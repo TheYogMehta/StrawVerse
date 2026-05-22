@@ -232,25 +232,25 @@ async function providerFetch(Type = "Anime", provider) {
   if (!provider)
     provider = Type === "Anime" ? config?.Animeprovider : config?.Mangaprovider;
 
-  return Type === "Anime"
-    ? {
-        provider_name:
-          provider && global.Anime_providers[provider] ? provider : null,
-        provider:
-          provider && global.Anime_providers[provider]
-            ? global.Anime_providers[provider]
-            : null,
-      }
-    : {
-        provider_name:
-          provider && global.Manga_providers[provider]
-            ? provider
-            : "weebcentral",
-        provider:
-          provider && global.Manga_providers[provider]
-            ? global.Manga_providers[provider]
-            : global.Manga_providers["weebcentral"],
-      };
+  if (Type === "Anime") {
+    if (!provider || !global.Anime_providers[provider]) {
+      const available = Object.keys(global.Anime_providers || {});
+      if (available.length > 0) provider = available[0];
+    }
+    return {
+      provider_name: provider && global.Anime_providers[provider] ? provider : null,
+      provider: provider && global.Anime_providers[provider] ? global.Anime_providers[provider] : null,
+    };
+  } else {
+    if (!provider || !global.Manga_providers[provider]) {
+      const available = Object.keys(global.Manga_providers || {});
+      if (available.length > 0) provider = available[0];
+    }
+    return {
+      provider_name: provider && global.Manga_providers[provider] ? provider : null,
+      provider: provider && global.Manga_providers[provider] ? global.Manga_providers[provider] : null,
+    };
+  }
 }
 
 // sync the config with database

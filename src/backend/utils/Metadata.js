@@ -193,6 +193,16 @@ async function getAllMetadata(type, baseDir, page = 1) {
   try {
     const typeDir = path.join(baseDir, type);
 
+    if (!fs.existsSync(typeDir)) {
+      return {
+        totalPages: 0,
+        currentPage: 1,
+        hasNextPage: false,
+        totalItems: 0,
+        results: [],
+      };
+    }
+
     const directories = await fs.promises.readdir(typeDir, {
       withFileTypes: true,
     });
