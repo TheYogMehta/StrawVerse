@@ -161,7 +161,7 @@ async function downloadEpisodeByQuality(
         sourcesArray?.subtitles ?? [],
         config?.mergeSubtitles === "on" ? true : false,
         (config?.subtitleFormat ?? "ttv") === "srt",
-        provider.provider_name
+        selectedSource.headers ?? {}
       );
     } else {
       throw new Error("No source link found.");
@@ -181,7 +181,8 @@ async function downloadVideo(
   epid,
   subtitles = [],
   MergeSubtitles,
-  subtitleFormat = false
+  subtitleFormat = false,
+  headers = {}
 ) {
   try {
     await download({
@@ -193,6 +194,7 @@ async function downloadVideo(
       subtitles: subtitles,
       MergeSubtitles: MergeSubtitles,
       ChangeTosrt: subtitleFormat,
+      headers: headers,
     });
   } catch (err) {
     throw new Error(`Failed To Download \n${err}`);

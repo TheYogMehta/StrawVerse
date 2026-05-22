@@ -389,6 +389,7 @@ async function addchild(data) {
 
     const lazyImages = document.querySelectorAll(".lazy-image");
     lazyImages.forEach((img) => {
+      img.classList.remove("lazy-image");
       const tempImage = new Image();
       tempImage.src = img.getAttribute("data-src");
 
@@ -534,13 +535,18 @@ async function handlePagination(targetPage) {
 }
 
 function isScrolledToBottom() {
-  return window.innerHeight + window.scrollY >= document.body.offsetHeight;
+  return window.innerHeight + window.scrollY >= document.body.offsetHeight - 500;
 }
 
+let scrollTimeout = null;
 async function handleScroll() {
-  if (!isFetching && isScrolledToBottom()) {
-    await fetchPageData(currentPage + 1);
-  }
+  if (scrollTimeout) return;
+  scrollTimeout = setTimeout(async () => {
+    scrollTimeout = null;
+    if (!isFetching && isScrolledToBottom()) {
+      await fetchPageData(currentPage + 1);
+    }
+  }, 100);
 }
 
 async function init(paginationInput, apiInput, infoapiInput) {

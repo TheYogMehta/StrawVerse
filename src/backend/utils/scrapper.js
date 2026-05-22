@@ -17,22 +17,43 @@ function createScrapperWindow() {
       contextIsolation: true,
       webSecurity: false,
       partition: "persist:scrapper",
+      autoplayPolicy: "no-user-gesture-required",
     },
   });
 
   global.ScrapperWindow.webContents.session.webRequest.onBeforeRequest(
     { urls: ["*://*/*"] },
     (details, callback) => {
+      if (details.url.includes(".m3u8") && !details.url.includes("ping.gif")) {
+        global.LastM3u8 = details.url;
+      }
       if (
         details.resourceType === "mainFrame" ||
         details.url.includes("ddos-guard") ||
         details.url.includes("apdoesnthavelogotheysaidapistooplaintheysaid") ||
-        details.url.includes("api/fsearch")
+        details.url.includes("api/fsearch") ||
+        details.url.includes("megaplay") ||
+        details.url.includes("jquery") ||
+        details.url.includes("jsdelivr") ||
+        details.url.includes(".m3u8") ||
+        details.url.includes("megacloud") ||
+        details.url.includes("rabbitstream") ||
+        details.url.includes("jwpcdn")
       ) {
         callback({ cancel: false });
       } else {
         callback({ cancel: true });
       }
+    },
+  );
+
+  global.ScrapperWindow.webContents.session.webRequest.onBeforeSendHeaders(
+    { urls: ["*://*/*"] },
+    (details, callback) => {
+      if (details.url.includes("megaplay")) {
+        details.requestHeaders["Referer"] = "https://anikototv.to/";
+      }
+      callback({ requestHeaders: details.requestHeaders });
     }
   );
 
@@ -40,9 +61,9 @@ function createScrapperWindow() {
     "did-fail-load",
     (event, errorCode, errorDescription, validatedURL) => {
       console.error(
-        `Failed to load ${validatedURL}: ${errorCode} - ${errorDescription}`
+        `Failed to load ${validatedURL}: ${errorCode} - ${errorDescription}`,
       );
-    }
+    },
   );
 
   global.ScrapperWindow.on("closed", () => {
@@ -55,7 +76,7 @@ function createScrapperWindow() {
     "changed",
     (event, cookie, cause, removed) => {
       saveCookies();
-    }
+    },
   );
 }
 
@@ -64,7 +85,7 @@ async function saveCookies() {
   if (!global.ScrapperWindow) return;
   try {
     const cookies = await global.ScrapperWindow.webContents.session.cookies.get(
-      {}
+      {},
     );
     fs.writeFileSync(COOKIE_FILE, JSON.stringify(cookies, null, 2));
   } catch (err) {
@@ -141,7 +162,7 @@ async function processQueue() {
     }
 
     const bodyText = await global.ScrapperWindow.webContents.executeJavaScript(
-      "document.body.innerText"
+      "document.body.innerText",
     );
 
     try {
@@ -149,7 +170,7 @@ async function processQueue() {
       resolve(json);
     } catch {
       const html = await global.ScrapperWindow.webContents.executeJavaScript(
-        "document.documentElement.outerHTML"
+        "document.documentElement.outerHTML",
       );
       resolve(html);
     }

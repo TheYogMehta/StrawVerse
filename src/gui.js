@@ -18,7 +18,6 @@ const express = require("express");
 const path = require("node:path");
 const net = require("net");
 
-app.commandLine.appendSwitch("disable-http-cache");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 
 // global varibles
@@ -84,7 +83,6 @@ const createWindow = () => {
     minHeight: 750,
   });
 
-  app.commandLine.appendSwitch("disable-http-cache");
   app.commandLine.appendSwitch("disable-renderer-backgrounding");
   global.win.maximize();
   nativeTheme.themeSource = "dark";
@@ -92,12 +90,7 @@ const createWindow = () => {
 
   global.win.webContents.session.webRequest.onBeforeSendHeaders(
     {
-      urls: [
-        "*://i.animepahe.ru/*",
-        "*://temp.compsci88.com/cover/small/*",
-        "*://*.owocdn.top/*",
-        "*://*.kwik.cx/*",
-      ],
+      urls: ["*://*/*"],
     },
     (details, callback) => {
       const url = details.url;
@@ -109,6 +102,12 @@ const createWindow = () => {
         details.requestHeaders["Referer"] = "https://kwik.cx/";
         details.requestHeaders["User-Agent"] =
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
+      } else if (
+        url.includes("mewstream.buzz") ||
+        url.includes("orbitra.click") ||
+        url.match(/\/anime\/[a-f0-9]{32}\/[a-f0-9]{32}\//)
+      ) {
+        details.requestHeaders["Referer"] = "https://megaplay.buzz/";
       }
       callback({ requestHeaders: details.requestHeaders });
     },

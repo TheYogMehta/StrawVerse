@@ -14,18 +14,19 @@ class downloader {
     streamUrl,
     Epnum = NaN,
     caption,
-    EpID,
+    EpID = NaN,
     subtitles = [],
     MergeSubtitles = false,
     ChangeTosrt = false,
+    headers = {},
   }) {
     this.directory = directory;
     if (streamUrl?.url) {
       this.streamUrl = streamUrl.url;
-      this.headers = streamUrl.headers ?? {};
+      this.headers = streamUrl.headers ?? headers;
     } else {
       this.streamUrl = streamUrl;
-      this.headers = {};
+      this.headers = headers ?? {};
     }
     
     if (this.streamUrl && (this.streamUrl.includes('owocdn.top') || this.streamUrl.includes('kwik.cx'))) {

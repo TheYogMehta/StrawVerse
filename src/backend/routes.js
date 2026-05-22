@@ -790,23 +790,26 @@ router.get("/search", async (req, res) => {
 router.get("/setting", async (req, res) => {
   try {
     const setting = await settingfetch();
-    url = null;
+    let url = null;
+    
+    const settingsWithProviders = {
+      ...setting,
+      providers: {
+        Anime: global.Anime_providers
+          ? Object.keys(global.Anime_providers)
+          : [],
+        Manga: global.Manga_providers
+          ? Object.keys(global.Manga_providers)
+          : [],
+      },
+    };
+
     if (!setting.mal_on_off || setting.mal_on_off === null) {
-      const url = await MalCreateUrl();
-      return res.render("settings.ejs", { settings: setting, url: url });
+      url = await MalCreateUrl();
+      return res.render("settings.ejs", { settings: settingsWithProviders, url: url });
     }
     res.render("settings.ejs", {
-      settings: {
-        ...setting,
-        providers: {
-          Anime: global.Anime_providers
-            ? Object.keys(global.Anime_providers)
-            : [],
-          Manga: global.Manga_providers
-            ? Object.keys(global.Manga_providers)
-            : [],
-        },
-      },
+      settings: settingsWithProviders,
       url: url,
     });
   } catch (err) {
