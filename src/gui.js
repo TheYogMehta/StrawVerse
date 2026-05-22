@@ -91,16 +91,27 @@ const createWindow = () => {
   global.win.loadURL(`http://localhost:${global.PORT}`);
 
   global.win.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ["*://i.animepahe.ru/*", "*://temp.compsci88.com/cover/small/*"] },
+    {
+      urls: [
+        "*://i.animepahe.ru/*",
+        "*://temp.compsci88.com/cover/small/*",
+        "*://*.owocdn.top/*",
+        "*://*.kwik.cx/*",
+      ],
+    },
     (details, callback) => {
       const url = details.url;
       if (url.startsWith("https://i.animepahe.ru/")) {
         details.requestHeaders["Referer"] = "https://animepahe.ru/";
       } else if (url.startsWith("https://temp.compsci88.com/")) {
         details.requestHeaders["Referer"] = "https://weebcentral.com/";
+      } else if (url.includes("owocdn.top") || url.includes("kwik.cx")) {
+        details.requestHeaders["Referer"] = "https://kwik.cx/";
+        details.requestHeaders["User-Agent"] =
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
       }
       callback({ requestHeaders: details.requestHeaders });
-    }
+    },
   );
 
   global.win.webContents.on("will-navigate", (event, url) => {
@@ -159,7 +170,7 @@ const createWindow = () => {
       width: 900,
       height: 500,
       parent: global.win,
-      modal: true,
+      modal: process.platform !== "linux",
       title: "MarketPlace",
       webPreferences: {
         preload: path.join(__dirname, "backend", "preload.js"),
@@ -169,7 +180,7 @@ const createWindow = () => {
     });
 
     global.marketplaceWin.loadURL(
-      `http://localhost:${global.PORT}/marketplace?type=${AnimeManga}`
+      `http://localhost:${global.PORT}/marketplace?type=${AnimeManga}`,
     );
   });
 
@@ -197,17 +208,27 @@ const createWindow = () => {
   Menu.setApplicationMenu(menu);
 
   // max priority
-  exec(
-    `powershell -Command "& {Get-Process -Id ${process.pid} | ForEach-Object { $_.PriorityClass = 'High' }}"`,
-    (error, stdout, stderr) => {
-      if (error) {
-        console.error("Failed to set process priority:", error);
-        logger.error(`Failed to set process priority : ${error.message}`);
-      } else {
-        logger.info("Process priority set to high.");
-      }
+  if (process.platform === "win32") {
+    exec(
+      `powershell -Command "& {Get-Process -Id ${process.pid} | ForEach-Object { $_.PriorityClass = 'High' }}"`,
+      (error, stdout, stderr) => {
+        if (error) {
+          console.error("Failed to set process priority:", error);
+          logger.error(`Failed to set process priority : ${error.message}`);
+        } else {
+          logger.info("Process priority set to high.");
+        }
+      },
+    );
+  } else {
+    try {
+      const os = require("os");
+      os.setPriority(process.pid, -10);
+      logger.info("Process priority set to high on Unix.");
+    } catch (err) {
+      logger.error(`Failed to set Unix process priority : ${err.message}`);
     }
-  );
+  }
 
   // Prevent Sleep
   let id = powerSaveBlocker.start("prevent-app-suspension");
@@ -244,7 +265,7 @@ app.whenReady().then(async () => {
     if (code) {
       if (global.Miniwindow && !global.Miniwindow.isDestroyed()) {
         global.Miniwindow.loadURL(
-          `http://localhost:${global.PORT}/mal/callback?code=${code}`
+          `http://localhost:${global.PORT}/mal/callback?code=${code}`,
         );
       }
     }
