@@ -1,4 +1,4 @@
-@import url("/css/poppins.css");
+@import url("/css/Poppins.css");
 
 * {
   margin: 0;
@@ -97,7 +97,9 @@ select:focus {
   border-radius: 5px;
   text-align: center;
   cursor: pointer;
-  transition: background 0.3s, transform 0.2s;
+  transition:
+    background 0.3s,
+    transform 0.2s;
 }
 
 .buttons:hover {

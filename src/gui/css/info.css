@@ -1,4 +1,4 @@
-@import url("/css/poppins.css");
+@import url("/css/Poppins.css");
 
 * {
   margin: 0;
@@ -133,7 +133,9 @@ button {
   width: fit-content;
   min-width: 5rem;
   border-radius: 0.5rem;
-  transition: transform ease 0.2s, box-shadow ease 0.2s;
+  transition:
+    transform ease 0.2s,
+    box-shadow ease 0.2s;
   display: inline-block;
   font-size: 0.8rem;
   z-index: 2;
@@ -180,7 +182,9 @@ button {
   color: #fff;
   border-radius: 0.5rem;
   border: none;
-  transition: transform ease 0.2s, box-shadow ease 0.2s;
+  transition:
+    transform ease 0.2s,
+    box-shadow ease 0.2s;
   font-size: 15px;
   padding: 10px 14px;
   margin: 5px;
@@ -238,7 +242,9 @@ button {
   font-weight: 500;
   width: 100%;
   text-align: center;
-  transition: transform ease 0.2s, box-shadow ease 0.2s;
+  transition:
+    transform ease 0.2s,
+    box-shadow ease 0.2s;
   border-radius: 12px;
   padding: 10px 15px;
 }

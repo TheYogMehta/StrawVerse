@@ -25,6 +25,12 @@ class downloader {
       this.headers = streamUrl.headers ?? {};
     } else {
       this.streamUrl = streamUrl;
+      this.headers = {};
+    }
+    
+    if (this.streamUrl && (this.streamUrl.includes('owocdn.top') || this.streamUrl.includes('kwik.cx'))) {
+      this.headers['Referer'] = 'https://kwik.cx/';
+      this.headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
     }
     this.Epnum = parseInt(Epnum);
     this.caption = caption;
