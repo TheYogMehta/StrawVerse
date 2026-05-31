@@ -26,12 +26,29 @@ const net = require("net");
 
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 
-// global varibles
-autoUpdater.setFeedURL({
-  provider: "github",
-  owner: "TheYogMehta",
-  repo: "StrawVerse",
-});
+// Load package.json config dynamically for the auto-updater to support fork updates
+try {
+  const pkg = require("./package.json");
+  if (pkg.build && pkg.build.publish) {
+    autoUpdater.setFeedURL({
+      provider: "github",
+      owner: pkg.build.publish.owner,
+      repo: pkg.build.publish.repo,
+    });
+  } else {
+    autoUpdater.setFeedURL({
+      provider: "github",
+      owner: "TheYogMehta",
+      repo: "StrawVerse",
+    });
+  }
+} catch (err) {
+  autoUpdater.setFeedURL({
+    provider: "github",
+    owner: "TheYogMehta",
+    repo: "StrawVerse",
+  });
+}
 
 //  functions
 const { logger } = require("./backend/utils/AppLogger");
