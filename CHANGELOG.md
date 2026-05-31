@@ -1,5 +1,9 @@
 # Changelog
 
+## [6.0.1] - 2026-05-31
+
+- Removed `better-sqlite3` and `electron-rebuild` dependencies
+
 ## [6.0.0] - 2026-05-31
 
 - Added ability to delete individual downloaded episodes directly from the UI
