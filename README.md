@@ -126,10 +126,9 @@ Follow these steps to build application:
 3. **Download and install Python**
    - [Python Download](https://www.python.org/downloads/)
 
-4. **Windows Build Tools (Windows only, required for node-gyp)**
-   ```bash
-   npm install --global windows-build-tools
-   ```
+4. **C++ Build Tools (Windows only, required for compiling native SQLite node modules via node-gyp)**
+   * During the Node.js installation on Windows, make sure you check the box that says **"Automatically install the necessary tools"** (this installs Python and the necessary VS Build Tools via Chocolatey automatically).
+   * Alternatively, you can manually download and install **[Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)** (be sure to select the **Desktop development with C++** workload during setup).
 
 ## Steps to Build
 
