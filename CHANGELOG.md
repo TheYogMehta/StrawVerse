@@ -1,5 +1,40 @@
 # Changelog
 
+## [7.0.0] - 2026-06-05
+
+### Frontend Migration
+- Migrated the entire frontend from server-side EJS templates and Vanilla JS/CSS to a component-based React + Vite single-page application.
+- Added components for Catalog, DownloadsTracker, InfoView, LogsView, MangaReader, Marketplace, SettingsView, Sidebar, and VideoPlayer.
+- Relocated public assets (fonts, images, icons) to `src/gui/public` to fit the Vite project structure.
+
+### Database & Storage
+- Replaced the legacy JSON databases (`database.json`, `queue.json`) and the `simpl.db` dependency with Node's native SQLite (`node:sqlite`).
+- Created a robust database utility in `src/backend/utils/db.js` that automatically handles schema creation, dynamic updates, and data migrations.
+- Structured SQLite tables for Anime/Manga metadata, MAL/Manga trackers, application settings, downloading queue, cookies, and watch/read history.
+
+### Local Tracking & History
+- Added SQLite schemas (`WatchHistory`, `ReadHistory`) to track progress: episode/chapter number, duration, current time, time spent, completion status, and last activity timestamps.
+- Implemented route endpoints to save, retrieve, and update user watch/read progress in real-time.
+
+### MyAnimeList (MAL) Integration Updates
+- Updated the MAL utility (`src/backend/utils/mal.js`) to support both Anime and Manga tracking, list fetching, and item addition.
+- Migrated MAL OAuth/PKCE tokens and settings storage from JSON files to the SQLite `Settings` table.
+- Implemented synced tracking logic using local SQLite tables (`MyAnimeList`, `MyMangaList`) to store user list items and query MAL lists.
+
+### Backend & Routing Refactoring
+- Redesigned backend routes (`src/backend/routes.js`) to act as a RESTful JSON API instead of template-rendering routes.
+- Updated endpoints to interface with the SQLite DB for queries (e.g., retrieving settings, logs, tracking items, and managing downloading queues).
+
+### Network & Bypass Updates
+- Introduced a proxy headers manager (`src/backend/utils/proxyHeaders.js`) to handle referer and cookie injection for scraping and downloads.
+- Improved scrapper and downloader logic to bypass Cloudflare protection reliably.
+
+### Build & Configuration
+- Added a root "build" script to trigger the frontend production build.
+- Configured custom desktop mime types and protocol handlers (`strawverse://` deep-linking).
+- Updated electron-builder exclusion rules to omit source development files (e.g. `src/gui/src/`) from the production package build.
+- Upgraded multiple core dependencies in `src/package.json`.
+
 ## [6.0.1] - 2026-05-31
 
 - Removed `better-sqlite3` and `electron-rebuild` dependencies
