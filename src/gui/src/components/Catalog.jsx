@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, no-unused-vars */
+import { useState, useEffect, useCallback } from "react";
+import "./css/Catalog.css";
 import {
   Search,
   Loader2,
@@ -32,94 +34,7 @@ export default function Catalog({ type, provider, onSelectMedia }) {
 
   // Define supported filter maps matching index.js
   const siteFilterDefs = {
-    hianime: {
-      type: {
-        label: "Type",
-        options: {
-          All: "",
-          Movie: "1",
-          Tv: "2",
-          OVA: "3",
-          ONA: "4",
-          Special: "5",
-          Music: "6",
-        },
-      },
-      status: {
-        label: "Status",
-        options: {
-          All: "",
-          "Finished Airing": "1",
-          "Currently Airing": "2",
-          "Not Yet Aired": "3",
-        },
-      },
-      rated: {
-        label: "Rated",
-        options: {
-          All: "",
-          G: "1",
-          PG: "2",
-          "PG-13": "3",
-          R: "4",
-          "R+": "5",
-          Rx: "6",
-        },
-      },
-      score: {
-        label: "Score",
-        options: {
-          All: "",
-          Average: "5",
-          Good: "7",
-          "Very Good": "8",
-          Great: "9",
-          Masterpiece: "10",
-        },
-      },
-      season: {
-        label: "Season",
-        options: { All: "", Spring: "1", Summer: "2", Fall: "3", Winter: "4" },
-      },
-      language: { label: "Language", options: { All: "", SUB: "1", DUB: "2" } },
-      sort: {
-        label: "Sort By",
-        options: {
-          "Recently Updated": "recently_updated",
-          "Recently Added": "recently_added",
-          Score: "score",
-          "Name A-Z": "name_az",
-          "Released Date": "released_date",
-          "Most Watched": "most_watched",
-        },
-      },
-    },
-    animekai: {
-      sort: {
-        label: "Sort By",
-        options: {
-          "Updated Date": "updated_date",
-          "Released Date": "released_date",
-          Trending: "trending",
-          "Name A-Z": "title_az",
-          "Average Score": "avg_score",
-          "MAL Score": "mal_score",
-        },
-      },
-      status: {
-        label: "Status",
-        options: {
-          All: "",
-          "Not Yet Aired": "info",
-          Releasing: "releasing",
-          Completed: "completed",
-        },
-      },
-      type: {
-        label: "Type",
-        options: { All: "", Movie: "movie", Tv: "tv", OVA: "ova", ONA: "ona" },
-      },
-    },
+    // legacy for now..
   };
 
   const getApiEndpoint = (currentTag = activeFilters.tag) => {
@@ -433,9 +348,9 @@ export default function Catalog({ type, provider, onSelectMedia }) {
   };
 
   return (
-    <div style={catalogWrapperStyle}>
-      <header style={headerStyle}>
-        <h1 style={titleStyle}>
+    <div className="catalog-wrapper">
+      <header className="catalog-header">
+        <h1 className="catalog-title">
           {provider === "local"
             ? `Local ${type}`
             : provider === "mal"
@@ -445,15 +360,15 @@ export default function Catalog({ type, provider, onSelectMedia }) {
 
         {/* Search bar for non-local searches, or when linking a MAL title */}
         {((provider !== "local" && provider !== "mal") || linkingMalItem) && (
-          <form onSubmit={handleSearchSubmit} style={searchFormStyle}>
+          <form onSubmit={handleSearchSubmit} className="search-form">
             <input
               type="text"
               placeholder={`Search ${type}...`}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              style={searchInputStyle}
+              className="search-input"
             />
-            <button type="submit" style={searchBtnStyle}>
+            <button type="submit" className="btn-search">
               <Search size={18} />
             </button>
           </form>
@@ -462,14 +377,14 @@ export default function Catalog({ type, provider, onSelectMedia }) {
 
       {/* Filter panel */}
       {availableFilters && (
-        <div style={filterPanelStyle}>
+        <div className="filter-panel">
           {Object.entries(availableFilters).map(([key, filter]) => (
-            <div key={key} style={filterGroupStyle}>
-              <label style={filterLabelStyle}>{filter.label}</label>
+            <div key={key} className="filter-group">
+              <label className="filter-label">{filter.label}</label>
               <select
                 value={activeFilters[key] || ""}
                 onChange={(e) => handleFilterChange(key, e.target.value)}
-                style={filterSelectStyle}
+                className="filter-select"
               >
                 {Object.entries(filter.options).map(([optLabel, optVal]) => (
                   <option key={optLabel} value={optVal}>
@@ -484,14 +399,10 @@ export default function Catalog({ type, provider, onSelectMedia }) {
 
       {/* Local Tag Filter panel */}
       {provider === "local" && !linkingMalItem && (
-        <div style={tagChipsContainerStyle}>
+        <div className="tag-chips-container">
           <button
             onClick={() => handleFilterChange("tag", "")}
-            style={
-              !activeFilters.tag || activeFilters.tag === ""
-                ? activeTagChipStyle
-                : tagChipStyle
-            }
+            className={`tag-chip ${!activeFilters.tag || activeFilters.tag === "" ? "active" : ""}`}
           >
             All
           </button>
@@ -499,16 +410,14 @@ export default function Catalog({ type, provider, onSelectMedia }) {
             <button
               key={tag}
               onClick={() => handleFilterChange("tag", tag)}
-              style={
-                activeFilters.tag === tag ? activeTagChipStyle : tagChipStyle
-              }
+              className={`tag-chip ${activeFilters.tag === tag ? "active" : ""}`}
             >
               {tag}
             </button>
           ))}
           <button
             onClick={handleAddLocalTag}
-            style={addTagBtnStyle}
+            className="tag-chip btn-add-tag"
             title="Create Custom Tag"
           >
             <Plus size={14} style={{ marginRight: "4px" }} />
@@ -519,22 +428,22 @@ export default function Catalog({ type, provider, onSelectMedia }) {
 
       {/* Linking Banner */}
       {linkingMalItem && (
-        <div style={linkingBannerStyle}>
-          <span style={linkingBannerTextStyle}>
+        <div className="linking-banner">
+          <span className="linking-banner-text">
             Linking MyAnimeList title: <strong>{linkingMalItem.title}</strong>.
             Select the matching card below to link it.
           </span>
-          <button onClick={handleCancelLinking} style={cancelLinkBtnStyle}>
+          <button onClick={handleCancelLinking} className="btn-cancel-link">
             Cancel Link
           </button>
         </div>
       )}
 
-      {errorMsg && <div style={errorBannerStyle}>{errorMsg}</div>}
+      {errorMsg && <div className="error-banner">{errorMsg}</div>}
 
       {/* Content grid */}
       {loading ? (
-        <div style={loadingCenterStyle}>
+        <div className="loading-center-panel">
           <img
             src="/images/loading.gif"
             alt="loading"
@@ -545,7 +454,7 @@ export default function Catalog({ type, provider, onSelectMedia }) {
           </p>
         </div>
       ) : data?.results?.length === 0 ? (
-        <div style={emptyCenterStyle}>
+        <div className="empty-center-panel">
           <span style={{ fontSize: "48px" }}>🍉</span>
           <h3>
             {provider === "local" ? "Empty Collection" : "No results found"}
@@ -563,30 +472,27 @@ export default function Catalog({ type, provider, onSelectMedia }) {
           </p>
         </div>
       ) : (
-        <div style={containerStyle}>
-          <div style={gridStyle}>
+        <div className="content-container">
+          <div className="content-grid">
             {data.results.map((item) => (
               <div
                 key={item.id}
                 onClick={() => handleMediaClick(item)}
-                style={cardStyle}
-                className="glass-panel"
+                className="media-card glass-panel"
               >
-                <div style={imgContainerStyle}>
+                <div className="img-container">
                   <img
                     src={item.image}
                     alt={item.title}
-                    style={imgStyle}
+                    className="media-img"
                     onError={(e) => {
                       e.target.src = "/images/image-404.png";
                     }}
                   />
 
-
-
                   {/* Indicator badges for downloaded or watched counts */}
                   {item.Downloaded && item.Downloaded.length > 0 && (
-                    <div style={badgeStyle}>
+                    <div className="indicator-badge">
                       <Download size={12} style={{ marginRight: "4px" }} />
                       {item.Downloaded.length}{" "}
                       {type === "Anime" ? "Eps" : "Chs"}
@@ -594,7 +500,7 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                   )}
 
                   {item.watched !== undefined && item.watched !== null && (
-                    <div style={badgeStyle}>
+                    <div className="indicator-badge">
                       <Eye size={12} style={{ marginRight: "4px" }} />
                       {item.watched}/{item.totalEpisodes || "?"}
                     </div>
@@ -611,10 +517,10 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                     )}
                 </div>
 
-                <div style={cardInfoStyle}>
-                  <h4 style={cardTitleStyle}>{item.title}</h4>
+                <div className="card-info">
+                  <h4 className="card-title">{item.title}</h4>
                   {item.type && (
-                    <span style={cardMetaStyle}>{item.type.toUpperCase()}</span>
+                    <span className="card-meta">{item.type.toUpperCase()}</span>
                   )}
                 </div>
               </div>
@@ -623,15 +529,15 @@ export default function Catalog({ type, provider, onSelectMedia }) {
 
           {/* Pagination */}
           {(data.totalPages > 1 || data.hasNextPage || currentPage > 1) && (
-            <div style={paginationStyle}>
+            <div className="pagination-container">
               <button
                 onClick={() => handlePageChange(currentPage - 1)}
                 disabled={currentPage <= 1}
-                style={pageBtnStyle(currentPage <= 1)}
+                className="btn-page"
               >
                 <ArrowLeft size={16} />
               </button>
-              <span style={pageInfoStyle}>
+              <span className="page-info">
                 Page {currentPage}{" "}
                 {data.totalPages ? `of ${data.totalPages}` : ""}
               </span>
@@ -640,9 +546,7 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                 disabled={
                   !data.hasNextPage && currentPage >= (data.totalPages || 999)
                 }
-                style={pageBtnStyle(
-                  !data.hasNextPage && currentPage >= (data.totalPages || 999),
-                )}
+                className="btn-page"
               >
                 <ArrowRight size={16} />
               </button>
@@ -653,276 +557,6 @@ export default function Catalog({ type, provider, onSelectMedia }) {
     </div>
   );
 }
-
-const catalogWrapperStyle = {
-  flex: 1,
-  padding: "30px",
-  overflowY: "auto",
-  height: "100%",
-  backgroundColor: "var(--bg-primary)",
-};
-
-const headerStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  marginBottom: "24px",
-  flexWrap: "wrap",
-  gap: "16px",
-};
-
-const titleStyle = {
-  fontSize: "28px",
-  fontWeight: "800",
-  letterSpacing: "-0.5px",
-};
-
-const searchFormStyle = {
-  display: "flex",
-  alignItems: "center",
-  backgroundColor: "var(--bg-secondary)",
-  borderRadius: "8px",
-  border: "1px solid var(--border)",
-  overflow: "hidden",
-  width: "320px",
-};
-
-const searchInputStyle = {
-  flex: 1,
-  padding: "10px 14px",
-  background: "transparent",
-  border: "none",
-  color: "white",
-  outline: "none",
-  fontSize: "14px",
-};
-
-const searchBtnStyle = {
-  background: "transparent",
-  border: "none",
-  padding: "10px 14px",
-  color: "var(--text-muted)",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-};
-
-const filterPanelStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "12px",
-  marginBottom: "24px",
-  padding: "16px",
-  backgroundColor: "var(--bg-secondary)",
-  borderRadius: "10px",
-  border: "1px solid var(--border)",
-};
-
-const filterGroupStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px",
-  minWidth: "130px",
-};
-
-const filterLabelStyle = {
-  fontSize: "11px",
-  fontWeight: "700",
-  color: "var(--text-muted)",
-  textTransform: "uppercase",
-  letterSpacing: "0.5px",
-};
-
-const filterSelectStyle = {
-  backgroundColor: "var(--bg-tertiary)",
-  border: "1px solid var(--border)",
-  color: "white",
-  padding: "8px 12px",
-  borderRadius: "6px",
-  outline: "none",
-  cursor: "pointer",
-  fontSize: "13px",
-};
-
-const tagChipsContainerStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "10px",
-  marginBottom: "24px",
-};
-
-const tagChipStyle = {
-  backgroundColor: "var(--bg-secondary)",
-  border: "1px solid var(--border)",
-  color: "var(--text-muted)",
-  padding: "8px 16px",
-  borderRadius: "20px",
-  cursor: "pointer",
-  fontSize: "13px",
-  fontWeight: "600",
-  transition: "var(--transition)",
-  outline: "none",
-};
-
-const activeTagChipStyle = {
-  ...tagChipStyle,
-  backgroundColor: "var(--accent)",
-  border: "1px solid var(--accent)",
-  color: "white",
-};
-
-const addTagBtnStyle = {
-  ...tagChipStyle,
-  backgroundColor: "transparent",
-  border: "1px dashed var(--accent)",
-  color: "var(--accent)",
-  display: "flex",
-  alignItems: "center",
-};
-
-const errorBannerStyle = {
-  padding: "12px 16px",
-  backgroundColor: "rgba(239, 68, 68, 0.1)",
-  border: "1px solid var(--danger)",
-  borderRadius: "8px",
-  color: "var(--danger)",
-  marginBottom: "20px",
-  fontSize: "14px",
-};
-
-const containerStyle = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-};
-
-const gridStyle = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-  gap: "24px",
-  width: "100%",
-  marginBottom: "40px",
-};
-
-const cardStyle = {
-  cursor: "pointer",
-  overflow: "hidden",
-  transition: "var(--transition)",
-  position: "relative",
-  display: "flex",
-  flexDirection: "column",
-  "&:hover": {
-    transform: "translateY(-4px)",
-    borderColor: "var(--accent)",
-  },
-};
-
-const imgContainerStyle = {
-  position: "relative",
-  width: "100%",
-  paddingBottom: "140%", // Aspect ratio 1:1.4
-  overflow: "hidden",
-};
-
-const imgStyle = {
-  position: "absolute",
-  top: 0,
-  left: 0,
-  width: "100%",
-  height: "100%",
-  objectFit: "cover",
-  transition: "var(--transition)",
-};
-
-const badgeStyle = {
-  position: "absolute",
-  top: "8px",
-  left: "8px",
-  backgroundColor: "rgba(0, 0, 0, 0.75)",
-  color: "#fff",
-  fontSize: "11px",
-  fontWeight: "700",
-  padding: "4px 8px",
-  borderRadius: "4px",
-  backdropFilter: "blur(4px)",
-  display: "flex",
-  alignItems: "center",
-};
-
-const cardInfoStyle = {
-  padding: "14px",
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px",
-  flexGrow: 1,
-  justifyContent: "space-between",
-};
-
-const cardTitleStyle = {
-  fontSize: "14px",
-  fontWeight: "600",
-  lineHeight: "1.4",
-  color: "var(--text-main)",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  display: "-webkit-box",
-  WebkitLineClamp: "2",
-  WebkitBoxOrient: "vertical",
-};
-
-const cardMetaStyle = {
-  fontSize: "10px",
-  fontWeight: "700",
-  color: "var(--accent)",
-  letterSpacing: "0.5px",
-};
-
-const paginationStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "16px",
-  padding: "16px 0",
-};
-
-const pageBtnStyle = (disabled) => ({
-  background: disabled ? "var(--bg-secondary)" : "var(--bg-tertiary)",
-  border: "1px solid var(--border)",
-  color: disabled ? "rgba(255, 255, 255, 0.2)" : "white",
-  width: "40px",
-  height: "40px",
-  borderRadius: "8px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: disabled ? "not-allowed" : "pointer",
-  transition: "var(--transition)",
-});
-
-const pageInfoStyle = {
-  fontSize: "14px",
-  fontWeight: "600",
-};
-
-const loadingCenterStyle = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  height: "350px",
-  width: "100%",
-};
-
-const emptyCenterStyle = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  height: "300px",
-  width: "100%",
-  gap: "10px",
-};
-
-
 
 // Deterministic colour from provider name string
 function providerColour(name) {
@@ -944,7 +578,7 @@ function providerColour(name) {
 
 // Small provider badge rendered bottom-right of card image
 function ProviderBadge({ providerName, iconUrl }) {
-  const [imgFailed, setImgFailed] = React.useState(false);
+  const [imgFailed, setImgFailed] = useState(false);
   const label =
     providerName === "local source"
       ? "📁"
@@ -956,21 +590,10 @@ function ProviderBadge({ providerName, iconUrl }) {
   return (
     <div
       title={friendlyName}
+      className="provider-badge-wrapper"
       style={{
-        position: "absolute",
-        bottom: "8px",
-        right: "8px",
-        backgroundColor: "rgba(0,0,0,0.82)",
-        backdropFilter: "blur(6px)",
-        borderRadius: "6px",
-        padding: "3px 6px",
-        display: "flex",
-        alignItems: "center",
-        gap: "4px",
         border: `1px solid ${colour}55`,
         boxShadow: `0 0 0 1px ${colour}33`,
-        maxWidth: "90px",
-        overflow: "hidden",
       }}
     >
       {iconUrl && !imgFailed ? (
@@ -979,73 +602,20 @@ function ProviderBadge({ providerName, iconUrl }) {
           alt={providerName}
           width={14}
           height={14}
-          style={{ borderRadius: "2px", flexShrink: 0 }}
+          className="provider-badge-img"
           onError={() => setImgFailed(true)}
         />
       ) : providerName === "local source" ? (
         <Folder size={14} style={{ color: "#fff", flexShrink: 0 }} />
       ) : (
         <span
-          style={{
-            width: "14px",
-            height: "14px",
-            borderRadius: "3px",
-            backgroundColor: colour,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontSize: "8px",
-            fontWeight: "900",
-            color: "#fff",
-            flexShrink: 0,
-          }}
+          className="provider-badge-text-icon"
+          style={{ backgroundColor: colour }}
         >
           {label.charAt(0)}
         </span>
       )}
-      <span
-        style={{
-          fontSize: "10px",
-          fontWeight: "700",
-          color: "#fff",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          letterSpacing: "0.2px",
-        }}
-      >
-        {friendlyName}
-      </span>
+      <span className="provider-badge-label">{friendlyName}</span>
     </div>
   );
 }
-
-const linkingBannerStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "16px 20px",
-  backgroundColor: "rgba(167, 139, 250, 0.1)",
-  border: "1px solid var(--accent)",
-  borderRadius: "10px",
-  color: "white",
-  marginBottom: "24px",
-  fontSize: "14px",
-};
-
-const linkingBannerTextStyle = {
-  lineHeight: "1.5",
-};
-
-const cancelLinkBtnStyle = {
-  backgroundColor: "rgba(239, 68, 68, 0.1)",
-  border: "1px solid var(--danger)",
-  color: "var(--danger)",
-  padding: "6px 12px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  fontWeight: "600",
-  fontSize: "12px",
-  transition: "var(--transition)",
-  borderStyle: "solid",
-};

@@ -1,4 +1,4 @@
-import React from 'react';
+import './css/Sidebar.css';
 import { 
   Play, 
   FolderMinus, 
@@ -9,11 +9,10 @@ import {
   Settings, 
   ShoppingBag, 
   ChevronLeft, 
-  ChevronRight,
-  TrendingUp
+  ChevronRight
 } from 'lucide-react';
 
-export default function Sidebar({ currentView, setView, isCollapsed, toggleCollapse, malLoggedIn }) {
+export default function Sidebar({ currentView, setView, isCollapsed, toggleCollapse }) {
   const menuItems = [
     { id: 'local-anime', label: 'Local Anime', icon: Library },
     { id: 'local-manga', label: 'Local Manga', icon: FolderMinus },

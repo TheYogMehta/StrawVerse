@@ -1,5 +1,7 @@
-import React, { useEffect, useState, useRef, useMemo } from "react";
-import { ArrowLeft, Loader2, ChevronsUp, ChevronsDown, ChevronLeft, ChevronRight, BookOpen, HardDrive, Globe } from "lucide-react";
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+import { useEffect, useState, useRef, useMemo } from "react";
+import { ArrowLeft, Loader2, ChevronsUp, ChevronsDown, ChevronLeft, ChevronRight, HardDrive, Globe } from "lucide-react";
+import "./css/MangaReader.css";
 
 // Lazy-loaded page component with CSS transition fade-in
 function LazyMangaPage({ src, alt, style }) {
@@ -26,12 +28,12 @@ function LazyMangaPage({ src, alt, style }) {
   }, []);
 
   return (
-    <div ref={ref} style={{ ...style, display: "flex", justifyContent: "center", alignItems: "center", minHeight: "80vh", width: "100%", position: "relative" }}>
+    <div ref={ref} className="lazy-page-container" style={style}>
       {isVisible ? (
         <>
           {!loaded && (
-            <div style={{ position: "absolute", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 0 }}>
-              <Loader2 className="spin-icon" size={24} style={{ color: "var(--accent)" }} />
+            <div className="lazy-page-loading-overlay">
+              <Loader2 className="spin-icon" size={24} />
             </div>
           )}
           <img
@@ -39,13 +41,9 @@ function LazyMangaPage({ src, alt, style }) {
             alt={alt}
             onLoad={() => setLoaded(true)}
             style={{
-              width: "100%",
-              height: "auto",
-              display: "block",
-              transition: "opacity 0.6s cubic-bezier(0.4, 0, 0.2, 1)",
               opacity: loaded ? 1 : 0,
-              zIndex: 1,
             }}
+            className="lazy-page-img"
             loading="lazy"
             onError={(e) => {
               e.target.src = "/images/image-404.png";
@@ -54,8 +52,8 @@ function LazyMangaPage({ src, alt, style }) {
           />
         </>
       ) : (
-        <div style={{ width: "100%", height: "80vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#08090b" }}>
-          <Loader2 className="spin-icon" size={24} style={{ color: "var(--accent)" }} />
+        <div className="reader-viewport-loading">
+          <Loader2 className="spin-icon" size={24} />
         </div>
       )}
     </div>
@@ -175,7 +173,7 @@ export default function MangaReader({
   };
 
   // History Tracking Ref & Logic
-  const lastTickTimeRef = useRef(Date.now());
+  const lastTickTimeRef = useRef(0);
   const activePageRef = useRef(1);
   const activeChapterRef = useRef(chapterNumOrId);
   const savedResumePageRef = useRef(1);
@@ -453,7 +451,7 @@ export default function MangaReader({
   };
 
   return (
-    <div ref={containerRef} style={readerWrapperStyle}>
+    <div ref={containerRef} className="reader-wrapper">
       <style>{`
         @keyframes bounce {
           0%, 20%, 50%, 80%, 100% {
@@ -481,35 +479,35 @@ export default function MangaReader({
           animation: spin 1s linear infinite;
         }
       `}</style>
-
+ 
       {/* Top Header controls */}
-      <div style={headerStyle} className="glass-panel">
-        <div style={headerLeftSectionStyle}>
-          <button onClick={onBack} style={backBtnStyle}>
+      <div className="reader-header glass-panel">
+        <div className="header-left-section">
+          <button onClick={onBack} className="btn-reader-back">
             <ArrowLeft size={18} />
             <span>Exit Reader</span>
           </button>
         </div>
-
+ 
         {sortedChapters.length > 0 && (
-          <div style={navigationStyle}>
+          <div className="reader-navigation">
             <button
               onClick={handlePrevChapter}
               disabled={prevIndex === -1}
-              style={navBtnStyle(prevIndex === -1)}
+              className="btn-nav"
               title="Previous Chapter"
             >
               <ChevronLeft size={16} />
             </button>
-
-            <div style={selectContainerStyle}>
+ 
+            <div className="select-container">
               <select
                 value={activeChapterInView || ''}
                 onChange={(e) => {
                   const selected = sortedChapters.find(item => item.id === e.target.value);
                   if (selected) handleJumpToChapter(selected);
                 }}
-                style={navSelectStyle}
+                className="select-nav"
               >
                 {sortedChapters.map(item => (
                   <option key={item.id} value={item.id}>
@@ -518,23 +516,23 @@ export default function MangaReader({
                 ))}
               </select>
             </div>
-
+ 
             <button
               onClick={handleNextChapter}
               disabled={nextIndex === -1}
-              style={navBtnStyle(nextIndex === -1)}
+              className="btn-nav"
               title="Next Chapter"
             >
               <ChevronRight size={16} />
             </button>
           </div>
         )}
-
-        <div style={headerRightSectionStyle}>
-          <span style={chapterTitleStyle} title={mangaTitle || id}>
+ 
+        <div className="header-right-section">
+          <span className="chapter-title" title={mangaTitle || id}>
             {mangaTitle ? `${mangaTitle.slice(0, 20)}${mangaTitle.length > 20 ? '...' : ''}` : "Manga"} - Ch {getCleanChapterNum(activeChapterInView, chapterNumOrId)}
           </span>
-          <span style={{ ...headerBadgeStyle(isCurrentDownloaded), display: "inline-flex", alignItems: "center", gap: "4px" }}>
+          <span className={`header-badge ${isCurrentDownloaded ? 'local' : 'online'}`}>
             {isCurrentDownloaded ? <HardDrive size={13} /> : <Globe size={13} />}
             <span>{isCurrentDownloaded ? 'Local' : 'Online'}</span>
           </span>
@@ -542,49 +540,49 @@ export default function MangaReader({
       </div>
 
       {/* Main Pages viewport */}
-      <div style={viewportStyle}>
+      <div className="reader-viewport">
         {loading ? (
-          <div style={statusOverlayStyle}>
+          <div className="status-overlay">
             <img
               src="/images/loading.gif"
               alt="loading"
-              style={{ width: "64px", height: "64px" }}
+              className="loading-gif"
             />
-            <p style={{ marginTop: "16px", color: "var(--text-muted)" }}>
+            <p>
               Loading pages for Chapter {getCleanChapterNum(activeChapterInView, chapterNumOrId)}...
             </p>
           </div>
         ) : errorMsg ? (
-          <div style={statusOverlayStyle}>
-            <span style={{ fontSize: "48px" }}>⚠️</span>
-            <p style={{ marginTop: "16px", color: "var(--danger)" }}>
+          <div className="status-overlay">
+            <span className="error-icon">⚠️</span>
+            <p className="error-msg">
               {errorMsg}
             </p>
-            <button onClick={() => fetchChapterPages(null, false)} style={retryBtnStyle}>
+            <button onClick={() => fetchChapterPages(null, false)} className="btn-retry">
               Retry
             </button>
           </div>
         ) : (
-          <div style={pagesContainerStyle}>
+          <div className="pages-container">
             {items.map((item) => {
               if (item.type === "header") {
                 return (
-                  <div key={item.id} data-chapter={item.chapterId} style={splashCardStyle}>
-                    <div style={splashCardOverlayStyle} />
-                    <div style={splashCardContentStyle}>
-                      <span style={splashMangaTitleStyle}>
+                  <div key={item.id} data-chapter={item.chapterId} className="splash-card">
+                    <div className="splash-card-overlay" />
+                    <div className="splash-card-content">
+                      <span className="splash-manga-title">
                         {mangaTitle || id || "Manga Stream"}
                       </span>
-                      <h1 style={splashChapterNumStyle}>
+                      <h1 className="splash-chapter-num">
                         Chapter {getCleanChapterNum(item.chapterId, item.chapterNum)}
                       </h1>
-                      <div style={splashStatusBadgeStyle(item.isDownloaded)}>
+                      <div className={`splash-status-badge ${item.isDownloaded ? 'local' : 'online'}`}>
                         {item.isDownloaded ? <HardDrive size={13} /> : <Globe size={13} />}
                         <span>{item.isDownloaded ? "Downloaded Chapter" : "Online Stream"}</span>
                       </div>
                       
-                      <div className="splash-chevron" style={splashScrollHintStyle}>
-                        <span style={{ fontSize: "11px", letterSpacing: "1.5px", opacity: 0.8, fontWeight: "600" }}>SCROLL TO READ</span>
+                      <div className="splash-chevron splash-scroll-hint">
+                        <span>SCROLL TO READ</span>
                         <ChevronsDown size={20} />
                       </div>
                     </div>
@@ -592,13 +590,12 @@ export default function MangaReader({
                 );
               } else {
                 return (
-                  <div key={item.id} data-chapter={item.chapterId} data-page={item.page} style={pageWrapperStyle}>
+                  <div key={item.id} data-chapter={item.chapterId} data-page={item.page} className="page-wrapper">
                     <LazyMangaPage
                       src={item.img}
                       alt={`Page ${item.page}`}
-                      style={pageImgStyle}
                     />
-                    <div style={pageNumStyle}>Page {item.page}</div>
+                    <div className="page-num">Page {item.page}</div>
                   </div>
                 );
               }
@@ -606,35 +603,35 @@ export default function MangaReader({
 
             {/* Subtle pre-fetching loading indicator at bottom */}
             {appendingLoading && (
-              <div style={appendLoadingContainerStyle}>
-                <Loader2 className="spin-icon" size={24} style={{ color: "var(--accent)" }} />
-                <span style={{ fontSize: "13px", color: "var(--text-muted)" }}>Pre-fetching next chapter...</span>
+              <div className="append-loading-container">
+                <Loader2 className="spin-icon" size={24} />
+                <span>Pre-fetching next chapter...</span>
               </div>
             )}
-
+ 
             {/* Bottom Navigation Controls */}
             {sortedChapters.length > 0 && !appendingLoading && (
-              <div style={bottomControlsPanelStyle} className="glass-panel">
-                <p style={bottomControlsTitleStyle}>
+              <div className="bottom-controls-panel glass-panel">
+                <p className="bottom-controls-title">
                   You've reached the end of Chapter {getCleanChapterNum(activeChapterInView, chapterNumOrId)}
                 </p>
-                <div style={bottomNavRowStyle}>
+                <div className="bottom-nav-row">
                   <button
                     onClick={handlePrevChapter}
                     disabled={prevIndex === -1}
-                    style={bottomNavBtnStyle(prevIndex === -1)}
+                    className="btn-bottom-nav"
                   >
                     <ChevronLeft size={16} />
                     <span>Previous Chapter</span>
                   </button>
-
+ 
                   <select
                     value={activeChapterInView || ''}
                     onChange={(e) => {
                       const selected = sortedChapters.find(item => item.id === e.target.value);
                       if (selected) handleJumpToChapter(selected);
                     }}
-                    style={bottomNavSelectStyle}
+                    className="bottom-nav-select"
                   >
                     {sortedChapters.map(item => (
                       <option key={item.id} value={item.id}>
@@ -642,11 +639,11 @@ export default function MangaReader({
                       </option>
                     ))}
                   </select>
-
+ 
                   <button
                     onClick={handleNextChapter}
                     disabled={nextIndex === -1}
-                    style={bottomNavBtnStyle(nextIndex === -1)}
+                    className="btn-bottom-nav"
                   >
                     <span>Next Chapter</span>
                     <ChevronRight size={16} />
@@ -657,365 +654,13 @@ export default function MangaReader({
           </div>
         )}
       </div>
-
+ 
       {/* Floating Scroll Top button */}
       {showScrollTop && (
-        <button onClick={scrollToTop} style={scrollTopBtnStyle}>
+        <button onClick={scrollToTop} className="btn-scroll-top">
           <ChevronsUp size={24} />
         </button>
       )}
     </div>
   );
 }
-
-// Styling definitions
-const readerWrapperStyle = {
-  flex: 1,
-  backgroundColor: "#0a0a0c",
-  height: "100%",
-  overflowY: "auto",
-  width: "100%",
-  color: "white",
-  display: "flex",
-  flexDirection: "column",
-};
-
-const headerStyle = {
-  position: "sticky",
-  top: 0,
-  width: "100%",
-  height: "60px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "0 24px",
-  zIndex: 90,
-  borderRadius: 0,
-  borderTop: "none",
-  borderLeft: "none",
-  borderRight: "none",
-  flexShrink: 0,
-};
-
-const backBtnStyle = {
-  background: "#1f222d",
-  border: "1px solid #262936",
-  color: "white",
-  padding: "6px 14px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  fontSize: "13px",
-  fontWeight: "600",
-  transition: "var(--transition)",
-};
-
-const chapterTitleStyle = {
-  fontSize: "13px",
-  fontWeight: "600",
-  color: "#e5e7eb",
-};
-
-const viewportStyle = {
-  paddingTop: "20px",
-  paddingBottom: "40px",
-  width: "100%",
-  display: "flex",
-  justifyContent: "center",
-};
-
-const statusOverlayStyle = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  height: "400px",
-  color: "#9ca3af",
-};
-
-const retryBtnStyle = {
-  marginTop: "16px",
-  backgroundColor: "var(--accent)",
-  color: "white",
-  border: "none",
-  padding: "8px 20px",
-  borderRadius: "6px",
-  cursor: "pointer",
-  fontWeight: "600",
-};
-
-const pagesContainerStyle = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  width: "100%",
-  maxWidth: "800px",
-  gap: "8px",
-};
-
-const pageWrapperStyle = {
-  position: "relative",
-  width: "100%",
-  minHeight: "80vh",
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  backgroundColor: "#000",
-  borderRadius: "4px",
-  overflow: "hidden",
-  boxShadow: "0 4px 12px rgba(0,0,0,0.5)",
-};
-
-const pageImgStyle = {
-  width: "100%",
-  height: "auto",
-  display: "block",
-};
-
-const pageNumStyle = {
-  padding: "8px",
-  fontSize: "11px",
-  fontWeight: "600",
-  color: "#4b5563",
-  textAlign: "center",
-};
-
-const scrollTopBtnStyle = {
-  position: "fixed",
-  bottom: "30px",
-  right: "30px",
-  width: "50px",
-  height: "50px",
-  borderRadius: "50%",
-  backgroundColor: "var(--accent)",
-  color: "white",
-  border: "none",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: "pointer",
-  boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
-  zIndex: 100,
-  transition: "var(--transition)",
-  "&:hover": {
-    backgroundColor: "var(--accent-hover)",
-    transform: "scale(1.1)",
-  },
-};
-
-// Navigation Styles
-const navigationStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "10px",
-  backgroundColor: "#0e0f12",
-  padding: "4px 8px",
-  borderRadius: "8px",
-  border: "1px solid #1f222d",
-};
-
-const navBtnStyle = (disabled) => ({
-  backgroundColor: disabled ? "rgba(255,255,255,0.02)" : "#1f222d",
-  color: disabled ? "#4b5563" : "white",
-  border: "1px solid #262936",
-  padding: "6px 10px",
-  borderRadius: "6px",
-  cursor: disabled ? "not-allowed" : "pointer",
-  transition: "var(--transition)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  opacity: disabled ? 0.4 : 1,
-});
-
-const selectContainerStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "6px",
-};
-
-const navSelectStyle = {
-  backgroundColor: "#1f222d",
-  border: "1px solid #262936",
-  color: "white",
-  padding: "5px 10px",
-  borderRadius: "6px",
-  fontSize: "12px",
-  fontWeight: "600",
-  outline: "none",
-  cursor: "pointer",
-};
-
-const headerLeftSectionStyle = {
-  display: "flex",
-  alignItems: "center",
-  flex: 1,
-};
-
-const headerRightSectionStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "flex-end",
-  gap: "10px",
-  flex: 1,
-};
-
-const headerBadgeStyle = (downloaded) => ({
-  fontSize: "11px",
-  fontWeight: "600",
-  padding: "3px 8px",
-  borderRadius: "12px",
-  backgroundColor: downloaded ? "rgba(16, 185, 129, 0.1)" : "rgba(124, 58, 237, 0.15)",
-  color: downloaded ? "var(--success)" : "#c084fc",
-  border: downloaded ? "1px solid var(--success)" : "1px solid rgba(124, 58, 237, 0.3)",
-});
-
-// Beautiful Splash Cover Styles
-const splashCardStyle = {
-  width: "100%",
-  height: "calc(100vh - 120px)",
-  minHeight: "450px",
-  position: "relative",
-  background: "linear-gradient(135deg, #13151a 0%, #090a0d 100%)",
-  borderRadius: "8px",
-  border: "1px solid #1f222d",
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  boxShadow: "0 8px 32px rgba(0, 0, 0, 0.6)",
-  marginBottom: "30px",
-  overflow: "hidden",
-};
-
-const splashCardOverlayStyle = {
-  position: "absolute",
-  top: 0,
-  left: 0,
-  right: 0,
-  bottom: 0,
-  backgroundImage: "radial-gradient(circle at center, rgba(124, 58, 237, 0.08) 0%, transparent 70%)",
-  pointerEvents: "none",
-};
-
-const splashCardContentStyle = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  zIndex: 2,
-  padding: "0 24px",
-  textAlign: "center",
-};
-
-const splashMangaTitleStyle = {
-  fontSize: "13px",
-  color: "var(--text-muted)",
-  textTransform: "uppercase",
-  letterSpacing: "3px",
-  fontWeight: "700",
-  marginBottom: "12px",
-  opacity: 0.8,
-};
-
-const splashChapterNumStyle = {
-  fontSize: "44px",
-  fontWeight: "800",
-  color: "#ffffff",
-  letterSpacing: "0.5px",
-  marginBottom: "16px",
-  background: "linear-gradient(to right, #ffffff, #a78bfa)",
-  WebkitBackgroundClip: "text",
-  WebkitTextFillColor: "transparent",
-};
-
-const splashStatusBadgeStyle = (downloaded) => ({
-  backgroundColor: downloaded ? "rgba(16, 185, 129, 0.1)" : "rgba(124, 58, 237, 0.15)",
-  border: downloaded ? "1px solid var(--success)" : "1px solid var(--accent)",
-  color: downloaded ? "var(--success)" : "#c084fc",
-  padding: "6px 14px",
-  borderRadius: "20px",
-  fontSize: "12px",
-  fontWeight: "600",
-  letterSpacing: "0.5px",
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "6px",
-});
-
-const splashScrollHintStyle = {
-  position: "absolute",
-  bottom: "40px",
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  gap: "8px",
-  color: "var(--text-muted)",
-  opacity: 0.7,
-};
-
-// Bottom Navigation panel
-const bottomControlsPanelStyle = {
-  width: "100%",
-  padding: "24px 30px",
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  gap: "16px",
-  marginTop: "20px",
-  border: "1px solid var(--border)",
-  background: "rgba(22, 24, 31, 0.4)",
-  borderRadius: "12px",
-};
-
-const bottomControlsTitleStyle = {
-  fontSize: "14px",
-  fontWeight: "500",
-  color: "var(--text-muted)",
-};
-
-const bottomNavRowStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "14px",
-  width: "100%",
-};
-
-const bottomNavBtnStyle = (disabled) => ({
-  backgroundColor: disabled ? "rgba(255,255,255,0.02)" : "var(--bg-tertiary)",
-  color: disabled ? "var(--text-muted)" : "white",
-  border: "1px solid var(--border)",
-  padding: "10px 20px",
-  borderRadius: "8px",
-  fontSize: "13px",
-  fontWeight: "600",
-  cursor: disabled ? "not-allowed" : "pointer",
-  transition: "var(--transition)",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  opacity: disabled ? 0.4 : 1,
-});
-
-const bottomNavSelectStyle = {
-  backgroundColor: "var(--bg-tertiary)",
-  border: "1px solid var(--border)",
-  color: "white",
-  padding: "10px 16px",
-  borderRadius: "8px",
-  fontSize: "13px",
-  fontWeight: "600",
-  outline: "none",
-  cursor: "pointer",
-  minWidth: "150px",
-};
-
-const appendLoadingContainerStyle = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  gap: "10px",
-  margin: "30px 0",
-};

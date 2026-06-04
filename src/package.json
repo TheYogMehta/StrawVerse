@@ -58,7 +58,9 @@
       ],
       "icon": "assets/luffy.png",
       "desktop": {
-        "MimeType": "x-scheme-handler/strawverse;"
+        "entry": {
+          "MimeType": "x-scheme-handler/strawverse;"
+        }
       }
     },
     "icon": "assets/luffy.png",

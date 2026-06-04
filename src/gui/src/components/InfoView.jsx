@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, no-unused-vars */
+import { useState, useEffect, useMemo } from "react";
 import {
   Loader2,
   ArrowLeft,
@@ -13,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import Swal from "sweetalert2";
+import "./css/InfoView.css";
 
 export default function InfoView({
   id: propId,
@@ -39,7 +41,7 @@ export default function InfoView({
 
   const [sortOrder, setSortOrder] = useState("asc"); // 'asc' or 'desc'
 
-  const sortedItems = React.useMemo(() => {
+  const sortedItems = useMemo(() => {
     return [...episodesOrChapters].sort((a, b) => {
       const numA = parseFloat(a.number) || 0;
       const numB = parseFloat(b.number) || 0;
@@ -47,7 +49,7 @@ export default function InfoView({
     });
   }, [episodesOrChapters, sortOrder]);
 
-  const filteredItems = React.useMemo(() => {
+  const filteredItems = useMemo(() => {
     if (!episodeSearchQuery.trim()) return sortedItems;
     const query = episodeSearchQuery.toLowerCase().trim();
     return sortedItems.filter((item) => {
@@ -1103,7 +1105,7 @@ export default function InfoView({
 
   if (loading) {
     return (
-      <div style={loadingCenterStyle}>
+      <div className="loading-center-spinner">
         <img
           src="/images/loading.gif"
           alt="loading"
@@ -1127,15 +1129,15 @@ export default function InfoView({
   const numToDelete = selectedDownloaded.length;
 
   return (
-    <div style={viewWrapperStyle}>
+    <div className="info-wrapper">
       {/* Back Header */}
-      <div style={backHeaderStyle}>
-        <button onClick={onBack} style={backBtnStyle}>
+      <div className="back-header">
+        <button onClick={onBack} className="btn-back">
           <ArrowLeft size={20} />
           <span>{backText || "Back to Collection"}</span>
         </button>
         {localMalProvider === "local" && (
-          <button onClick={handleDeleteLocal} style={deleteBtnStyle}>
+          <button onClick={handleDeleteLocal} className="btn-delete-show">
             <Trash2 size={16} />
             <span>Delete All Downloads</span>
           </button>
@@ -1143,22 +1145,22 @@ export default function InfoView({
       </div>
 
       {/* Main Details Panel */}
-      <div style={detailsGridStyle} className="glass-panel">
-        <div style={coverWrapperStyle}>
+      <div className="details-grid glass-panel">
+        <div className="cover-wrapper">
           <img
             src={details?.image}
             alt={details?.title}
-            style={coverStyle}
+            className="cover-img"
             onError={(e) => {
               e.target.src = "/images/image-404.png";
             }}
           />
         </div>
 
-        <div style={infoContentStyle}>
-          <h1 style={titleStyle}>{details?.title}</h1>
+        <div className="info-content">
+          <h1 className="info-title">{details?.title}</h1>
 
-          <div style={tagListStyle}>
+          <div className="tag-list">
             {(Array.isArray(details?.genres)
               ? details.genres
               : (details?.genres || "")
@@ -1166,34 +1168,34 @@ export default function InfoView({
                   .map((g) => g.trim())
                   .filter(Boolean)
             ).map((genre) => (
-              <span key={genre} style={tagStyle}>
+              <span key={genre} className="info-tag">
                 {genre}
               </span>
             ))}
             {details?.type && (
-              <span style={tagMetaStyle}>{details.type.toUpperCase()}</span>
+              <span className="info-tag-meta">{details.type.toUpperCase()}</span>
             )}
             {details?.status && (
-              <span style={tagStatusStyle}>{details.status}</span>
+              <span className="info-tag-status">{details.status}</span>
             )}
           </div>
 
-          <p style={descriptionStyle}>
+          <p className="info-description">
             {details?.description || "No description available for this title."}
           </p>
 
           {details?.released && (
-            <div style={metaItemStyle}>
+            <div className="meta-item">
               <strong>Released:</strong> {details.released}
             </div>
           )}
           {details?.author && (
-            <div style={metaItemStyle}>
+            <div className="meta-item">
               <strong>Author:</strong> {details.author}
             </div>
           )}
           {details?.provider && (
-            <div style={metaItemStyle}>
+            <div className="meta-item">
               <strong>Source Provider:</strong>{" "}
               {details.linkedProviders && details.linkedProviders.length > 1 ? (
                 <select
@@ -1236,10 +1238,10 @@ export default function InfoView({
           )}
 
           {/* Action Row containing Play Actions & Library/Tracking Controls */}
-          <div style={actionsRowStyle}>
+          <div className="actions-row">
             {/* Quick Resumption / Play Actions */}
-            <div style={quickActionsWrapperStyle}>
-              <button onClick={handleContinueWatchRead} style={continueBtnStyle}>
+            <div className="quick-actions-wrapper">
+              <button onClick={handleContinueWatchRead} className="btn-action-base btn-continue">
                 <Play size={16} style={{ marginRight: '6px' }} />
                 {!hasAnyProgress 
                   ? (type === "Anime" ? "Watch from Episode 1" : "Read from Chapter 1")
@@ -1247,16 +1249,16 @@ export default function InfoView({
                     ? (type === "Anime" ? "Rewatch from Episode 1" : "Rewatch from Chapter 1")
                     : (type === "Anime" ? `Continue Watching Episode ${nextToPlay}` : `Continue Reading Chapter ${nextToPlay}`)}
               </button>
-              <button onClick={handleWatchReadLatest} style={watchLatestBtnStyle}>
+              <button onClick={handleWatchReadLatest} className="btn-action-base btn-watch-latest">
                 <Play size={16} style={{ marginRight: '6px' }} />
                 {type === "Anime" ? "Watch Latest Episode" : "Read Latest Chapter"}
               </button>
             </div>
 
             {/* Library Tags & MAL Connection */}
-            <div style={trackingGroupStyle}>
-              <div style={{ ...inputGroupStyle, minWidth: "250px" }}>
-                <label style={inputLabelStyle}>Library Tags</label>
+            <div className="tracking-group">
+              <div className="input-group" style={{ minWidth: "250px" }}>
+                <label className="input-label">Library Tags</label>
                 {/* Select tag dropdown */}
                 <select
                   value={currentTags[0] || ""}
@@ -1267,7 +1269,7 @@ export default function InfoView({
                       handleSetSingleTag(e.target.value);
                     }
                   }}
-                  style={selectStyle}
+                  className="select-val"
                 >
                   <option value="">None (Not in Library)</option>
                   {customTags
@@ -1282,12 +1284,12 @@ export default function InfoView({
 
                 {/* Assigned tags */}
                 {currentTags.length > 0 ? (
-                  <div style={tagChipsRowStyle}>
-                    <span style={tagChipWithRemoveStyle}>
+                  <div className="tag-chips-row">
+                    <span className="tag-chip-with-remove">
                       Status: {currentTags[0]}
                       <button
                         onClick={() => handleSetSingleTag("")}
-                        style={tagChipRemoveBtnStyle}
+                        className="btn-tag-chip-remove"
                         title="Remove from Library"
                       >
                         &times;
@@ -1310,8 +1312,8 @@ export default function InfoView({
 
               {/* MyAnimeList Connection */}
               {details && details.MalLoggedIn && (
-                <div style={{ ...inputGroupStyle, minWidth: "180px" }}>
-                  <label style={inputLabelStyle}>MyAnimeList Connection</label>
+                <div className="input-group" style={{ minWidth: "180px" }}>
+                  <label className="input-label">MyAnimeList Connection</label>
                   {details.malid ? (
                     <div
                       style={{
@@ -1321,17 +1323,18 @@ export default function InfoView({
                         height: "38px",
                       }}
                     >
-                      <span style={malLinkBadgeStyle}>
+                      <span className="mal-link-badge">
                         Linked (ID: {details.malid})
                       </span>
-                      <button onClick={handleUnlinkMal} style={unlinkBtnStyle}>
+                      <button onClick={handleUnlinkMal} className="btn-unlink">
                         Unlink
                       </button>
                     </div>
                   ) : (
                     <button
                       onClick={startMalLink}
-                      style={{ ...linkMalBtnStyle, height: "38px" }}
+                      className="btn-link-mal"
+                      style={{ height: "38px" }}
                     >
                       Link MAL Title
                     </button>
@@ -1343,11 +1346,11 @@ export default function InfoView({
 
           {/* MAL Configuration sync Panel */}
           {details?.malid && details?.MalLoggedIn && (
-            <div style={malBoxStyle}>
-              <h3 style={malTitleStyle}>MyAnimeList Sync</h3>
-              <div style={malRowStyle}>
-                <div style={inputGroupStyle}>
-                  <label style={inputLabelStyle}>
+            <div className="mal-box">
+              <h3 className="mal-title">MyAnimeList Sync</h3>
+              <div className="mal-row">
+                <div className="input-group">
+                  <label className="input-label">
                     {type === "Anime" ? "Watched Episodes" : "Read Chapters"}
                   </label>
                   <input
@@ -1356,15 +1359,15 @@ export default function InfoView({
                     onChange={(e) =>
                       setMalWatched(parseInt(e.target.value) || 0)
                     }
-                    style={inputStyle}
+                    className="input-val"
                   />
                 </div>
-                <div style={inputGroupStyle}>
-                  <label style={inputLabelStyle}>Status</label>
+                <div className="input-group">
+                  <label className="input-label">Status</label>
                   <select
                     value={malStatus}
                     onChange={(e) => setMalStatus(e.target.value)}
-                    style={selectStyle}
+                    className="select-val"
                   >
                     {type === "Anime" ? (
                       <>
@@ -1388,8 +1391,7 @@ export default function InfoView({
                 <button
                   onClick={handleMalSync}
                   disabled={malSyncing}
-                  style={syncBtnStyle}
-                  className="glow-button"
+                  className="btn-sync glow-button"
                 >
                   {malSyncing ? (
                     <Loader2 size={16} className="spin" />
@@ -1404,31 +1406,31 @@ export default function InfoView({
       </div>
 
       {/* Episodes / Chapters List */}
-      <div style={itemsSectionStyle}>
-        <div style={sectionHeaderStyle}>
+      <div className="items-section">
+        <div className="section-header">
           <h2>{type === "Anime" ? "Episodes List" : "Chapters List"}</h2>
           {episodesOrChapters.length > 0 && (
-            <div style={bulkActionsStyle}>
+            <div className="bulk-actions">
               {/* In-Page Search Input */}
-              <div style={searchWrapperStyle}>
-                <Search size={14} style={searchIconStyle} />
+              <div className="search-wrapper">
+                <Search size={14} className="search-icon" />
                 <input
                   type="text"
                   placeholder={type === "Anime" ? "Search episode..." : "Search chapter..."}
                   value={episodeSearchQuery}
                   onChange={(e) => setEpisodeSearchQuery(e.target.value)}
-                  style={searchInputStyle}
+                  className="search-input-box"
                 />
                 {episodeSearchQuery && (
                   <button
                     onClick={() => setEpisodeSearchQuery("")}
-                    style={searchClearBtnStyle}
+                    className="btn-search-clear"
                   >
                     <X size={12} />
                   </button>
                 )}
               </div>
-              {/* Premium Sort Button */}
+              {/* Sort Button */}
               <button
                 onClick={() => {
                   const newOrder = sortOrder === "asc" ? "desc" : "asc";
@@ -1442,7 +1444,7 @@ export default function InfoView({
                     }
                   }
                 }}
-                style={bulkBtnStyle}
+                className="btn-bulk"
                 title={`Sort by number: ${sortOrder === "asc" ? "Ascending" : "Descending"}`}
               >
                 <ArrowUpDown
@@ -1463,7 +1465,7 @@ export default function InfoView({
                     <select
                       value={dubSelect}
                       onChange={(e) => setDubSelect(e.target.value)}
-                      style={selectStyle}
+                      className="select-val"
                     >
                       <option value="sub">SUB</option>
                       <option value="dub">DUB</option>
@@ -1472,10 +1474,10 @@ export default function InfoView({
                   <button
                     onClick={handleSelectAll}
                     style={{
-                      ...bulkBtnStyle,
                       opacity: selectableItems.length === 0 ? 0.5 : 1,
                       cursor: selectableItems.length === 0 ? "not-allowed" : "pointer"
                     }}
+                    className="btn-bulk"
                     disabled={selectableItems.length === 0}
                   >
                     {allSelectableSelected ? "Deselect All" : "Select All"}
@@ -1483,7 +1485,7 @@ export default function InfoView({
                   {numToDownload > 0 && (
                     <button
                       onClick={() => handleDownload()}
-                      style={downloadBtnStyle(false)}
+                      className="btn-download-all"
                     >
                       <Download size={16} />
                       <span>Download Checked ({numToDownload})</span>
@@ -1492,7 +1494,7 @@ export default function InfoView({
                   {numToDelete > 0 && (
                     <button
                       onClick={handleBulkDelete}
-                      style={deleteBtnStyle}
+                      className="btn-delete-show"
                     >
                       <Trash2 size={16} />
                       <span>Delete Checked ({numToDelete})</span>
@@ -1504,7 +1506,7 @@ export default function InfoView({
           )}
         </div>
 
-        <div style={itemsListStyle}>
+        <div className="items-list">
           {filteredItems.map((item) => {
             const hasSub = isDownloaded(item.number, "sub");
             const hasDub = isDownloaded(item.number, "dub");
@@ -1518,17 +1520,11 @@ export default function InfoView({
             const isCompleted = (epStatus && epStatus.isCompleted) || isMalCompleted;
             const isStarted = epStatus && !epStatus.isCompleted;
 
-            let customBorder = {};
+            let customBorderClass = "";
             if (isCompleted) {
-              customBorder = {
-                border: "1px solid rgba(16, 185, 129, 0.4)",
-                backgroundColor: "rgba(16, 185, 129, 0.03)"
-              };
+              customBorderClass = "completed";
             } else if (isStarted) {
-              customBorder = {
-                border: "1px solid rgba(124, 58, 237, 0.4)",
-                backgroundColor: "rgba(124, 58, 237, 0.03)"
-              };
+              customBorderClass = "started";
             }
 
             const hasSubLang =
@@ -1538,7 +1534,7 @@ export default function InfoView({
               details?.provider && details?.provider !== "local source";
 
             return (
-              <div key={item.id} style={{ ...itemCardStyle, ...customBorder }} className="glass-panel">
+              <div key={item.id} className={`item-card glass-panel ${customBorderClass}`}>
                 <div
                   style={{
                     display: "flex",
@@ -1561,7 +1557,7 @@ export default function InfoView({
                       }}
                     />
                   )}
-                  <span style={itemNumStyle}>
+                  <span className="item-num">
                     {type === "Anime"
                       ? `Episode ${item.number}`
                       : item.title || `Chapter ${item.number}`}
@@ -1576,8 +1572,8 @@ export default function InfoView({
                     <>
                       {/* SUB stream / delete */}
                       {hasSub ? (
-                        <div style={badgeAndActionStyle}>
-                          <span style={badgeSubDubStyle("sub")}>
+                        <div className="badge-and-action">
+                          <span className="badge-subdub sub">
                             SUB Downloaded
                           </span>
                           <button
@@ -1593,7 +1589,7 @@ export default function InfoView({
                                 details?.provider,
                               )
                             }
-                            style={playBtnStyle}
+                            className="btn-play"
                           >
                             <Play size={18} />
                           </button>
@@ -1602,7 +1598,7 @@ export default function InfoView({
                               onClick={() =>
                                 handleDeleteEpisode(item.number, "sub")
                               }
-                              style={actionTrashStyle}
+                              className="btn-action-trash"
                             >
                               <Trash2 size={18} />
                             </button>
@@ -1624,7 +1620,7 @@ export default function InfoView({
                                 details?.provider,
                               )
                             }
-                            style={streamBtnStyle}
+                            className="btn-stream"
                           >
                             <span>Stream SUB</span>
                           </button>
@@ -1633,8 +1629,8 @@ export default function InfoView({
 
                       {/* DUB stream / delete */}
                       {hasDub ? (
-                        <div style={badgeAndActionStyle}>
-                          <span style={badgeSubDubStyle("dub")}>
+                        <div className="badge-and-action">
+                          <span className="badge-subdub dub">
                             DUB Downloaded
                           </span>
                           <button
@@ -1650,7 +1646,7 @@ export default function InfoView({
                                 details?.provider,
                               )
                             }
-                            style={playBtnStyle}
+                            className="btn-play"
                           >
                             <Play size={18} />
                           </button>
@@ -1659,7 +1655,7 @@ export default function InfoView({
                               onClick={() =>
                                 handleDeleteEpisode(item.number, "dub")
                               }
-                              style={actionTrashStyle}
+                              className="btn-action-trash"
                             >
                               <Trash2 size={18} />
                             </button>
@@ -1681,7 +1677,7 @@ export default function InfoView({
                                 details?.provider,
                               )
                             }
-                            style={streamBtnStyle}
+                            className="btn-stream"
                           >
                             <span>Stream DUB</span>
                           </button>
@@ -1692,11 +1688,11 @@ export default function InfoView({
                     /* Manga reader buttons */
                     <>
                       {hasSub ? (
-                        <div style={badgeAndActionStyle}>
-                          <span style={badgeMangaStyle}>Downloaded</span>
+                        <div className="badge-and-action">
+                          <span className="badge-manga">Downloaded</span>
                           <button
                             onClick={() => onRead(id, item.number, true, sortedItems, details?.DownloadedChapters, details?.title, details?.provider)}
-                            style={readBtnStyle}
+                            className="btn-read"
                           >
                             <BookOpen size={18} />
                           </button>
@@ -1705,7 +1701,7 @@ export default function InfoView({
                               onClick={() =>
                                 handleDeleteChapter(item.number)
                               }
-                              style={actionTrashStyle}
+                              className="btn-action-trash"
                             >
                               <Trash2 size={18} />
                             </button>
@@ -1715,7 +1711,7 @@ export default function InfoView({
                         showOnlineActions && (
                           <button
                             onClick={() => onRead(id, item.id, false, sortedItems, details?.DownloadedChapters, details?.title, details?.provider)}
-                            style={streamBtnStyle}
+                            className="btn-stream"
                           >
                             <span>Read Online</span>
                           </button>
@@ -1728,7 +1724,7 @@ export default function InfoView({
                   {showOnlineActions && !isItemFullyDownloaded(item) && !isItemUnavailable(item) && (
                     <button
                       onClick={() => handleDownload(item)}
-                      style={singleDlBtnStyle}
+                      className="btn-single-dl"
                       title={type === "Anime" ? "Download Episode" : "Download Chapter"}
                     >
                       <Download size={18} />
@@ -1752,31 +1748,23 @@ export default function InfoView({
           const logicalPage = isAnimePahe && sortOrder === "asc" ? (totalPages - itemsPage + 1) : itemsPage;
 
           return totalPages > 1 ? (
-            <div style={paginationContainerStyle}>
+            <div className="pagination-controls">
               <button
                 onClick={() => fetchItems(firstPageTarget)}
                 disabled={itemsLoading || disableFirstPrev}
-                style={{
-                  ...paginationBtnStyle,
-                  opacity: (itemsLoading || disableFirstPrev) ? 0.5 : 1,
-                  cursor: (itemsLoading || disableFirstPrev) ? "not-allowed" : "pointer"
-                }}
+                className="btn-pagination"
               >
                 First
               </button>
               <button
                 onClick={() => fetchItems(prevPageTarget)}
                 disabled={itemsLoading || disableFirstPrev}
-                style={{
-                  ...paginationBtnStyle,
-                  opacity: (itemsLoading || disableFirstPrev) ? 0.5 : 1,
-                  cursor: (itemsLoading || disableFirstPrev) ? "not-allowed" : "pointer"
-                }}
+                className="btn-pagination"
               >
                 Prev
               </button>
               
-              <span style={paginationInfoStyle}>
+              <span className="pagination-label">
                 Page {logicalPage} of {totalPages}
               </span>
 
@@ -1790,7 +1778,7 @@ export default function InfoView({
                   fetchItems(targetBackend);
                 }}
                 disabled={itemsLoading}
-                style={paginationSelectStyle}
+                className="pagination-select"
               >
                 {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
                   <option key={p} value={p}>
@@ -1802,22 +1790,14 @@ export default function InfoView({
               <button
                 onClick={() => fetchItems(nextPageTarget)}
                 disabled={itemsLoading || disableNextLast}
-                style={{
-                  ...paginationBtnStyle,
-                  opacity: (itemsLoading || disableNextLast) ? 0.5 : 1,
-                  cursor: (itemsLoading || disableNextLast) ? "not-allowed" : "pointer"
-                }}
+                className="btn-pagination"
               >
                 Next
               </button>
               <button
                 onClick={() => fetchItems(lastPageTarget)}
                 disabled={itemsLoading || disableNextLast}
-                style={{
-                  ...paginationBtnStyle,
-                  opacity: (itemsLoading || disableNextLast) ? 0.5 : 1,
-                  cursor: (itemsLoading || disableNextLast) ? "not-allowed" : "pointer"
-                }}
+                className="btn-pagination"
               >
                 Last
               </button>
@@ -1827,7 +1807,7 @@ export default function InfoView({
               <button
                 onClick={() => fetchItems(itemsPage + 1, details?.provider, details, true)}
                 disabled={itemsLoading}
-                style={loadMoreBtnStyle}
+                className="btn-load-more"
               >
                 {itemsLoading ? (
                   <Loader2 size={18} className="spin" />
@@ -1944,689 +1924,3 @@ export default function InfoView({
     </div>
   );
 }
-
-const viewWrapperStyle = {
-  flex: 1,
-  padding: "30px",
-  overflowY: "auto",
-  height: "100%",
-  backgroundColor: "var(--bg-primary)",
-};
-
-const backHeaderStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: "24px",
-};
-
-const backBtnStyle = {
-  background: "transparent",
-  border: "none",
-  color: "white",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  fontSize: "14px",
-  fontWeight: "600",
-  padding: "8px 12px",
-  borderRadius: "6px",
-  transition: "var(--transition)",
-  "&:hover": {
-    backgroundColor: "var(--bg-secondary)",
-  },
-};
-
-const deleteBtnStyle = {
-  backgroundColor: "rgba(239, 68, 68, 0.1)",
-  border: "1px solid var(--danger)",
-  color: "var(--danger)",
-  borderRadius: "6px",
-  padding: "8px 14px",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  fontSize: "13px",
-  fontWeight: "600",
-  transition: "var(--transition)",
-};
-
-const detailsGridStyle = {
-  display: "grid",
-  gridTemplateColumns: "220px 1fr",
-  gap: "30px",
-  padding: "24px",
-  marginBottom: "30px",
-};
-
-const coverWrapperStyle = {
-  width: "100%",
-  borderRadius: "8px",
-  overflow: "hidden",
-  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
-};
-
-const coverStyle = {
-  width: "100%",
-  height: "auto",
-  display: "block",
-};
-
-const infoContentStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "16px",
-};
-
-const titleStyle = {
-  fontSize: "28px",
-  fontWeight: "800",
-  lineHeight: "1.2",
-};
-
-const tagListStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "8px",
-};
-
-const tagStyle = {
-  backgroundColor: "var(--bg-tertiary)",
-  border: "1px solid var(--border)",
-  padding: "4px 10px",
-  borderRadius: "50px",
-  fontSize: "11px",
-  fontWeight: "600",
-  color: "var(--text-muted)",
-};
-
-const tagMetaStyle = {
-  backgroundColor: "rgba(124, 58, 237, 0.15)",
-  border: "1px solid var(--accent)",
-  color: "var(--accent-hover)",
-  padding: "4px 10px",
-  borderRadius: "50px",
-  fontSize: "11px",
-  fontWeight: "700",
-};
-
-const tagStatusStyle = {
-  backgroundColor: "rgba(16, 185, 129, 0.15)",
-  border: "1px solid var(--success)",
-  color: "var(--success)",
-  padding: "4px 10px",
-  borderRadius: "50px",
-  fontSize: "11px",
-  fontWeight: "700",
-};
-
-const descriptionStyle = {
-  fontSize: "15px",
-  lineHeight: "1.6",
-  color: "var(--text-muted)",
-};
-
-const metaItemStyle = {
-  fontSize: "13px",
-  color: "var(--text-muted)",
-};
-
-const malBoxStyle = {
-  marginTop: "20px",
-  padding: "16px",
-  backgroundColor: "rgba(255,255,255,0.02)",
-  borderRadius: "8px",
-  border: "1px solid var(--border)",
-};
-
-const malTitleStyle = {
-  fontSize: "14px",
-  fontWeight: "700",
-  marginBottom: "12px",
-  color: "var(--text-main)",
-};
-
-const malRowStyle = {
-  display: "flex",
-  alignItems: "flex-end",
-  gap: "16px",
-  flexWrap: "wrap",
-};
-
-const inputGroupStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "6px",
-};
-
-const inputLabelStyle = {
-  fontSize: "11px",
-  fontWeight: "600",
-  color: "var(--text-muted)",
-};
-
-const inputStyle = {
-  backgroundColor: "var(--bg-tertiary)",
-  border: "1px solid var(--border)",
-  color: "white",
-  padding: "8px 12px",
-  borderRadius: "6px",
-  width: "100px",
-  outline: "none",
-};
-
-const selectStyle = {
-  backgroundColor: "var(--bg-tertiary)",
-  border: "1px solid var(--border)",
-  color: "white",
-  padding: "8px 12px",
-  borderRadius: "6px",
-  outline: "none",
-  cursor: "pointer",
-};
-
-const trackingControlsStyle = {
-  marginTop: "12px",
-  padding: "16px",
-  backgroundColor: "rgba(255,255,255,0.02)",
-  borderRadius: "8px",
-  border: "1px solid var(--border)",
-};
-
-const trackingGroupStyle = {
-  display: "flex",
-  alignItems: "flex-start",
-  gap: "24px",
-  flexWrap: "wrap",
-};
-
-const actionsRowStyle = {
-  display: "flex",
-  alignItems: "flex-start",
-  gap: "32px",
-  flexWrap: "wrap",
-  marginTop: "20px",
-  marginBottom: "16px",
-};
-
-const malConnectionRowStyle = {
-  marginTop: "16px",
-  marginBottom: "16px",
-  maxWidth: "500px",
-  width: "100%",
-};
-
-const malLinkBadgeStyle = {
-  fontSize: "12px",
-  fontWeight: "700",
-  color: "var(--success)",
-  backgroundColor: "rgba(16, 185, 129, 0.15)",
-  border: "1px solid var(--success)",
-  padding: "6px 12px",
-  borderRadius: "6px",
-};
-
-const linkMalBtnStyle = {
-  backgroundColor: "var(--accent)",
-  color: "white",
-  border: "none",
-  padding: "8px 14px",
-  borderRadius: "6px",
-  fontSize: "13px",
-  fontWeight: "600",
-  cursor: "pointer",
-  transition: "var(--transition)",
-};
-
-const unlinkBtnStyle = {
-  backgroundColor: "rgba(239, 68, 68, 0.15)",
-  color: "var(--danger)",
-  border: "1px solid var(--danger)",
-  padding: "6px 12px",
-  borderRadius: "6px",
-  fontSize: "12px",
-  fontWeight: "600",
-  cursor: "pointer",
-  transition: "var(--transition)",
-};
-
-const inlineMalSearchStyle = {
-  position: "relative",
-  width: "100%",
-  maxWidth: "460px",
-  marginTop: "8px",
-};
-
-const inlineInputStyle = {
-  ...inputStyle,
-  width: "auto",
-  flex: 1,
-};
-
-const inlineSearchBtnStyle = {
-  backgroundColor: "var(--accent)",
-  color: "white",
-  border: "none",
-  padding: "8px 12px",
-  borderRadius: "6px",
-  fontSize: "12px",
-  fontWeight: "600",
-  cursor: "pointer",
-};
-
-const inlineCancelBtnStyle = {
-  backgroundColor: "transparent",
-  color: "var(--text-muted)",
-  border: "1px solid var(--border)",
-  padding: "8px 12px",
-  borderRadius: "6px",
-  fontSize: "12px",
-  fontWeight: "600",
-  cursor: "pointer",
-};
-
-const malResultListStyle = {
-  listStyle: "none",
-  padding: 0,
-  margin: 0,
-  maxHeight: "200px",
-  overflowY: "auto",
-  display: "flex",
-  flexDirection: "column",
-  gap: "8px",
-};
-
-const malResultItemStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "12px",
-  padding: "8px",
-  backgroundColor: "var(--bg-tertiary)",
-  borderRadius: "6px",
-  cursor: "pointer",
-  transition: "var(--transition)",
-  border: "1px solid transparent",
-};
-
-const malResultImgStyle = {
-  width: "32px",
-  height: "48px",
-  objectFit: "cover",
-  borderRadius: "4px",
-};
-
-const malResultTitleStyle = {
-  fontSize: "12px",
-  fontWeight: "bold",
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-};
-
-const syncBtnStyle = {
-  padding: "9px 16px",
-  fontSize: "13px",
-};
-
-const itemsSectionStyle = {
-  marginTop: "40px",
-};
-
-const sectionHeaderStyle = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  marginBottom: "20px",
-  flexWrap: "wrap",
-  gap: "16px",
-};
-
-const bulkActionsStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "12px",
-};
-
-const bulkBtnStyle = {
-  backgroundColor: "var(--bg-tertiary)",
-  border: "1px solid var(--border)",
-  color: "white",
-  borderRadius: "6px",
-  padding: "8px 14px",
-  cursor: "pointer",
-  fontSize: "13px",
-  fontWeight: "600",
-  transition: "var(--transition)",
-};
-
-const downloadBtnStyle = (disabled) => ({
-  backgroundColor: disabled ? "var(--bg-secondary)" : "var(--accent)",
-  border: disabled ? "1px solid var(--border)" : "none",
-  color: disabled ? "var(--text-muted)" : "white",
-  borderRadius: "6px",
-  padding: "8px 14px",
-  cursor: disabled ? "not-allowed" : "pointer",
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-  fontSize: "13px",
-  fontWeight: "600",
-  transition: "var(--transition)",
-});
-
-const itemsListStyle = {
-  display: "flex",
-  flexDirection: "column",
-  gap: "10px",
-  marginBottom: "20px",
-};
-
-const itemCardStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "12px 18px",
-  borderRadius: "8px",
-  transition: "var(--transition)",
-};
-
-const itemNumStyle = {
-  fontSize: "14px",
-  fontWeight: "600",
-};
-
-const badgeAndActionStyle = {
-  display: "flex",
-  alignItems: "center",
-  gap: "8px",
-};
-
-const badgeSubDubStyle = (subdub) => ({
-  fontSize: "10px",
-  fontWeight: "700",
-  padding: "4px 8px",
-  borderRadius: "4px",
-  backgroundColor:
-    subdub === "sub" ? "rgba(59, 130, 246, 0.15)" : "rgba(236, 72, 153, 0.15)",
-  color: subdub === "sub" ? "#60a5fa" : "#f472b6",
-  border:
-    subdub === "sub"
-      ? "1px solid rgba(59, 130, 246, 0.3)"
-      : "1px solid rgba(236, 72, 153, 0.3)",
-});
-
-const badgeMangaStyle = {
-  fontSize: "10px",
-  fontWeight: "700",
-  padding: "4px 8px",
-  borderRadius: "4px",
-  backgroundColor: "rgba(16, 185, 129, 0.15)",
-  color: "#34d399",
-  border: "1px solid rgba(16, 185, 129, 0.3)",
-};
-
-const playBtnStyle = {
-  backgroundColor: "var(--success)",
-  border: "none",
-  color: "white",
-  width: "36px",
-  height: "36px",
-  borderRadius: "6px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: "pointer",
-  transition: "var(--transition)",
-};
-
-const readBtnStyle = {
-  backgroundColor: "#3b82f6",
-  border: "none",
-  color: "white",
-  width: "36px",
-  height: "36px",
-  borderRadius: "6px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: "pointer",
-  transition: "var(--transition)",
-};
-
-const actionTrashStyle = {
-  backgroundColor: "rgba(239, 68, 68, 0.1)",
-  border: "1px solid var(--danger)",
-  color: "var(--danger)",
-  width: "36px",
-  height: "36px",
-  borderRadius: "6px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: "pointer",
-  transition: "var(--transition)",
-};
-
-const streamBtnStyle = {
-  backgroundColor: "rgba(59, 130, 246, 0.08)",
-  border: "1px solid rgba(59, 130, 246, 0.3)",
-  color: "#60a5fa",
-  borderRadius: "6px",
-  padding: "8px 14px",
-  fontSize: "13px",
-  fontWeight: "600",
-  cursor: "pointer",
-  transition: "var(--transition)",
-  "&:hover": {
-    borderColor: "#3b82f6",
-    color: "#93c5fd",
-  },
-};
-
-const singleDlBtnStyle = {
-  backgroundColor: "var(--bg-tertiary)",
-  border: "1px solid var(--border)",
-  color: "var(--text-muted)",
-  width: "36px",
-  height: "36px",
-  borderRadius: "6px",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  cursor: "pointer",
-  transition: "var(--transition)",
-  "&:hover": {
-    backgroundColor: "var(--accent)",
-    color: "white",
-    border: "none",
-  },
-};
-
-const loadMoreBtnStyle = {
-  backgroundColor: "var(--bg-secondary)",
-  border: "1px solid var(--border)",
-  color: "white",
-  width: "100%",
-  padding: "12px",
-  borderRadius: "8px",
-  cursor: "pointer",
-  fontWeight: "600",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  transition: "var(--transition)",
-};
-
-const searchWrapperStyle = {
-  position: "relative",
-  display: "inline-flex",
-  alignItems: "center",
-};
-
-const searchIconStyle = {
-  position: "absolute",
-  left: "10px",
-  color: "var(--text-muted)",
-  pointerEvents: "none",
-};
-
-const searchInputStyle = {
-  background: "rgba(255, 255, 255, 0.05)",
-  border: "1px solid var(--border)",
-  color: "var(--text-main)",
-  borderRadius: "20px",
-  padding: "6px 28px 6px 30px",
-  outline: "none",
-  fontSize: "13px",
-  transition: "all 0.2s ease-in-out",
-  width: "160px",
-};
-
-const searchClearBtnStyle = {
-  position: "absolute",
-  right: "8px",
-  background: "none",
-  border: "none",
-  color: "var(--text-muted)",
-  cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "2px",
-};
-
-const paginationContainerStyle = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "8px",
-  marginTop: "20px",
-  flexWrap: "wrap",
-};
-
-const paginationBtnStyle = {
-  backgroundColor: "var(--bg-secondary)",
-  border: "1px solid var(--border)",
-  color: "white",
-  padding: "6px 12px",
-  borderRadius: "6px",
-  fontWeight: "600",
-  fontSize: "13px",
-  transition: "var(--transition)",
-};
-
-const paginationInfoStyle = {
-  color: "var(--text-muted)",
-  fontSize: "13px",
-  margin: "0 8px",
-};
-
-const paginationSelectStyle = {
-  background: "var(--bg-secondary)",
-  color: "white",
-  border: "1px solid var(--border)",
-  borderRadius: "6px",
-  padding: "5px 8px",
-  fontSize: "13px",
-  outline: "none",
-  cursor: "pointer",
-};
-
-const loadingCenterStyle = {
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  height: "350px",
-  width: "100%",
-};
-
-const tagChipsRowStyle = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "8px",
-  marginTop: "6px",
-  marginBottom: "6px",
-};
-
-const tagChipWithRemoveStyle = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "6px",
-  backgroundColor: "rgba(255, 255, 255, 0.05)",
-  border: "1px solid var(--border)",
-  borderRadius: "16px",
-  padding: "4px 10px",
-  fontSize: "12px",
-  color: "var(--text-main)",
-  fontWeight: "500",
-};
-
-const tagChipRemoveBtnStyle = {
-  background: "none",
-  border: "none",
-  color: "var(--text-muted)",
-  cursor: "pointer",
-  padding: "0",
-  fontSize: "14px",
-  fontWeight: "bold",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  marginLeft: "4px",
-  transition: "color 0.2s",
-};
-
-const quickAddTagBtnStyle = {
-  backgroundColor: "rgba(255, 255, 255, 0.03)",
-  border: "1px dashed var(--border)",
-  color: "var(--text-muted)",
-  borderRadius: "12px",
-  padding: "3px 8px",
-  fontSize: "11px",
-  cursor: "pointer",
-  transition: "var(--transition)",
-};
-
-const quickActionsWrapperStyle = {
-  display: 'flex',
-  gap: '12px',
-  marginTop: '21px',
-  flexWrap: 'wrap',
-};
-
-const actionBtnBase = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  padding: '10px 18px',
-  borderRadius: '8px',
-  fontWeight: '600',
-  fontSize: '13px',
-  cursor: 'pointer',
-  transition: 'all 0.2s ease',
-  border: 'none',
-  outline: 'none',
-};
-
-const continueBtnStyle = {
-  ...actionBtnBase,
-  backgroundColor: 'var(--accent)',
-  color: 'white',
-  boxShadow: '0 4px 12px rgba(124, 58, 237, 0.3)',
-};
-
-const startFirstBtnStyle = {
-  ...actionBtnBase,
-  backgroundColor: '#1f222d',
-  border: '1px solid #262936',
-  color: 'white',
-};
-
-const watchLatestBtnStyle = {
-  ...actionBtnBase,
-  backgroundColor: '#1f222d',
-  border: '1px solid #262936',
-  color: 'white',
-};

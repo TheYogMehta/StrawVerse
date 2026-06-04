@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { Loader2, Download, Trash2, ShieldAlert } from 'lucide-react';
+/* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+import { useState, useEffect } from 'react';
+import { Loader2, Download, ShieldAlert } from 'lucide-react';
 import Swal from 'sweetalert2';
+import './css/Marketplace.css';
 
 export default function Marketplace({ initialType }) {
   const [activeType, setActiveType] = useState(initialType || 'Anime');
@@ -119,24 +121,24 @@ export default function Marketplace({ initialType }) {
   // Wait, let's see if we should fetch version. Let's just look at how EJS rendered it. EJS rendered Install, Update, Remove. Let's support Install and Remove, and if it's already installed, we can let user update it or remove it.
 
   return (
-    <div style={marketWrapperStyle}>
-      <header style={headerStyle}>
+    <div className="market-wrapper">
+      <header className="market-header">
         <div>
-          <h1 style={titleStyle}>Scraper Marketplace</h1>
-          <p style={subtitleStyle}>Install, update, or remove extensions for anime & manga content streaming.</p>
+          <h1 className="market-title">Scraper Marketplace</h1>
+          <p className="market-subtitle">Install, update, or remove extensions for anime & manga content streaming.</p>
         </div>
 
         {/* Anime / Manga Tab Selectors */}
-        <div style={tabsWrapperStyle}>
+        <div className="market-tabs-wrapper">
           <button
             onClick={() => setActiveType('Anime')}
-            style={tabBtnStyle(activeType === 'Anime')}
+            className={`market-tab-btn ${activeType === 'Anime' ? 'active' : ''}`}
           >
             Anime Scrapers
           </button>
           <button
             onClick={() => setActiveType('Manga')}
-            style={tabBtnStyle(activeType === 'Manga')}
+            className={`market-tab-btn ${activeType === 'Manga' ? 'active' : ''}`}
           >
             Manga Scrapers
           </button>
@@ -144,12 +146,12 @@ export default function Marketplace({ initialType }) {
       </header>
 
       {loading ? (
-        <div style={loadingCenterStyle}>
-          <img src="/images/loading.gif" alt="loading" style={{ width: '64px', height: '64px' }} />
-          <p style={{ marginTop: '16px', color: 'var(--text-muted)' }}>Connecting to extensions registry...</p>
+        <div className="market-loading-center">
+          <img src="/images/loading.gif" alt="loading" />
+          <p>Connecting to extensions registry...</p>
         </div>
       ) : (
-        <div style={gridStyle}>
+        <div className="market-grid">
           {extensions.map((provider) => {
             const installed = isInstalled(provider.name);
             const isProcessing = processingId === provider.name;
@@ -158,30 +160,30 @@ export default function Marketplace({ initialType }) {
             const hasUpdate = installedVer ? isUpdateAvailable(installedVer, provider.version) : false;
 
             return (
-              <div key={provider.name} style={cardStyle} className="glass-panel">
-                <div style={cardHeaderStyle}>
-                  <div style={logoWrapperStyle}>
+              <div key={provider.name} className="market-card glass-panel">
+                <div className="market-card-header">
+                  <div className="market-logo-wrapper">
                     <img
                       src={logoUrl}
                       alt={provider.name}
-                      style={logoStyle}
+                      className="market-logo"
                       onError={(e) => { e.target.src = '/images/image-404.png'; }}
                     />
                   </div>
                   <div>
-                    <h3 style={cardTitleStyle}>{provider.name}</h3>
-                    <span style={versionStyle}>v{provider.version}</span>
+                    <h3 className="market-card-title">{provider.name}</h3>
+                    <span className="market-version">v{provider.version}</span>
                   </div>
                 </div>
 
                 {provider.disabled && (
-                  <div style={disabledBannerStyle}>
+                  <div className="market-disabled-banner">
                     <ShieldAlert size={14} />
                     <span>Scraper Disabled / Obsolete</span>
                   </div>
                 )}
 
-                <div style={cardActionsStyle}>
+                <div className="market-card-actions">
                   {isProcessing ? (
                     <button disabled className="btn-market-loading">
                       <Loader2 size={16} className="spin" />
@@ -231,129 +233,3 @@ export default function Marketplace({ initialType }) {
     </div>
   );
 }
-
-const marketWrapperStyle = {
-  flex: 1,
-  padding: '30px',
-  overflowY: 'auto',
-  height: '100%',
-  backgroundColor: 'var(--bg-primary)',
-};
-
-const headerStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  marginBottom: '30px',
-  flexWrap: 'wrap',
-  gap: '16px',
-};
-
-const titleStyle = {
-  fontSize: '28px',
-  fontWeight: '800',
-  letterSpacing: '-0.5px',
-  marginBottom: '4px',
-};
-
-const subtitleStyle = {
-  fontSize: '13px',
-  color: 'var(--text-muted)',
-};
-
-const tabsWrapperStyle = {
-  display: 'flex',
-  backgroundColor: 'var(--bg-secondary)',
-  padding: '4px',
-  borderRadius: '8px',
-  border: '1px solid var(--border)',
-};
-
-const tabBtnStyle = (active) => ({
-  backgroundColor: active ? 'var(--accent)' : 'transparent',
-  border: 'none',
-  color: active ? 'white' : 'var(--text-muted)',
-  padding: '8px 16px',
-  borderRadius: '6px',
-  fontSize: '13px',
-  fontWeight: '600',
-  cursor: 'pointer',
-  transition: 'var(--transition)',
-});
-
-const gridStyle = {
-  display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-  gap: '20px',
-};
-
-const cardStyle = {
-  padding: '20px',
-  display: 'flex',
-  flexDirection: 'column',
-  justifyContent: 'space-between',
-  minHeight: '160px',
-};
-
-const cardHeaderStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '16px',
-  marginBottom: '16px',
-};
-
-const logoWrapperStyle = {
-  width: '42px',
-  height: '42px',
-  borderRadius: '8px',
-  backgroundColor: 'var(--bg-tertiary)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  border: '1px solid var(--border)',
-};
-
-const logoStyle = {
-  width: '24px',
-  height: '24px',
-};
-
-const cardTitleStyle = {
-  fontSize: '16px',
-  fontWeight: '700',
-};
-
-const versionStyle = {
-  fontSize: '11px',
-  color: 'var(--text-muted)',
-  fontWeight: '600',
-};
-
-const disabledBannerStyle = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  padding: '6px 10px',
-  backgroundColor: 'rgba(239, 68, 68, 0.1)',
-  border: '1px solid var(--danger)',
-  borderRadius: '6px',
-  color: 'var(--danger)',
-  fontSize: '12px',
-  fontWeight: '600',
-  marginBottom: '16px',
-};
-
-const cardActionsStyle = {
-  display: 'flex',
-  gap: '10px',
-  marginTop: 'auto',
-};
-
-const loadingCenterStyle = {
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-  justifyContent: 'center',
-  height: '300px',
-  width: '100%',
-};
