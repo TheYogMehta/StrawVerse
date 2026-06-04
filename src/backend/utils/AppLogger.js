@@ -16,7 +16,7 @@ const logger = winston.createLogger({
     winston.format.timestamp(),
     winston.format.printf(({ timestamp, level, message }) => {
       return `${timestamp} [${level}]: ${message}`;
-    })
+    }),
   ),
   transports: [
     new winston.transports.File({
@@ -46,4 +46,16 @@ function getLogs() {
   });
 }
 
-module.exports = { logger, getLogs };
+function clearLogs() {
+  return new Promise((resolve, reject) => {
+    fs.writeFile(LogFilePath, "", "utf8", (err) => {
+      if (err) {
+        reject("Error clearing log file");
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+module.exports = { logger, getLogs, clearLogs };

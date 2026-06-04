@@ -2,6 +2,8 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 const RPC = require("discord-rpc");
+const settingsDb = require("./db");
+const pkg = require("../../package.json");
 
 const clientId = "1372260492982358016";
 let idle_messages = [
@@ -21,6 +23,16 @@ let idle_messages = [
 
 let rpcClient = null;
 let rpcConnected = false;
+
+function isDiscordRPCEnabled() {
+  try {
+    const { settings: settingsDb } = require("./db");
+    const config = settingsDb.get("config");
+    return config?.enableDiscordRPC === "on";
+  } catch (err) {
+    return false;
+  }
+}
 
 async function StartDiscordRPC() {
   if (!isDiscordRunning()) {
@@ -44,7 +56,7 @@ async function StartDiscordRPC() {
     } catch (err) {
       rpcConnected = false;
       reject(
-        new Error("Failed to login to Discord Rich Presence: " + err.message)
+        new Error("Failed to login to Discord Rich Presence: " + err.message),
       );
     }
   });
@@ -57,8 +69,8 @@ function isDiscordRunning() {
     return fs.existsSync(
       path.join(
         process.env.XDG_RUNTIME_DIR || process.env.TMPDIR || "/tmp",
-        "discord-ipc-0"
-      )
+        "discord-ipc-0",
+      ),
     );
   }
 }
@@ -77,10 +89,51 @@ async function StopDiscordRPC() {
   return false;
 }
 
-function UpdateDiscordRPC(Title = null, Number = null) {
-  if (!rpcConnected) return;
+async function UpdateDiscordRPC(Title = null, Number = null) {
+  if (!isDiscordRPCEnabled()) {
+    if (rpcConnected) {
+      await StopDiscordRPC();
+    }
+    return;
+  }
+
+  if (!rpcConnected) {
+    if (isDiscordRunning()) {
+      try {
+        await StartDiscordRPC();
+      } catch (err) {
+        return;
+      }
+    } else {
+      return;
+    }
+  } else {
+    if (!isDiscordRunning()) {
+      rpcConnected = false;
+      rpcClient = null;
+      return;
+    }
+  }
+
+  if (!rpcConnected || !rpcClient) return;
 
   let InDownloads = global.getQueueNumber();
+
+  let rawUrl = "";
+  if (typeof pkg.repository === "string") {
+    rawUrl = pkg.repository;
+  } else if (pkg.repository && typeof pkg.repository.url === "string") {
+    rawUrl = pkg.repository.url;
+  }
+
+  let repoUrl = rawUrl.replace(/^git\+/, "");
+  if (repoUrl.endsWith(".git")) {
+    repoUrl = repoUrl.slice(0, -4);
+  }
+  if (!repoUrl) {
+    repoUrl = "https://github.com/TheYogMehta/StrawVerse";
+  }
+  const releaseUrl = `${repoUrl}/releases/latest`;
 
   let Activity = {
     details: `idle`,
@@ -94,7 +147,7 @@ function UpdateDiscordRPC(Title = null, Number = null) {
     buttons: [
       {
         label: "Download StrawVerse App",
-        url: "https://github.com/TheYogMehta/StrawVerse/releases/latest",
+        url: releaseUrl,
       },
     ],
   };
@@ -110,7 +163,12 @@ function UpdateDiscordRPC(Title = null, Number = null) {
     }`;
   }
 
-  rpcClient.setActivity(Activity);
+  try {
+    rpcClient.setActivity(Activity);
+  } catch (err) {
+    rpcConnected = false;
+    rpcClient = null;
+  }
 }
 
 module.exports = {

@@ -31,7 +31,7 @@ function registerSharedStateHandlers() {
     "extensions",
     async (event, TaskType, AnimeManga, ExtentionName) => {
       return await HandleExtensions(TaskType, AnimeManga, ExtentionName);
-    }
+    },
   );
 }
 

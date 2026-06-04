@@ -16,6 +16,7 @@ const {
   Notification,
   ipcMain,
   protocol,
+  shell,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const bodyParser = require("body-parser");
@@ -24,7 +25,37 @@ const express = require("express");
 const path = require("node:path");
 const net = require("net");
 
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
+
+app.on("second-instance", (event, commandLine) => {
+  logger.info(
+    "[Protocol] second-instance triggered. Command line: " +
+      JSON.stringify(commandLine),
+  );
+  if (global.win) {
+    if (global.win.isMinimized()) global.win.restore();
+    global.win.focus();
+  }
+  const url = commandLine.find((arg) => {
+    const cleanArg = arg.replace(/^['"]|['"]$/g, "");
+    return cleanArg.startsWith("strawverse://");
+  });
+  logger.info("[Protocol] Found URL in second-instance args: " + url);
+  if (url) {
+    handleCustomProtocolUrl(url);
+  }
+});
+
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  logger.info("[Protocol] open-url triggered: " + url);
+  handleCustomProtocolUrl(url);
+});
 
 // Load package.json config dynamically for the auto-updater to support fork updates
 try {
@@ -59,36 +90,27 @@ const {
 } = require("./backend/utils/settings");
 const { loadQueue } = require("./backend/utils/queue");
 const { continuousExecution } = require("./backend/queueWorker");
-const { fetchAndUpdateMappingDatabase } = require("./backend/utils/Metadata");
 const { StopDiscordRPC } = require("./backend/utils/discord");
 const {
   createScrapperWindow,
   ExitScrapperWindow,
 } = require("./backend/utils/scrapper");
+const { getHeaders } = require("./backend/utils/proxyHeaders");
+const { registerSharedStateHandlers } = require("./backend/sharedState");
 
 // Express Server
 const routes = require("./backend/routes");
 const appExpress = express();
 appExpress.use(bodyParser.urlencoded({ extended: true }));
 appExpress.use(bodyParser.json());
-appExpress.use(express.static(path.join(__dirname, "gui")));
-appExpress.set("views", path.join(__dirname, "gui"));
+appExpress.use(express.static(path.join(__dirname, "gui", "dist")));
+appExpress.set("views", path.join(__dirname, "gui", "dist"));
 appExpress.use((req, res, next) => {
   res.locals.MalLoggedIn = global.MalLoggedIn;
   next();
 });
 appExpress.use(routes);
 
-getFreePort().then((PORT) => {
-  global.PORT = PORT;
-
-  appExpress.listen(PORT, () => {
-    logger.info(`Listening on port ${PORT}`);
-  });
-});
-
-// create window / electron
-const { registerSharedStateHandlers } = require("./backend/sharedState");
 registerSharedStateHandlers();
 
 const createWindow = () => {
@@ -111,7 +133,6 @@ const createWindow = () => {
     minHeight: 750,
   });
 
-  app.commandLine.appendSwitch("disable-renderer-backgrounding");
   global.win.maximize();
   nativeTheme.themeSource = "dark";
   global.win.loadURL(`http://localhost:${global.PORT}`);
@@ -122,25 +143,9 @@ const createWindow = () => {
     },
     (details, callback) => {
       const url = details.url;
-      if (url.startsWith("https://i.animepahe.pw/")) {
-        details.requestHeaders["Referer"] = "https://animepahe.pw/";
-      } else if (url.startsWith("https://temp.compsci88.com/")) {
-        details.requestHeaders["Referer"] = "https://weebcentral.com/";
-      } else if (url.includes("owocdn.top") || url.includes("kwik.cx")) {
-        details.requestHeaders["Referer"] = "https://kwik.cx/";
-        details.requestHeaders["User-Agent"] =
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-      } else if (
-        url.includes("mewstream.buzz") ||
-        url.includes("orbitra.click") ||
-        url.match(/\/anime\/[a-f0-9]{32}\/[a-f0-9]{32}\//)
-      ) {
-        details.requestHeaders["Referer"] = "https://megaplay.buzz/";
-      } else if (url.includes("youtube-anime.com")) {
-        details.requestHeaders["Referer"] = "https://allmanga.to/";
-        details.requestHeaders["User-Agent"] =
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36";
-      }
+      const { Referer: referer, "User-Agent": userAgent } = getHeaders(url);
+      if (referer) details.requestHeaders["Referer"] = referer;
+      if (userAgent) details.requestHeaders["User-Agent"] = userAgent;
       callback({ requestHeaders: details.requestHeaders });
     },
   );
@@ -149,36 +154,18 @@ const createWindow = () => {
     event.preventDefault();
 
     if (url.startsWith("https://myanimelist.net")) {
-      global.Miniwindow = new BrowserWindow({
-        width: 500,
-        height: 650,
-        resizable: false,
-        minimizable: false,
-        maximizable: false,
-        title: "MyAnimeList",
-        webPreferences: {
-          nodeIntegration: false,
-          contextIsolation: true,
-        },
-      });
-
-      global.Miniwindow.loadURL(url);
-
-      global.Miniwindow.setMenu(null);
-
-      ipcMain.on("mal", () => {
-        if (malPopup) {
-          global.Miniwindow.close();
-          global.Miniwindow = null;
-        }
-      });
-
-      global.Miniwindow.on("closed", () => {
-        global.Miniwindow = null;
-      });
+      shell.openExternal(url);
     } else {
       global.win.loadURL(url);
     }
+  });
+
+  global.win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith("https://myanimelist.net")) {
+      shell.openExternal(url);
+      return { action: "deny" };
+    }
+    return { action: "allow" };
   });
 
   global.win.webContents.on("context-menu", (event) => {
@@ -218,11 +205,6 @@ const createWindow = () => {
   global.win.on("closed", async () => {
     if (global.ScrapperWindow && !global.ScrapperWindow.isDestroyed()) {
       await ExitScrapperWindow();
-    }
-
-    if (global.Miniwindow && !global.Miniwindow.isDestroyed()) {
-      global.Miniwindow.close();
-      global.Miniwindow = null;
     }
 
     if (global.marketplaceWin && !global.marketplaceWin.isDestroyed()) {
@@ -275,15 +257,22 @@ const createWindow = () => {
   logger.info("Power save blocker active:", powerSaveBlocker.isStarted(id));
 };
 
-try {
-  fetchAndUpdateMappingDatabase();
-  continuousExecution();
-} catch (err) {
-  logger.error(`Error message: ${err.message}`);
-  logger.error(`Stack trace: ${err.stack}`);
-}
-
 app.whenReady().then(async () => {
+  const PORT = await getFreePort();
+  global.PORT = PORT;
+  await new Promise((resolve) => {
+    const server = appExpress.listen(PORT, () => {
+      logger.info(`Listening on port ${PORT}`);
+      resolve();
+    });
+    server.on("error", (err) => {
+      logger.error(
+        `Express server failed to listen on port ${PORT}: ${err.message}`,
+      );
+      resolve();
+    });
+  });
+
   await patchModulePaths();
   createWindow();
   createScrapperWindow();
@@ -297,20 +286,29 @@ app.whenReady().then(async () => {
     }
   });
 
-  protocol.handle("mal", async (request) => {
-    const url = new URL(request.url);
-    const code = url.searchParams.get("code");
+  registerLinuxProtocol();
+  app.setAsDefaultProtocolClient("strawverse");
 
-    if (code) {
-      if (global.Miniwindow && !global.Miniwindow.isDestroyed()) {
-        global.Miniwindow.loadURL(
-          `http://localhost:${global.PORT}/mal/callback?code=${code}`,
-        );
-      }
-    }
+  const urlArg = process.argv.find((arg) => {
+    const cleanArg = arg.replace(/^['"]|['"]$/g, "");
+    return cleanArg.startsWith("strawverse://");
+  });
+  if (urlArg) {
+    handleCustomProtocolUrl(urlArg);
+  }
+
+  protocol.handle("strawverse", async (request) => {
+    handleCustomProtocolUrl(request.url);
   });
 
-  // autoUpdater.checkForUpdatesAndNotify();
+  autoUpdater.checkForUpdatesAndNotify();
+
+  try {
+    continuousExecution();
+  } catch (err) {
+    logger.error(`Error message: ${err.message}`);
+    logger.error(`Stack trace: ${err.stack}`);
+  }
 });
 
 app.on("will-quit", () => {
@@ -370,7 +368,7 @@ autoUpdater.on("update-installed", () => {
 
 // Find Free Port
 async function getFreePort() {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const tryFindPort = () => {
       const server = net.createServer();
       server.listen(0, () => {
@@ -379,9 +377,143 @@ async function getFreePort() {
       });
 
       server.on("error", (err) => {
-        tryFindPort();
+        logger.error(`getFreePort error: ${err.message}`);
+        setTimeout(tryFindPort, 50);
       });
     };
     tryFindPort();
   });
+}
+
+// Register Linux protocol handler dynamically (for AppImage and system integration)
+function registerLinuxProtocol() {
+  if (process.platform !== "linux") return;
+  // We only register the custom protocol handler desktop file if the app is packaged
+  if (!app.isPackaged) return;
+
+  const fs = require("fs");
+  const path = require("path");
+  const os = require("os");
+  const { exec } = require("child_process");
+
+  try {
+    const desktopDir = path.join(os.homedir(), ".local/share/applications");
+    if (!fs.existsSync(desktopDir)) {
+      fs.mkdirSync(desktopDir, { recursive: true });
+    }
+
+    const desktopFilePath = path.join(desktopDir, "strawverse.desktop");
+
+    // Use the AppImage path if available, fallback to execPath
+    const execPath = process.env.APPIMAGE || process.execPath;
+
+    // Copy icon to user local icons path for persistence
+    const localIconDir = path.join(
+      os.homedir(),
+      ".local/share/icons/hicolor/256x256/apps",
+    );
+    const localIconPath = path.join(localIconDir, "strawverse.png");
+    const sourceIconPath = path.join(__dirname, "assets", "luffy.png");
+
+    let useIconName = "strawverse";
+    if (fs.existsSync(sourceIconPath)) {
+      try {
+        if (!fs.existsSync(localIconDir)) {
+          fs.mkdirSync(localIconDir, { recursive: true });
+        }
+        fs.copyFileSync(sourceIconPath, localIconPath);
+      } catch (iconErr) {
+        logger.error(`[Protocol] Failed to copy icon: ${iconErr.message}`);
+        useIconName = sourceIconPath;
+      }
+    }
+
+    const desktopContent = `[Desktop Entry]
+Name=strawverse
+Exec="${execPath}" --no-sandbox %U
+Terminal=false
+Type=Application
+Icon=${useIconName}
+StartupWMClass=strawverse
+X-AppImage-Version=${app.getVersion()}
+Comment=Download anime in batches & its fast :3
+MimeType=x-scheme-handler/strawverse;
+Categories=Utility;
+`;
+
+    let shouldWrite = true;
+    if (fs.existsSync(desktopFilePath)) {
+      const existingContent = fs.readFileSync(desktopFilePath, "utf8");
+      if (existingContent === desktopContent) {
+        shouldWrite = false;
+      }
+    }
+
+    if (shouldWrite) {
+      fs.writeFileSync(desktopFilePath, desktopContent, "utf8");
+      fs.chmodSync(desktopFilePath, "755");
+      logger.info(`[Protocol] Registered desktop entry at ${desktopFilePath}`);
+
+      exec(
+        `xdg-mime default strawverse.desktop x-scheme-handler/strawverse`,
+        (error, stdout, stderr) => {
+          if (error) {
+            logger.error(`[Protocol] xdg-mime failed: ${error.message}`);
+          } else {
+            logger.info(
+              `[Protocol] Registered strawverse scheme handler via xdg-mime`,
+            );
+          }
+        },
+      );
+    }
+  } catch (err) {
+    logger.error(
+      `[Protocol] Failed to register custom protocol on Linux: ${err.message}`,
+    );
+  }
+}
+
+// handle custom protocol - only works in packaged version
+function handleCustomProtocolUrl(urlStr) {
+  const cleanUrlStr = urlStr.replace(/^['"]|['"]$/g, "");
+  logger.info("[Protocol] handleCustomProtocolUrl called with: " + cleanUrlStr);
+  try {
+    const url = new URL(cleanUrlStr);
+    const code = url.searchParams.get("code");
+    logger.info("[Protocol] Parsed code: " + code);
+    if (code) {
+      const callbackUrl = `http://localhost:${global.PORT}/mal/callback?code=${code}`;
+      logger.info(
+        "[Protocol] Triggering background callback request: " + callbackUrl,
+      );
+
+      fetch(callbackUrl)
+        .then((res) => {
+          logger.info(
+            "[Protocol] Background MAL callback request completed with status: " +
+              res.status,
+          );
+        })
+        .catch((err) => {
+          logger.error(
+            "[Protocol] Background MAL callback request failed: " + err.message,
+          );
+        });
+
+      if (global.win) {
+        if (global.win.isMinimized()) global.win.restore();
+        global.win.focus();
+      }
+    } else {
+      logger.warn("[Protocol] No code parameter found in URL!");
+    }
+  } catch (e) {
+    logger.error(
+      "[Protocol] Failed to parse custom protocol URL: " +
+        cleanUrlStr +
+        " Error: " +
+        e.message,
+    );
+  }
 }

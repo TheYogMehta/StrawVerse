@@ -1,17 +1,22 @@
 const { app, BrowserWindow } = require("electron");
+const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
+const {
+  getHeaders,
+  shouldAllowScrapingRequest,
+  getBypassCheck,
+} = require("./proxyHeaders");
+const { run, queryAll, queryOne } = require("./db");
 
-let isBusy = false;
 let isQuitting = false;
-const queue = [];
-const COOKIE_FILE = path.join(app.getPath("userData"), "cookies.json");
+let activeBypasses = {};
+let bypassQueue = [];
+let bypassBusy = false;
 
 app.on("before-quit", () => {
   isQuitting = true;
 });
-
-// Loading helpers
 
 // Create Scrapping Window
 function createScrapperWindow() {
@@ -27,9 +32,10 @@ function createScrapperWindow() {
   });
 
   const defaultUA = global.ScrapperWindow.webContents.userAgent;
-  global.ScrapperWindow.webContents.userAgent = defaultUA
+  global.userAgent = defaultUA
     .replace(/Electron\/[\d\.]+ /g, "")
     .replace(/strawverse\/[\d\.]+ /g, "");
+  global.ScrapperWindow.webContents.userAgent = global.userAgent;
 
   global.ScrapperWindow.webContents.session.webRequest.onBeforeRequest(
     { urls: ["*://*/*"] },
@@ -48,26 +54,7 @@ function createScrapperWindow() {
       if (details.url.includes(".m3u8") && !details.url.includes("ping.gif")) {
         global.LastM3u8 = details.url;
       }
-      if (
-        details.resourceType === "mainFrame" ||
-        details.url.includes("ddos-guard") ||
-        details.url.includes("apdoesnthavelogotheysaidapistooplaintheysaid") ||
-        details.url.includes("api/fsearch") ||
-        details.url.includes("megaplay") ||
-        details.url.includes("jquery") ||
-        details.url.includes("jsdelivr") ||
-        details.url.includes(".m3u8") ||
-        details.url.includes("megacloud") ||
-        details.url.includes("rabbitstream") ||
-        details.url.includes("jwpcdn") ||
-        details.url.includes("cloudflare") ||
-        details.url.includes("cdn-cgi") ||
-        details.url.includes("allmanga") ||
-        details.url.includes("allanime") ||
-        details.url.includes("youtube-anime") ||
-        details.url.includes("ytimgf") ||
-        details.url.includes("kwik")
-      ) {
+      if (shouldAllowScrapingRequest(details.url, details.resourceType)) {
         callback({ cancel: false });
       } else {
         callback({ cancel: true });
@@ -92,11 +79,12 @@ function createScrapperWindow() {
           .replace(/"Electron";v="[\d\.]+",?/g, "")
           .replace(/,?\s*"Electron";v="[\d\.]+"/g, "");
       }
-      if (details.url.includes("megaplay")) {
-        details.requestHeaders["Referer"] = "https://anikototv.to/";
-      } else if (details.url.includes("kwik.cx")) {
-        details.requestHeaders["Referer"] = "https://animepahe.pw/";
-      }
+
+      const { Referer: referer, "User-Agent": userAgent } = getHeaders(
+        details.url,
+      );
+      if (referer) details.requestHeaders["Referer"] = referer;
+      if (userAgent) details.requestHeaders["User-Agent"] = userAgent;
       callback({ requestHeaders: details.requestHeaders });
     },
   );
@@ -120,155 +108,234 @@ function createScrapperWindow() {
   global.ScrapperWindow.on("closed", () => {
     global.ScrapperWindow = null;
   });
-
-  loadCookies();
-
-  global.ScrapperWindow.webContents.session.cookies.on(
-    "changed",
-    (event, cookie, cause, removed) => {
-      saveCookies();
-    },
-  );
 }
 
-let cookieSaveTimeout = null;
-
-// Save Cookies to disk
-async function saveCookies() {
-  if (!global.ScrapperWindow) return;
-
-  if (cookieSaveTimeout) {
-    clearTimeout(cookieSaveTimeout);
-  }
-
-  cookieSaveTimeout = setTimeout(async () => {
-    try {
-      if (!global.ScrapperWindow) return;
-      const cookies =
-        await global.ScrapperWindow.webContents.session.cookies.get({});
-      fs.writeFile(COOKIE_FILE, JSON.stringify(cookies, null, 2), (err) => {
-        if (err) console.error("Failed to save cookies", err);
-      });
-    } catch (err) {
-      // ignore errors
-    }
-  }, 2000);
-}
-
-// Load Cookies from disk
-async function loadCookies() {
-  if (!global.ScrapperWindow) return;
-  if (!fs.existsSync(COOKIE_FILE)) return;
-
+async function processBypassQueue() {
+  if (bypassBusy || bypassQueue.length === 0) return;
+  bypassBusy = true;
+  const { runBypass, resolve, reject } = bypassQueue.shift();
   try {
-    const cookies = JSON.parse(fs.readFileSync(COOKIE_FILE, "utf8"));
-    for (const cookie of cookies) {
-      const domain = cookie.domain.startsWith(".")
-        ? cookie.domain.slice(1)
-        : cookie.domain;
-      const url = `${cookie.secure ? "https" : "http"}://${domain}${cookie.path}`;
-      await global.ScrapperWindow.webContents.session.cookies.set({
-        url: url,
-        name: cookie.name,
-        value: cookie.value,
-        domain: cookie.domain,
-        path: cookie.path,
-        secure: cookie.secure,
-        httpOnly: cookie.httpOnly,
-        expirationDate: cookie.expirationDate,
-      });
-    }
+    const result = await runBypass();
+    resolve(result);
   } catch (err) {
-    console.error("Failed to load cookies:", err);
+    reject(err);
+  } finally {
+    bypassBusy = false;
+    processBypassQueue();
   }
 }
 
-// Public scrapeURL function, queues requests
-global.scrapeURL = async (url, type = null) => {
+function queueBypass(runBypass) {
   return new Promise((resolve, reject) => {
-    queue.push({ url, type, resolve, reject });
-    processQueue();
+    bypassQueue.push({ runBypass, resolve, reject });
+    processBypassQueue();
   });
-};
+}
 
-async function processQueue() {
-  if (isBusy || queue.length === 0 || !global.ScrapperWindow) return;
+global.cloudflarebypass = async (targetUrl, successCheckFn, force = false) => {
+  if (!global.ScrapperWindow) {
+    throw new Error("Global ScrapperWindow is not initialized");
+  }
 
-  const { url, resolve, reject } = queue.shift();
-  isBusy = true;
+  const win = global.ScrapperWindow;
+  const domain = new URL(targetUrl).hostname.replace("www.", "");
+  const dbKey = `${domain}-cf_clearance`;
 
+  // 1. Check database for valid cookie expiration date
   try {
-    if (typeof url === "object") {
-      await global.ScrapperWindow.loadURL(url.url);
+    const row = queryOne("SELECT expirationDate FROM cookie WHERE id = ?", [
+      dbKey,
+    ]);
+    if (
+      row &&
+      row.expirationDate &&
+      row.expirationDate > Date.now() &&
+      !force
+    ) {
+      return;
+    }
+  } catch (e) {
+    console.error("Failed to check cookie expiration in DB:", e);
+  }
 
-      const result = await global.ScrapperWindow.webContents.executeJavaScript(`
-          (async () => {
-            try {
-              const res = await fetch("${url.url}${url.path}", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(${JSON.stringify(url.body)})
-              });
-              return await res.text();
-            } catch (err) {
-              return "FETCH_ERROR: " + err.message;
-            }
-          })()
-        `);
+  if (activeBypasses[domain]) {
+    return activeBypasses[domain];
+  }
 
-      if (result.startsWith("FETCH_ERROR:")) {
-        throw result;
-      } else {
+  activeBypasses[domain] = queueBypass(async () => {
+    global.IsBypassingCloudflare = true;
+
+    try {
+      run("DELETE FROM cookie WHERE id = ?", [dbKey]);
+      await win.webContents.session.cookies.remove(targetUrl, "cf_clearance");
+    } catch (e) {
+      console.error("[Bypass] Failed to clear cookie before bypass:", e);
+    }
+
+    try {
+      await win.loadURL(targetUrl);
+
+      let passed = false;
+      for (let i = 0; i < 60; i++) {
+        const title = await win.webContents
+          .executeJavaScript("document.title")
+          .catch(() => "");
+        const html = await win.webContents
+          .executeJavaScript("document.documentElement.outerHTML")
+          .catch(() => "");
+
+        if (successCheckFn(title, html)) {
+          passed = true;
+          break;
+        } else if (title) {
+          if (!global.ScrapperWindow.isVisible()) win.show();
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+
+      if (!passed) {
+        win.hide();
+        throw new Error(
+          `Timeout waiting for Cloudflare captcha on ${targetUrl}`,
+        );
+      }
+
+      win.hide();
+
+      // Retrieve cookies from session and find cf_clearance to store its expiration
+      const cookies = await win.webContents.session.cookies.get({});
+      const cfClearance = cookies.find(
+        (c) =>
+          c.name === "cf_clearance" &&
+          c.domain.includes(domain.replace("www.", "")),
+      );
+
+      const expiry =
+        cfClearance && cfClearance.expirationDate
+          ? cfClearance.expirationDate * 1000 // Convert Unix seconds to MS
+          : Date.now() + 1000 * 60 * 10; // Fallback to 10 minutes from now
+
+      if (cfClearance) {
         try {
-          const json = JSON.parse(result);
-          resolve(json);
-        } catch {
-          throw result;
+          run(
+            `INSERT OR REPLACE INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate) 
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [
+              dbKey,
+              cfClearance.value,
+              "cf_clearance",
+              domain,
+              "",
+              "",
+              "",
+              "",
+              expiry,
+            ],
+          );
+        } catch (dbErr) {
+          console.error("Failed to save cf_clearance to database:", dbErr);
         }
       }
-    } else {
-      await global.ScrapperWindow.loadURL(url);
-
-      await new Promise((resolve) => {
-        global.ScrapperWindow.webContents.once("did-stop-loading", resolve);
-      });
-
-      await new Promise((r) => setTimeout(r, 1500));
+    } finally {
+      global.IsBypassingCloudflare = false;
     }
+  });
 
-    const bodyText = await global.ScrapperWindow.webContents.executeJavaScript(
-      "document.body.innerText",
-    );
-
-    try {
-      const json = JSON.parse(bodyText);
-      resolve(json);
-    } catch {
-      const html = await global.ScrapperWindow.webContents.executeJavaScript(
-        "document.documentElement.outerHTML",
-      );
-      resolve(html);
-    }
-  } catch (err) {
-    if (err.message.includes("ERR_ABORTED")) {
-      // INGORED
-    } else {
-      reject(err);
-    }
+  try {
+    await activeBypasses[domain];
   } finally {
-    isBusy = false;
-    processQueue();
+    delete activeBypasses[domain];
   }
-}
+};
 
 async function ExitScrapperWindow() {
   if (global.ScrapperWindow && !global.ScrapperWindow.isDestroyed()) {
-    await saveCookies();
     isQuitting = true;
     global.ScrapperWindow.close();
     global.ScrapperWindow = null;
   }
 }
+
+global.axios = axios.create();
+global.axios.interceptors.request.use(
+  async (config) => {
+    const { cookieRequired, ...headers } = getHeaders(config.url);
+    config.headers = { ...config.headers, ...headers };
+    if (cookieRequired && !headers.Cookie) {
+      const bypass = getBypassCheck(config.url);
+      if (bypass && global.cloudflarebypass) {
+        try {
+          await global.cloudflarebypass(bypass.baseUrl, bypass.check);
+          const { cookieRequired: _, ...newHeaders } = getHeaders(config.url);
+          config.headers = { ...config.headers, ...newHeaders };
+        } catch (err) {
+          console.error("Failed pre-emptive Cloudflare bypass:", err.message);
+        }
+      }
+    }
+    return config;
+  },
+  (error) => Promise.reject(error),
+);
+
+global.axios.interceptors.response.use(
+  (response) => {
+    const data = response.data;
+    if (
+      data &&
+      data.errors &&
+      data.errors.some((e) => e.message === "NEED_CAPTCHA") &&
+      !response.config._retry
+    ) {
+      response.config._retry = true;
+      const bypass = getBypassCheck(response.config.url);
+      if (bypass && global.cloudflarebypass) {
+        return global
+          .cloudflarebypass(bypass.baseUrl, bypass.check, true)
+          .then(() => {
+            const { cookieRequired, ...newHeaders } = getHeaders(
+              response.config.url,
+            );
+            response.config.headers = {
+              ...response.config.headers,
+              ...newHeaders,
+            };
+            return global.axios(response.config);
+          });
+      }
+    }
+    return response;
+  },
+  async (error) => {
+    const { config, response } = error;
+    if (
+      response &&
+      (response.status === 403 || response.status === 503) &&
+      config &&
+      !config._retry
+    ) {
+      config._retry = true;
+      const bypass = getBypassCheck(config.url);
+      if (bypass && global.cloudflarebypass) {
+        console.log(
+          `Cloudflare challenge detected (status: ${response.status}) for ${config.url}. Retrying with bypass...`,
+        );
+        try {
+          await global.cloudflarebypass(bypass.baseUrl, bypass.check, true);
+          const { cookieRequired, ...newHeaders } = getHeaders(config.url);
+          config.headers = {
+            ...config.headers,
+            ...newHeaders,
+          };
+          return global.axios(config);
+        } catch (bypassErr) {
+          return Promise.reject(bypassErr);
+        }
+      }
+    }
+    return Promise.reject(error);
+  },
+);
 
 module.exports = {
   createScrapperWindow,

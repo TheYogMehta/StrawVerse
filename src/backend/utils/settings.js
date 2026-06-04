@@ -1,9 +1,8 @@
 // libs
 const { app } = require("electron");
-const SimplDB = require("simpl.db");
 const Module = require("module");
 const path = require("path");
-const got = require("got");
+const got = require("got").default || require("got");
 const fs = require("fs");
 
 // Functions
@@ -14,17 +13,15 @@ const {
 const { MalRefreshTokenGen } = require("./mal.js");
 const { StartDiscordRPC, StopDiscordRPC } = require("./discord");
 const { logger } = require("./AppLogger.js");
-
-// database create [ gets created in /user/your_name/AppData/Roaming ]
 const userDataPath = app.getPath("userData");
-const DatabaseFilePath = path.join(userDataPath, "database.json");
-const settings = new SimplDB({ dataFile: DatabaseFilePath });
+const { getKeyValue, setKeyValue } = require("./db");
 
 const appNodeModules = path.join(__dirname, "..", "..", "node_modules");
 
 let config = [],
   ScraperAnime,
-  ScraperManga;
+  ScraperManga,
+  ScraperIcons;
 global.Anime_providers = {};
 global.Manga_providers = {};
 
@@ -34,15 +31,16 @@ async function settingupdate({
   mal_on_off = null,
   status = null,
   malToken = null,
-  autotrack = null,
   CustomDownloadLocation = null,
   Animeprovider = null,
   Mangaprovider = null,
   Pagination = null,
   autoLoadNextChapter = null,
   enableDiscordRPC = null,
+  mergeSubtitles = null,
+  subtitleFormat = null,
 }) {
-  const currentSettings = settings.get("config");
+  const currentSettings = getKeyValue("Settings", "config");
 
   if (mal_on_off === "logout") {
     mal_on_off = false;
@@ -56,7 +54,6 @@ async function settingupdate({
     }
   }
 
-  if (autotrack === null) autotrack = currentSettings?.autotrack || "off";
   if (status === null) status = currentSettings?.status || "plan_to_watch";
 
   if (quality === null) {
@@ -83,6 +80,14 @@ async function settingupdate({
     enableDiscordRPC = currentSettings?.enableDiscordRPC || "off";
   }
 
+  if (mergeSubtitles === null) {
+    mergeSubtitles = currentSettings?.mergeSubtitles || "off";
+  }
+
+  if (subtitleFormat === null) {
+    subtitleFormat = currentSettings?.subtitleFormat || "vtt";
+  }
+
   if (CustomDownloadLocation === null) {
     CustomDownloadLocation =
       currentSettings?.CustomDownloadLocation || getDownloadsFolder();
@@ -92,22 +97,23 @@ async function settingupdate({
   config.mal_on_off = mal_on_off;
   config.status = status;
   config.malToken = malToken;
-  config.autotrack = autotrack;
   config.CustomDownloadLocation = CustomDownloadLocation;
   config.Animeprovider = Animeprovider;
   config.Mangaprovider = Mangaprovider;
   config.Pagination = Pagination;
   config.autoLoadNextChapter = autoLoadNextChapter;
   config.enableDiscordRPC = enableDiscordRPC;
+  config.mergeSubtitles = mergeSubtitles;
+  config.subtitleFormat = subtitleFormat;
 
   if (config.enableDiscordRPC === "on") {
     try {
       await StartDiscordRPC();
       logger.info("Discord RPC Activated");
     } catch (err) {
-      config.enableDiscordRPC = "off";
-      logger.error(err);
-      logger.info("Discord RPC DISABLED");
+      logger.error(
+        `Failed to activate Discord RPC (will retry when watching): ${err.message}`,
+      );
     }
   } else {
     let stopped = await StopDiscordRPC();
@@ -119,12 +125,13 @@ async function settingupdate({
     quality,
     mal_on_off,
     status,
-    autotrack,
     Animeprovider,
     Mangaprovider,
     Pagination,
     autoLoadNextChapter,
     enableDiscordRPC,
+    mergeSubtitles,
+    subtitleFormat,
   };
 }
 
@@ -175,6 +182,16 @@ async function settingfetch() {
       changes = true;
     }
 
+    if (!config?.hasOwnProperty("mergeSubtitles")) {
+      config.mergeSubtitles = "off";
+      changes = true;
+    }
+
+    if (!config?.hasOwnProperty("subtitleFormat")) {
+      config.subtitleFormat = "vtt";
+      changes = true;
+    }
+
     if (changes) {
       await settingSave();
     }
@@ -190,7 +207,7 @@ async function settingfetch() {
 // load settings
 async function SettingsLoad() {
   try {
-    const storedConfig = await settings.get("config");
+    const storedConfig = getKeyValue("Settings", "config");
     config =
       storedConfig && typeof storedConfig === "object"
         ? storedConfig
@@ -205,6 +222,8 @@ async function SettingsLoad() {
             autoLoadNextChapter: "on",
             Pagination: "off",
             enableDiscordRPC: "off",
+            mergeSubtitles: "off",
+            subtitleFormat: "vtt",
           };
 
     if (config.malToken != null) {
@@ -238,8 +257,12 @@ async function providerFetch(Type = "Anime", provider) {
       if (available.length > 0) provider = available[0];
     }
     return {
-      provider_name: provider && global.Anime_providers[provider] ? provider : null,
-      provider: provider && global.Anime_providers[provider] ? global.Anime_providers[provider] : null,
+      provider_name:
+        provider && global.Anime_providers[provider] ? provider : null,
+      provider:
+        provider && global.Anime_providers[provider]
+          ? global.Anime_providers[provider]
+          : null,
     };
   } else {
     if (!provider || !global.Manga_providers[provider]) {
@@ -247,8 +270,12 @@ async function providerFetch(Type = "Anime", provider) {
       if (available.length > 0) provider = available[0];
     }
     return {
-      provider_name: provider && global.Manga_providers[provider] ? provider : null,
-      provider: provider && global.Manga_providers[provider] ? global.Manga_providers[provider] : null,
+      provider_name:
+        provider && global.Manga_providers[provider] ? provider : null,
+      provider:
+        provider && global.Manga_providers[provider]
+          ? global.Manga_providers[provider]
+          : null,
     };
   }
 }
@@ -256,8 +283,7 @@ async function providerFetch(Type = "Anime", provider) {
 // sync the config with database
 async function settingSave() {
   try {
-    await settings.set("config", config);
-    await settings.save();
+    setKeyValue("Settings", "config", config);
   } catch (err) {
     logger.error("Failed To Save Settings");
     logger.error(`Error message: ${err.message}`);
@@ -283,6 +309,12 @@ async function CheckScrapperFolderExists() {
   if (!fs.existsSync(ScraperManga)) {
     fs.mkdirSync(ScraperManga, { recursive: true });
     logger.info(`Created Manga scraper folder: ${ScraperManga}`);
+  }
+
+  ScraperIcons = path.join(Scraper, "icons");
+  if (!fs.existsSync(ScraperIcons)) {
+    fs.mkdirSync(ScraperIcons, { recursive: true });
+    logger.info(`Created icons folder: ${ScraperIcons}`);
   }
 }
 
@@ -338,6 +370,18 @@ async function loadAllScrapers() {
           if (type === "manga") global.Manga_providers[scraper.name] = scraper;
 
           logger.info(`Loaded ${type} scraper: ${scraper.name}`);
+
+          const iconDest = path.join(ScraperIcons, `${scraper.name}.ico`);
+          if (!fs.existsSync(iconDest)) {
+            got(
+              `https://raw.githubusercontent.com/TheYogMehta/extensions/refs/heads/main/ico/${scraper.name}.ico`,
+              { responseType: "buffer" },
+            )
+              .then((r) => {
+                fs.writeFileSync(iconDest, r.rawBody);
+              })
+              .catch(() => {});
+          }
         } else {
           logger.warn(`Scraper missing 'name' export: ${fullPath}`);
         }
@@ -361,22 +405,99 @@ async function loadAllScrapers() {
   }
 }
 
+function notifyScrapersUpdated() {
+  if (global.win && global.win.webContents) {
+    global.win.webContents.send("extention-updated", {
+      Anime: Object.entries(global.Anime_providers || {}).map(([key, val]) => ({
+        name: key,
+        version: val.version,
+      })),
+      Manga: Object.entries(global.Manga_providers || {}).map(([key, val]) => ({
+        name: key,
+        version: val.version,
+      })),
+    });
+  }
+}
+
+async function loadSingleScraper(AnimeManga, ExtensionName) {
+  try {
+    await CheckScrapperFolderExists();
+    const folder = AnimeManga === "Anime" ? ScraperAnime : ScraperManga;
+    const fullPath = path.join(folder, `${ExtensionName}.js`);
+
+    try {
+      const resolvedPath = require.resolve(fullPath);
+      delete require.cache[resolvedPath];
+    } catch (e) {
+      // Path not in require cache yet, skip cache deletion
+    }
+
+    const scraper = require(fullPath);
+    if (scraper?.name) {
+      if (AnimeManga === "Anime") {
+        global.Anime_providers[scraper.name] = scraper;
+      } else {
+        global.Manga_providers[scraper.name] = scraper;
+      }
+      logger.info(
+        `Loaded/Reloaded ${AnimeManga.toLowerCase()} scraper: ${scraper.name}`,
+      );
+      notifyScrapersUpdated();
+    } else {
+      logger.warn(`Scraper missing 'name' export: ${fullPath}`);
+    }
+  } catch (err) {
+    logger.error(
+      `Failed to load/reload scraper ${ExtensionName}: ${err.message}`,
+    );
+  }
+}
+
+function unloadSingleScraper(AnimeManga, ExtensionName) {
+  try {
+    if (AnimeManga === "Anime") {
+      delete global.Anime_providers[ExtensionName];
+    } else {
+      delete global.Manga_providers[ExtensionName];
+    }
+    logger.info(
+      `Unloaded ${AnimeManga.toLowerCase()} scraper: ${ExtensionName}`,
+    );
+    notifyScrapersUpdated();
+  } catch (err) {
+    logger.error(`Failed to unload scraper ${ExtensionName}: ${err.message}`);
+  }
+}
+
 // Download / Delete Scrapper
 async function HandleExtensions(TaskType, AnimeManga, ExtensionName) {
   await CheckScrapperFolderExists();
   const extensionPath = path.join(
     AnimeManga === "Anime" ? ScraperAnime : ScraperManga,
-    `${ExtensionName}.js`
+    `${ExtensionName}.js`,
   );
   if (TaskType === "add") {
     try {
       const response = await got(
-        `https://raw.githubusercontent.com/TheYogMehta/extensions/refs/heads/main/extensions/${AnimeManga}/${ExtensionName}.js`
+        `https://raw.githubusercontent.com/TheYogMehta/extensions/refs/heads/main/extensions/${AnimeManga}/${ExtensionName}.js`,
       );
       fs.writeFileSync(extensionPath, response.body, "utf-8");
 
+      // Download icon alongside the scraper
+      try {
+        const iconResponse = await got(
+          `https://raw.githubusercontent.com/TheYogMehta/extensions/refs/heads/main/ico/${ExtensionName}.ico`,
+          { responseType: "buffer" },
+        );
+        const iconDest = path.join(ScraperIcons, `${ExtensionName}.ico`);
+        fs.writeFileSync(iconDest, iconResponse.rawBody);
+        logger.info(`Downloaded icon for ${ExtensionName}`);
+      } catch (iconErr) {
+        logger.warn(`No icon found for ${ExtensionName}: ${iconErr.message}`);
+      }
 
-      await loadAllScrapers();
+      await loadSingleScraper(AnimeManga, ExtensionName);
       return {
         type: "success",
         title: `${AnimeManga} Extention Installed!`,
@@ -393,8 +514,7 @@ async function HandleExtensions(TaskType, AnimeManga, ExtensionName) {
     if (fs.existsSync(extensionPath)) {
       fs.unlinkSync(extensionPath);
 
-
-      await loadAllScrapers();
+      unloadSingleScraper(AnimeManga, ExtensionName);
       return {
         type: "success",
         title: `Removed ${AnimeManga} Extention!`,
@@ -425,4 +545,5 @@ module.exports = {
   loadAllScrapers,
   HandleExtensions,
   patchModulePaths,
+  getScraperIconsPath: () => ScraperIcons,
 };

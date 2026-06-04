@@ -3,7 +3,7 @@ class HLSLogger {
     caption = "downloading",
     epid = "downloadep",
     indent = 0,
-    quiet = false
+    quiet = false,
   ) {
     this.quiet = quiet;
     this.totalSegments = 0;
@@ -12,7 +12,7 @@ class HLSLogger {
     this.epid = epid;
   }
   logProgress() {
-    fetch(`http:localhost:${global.PORT}/api/logger`, {
+    fetch(`http://localhost:${global.PORT}/api/logger`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

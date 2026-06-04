@@ -1,103 +1,27 @@
 // libs
-const { DatabaseSync } = require("node:sqlite");
 const { logger } = require("./AppLogger");
-const { app } = require("electron");
 const axios = require("axios");
 const path = require("path");
 const fs = require("fs");
+const { db, tables } = require("./db");
 
-// Database creation [gets created in /user/your_name/AppData/Roaming]
-const userDataPath = app.getPath("userData");
-const db = new DatabaseSync(path.join(userDataPath, "metadata.db"));
+const VIDEO_EXTENSIONS = [".mp4", ".mkv", ".webm", ".ts", ".avi", ".mov", ".flv", ".m4v", ".3gp"];
 
-const tables = {
-  Anime: {
-    id: "TEXT PRIMARY KEY",
-    folder_name: "TEXT",
-    title: "TEXT",
-    subOrDub: "TEXT",
-    type: "TEXT",
-    provider: "TEXT",
-    description: "TEXT",
-    status: "TEXT",
-    genres: "TEXT",
-    aired: "TEXT",
-    EpisodesDataId: "TEXT",
-    image: "BLOB",
-    last_updated: "DATE",
-  },
-  Manga: {
-    id: "TEXT PRIMARY KEY",
-    title: "TEXT",
-    folder_name: "TEXT",
-    provider: "TEXT",
-    description: "TEXT",
-    genres: "TEXT",
-    type: "TEXT",
-    author: "TEXT",
-    released: "TEXT",
-    image: "BLOB",
-    last_updated: "DATE",
-  },
-  Mapping: {
-    id: "INTEGER PRIMARY KEY AUTOINCREMENT",
-    MalID: "TEXT",
-    AnimeKai: "TEXT",
-    HiAnime: "TEXT",
-    AnimePahe: "TEXT",
-    NextEpisodes: "TEXT",
-  },
-  MyAnimeList: {
-    id: "TEXT UNIQUE",
-    title: "TEXT",
-    image: "TEXT",
-    totalEpisodes: "INTEGER",
-    lastEpisode: "INTEGER",
-    watched: "INTEGER",
-    status: "TEXT",
-    sortOrder: "INTEGER",
-    updated_at: "TEXT",
-    NextEpisodeIn: "TEXT",
-  },
-  last_ran_Mapping: {
-    id: "INTEGER PRIMARY KEY AUTOINCREMENT",
-    last_ran: "TEXT",
-    last_fetched: "TEXT",
-    last_Sync_Mal: "TEXT",
-  },
-};
+function getEpisodeNumberFromFilename(filename) {
+  const ext = path.extname(filename).toLowerCase();
+  if (!VIDEO_EXTENSIONS.includes(ext)) return null;
 
-// Create tables & update schema
-Object.entries(tables).forEach(([tableName, columns]) => {
-  const columnsString = Object.entries(columns)
-    .map(([col, definition]) => `${col} ${definition}`)
-    .join(", ");
+  // Match starts with number (e.g. 1Ep.mp4, 1.mp4, 01.mkv)
+  let match = filename.match(/^(\d+(\.\d+)?)/);
+  if (match) return parseFloat(match[1]);
 
-  try {
-    db.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnsString})`);
-    updateTableSchema(tableName, columns);
-  } catch (error) {
-    throw new Error(`Error creating table ${tableName}: ${error.message}`);
-  }
-});
+  // Match ep/episode prefix
+  match = filename.match(/(?:ep|episode|ch|chapter)\s*(\d+(\.\d+)?)/i);
+  if (match) return parseFloat(match[1]);
 
-function updateTableSchema(tableName, expectedColumns) {
-  try {
-    const existingColumns = db
-      .prepare(`PRAGMA table_info(${tableName})`)
-      .all()
-      .map((col) => col.name);
-
-    Object.entries(expectedColumns).forEach(([col, definition]) => {
-      if (!existingColumns.includes(col)) {
-        db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${col} ${definition}`);
-      }
-    });
-  } catch (error) {
-    throw new Error(
-      `Error updating table schema for ${tableName}: ${error.message}`,
-    );
-  }
+  // Fallback to first digit sequence
+  match = filename.match(/\d+(\.\d+)?/);
+  return match ? parseFloat(match[0]) : null;
 }
 
 // Add metadata
@@ -106,16 +30,31 @@ async function MetadataAdd(type, valuesToAdd) {
     throw new Error(`Invalid args!`);
   }
 
+  // Fallback to existing MalID for the same series if not provided
+  if (valuesToAdd?.title && (!valuesToAdd.MalID || valuesToAdd.MalID === "")) {
+    try {
+      const baseTitle = valuesToAdd.title.replace(/\s+(sub|dub|both)$/i, "");
+      const match = db.prepare(`SELECT MalID FROM ${type} WHERE (title LIKE ? OR folder_name LIKE ?) AND MalID IS NOT NULL AND MalID != '' LIMIT 1`)
+        .get(`%${baseTitle}%`, `%${baseTitle}%`);
+      if (match?.MalID) {
+        valuesToAdd.MalID = match.MalID;
+      }
+    } catch (_) {}
+  }
+
   let existingRecord = db
-    .prepare(`SELECT * FROM ${type} WHERE id = ? OR title = ?`)
-    .get(valuesToAdd?.id, valuesToAdd?.title);
+    .prepare(`SELECT * FROM ${type} WHERE id = ?`)
+    .get(valuesToAdd?.id);
 
   if (!existingRecord) {
     if (valuesToAdd?.ImageUrl) {
       let Imageurl = valuesToAdd?.ImageUrl?.trim();
-
+      if (Imageurl.includes("/api/image?url=")) {
+        Imageurl = Imageurl.split("/api/image?url=")[1];
+      }
       try {
-        const response = await axios.get(Imageurl, {
+        const client = global.axios || axios;
+        const response = await client.get(Imageurl, {
           responseType: "arraybuffer",
         });
 
@@ -130,10 +69,33 @@ async function MetadataAdd(type, valuesToAdd) {
     }
 
     if (valuesToAdd?.title) {
-      valuesToAdd.folder_name = valuesToAdd?.title?.replace(
-        /[^a-zA-Z0-9]/g,
-        "_",
-      );
+      const baseFolderName = valuesToAdd.title.replace(/[^a-zA-Z0-9]/g, "_");
+      let existingByFolder = null;
+      try {
+        existingByFolder = db
+          .prepare(`SELECT provider FROM ${type} WHERE folder_name = ?`)
+          .get(baseFolderName);
+      } catch (_) {}
+      if (
+        existingByFolder &&
+        existingByFolder.provider !== (valuesToAdd.provider || "")
+      ) {
+        const pSuffix = (valuesToAdd.provider || "unknown").replace(
+          /[^a-zA-Z0-9]/g,
+          "_",
+        );
+        valuesToAdd.folder_name = `${baseFolderName}_${pSuffix}`;
+      } else {
+        valuesToAdd.folder_name = baseFolderName;
+      }
+    }
+
+    if (
+      !valuesToAdd.hasOwnProperty("CustomTag")
+    ) {
+      valuesToAdd.CustomTag = JSON.stringify([
+        type === "Manga" ? "Reading" : "Watching",
+      ]);
     }
 
     try {
@@ -141,7 +103,7 @@ async function MetadataAdd(type, valuesToAdd) {
       const filteredValues = {};
 
       validColumns.forEach((column) => {
-        if (valuesToAdd.hasOwnProperty(column)) {
+        if (valuesToAdd.hasOwnProperty(column) && valuesToAdd[column] !== undefined) {
           filteredValues[column] = valuesToAdd[column];
         } else {
           const columnType = tables[type][column];
@@ -168,6 +130,41 @@ async function MetadataAdd(type, valuesToAdd) {
     } catch (error) {
       throw new Error(`Error inserting into ${type}: ${error.message}`);
     }
+  } else {
+    const currentTag = existingRecord.CustomTag;
+    let hasTag = false;
+    try {
+      const parsed = JSON.parse(currentTag);
+      if (Array.isArray(parsed) && parsed.length > 0) hasTag = true;
+    } catch (e) {}
+    if (!currentTag || currentTag === "[]" || !hasTag) {
+      const defaultTag = JSON.stringify([
+        type === "Manga" ? "Reading" : "Watching",
+      ]);
+      db.prepare(
+        `UPDATE ${type} SET CustomTag = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+      ).run(defaultTag, existingRecord.id);
+    }
+
+    // Auto-update empty MalID in existing record if we have one available now
+    if (!existingRecord.MalID || existingRecord.MalID === "") {
+      let malIdToUpdate = valuesToAdd?.MalID;
+      if (!malIdToUpdate && existingRecord.title) {
+        try {
+          const baseTitle = existingRecord.title.replace(/\s+(sub|dub|both)$/i, "");
+          const match = db.prepare(`SELECT MalID FROM ${type} WHERE (title LIKE ? OR folder_name LIKE ?) AND MalID IS NOT NULL AND MalID != '' LIMIT 1`)
+            .get(`%${baseTitle}%`, `%${baseTitle}%`);
+          if (match?.MalID) {
+            malIdToUpdate = match.MalID;
+          }
+        } catch (_) {}
+      }
+      if (malIdToUpdate) {
+        db.prepare(
+          `UPDATE ${type} SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+        ).run(String(malIdToUpdate), existingRecord.id);
+      }
+    }
   }
 }
 
@@ -188,103 +185,167 @@ function MetadataRemove(type, id) {
 }
 
 // Get All Metadata
-async function getAllMetadata(type, baseDir, page = 1) {
+async function getAllMetadata(type, baseDir, page = 1, tag = null) {
   if (!tables[type]) {
     throw new Error(`Invalid table: ${type}`);
   }
 
   try {
     const typeDir = path.join(baseDir, type);
-
-    if (!fs.existsSync(typeDir)) {
-      return {
-        totalPages: 0,
-        currentPage: 1,
-        hasNextPage: false,
-        totalItems: 0,
-        results: [],
-      };
+    const folders = [];
+    if (fs.existsSync(typeDir)) {
+      const directories = await fs.promises.readdir(typeDir, {
+        withFileTypes: true,
+      });
+      directories
+        .filter((dir) => dir.isDirectory())
+        .forEach((dir) => folders.push(dir.name));
     }
 
-    const directories = await fs.promises.readdir(typeDir, {
-      withFileTypes: true,
-    });
-
-    const folders = directories
-      .filter((dir) => dir.isDirectory())
-      .map((dir) => dir.name);
-
-    if (folders?.length > 0) {
-      let storedMetadata = [];
-      try {
+    let storedMetadata = [];
+    try {
+      if (tag && tag !== "All" && tag !== "") {
+        const likeTag = `%"${tag}"%`;
+        storedMetadata = db
+          .prepare(
+            `SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`,
+          )
+          .all(tag, likeTag);
+      } else {
         storedMetadata = db
           .prepare(`SELECT * FROM ${type} ORDER BY last_updated DESC`)
           .all();
-      } catch (err) {
-        // ignore
-        storedMetadata = [];
+      }
+    } catch (err) {
+      storedMetadata = [];
+    }
+
+    const folderSet = new Set(folders);
+    const missingFolders = storedMetadata
+      .filter(
+        (entry) =>
+          !folderSet.has(entry.folder_name) &&
+          (!entry.CustomTag || entry.CustomTag === "") &&
+          (!entry.MalID || entry.MalID === ""),
+      )
+      .map((entry) => entry.folder_name);
+
+    missingFolders.forEach((folder) => {
+      if (folder) {
+        db.exec(`DELETE FROM ${type} WHERE folder_name = '${folder}'`);
+      }
+    });
+
+    try {
+      if (tag && tag !== "All" && tag !== "") {
+        const likeTag = `%"${tag}"%`;
+        storedMetadata = db
+          .prepare(
+            `SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`,
+          )
+          .all(tag, likeTag);
+      } else {
+        storedMetadata = db
+          .prepare(`SELECT * FROM ${type} ORDER BY last_updated DESC`)
+          .all();
+      }
+    } catch (err) {
+      storedMetadata = [];
+    }
+
+    const storedFolderSet = new Set(storedMetadata.map((m) => m.folder_name));
+    folders.forEach((alltitles) => {
+      if (storedFolderSet.has(alltitles)) return;
+
+      if (tag && tag !== "All" && tag !== "") return;
+
+      storedMetadata.push({
+        title: alltitles.replaceAll("_", ""),
+        folder_name: alltitles,
+        id: alltitles,
+        type: type,
+        provider: "local source",
+        CustomTag: "",
+      });
+    });
+
+    // Filter out pure backend links (no local folders and no custom tags)
+    storedMetadata = storedMetadata.filter((entry) => {
+      const folderExists = entry.folder_name ? folderSet.has(entry.folder_name) : false;
+      const hasTags = entry.CustomTag && entry.CustomTag !== "" && entry.CustomTag !== "[]";
+      return folderExists || hasTags;
+    });
+
+    // Group and merge entries by MalID
+    const groupedMetadata = [];
+    const malIdGroups = {};
+
+    storedMetadata.forEach((entry) => {
+      if (entry.MalID && entry.MalID !== "") {
+        if (!malIdGroups[entry.MalID]) {
+          malIdGroups[entry.MalID] = [];
+        }
+        malIdGroups[entry.MalID].push(entry);
+      } else {
+        groupedMetadata.push(entry);
+      }
+    });
+
+    Object.keys(malIdGroups).forEach((malId) => {
+      const group = malIdGroups[malId];
+      const mainEntry = group[0];
+      
+      mainEntry.linkedProviders = group.map((g) => ({
+        id: g.id,
+        provider: g.provider,
+        CustomTag: g.CustomTag,
+        title: g.title,
+        folder_name: g.folder_name,
+      }));
+
+      groupedMetadata.push(mainEntry);
+    });
+
+    storedMetadata = groupedMetadata;
+
+    // Pagination logic
+    const limit = 15;
+    const totalPages = Math.ceil(storedMetadata?.length / limit);
+    const startIndex = (page - 1) * limit;
+    const paginatedMetadata = storedMetadata.slice(
+      startIndex,
+      startIndex + limit,
+    );
+    const hasNextPage = page < totalPages;
+
+    const updatedMetadata = [];
+
+    for (const metadata of paginatedMetadata) {
+      const folderPath = path.join(baseDir, type, metadata.folder_name || "");
+      const folderExists = metadata.folder_name
+        ? fs.existsSync(folderPath)
+        : false;
+
+      if (
+        !folderExists &&
+        (!metadata.CustomTag || metadata.CustomTag === "") &&
+        (!metadata.MalID || metadata.MalID === "")
+      ) {
+        db.exec(`DELETE FROM ${type} WHERE id = '${metadata.id}'`);
+        continue;
       }
 
-      const folderSet = new Set(folders);
-      const missingFolders = storedMetadata
-        .filter((entry) => !folderSet.has(entry.folder_name))
-        .map((entry) => entry.folder_name);
-
-      missingFolders.forEach((folder) => {
-        db.exec(`DELETE FROM ${type} WHERE folder_name = '${folder}'`);
-      });
-
-      const storedFolderSet = new Set(storedMetadata.map(m => m.folder_name));
-
-      folders.forEach((alltitles) => {
-        if (storedFolderSet.has(alltitles)) return;
-        
-        storedMetadata.push({
-          title: alltitles.replaceAll("_", ""),
-          folder_name: alltitles,
-          id: alltitles,
-          type: type,
-          provider: "local source",
-        });
-      });
-
-      // Pagination logic
-      const limit = 15;
-      const totalPages = Math.ceil(storedMetadata?.length / limit);
-      const startIndex = (page - 1) * limit;
-      const paginatedMetadata = storedMetadata.slice(
-        startIndex,
-        startIndex + limit,
-      );
-      const hasNextPage = page < totalPages;
-
-      const updatedMetadata = [];
-
-      for (const metadata of paginatedMetadata) {
-        const folderPath = path.join(baseDir, type, metadata.folder_name);
-
-        if (!fs.existsSync(folderPath)) {
-          db.exec(`DELETE FROM ${type} WHERE id = '${metadata.id}'`);
-          continue;
-        }
-
-        let content = [];
+      let content = [];
+      if (folderExists) {
         const filesAndFolders = await fs.promises.readdir(folderPath, {
           withFileTypes: true,
         });
 
         if (type === "Anime") {
           content = filesAndFolders
-            .filter(
-              (file) =>
-                file.isFile() &&
-                file.name.endsWith(".mp4") &&
-                file.name.toLowerCase().includes("ep"),
-            )
-            .map((file) =>
-              parseInt(file?.name?.toLowerCase()?.split("ep")?.[0]),
-            )
-            .filter(Boolean)
+            .filter((file) => file.isFile())
+            .map((file) => getEpisodeNumberFromFilename(file.name))
+            .filter((num) => num !== null && !isNaN(num))
             .sort((a, b) => a - b);
         } else if (type === "Manga") {
           content = filesAndFolders
@@ -305,26 +366,19 @@ async function getAllMetadata(type, baseDir, page = 1) {
             .filter(Boolean)
             .sort((a, b) => a - b);
         }
-
-        updatedMetadata.push({
-          ...metadata,
-          Downloaded: content,
-        });
       }
 
-      return {
-        totalPages,
-        currentPage: page,
-        hasNextPage,
-        results: updatedMetadata,
-      };
+      updatedMetadata.push({
+        ...metadata,
+        Downloaded: content,
+      });
     }
 
     return {
-      totalPages: 0,
-      currentPage: 1,
-      hasNextPage: false,
-      results: [],
+      totalPages,
+      currentPage: page,
+      hasNextPage,
+      results: updatedMetadata,
     };
   } catch (err) {
     throw new Error(`Error fetching metadata: ${err.message}`);
@@ -363,51 +417,124 @@ async function FetchLocalProviderInfo(type, id) {
 }
 
 // Get Local Source By id
-async function getSourceById(type, baseDir, id, number) {
+async function getSourceById(type, baseDir, id, number, subdub) {
   if (!tables[type]) {
     throw new Error(`Invalid table: ${type}`);
   }
 
   let folder_name = id;
+  let malId = null;
+  let mainSubOrDub = null;
   try {
     const metadata = db.prepare(`SELECT * FROM ${type} WHERE id = ?`).get(id);
     if (metadata) {
       folder_name = metadata.folder_name;
+      malId = metadata.MalID;
+      mainSubOrDub = metadata.subOrDub;
     }
   } catch (err) {
     // ignore
   }
 
   try {
-    const folderPath = path.join(baseDir, type, folder_name);
-    if (!fs.existsSync(folderPath)) {
-      throw new Error(`Folder does not exist: ${folderPath}`);
+    let folderPath = path.join(baseDir, type, folder_name);
+    let finalPath = "";
+    let fileFound = false;
+
+    const searchInFolder = (fPath) => {
+      if (!fs.existsSync(fPath)) return null;
+      if (type === "Anime") {
+        const files = fs.readdirSync(fPath);
+        const match = files.find((f) => {
+          const num = getEpisodeNumberFromFilename(f);
+          return num !== null && num === parseFloat(number);
+        });
+        return match ? path.join(fPath, match) : null;
+      } else if (type === "Manga") {
+        const filePath = path.join(fPath, `Chapter ${number}.cbz`);
+        return fs.existsSync(filePath) ? filePath : null;
+      }
+      return null;
+    };
+
+    let dirsToSearch = [];
+    if (!subdub || mainSubOrDub === subdub) {
+      dirsToSearch.push(folderPath);
     }
 
-    DataToReturn = {};
-    let fileName = null;
+    if (malId) {
+      try {
+        const linked = db
+          .prepare(`SELECT folder_name, subOrDub FROM ${type} WHERE MalID = ?`)
+          .all(String(malId));
 
-    if (type === "Anime") {
-      fileName = `${number}Ep.mp4`;
-    } else if (type === "Manga") {
-      fileName = `Chapter ${number}.cbz`;
+        if (subdub) {
+          linked.forEach((r) => {
+            if (r.subOrDub === subdub && r.folder_name !== folder_name) {
+              dirsToSearch.push(path.join(baseDir, type, r.folder_name));
+            }
+          });
+          if (mainSubOrDub !== subdub) {
+            dirsToSearch.push(folderPath);
+          }
+          linked.forEach((r) => {
+            if (r.subOrDub !== subdub && r.folder_name !== folder_name) {
+              dirsToSearch.push(path.join(baseDir, type, r.folder_name));
+            }
+          });
+        } else {
+          linked.forEach((r) => {
+            if (r.folder_name !== folder_name) {
+              dirsToSearch.push(path.join(baseDir, type, r.folder_name));
+            }
+          });
+        }
+      } catch (err) {
+        if (!dirsToSearch.includes(folderPath)) {
+          dirsToSearch.push(folderPath);
+        }
+      }
+    } else {
+      if (!dirsToSearch.includes(folderPath)) {
+        dirsToSearch.push(folderPath);
+      }
     }
 
-    if (!fileName) {
-      throw new Error(`File not found for ${type} ${number}`);
+    for (const searchPath of dirsToSearch) {
+      const pathFound = searchInFolder(searchPath);
+      if (pathFound) {
+        finalPath = pathFound;
+        fileFound = true;
+        break;
+      }
     }
 
-    const subtitlesDir = path.join(folderPath, `subs`);
+    if (!fileFound) {
+      let fileName = null;
+      if (type === "Anime") {
+        fileName = `${number}Ep.mp4`;
+      } else if (type === "Manga") {
+        fileName = `Chapter ${number}.cbz`;
+      }
+      finalPath = path.join(folderPath, fileName);
+    }
+
+    const parentDir = path.dirname(finalPath);
+    const subtitlesDir = path.join(parentDir, `subs`);
     let subtitleFiles = [];
 
     if (fs.existsSync(subtitlesDir)) {
       subtitleFiles = fs
         .readdirSync(subtitlesDir)
-        .filter(
-          (file) =>
-            (file.endsWith(".srt") || file.endsWith(".vtt")) &&
-            file?.startsWith(`${number}Ep.`),
-        )
+        .filter((file) => {
+          const isSub = file.endsWith(".srt") || file.endsWith(".vtt") || file.endsWith(".ass");
+          if (!isSub) return false;
+          const match = file.match(/^\d+(\.\d+)?/);
+          if (match) {
+            return parseFloat(match[0]) === parseFloat(number);
+          }
+          return false;
+        })
         .map((subtitle) => {
           return {
             url: `/subtitles?file=${encodeURIComponent(
@@ -418,115 +545,11 @@ async function getSourceById(type, baseDir, id, number) {
         });
     }
     return {
-      filepath: path.join(folderPath, fileName),
-      ...DataToReturn,
+      filepath: finalPath,
       subtitleFiles: subtitleFiles,
     };
   } catch (err) {
     throw new Error(`Error fetching file by ID: ${err.message}`);
-  }
-}
-
-// get last mapping updated time
-function getMappingLastRun() {
-  try {
-    const row = db
-      .prepare(
-        "SELECT last_ran, last_fetched FROM last_ran_Mapping WHERE id = 1",
-      )
-      .get();
-    return {
-      last_ran: row?.last_ran ?? "1970-01-01T00:00:00.000Z",
-      last_fetched: row?.last_fetched ?? null,
-    };
-  } catch (error) {
-    return {
-      last_ran: "1970-01-01T00:00:00.000Z",
-      last_fetched: null,
-    };
-  }
-}
-
-// get last malsync updated time
-async function getMALLastSync() {
-  try {
-    const row = db
-      .prepare("SELECT last_Sync_Mal FROM last_ran_Mapping WHERE id = 2")
-      .get();
-
-    return row?.last_Sync_Mal ?? null;
-  } catch (error) {
-    return null;
-  }
-}
-
-// save mapping data
-function SaveMappingDatabase(data, last_ran) {
-  db.exec("DROP TABLE IF EXISTS Mapping;");
-  db.exec(
-    `CREATE TABLE Mapping (${Object.entries(tables.Mapping)
-      .map(([col, definition]) => `${col} ${definition}`)
-      .join(", ")});`,
-  );
-  db.exec("DELETE FROM sqlite_sequence WHERE name = 'Mapping';");
-  const insert = db.prepare(
-    `INSERT INTO Mapping (MalID , AnimeKai, HiAnime, AnimePahe, NextEpisodes) VALUES (?, ?, ?, ?, ?)`,
-  );
-
-  db.exec("BEGIN");
-  try {
-    for (const entry of data) {
-      insert.run(
-        String(entry?.MalId) || null,
-        JSON.stringify(entry?.AnimeKai || []),
-        JSON.stringify(entry?.HiAnime || []),
-        JSON.stringify(entry?.AnimePahe || []),
-        JSON.stringify(entry?.NextEpisodes || []),
-      );
-    }
-    db.exec("COMMIT");
-  } catch (e) {
-    db.exec("ROLLBACK");
-    throw e;
-  }
-
-  db.prepare(
-    "INSERT OR REPLACE INTO last_ran_Mapping (id, last_ran, last_fetched) VALUES (1, ?, ?)",
-  ).run(last_ran, new Date().toISOString());
-}
-
-// fetch updates
-async function fetchAndUpdateMappingDatabase() {
-  return;
-  const { last_ran, last_fetched } = getMappingLastRun();
-
-  let timeDiffInHours = null;
-
-  if (last_fetched) {
-    const now = new Date();
-    const lastFetchedTime = new Date(last_fetched);
-    timeDiffInHours = (now - lastFetchedTime) / (1000 * 60 * 60);
-  }
-
-  if (!timeDiffInHours || timeDiffInHours > 1) {
-    try {
-      const response = await axios.post("http://194.164.125.5:6145/last_ran", {
-        last_ran: last_ran,
-      });
-      if (
-        response.data &&
-        response.data.data &&
-        response.data.data.length > 0
-      ) {
-        logger.info("[MAL-LIST] NEW MAPPING FOUND");
-        SaveMappingDatabase(response.data.data, response.data.last_ran);
-        logger.info("[MAL-LIST] MAPPING UPDATED");
-      }
-    } catch (err) {
-      logger.error("[MAL-LIST] MAPPING FAILED");
-      logger.error(`Error message: ${err.message}`);
-      logger.error(`Stack trace: ${err.stack}`);
-    }
   }
 }
 
@@ -540,14 +563,24 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
       let id = AnimeMangaid?.replace(/-(dub|sub|both)$/, "");
 
       try {
-        // if no malid find mapping
-        if (!malid) {
-          const FoundRow = db
-            .prepare(
-              "SELECT * FROM Mapping WHERE AnimeKai LIKE ? OR HiAnime LIKE ? OR AnimePahe LIKE ?",
-            )
-            .get(`%${id}%`, `%${id}%`, `%${id}%`);
+        const FoundRow = db
+          .prepare(
+            "SELECT MalID, CustomTag FROM Anime WHERE id = ? or id = ? or id = ? or id = ? or folder_name = ? or folder_name = ? or folder_name = ? or folder_name = ?",
+          )
+          .get(
+            `${id}-sub`,
+            `${id}-dub`,
+            `${id}-both`,
+            AnimeMangaid,
+            AnimeMangaid,
+            id,
+            `${id}-sub`,
+            `${id}-dub`,
+          );
 
+        data.CustomTag = FoundRow?.CustomTag || "";
+
+        if (!malid) {
           data.malid = FoundRow?.MalID ? parseInt(FoundRow.MalID) : null;
         } else {
           data.malid = malid;
@@ -578,9 +611,28 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
       // Finding If Its Downloaded
       try {
-        const Downloads = db
-          .prepare("SELECT * FROM Anime WHERE id = ? or id = ?")
-          .all(`${id}-sub`, `${id}-dub`);
+        let Downloads = [];
+        if (data.malid) {
+          Downloads = db
+            .prepare("SELECT * FROM Anime WHERE MalID = ?")
+            .all(String(data.malid));
+        }
+        if (Downloads.length === 0) {
+          Downloads = db
+            .prepare(
+              "SELECT * FROM Anime WHERE id = ? or id = ? or id = ? or id = ? or folder_name = ? or folder_name = ? or folder_name = ? or folder_name = ?",
+            )
+            .all(
+              `${id}-sub`,
+              `${id}-dub`,
+              `${id}-both`,
+              AnimeMangaid,
+              AnimeMangaid,
+              id,
+              `${id}-sub`,
+              `${id}-dub`,
+            );
+        }
 
         if (Downloads?.length > 0) {
           Downloads[0].dataId = Downloads[0]?.EpisodesDataId;
@@ -599,7 +651,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             const folderPath = path.join(
               dir,
               "Anime",
-              `${SubDub.title?.replace(/[^a-zA-Z0-9]/g, "_")}`,
+              SubDub.folder_name || `${SubDub.title?.replace(/[^a-zA-Z0-9]/g, "_")}`,
             );
 
             if (fs.existsSync(folderPath)) {
@@ -607,16 +659,18 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
                 withFileTypes: true,
               });
 
-              data.DownloadedEpisodes[SubDub.subOrDub] = filesAndFolders
-                .filter(
-                  (file) =>
-                    file.isFile() &&
-                    file.name.endsWith(".mp4") &&
-                    file.name.match(/\d+/),
-                )
-                .map((file) => parseInt(file.name.match(/\d+/)[0]))
-                .filter(Boolean)
+              const resolvedSubDub = SubDub.subOrDub || "sub";
+
+              const scanned = filesAndFolders
+                .filter((file) => file.isFile())
+                .map((file) => getEpisodeNumberFromFilename(file.name))
+                .filter((num) => num !== null && !isNaN(num))
                 .sort((a, b) => a - b);
+
+              data.DownloadedEpisodes[resolvedSubDub] = Array.from(new Set([
+                ...(data.DownloadedEpisodes[resolvedSubDub] || []),
+                ...scanned
+              ])).sort((a, b) => a - b);
             }
           }
         } else {
@@ -640,14 +694,9 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             };
 
             data.DownloadedEpisodes["sub"] = filesAndFolders
-              .filter(
-                (file) =>
-                  file.isFile() &&
-                  file.name.endsWith(".mp4") &&
-                  file.name.match(/\d+/),
-              )
-              .map((file) => parseInt(file.name.match(/\d+/)[0]))
-              .filter(Boolean)
+              .filter((file) => file.isFile())
+              .map((file) => getEpisodeNumberFromFilename(file.name))
+              .filter((num) => num !== null && !isNaN(num))
               .sort((a, b) => a - b);
           }
         }
@@ -656,36 +705,80 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
       }
     } else {
       try {
-        const Downloads = db
-          .prepare("SELECT * FROM Manga WHERE id = ?")
-          .get(AnimeMangaid);
+        let downloadsList = [];
+        let malIdToUse = malid;
+        
+        const mainRecord = db.prepare("SELECT * FROM Manga WHERE id = ? or folder_name = ?").get(AnimeMangaid, AnimeMangaid);
+        if (mainRecord) {
+          malIdToUse = mainRecord.MalID || malIdToUse;
+        }
 
-        if (Downloads) {
-          data = { ...Downloads, DownloadedChapters: [] };
+        if (malIdToUse) {
+          downloadsList = db.prepare("SELECT * FROM Manga WHERE MalID = ?").all(String(malIdToUse));
+        }
+        if (downloadsList.length === 0 && mainRecord) {
+          downloadsList = [mainRecord];
+        }
 
-          const folderPath = path.join(dir, type, Downloads.folder_name);
+        if (downloadsList.length > 0) {
+          const firstRecord = downloadsList[0];
+          data = {
+            ...firstRecord,
+            malid: firstRecord.MalID ? parseInt(firstRecord.MalID) : null,
+            CustomTag: firstRecord.CustomTag || "",
+            DownloadedChapters: [],
+          };
 
-          if (fs.existsSync(folderPath)) {
-            const filesAndFolders = await fs.promises.readdir(folderPath, {
-              withFileTypes: true,
-            });
-
-            data.DownloadedChapters = filesAndFolders
-              .filter(
-                (file) =>
-                  file.isFile() &&
-                  file.name.endsWith(".cbz") &&
-                  file.name.toLowerCase().includes("chapter"),
-              )
-              .map((file) =>
-                parseInt(file.name.toLowerCase().split("chapter")[1]),
-              )
-              .filter(Boolean)
-              .sort((a, b) => a - b);
+          if (data.malid && global.MalLoggedIn) {
+            try {
+              let MalInfo = db
+                .prepare(`SELECT * FROM MyMangaList WHERE id = ?`)
+                .get(String(data.malid));
+              if (MalInfo) {
+                data = {
+                  ...data,
+                  totalChapters:
+                    MalInfo.totalChapters > 0
+                      ? MalInfo.totalChapters
+                      : MalInfo.lastChapter
+                        ? MalInfo.lastChapter
+                        : 0,
+                  lastChapter: MalInfo.lastChapter ?? null,
+                  watched: MalInfo.read ?? 0,
+                  status: MalInfo.status ?? "",
+                };
+              }
+            } catch (err) {
+              // ignore
+            }
           }
+
+          const uniqueChapters = new Set();
+          for (const dRecord of downloadsList) {
+            const folderPath = path.join(dir, type, dRecord.folder_name);
+            if (fs.existsSync(folderPath)) {
+              const filesAndFolders = await fs.promises.readdir(folderPath, {
+                withFileTypes: true,
+              });
+
+              filesAndFolders
+                .filter(
+                  (file) =>
+                    file.isFile() &&
+                    file.name.endsWith(".cbz") &&
+                    file.name.toLowerCase().includes("chapter"),
+                )
+                .map((file) =>
+                  parseInt(file.name.toLowerCase().split("chapter")[1]),
+                )
+                .filter(Boolean)
+                .forEach((chNum) => uniqueChapters.add(chNum));
+            }
+          }
+          data.DownloadedChapters = Array.from(uniqueChapters).sort((a, b) => a - b);
         }
       } catch (err) {
-        // ignore erro
+        // ignore error
       }
     }
 
@@ -782,195 +875,172 @@ async function processAndSortMyAnimeList() {
       .all();
     if (animeList.length === 0) return;
 
-    let malIds = animeList.map((anime) => anime.id);
-
-    let mappingData = db
-      .prepare(
-        `SELECT MalID, NextEpisodes FROM Mapping WHERE MalID IN (${malIds
-          .map(() => "?")
-          .join(",")})`,
-      )
-      .all(...malIds);
-
-    let mappingMap = new Map();
-    for (let { MalID, NextEpisodes } of mappingData) {
-      if (NextEpisodes && NextEpisodes !== "[]") {
-        try {
-          let parsedEpisodes = JSON.parse(NextEpisodes);
-          if (parsedEpisodes.length) {
-            mappingMap.set(MalID, parsedEpisodes);
-          }
-        } catch (e) {}
-      }
-    }
-
-    let now = Date.now();
-
-    let animeData = animeList.map((anime) => {
-      let totalEpisodes = parseInt(anime.totalEpisodes) || 0;
-
-      let NextEpisodes =
-        mappingMap
-          ?.get(anime.id)
-          ?.filter((item) => item?.Episode > totalEpisodes) ?? [];
-
-      if (NextEpisodes.length > 0) {
-        let lastEpisode = NextEpisodes[0].Episode - 1;
-        let lastDate = parseInt(NextEpisodes[0].date) * 1000;
-        return {
-          ...anime,
-          hasNext: true,
-          lastEpisode: lastEpisode,
-          lastDate: lastDate,
-          daysLeft: Math.floor((lastDate - now) / (1000 * 60 * 60 * 24)),
-          watchedLast: anime.watched === lastEpisode,
-          isCompleted: anime.watched >= totalEpisodes,
-        };
-      } else {
-        return {
-          ...anime,
-          hasNext: false,
-        };
-      }
-    });
-
-    animeData.sort((a, b) => {
-      if (a.hasUnwatchedReleased !== b.hasUnwatchedReleased)
-        return Number(b.hasUnwatchedReleased) - Number(a.hasUnwatchedReleased);
-
-      if (a.hasNext !== b.hasNext) return Number(b.hasNext) - Number(a.hasNext);
-
-      if (a.watchedLast !== b.watchedLast)
-        return Number(b.watchedLast) - Number(a.watchedLast);
-
-      if (a.lastDate && b.lastDate) {
-        let isWithin14DaysA = a.daysLeft >= 1 && a.daysLeft <= 14;
-        let isWithin14DaysB = b.daysLeft >= 1 && b.daysLeft <= 14;
-
-        if (isWithin14DaysA !== isWithin14DaysB)
-          return Number(isWithin14DaysB) - Number(isWithin14DaysA);
-
-        return a.daysLeft - b.daysLeft;
-      }
-
-      if (a.isCompleted !== b.isCompleted)
-        return Number(a.isCompleted) - Number(b.isCompleted);
-
-      return 0;
+    // Sort by updated_at descending (latest first)
+    animeList.sort((a, b) => {
+      const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+      const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+      return dateB - dateA;
     });
 
     let updateQuery = db.prepare(`
       UPDATE MyAnimeList 
-      SET title = ?, image = ?, totalEpisodes = ?, watched = ?, sortOrder = ?, NextEpisodeIn = ? 
+      SET sortOrder = ?
       WHERE id = ?
     `);
 
-    animeData.forEach((entry, index) => {
-      updateQuery.run(
-        entry.title,
-        entry.image,
-        entry?.totalEpisodes > 0
-          ? entry.totalEpisodes
-          : entry?.lastEpisode
-            ? entry?.lastEpisode
-            : 0,
-        entry.watched,
-        index,
-        entry?.lastDate ? String(entry.lastDate) : null,
-        entry.id,
-      );
-    });
-
-    db.prepare(
-      "INSERT OR REPLACE INTO last_ran_Mapping (id, last_Sync_Mal) VALUES (2, ?)",
-    ).run(new Date().toISOString());
+    db.exec("BEGIN");
+    try {
+      animeList.forEach((entry, index) => {
+        updateQuery.run(index + 1, entry.id);
+      });
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
 
     logger.info(`[MyAnimeList] Successfully Sorted!`);
   } catch (err) {
-    logger.error(`Error processing MyAnimeList`);
-    logger.error(`Error message: ${err.message}`);
-    logger.error(`Stack trace: ${err.stack}`);
+    logger.error(`Error processing MyAnimeList: ${err.message}`);
   }
 }
 
 // Mal Retrive Pages
-async function MalPage(provider_name, page = 1) {
+async function MalPage(type = "Anime", provider_name, page = 1) {
   try {
+    const isAnime = type === "Anime";
+    const tableName = isAnime ? "MyAnimeList" : "MyMangaList";
+    const statusVal = isAnime ? "watching" : "reading";
+
     const limit = 30;
     const offset = (page - 1) * limit;
-    let animeList = db
+    let list = db
       .prepare(
-        `SELECT * FROM MyAnimeList 
-       WHERE status = 'watching' 
+        `SELECT * FROM ${tableName} 
+       WHERE status = ? 
        AND sortOrder > 0 
        ORDER BY sortOrder 
        LIMIT ? OFFSET ?`,
       )
-      .all(limit, offset);
+      .all(statusVal, limit, offset);
 
     let totalRecords =
       db
         .prepare(
-          `SELECT COUNT(*) AS total FROM MyAnimeList WHERE status = 'watching'`,
+          `SELECT COUNT(*) AS total FROM ${tableName} WHERE status = ?`,
         )
-        .get()?.total || 0;
+        .get(statusVal)?.total || 0;
 
     let hasNextPage = offset + limit < totalRecords;
     let totalPages = Math.ceil(totalRecords / limit);
 
-    if (animeList.length === 0) throw new Error("Empty");
+    if (list.length === 0) throw new Error("Empty");
 
-    let malIds = animeList.map((anime) => anime.id);
-    let mappingData = db
+    let malIds = list.map((item) => item.id);
+
+    // Find all linked local entries for these MAL IDs
+    let linkedItems = db
       .prepare(
-        `SELECT MalID, AnimeKai, HiAnime, AnimePahe FROM Mapping WHERE MalID IN (${malIds
+        `SELECT MalID, id, provider FROM ${type} WHERE MalID IN (${malIds
           .map(() => "?")
           .join(",")})`,
       )
-      .all(...malIds);
+      .all(...malIds.map(String));
 
-    let filteredAnime = animeList.map((anime) => {
-      let mapping = mappingData.find((map) => map.MalID === anime.id);
-      if (!mapping) return null;
+    // Get all ids from linkedItems and look up recent activity in history to determine last used
+    const linkedIds = linkedItems.map(m => m.id);
+    let recentHistoryMap = {};
+    if (linkedIds.length > 0) {
+      const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
+      const idCol = isAnime ? "anime_id" : "manga_id";
+      const dateCol = isAnime ? "last_watched" : "last_read";
 
-      let providerId = null;
-      switch (provider_name) {
-        case "animekai":
-          providerId = mapping.AnimeKai;
-          break;
-        case "hianime":
-          providerId = mapping.HiAnime;
-          break;
-        case "pahe":
-          providerId = mapping.AnimePahe;
-          break;
-      }
-
-      if (providerId && providerId !== "[]" && providerId !== "{}") {
-        try {
-          providerId = JSON.parse(providerId);
-          providerId =
-            Array.isArray(providerId) && providerId.length > 0
-              ? providerId[0]
-              : null;
-        } catch (e) {
-          providerId = null;
+      let queryIds = [];
+      linkedIds.forEach(id => {
+        queryIds.push(id);
+        if (isAnime) {
+          const stripped = id.replace(/-(dub|sub|both)$/, "");
+          queryIds.push(`${stripped}-sub`, `${stripped}-dub`, `${stripped}-both`);
         }
-      } else {
-        providerId = null;
+      });
+
+      const placeholders = queryIds.map(() => "?").join(",");
+      try {
+        const historyRows = db.prepare(`
+          SELECT ${idCol}, MAX(${dateCol}) as max_date 
+          FROM ${historyTable} 
+          WHERE ${idCol} IN (${placeholders}) 
+          GROUP BY ${idCol}
+        `).all(...queryIds);
+        
+        historyRows.forEach(row => {
+          recentHistoryMap[row[idCol]] = new Date(row.max_date).getTime();
+        });
+      } catch (historyErr) {
+        logger.error(`Error querying recent history in MalPage: ${historyErr.message}`);
       }
+    }
 
-      return providerId ? { ...anime, MalID: anime.id, id: providerId } : null;
+    let filteredList = list.map((item) => {
+      // Find matches for this MAL ID
+      let matches = linkedItems.filter(
+        (linked) => String(linked.MalID) === String(item.id),
+      );
+
+      // Find the last used match among matches by checking history activity
+      let lastUsedMatch = null;
+      let maxTime = -1;
+      matches.forEach(m => {
+        let t = -1;
+        const possibleKeys = [m.id];
+        if (isAnime) {
+          const stripped = m.id.replace(/-(dub|sub|both)$/, "");
+          possibleKeys.push(`${stripped}-sub`, `${stripped}-dub`, `${stripped}-both`);
+        }
+        possibleKeys.forEach(k => {
+          if (recentHistoryMap[k] && recentHistoryMap[k] > t) {
+            t = recentHistoryMap[k];
+          }
+        });
+        if (t > maxTime) {
+          maxTime = t;
+          lastUsedMatch = m;
+        }
+      });
+
+      // Prefer lastUsedMatch, fallback to matching provider, fallback to matches[0]
+      let linked =
+        lastUsedMatch ||
+        matches.find((m) => m.provider === provider_name) ||
+        matches[0];
+
+      if (linked) {
+        return {
+          ...item,
+          MalID: item.id,
+          id: linked.id,
+          provider: linked.provider,
+          linked: true,
+          allMatches: matches.map(m => ({ id: m.id, provider: m.provider })),
+        };
+      } else {
+        return {
+          ...item,
+          MalID: item.id,
+          id: `unlinked-${item.id}`,
+          provider: provider_name,
+          linked: false,
+          allMatches: [],
+        };
+      }
     });
-
-    let lists = filteredAnime.filter((anime) => anime !== null);
 
     return {
       totalPages,
       currentPage: page,
       hasNextPage,
       totalItems: totalRecords,
-      results: lists,
+      results: filteredList,
     };
   } catch (err) {
     return {
@@ -983,17 +1053,131 @@ async function MalPage(provider_name, page = 1) {
   }
 }
 
+// Map MAL Manga
+async function MalMangaMap(data = []) {
+  try {
+    if (!data.length) return true;
+
+    const ids = data.map((entry) => entry.id.toString());
+
+    const existingEntries = db
+      .prepare(
+        `SELECT * FROM MyMangaList WHERE id IN (${ids
+          .map(() => "?")
+          .join(",")})`,
+      )
+      .all(...ids);
+
+    const existingMap = new Map(
+      existingEntries.map((entry) => [entry.id, entry]),
+    );
+
+    let NotChanged = false;
+
+    let InsertOrUpdateQuery = db.prepare(`
+      INSERT INTO MyMangaList (id, title, image, totalChapters, read, status, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET 
+        title = excluded.title,
+        image = excluded.image,
+        totalChapters = excluded.totalChapters,
+        read = excluded.read,
+        status = excluded.status,
+        updated_at = excluded.updated_at
+    `);
+
+    db.exec("BEGIN");
+    try {
+      for (const entry of data) {
+        const existing = existingMap.get(entry.id.toString());
+
+        if (
+          existing &&
+          existing.title === entry.title &&
+          existing.image === entry.image &&
+          existing.totalChapters === parseInt(entry.totalChapters ?? 0) &&
+          existing.read === parseInt(entry.read ?? 0) &&
+          existing.status === entry.status &&
+          existing.updated_at === entry.updated_at
+        ) {
+          NotChanged = true;
+          continue;
+        }
+
+        InsertOrUpdateQuery.run(
+          entry.id.toString(),
+          entry.title,
+          entry.image,
+          parseInt(entry.totalChapters ?? 0),
+          parseInt(entry.read ?? 0),
+          entry.status,
+          entry.updated_at,
+        );
+      }
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    return NotChanged;
+  } catch (err) {
+    logger.error(`Failed To Update MyMangaList`);
+    logger.error(`Error message: ${err.message}`);
+    logger.error(`Stack trace: ${err.stack}`);
+    return true;
+  }
+}
+
+// Manga Sort
+async function processAndSortMyMangaList() {
+  try {
+    let mangaList = db
+      .prepare(`SELECT * FROM MyMangaList WHERE status = 'reading'`)
+      .all();
+    if (mangaList.length === 0) return;
+
+    // Sort by updated_at descending (latest first)
+    mangaList.sort((a, b) => {
+      const dateA = a.updated_at ? new Date(a.updated_at).getTime() : 0;
+      const dateB = b.updated_at ? new Date(b.updated_at).getTime() : 0;
+      return dateB - dateA;
+    });
+
+    let updateQuery = db.prepare(`
+      UPDATE MyMangaList 
+      SET sortOrder = ?
+      WHERE id = ?
+    `);
+
+    db.exec("BEGIN");
+    try {
+      mangaList.forEach((entry, index) => {
+        updateQuery.run(index + 1, entry.id);
+      });
+      db.exec("COMMIT");
+    } catch (e) {
+      db.exec("ROLLBACK");
+      throw e;
+    }
+
+    logger.info(`[MyMangaList] Successfully Sorted!`);
+  } catch (err) {
+    logger.error(`Error processing MyMangaList: ${err.message}`);
+  }
+}
+
 module.exports = {
   MetadataAdd,
   MetadataRemove,
   getAllMetadata,
   getSourceById,
-  fetchAndUpdateMappingDatabase,
   FindMapping,
   MalEpMap,
   processAndSortMyAnimeList,
-  getMALLastSync,
   MalPage,
   FetchLocalProviderInfo,
+  MalMangaMap,
+  processAndSortMyMangaList,
   db,
 };

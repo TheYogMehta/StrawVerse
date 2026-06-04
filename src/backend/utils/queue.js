@@ -1,13 +1,6 @@
 // libs
-const { app } = require("electron");
-const path = require("path");
-const SimplDB = require("simpl.db");
+const { getKeyValue, setKeyValue } = require("./db");
 const { logger } = require("./AppLogger");
-
-// database create [ gets created in /user/your_name/AppData/Roaming ]
-const userDataPath = app.getPath("userData");
-const QueueFilePath = path.join(userDataPath, "queue.json");
-const queue = new SimplDB({ dataFile: QueueFilePath });
 
 let AnimeQueue = [];
 
@@ -19,7 +12,7 @@ async function addToQueue(item) {
 
 // load queue when the script start
 async function loadQueue() {
-  AnimeQueue = (await queue.get("queue")) || [];
+  AnimeQueue = getKeyValue("Queue", "queue") || [];
   AnimeQueue.forEach((entry) => {
     entry.progress = 0;
   });
@@ -33,6 +26,17 @@ async function removeQueue(AnimeEpId) {
     AnimeQueue.splice(indexToRemove, 1);
     await saveQueue();
   }
+  return AnimeQueue;
+}
+
+// Remove multiple items from queue at once and save to SQLite
+async function removeMultipleFromQueue(epids = []) {
+  if (epids.length > 0) {
+    const epidsSet = new Set(epids);
+    AnimeQueue = AnimeQueue.filter((item) => !epidsSet.has(item.epid));
+    await saveQueue();
+  }
+  return AnimeQueue;
 }
 
 // Remove With Index
@@ -53,7 +57,7 @@ async function updateQueue(epid, totalSegments, currentSegments) {
     AnimeQueue[indexToUpdate].currentSegments = currentSegments;
 
     const progressPercentage = Math.floor(
-      (currentSegments / totalSegments) * 100
+      (currentSegments / totalSegments) * 100,
     );
 
     if (progressPercentage % 10 === 0 || progressPercentage >= 98) {
@@ -82,8 +86,7 @@ async function getQueue(currently_downloading = null) {
 // sync the queue with database
 async function saveQueue() {
   try {
-    await queue.set("queue", AnimeQueue);
-    await queue.save();
+    setKeyValue("Queue", "queue", AnimeQueue);
   } catch (err) {
     logger.error("Failed To Save Queue");
     logger.error(`Error message: ${err.message}`);
@@ -97,14 +100,24 @@ async function checkEpisodeDownload(epid) {
   return found;
 }
 
+// Add multiple items to queue at once and save to SQLite
+async function addMultipleToQueue(items) {
+  if (items && items.length > 0) {
+    AnimeQueue.push(...items);
+    await saveQueue();
+  }
+}
+
 global.getQueueNumber = () => {
   return AnimeQueue?.length ?? 0;
 };
 
 module.exports = {
   addToQueue,
+  addMultipleToQueue,
   loadQueue,
   removeQueue,
+  removeMultipleFromQueue,
   saveQueue,
   updateQueue,
   getQueue,

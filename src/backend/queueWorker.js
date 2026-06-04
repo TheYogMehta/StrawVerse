@@ -39,10 +39,10 @@ async function continuousExecution() {
           if (currentTask?.Type === "Anime") {
             let { config, Title, EpNum, epid, SubDub } = currentTask;
             if (config && Title && EpNum && epid && SubDub) {
-              await downloadep(config, `${Title} ${SubDub}`, EpNum, epid);
+              await downloadep(config, `${Title} ${SubDub}`, EpNum, epid, SubDub);
             } else {
               logger.error(
-                `Error message: Some Anime Data missing [ removing from queue ]`
+                `Error message: Some Anime Data missing [ removing from queue ]`,
               );
               AnimeQueue.splice(0, 1);
               await SaveQueueData(AnimeQueue);
@@ -56,11 +56,11 @@ async function continuousExecution() {
                 Title,
                 EpNum,
                 epid,
-                ChapterTitle
+                ChapterTitle,
               );
             } else {
               logger.error(
-                `Error message: Some Manga Data missing [ removing from queue  ]`
+                `Error message: Some Manga Data missing [ removing from queue  ]`,
               );
               AnimeQueue.splice(0, 1);
               await SaveQueueData(AnimeQueue);
@@ -68,7 +68,7 @@ async function continuousExecution() {
             }
           } else {
             logger.error(
-              `Error message: Type is Not Valid [ removing from queue  ]`
+              `Error message: Type is Not Valid [ removing from queue  ]`,
             );
             AnimeQueue.splice(0, 1);
             await SaveQueueData(AnimeQueue);
@@ -96,11 +96,11 @@ async function continuousExecution() {
 }
 
 // start downloadloading ep
-async function downloadep(Videoconfig, Title, EpNum, AnimeEpId) {
+async function downloadep(Videoconfig, Title, EpNum, AnimeEpId, SubDub) {
   const directoryPath = await directoryMaker(
     Title,
     EpNum,
-    Videoconfig?.CustomDownloadLocation
+    Videoconfig?.CustomDownloadLocation,
   );
   try {
     await downloadEpisodeByQuality(
@@ -108,7 +108,8 @@ async function downloadep(Videoconfig, Title, EpNum, AnimeEpId) {
       EpNum,
       directoryPath,
       Title,
-      AnimeEpId
+      AnimeEpId,
+      SubDub,
     );
   } catch (err) {
     throw err;
@@ -121,21 +122,26 @@ async function downloadEpisodeByQuality(
   episodeNumber,
   directoryName,
   Title,
-  epid
+  epid,
+  subdub,
 ) {
   try {
     let preferredQualities = ["1080p", "720p", "360p", "default", "backup"];
     const provider = await providerFetch("Anime", config.Animeprovider);
-    const sourcesArray = await fetchEpisodeSources(provider, epid);
+    let resolvedEpid = epid;
+    if (subdub && !epid.endsWith("-sub") && !epid.endsWith("-dub") && !epid.endsWith("-both")) {
+      resolvedEpid = `${epid}-${subdub}`;
+    }
+    const sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
 
     let selectedSource = sourcesArray?.sources?.find(
-      (source) => source?.quality === config?.quality ?? "1080p"
+      (source) => source?.quality === config?.quality ?? "1080p",
     );
 
     if (!selectedSource) {
       for (const quality of preferredQualities) {
         selectedSource = sourcesArray?.sources.find(
-          (source) => source?.quality === quality
+          (source) => source?.quality === quality,
         );
         if (selectedSource) break;
       }
@@ -161,7 +167,7 @@ async function downloadEpisodeByQuality(
         sourcesArray?.subtitles ?? [],
         config?.mergeSubtitles === "on" ? true : false,
         (config?.subtitleFormat ?? "ttv") === "srt",
-        selectedSource.headers ?? {}
+        selectedSource.headers ?? {},
       );
     } else {
       throw new Error("No source link found.");
@@ -182,13 +188,14 @@ async function downloadVideo(
   subtitles = [],
   MergeSubtitles,
   subtitleFormat = false,
-  headers = {}
+  headers = {},
 ) {
   try {
     await download({
       directory: directoryPath,
       Epnum: episodeNumber,
       streamUrl: Url,
+      quality: quality,
       caption: `Downloading ${Title} || EP ${episodeNumber} [  ${quality}  ]`,
       EpID: epid,
       subtitles: subtitles,
@@ -207,23 +214,14 @@ async function downloadMangaChapters(
   Title,
   EpNum,
   ChapterId,
-  ChapterTitle
+  ChapterTitle,
 ) {
   const provider = await providerFetch("Manga", config?.Mangaprovider);
   const ChapterData = await MangaChapterFetch(provider, ChapterId);
 
   if (!ChapterData || ChapterData?.length < 1) {
-    await removeQueue(Title, EpNum, ChapterId);
+    await removeQueue(ChapterId);
     throw new Error("No Image Found For This Chapter!");
-  }
-
-  let headers = {};
-  if (provider?.provider?.getHeaders) {
-    try {
-      headers = await provider.provider.getHeaders();
-    } catch (err) {
-      logger.error(`Failed to get headers for manga provider: ${err.message}`);
-    }
   }
 
   const directoryPath = await MangaDir(Title, config?.CustomDownloadLocation);
@@ -236,7 +234,6 @@ async function downloadMangaChapters(
       Title,
       ChapterTitle,
       ChapterId,
-      headers
     );
   } catch (err) {
     throw err;

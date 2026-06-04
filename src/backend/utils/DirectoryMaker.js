@@ -111,7 +111,7 @@ async function MangaDir(title, customdir) {
   } catch (err) {
     if (err.code === "ENOENT") {
       destination = path.join(
-        process.env.PORTABLE_EXECUTABLE_DIR || process.cwd()
+        process.env.PORTABLE_EXECUTABLE_DIR || process.cwd(),
       );
     }
   }

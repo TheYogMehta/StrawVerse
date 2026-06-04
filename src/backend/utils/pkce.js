@@ -25,7 +25,7 @@ function generateVerifier(length) {
 async function generateChallenge(code_verifier) {
   const buffer = await crypto.webcrypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(code_verifier)
+    new TextEncoder().encode(code_verifier),
   );
   return Buffer.from(buffer)
     .toString("base64")
@@ -37,7 +37,7 @@ async function generateChallenge(code_verifier) {
 async function pkceChallenge(length = 43) {
   if (length < 43 || length > 128) {
     throw new Error(
-      `Expected a length between 43 and 128. Received ${length}.`
+      `Expected a length between 43 and 128. Received ${length}.`,
     );
   }
   const verifier = generateVerifier(length);

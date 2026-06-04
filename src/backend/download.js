@@ -1,9 +1,12 @@
 // imports
 const { animeinfo, MangaInfo } = require("./utils/AnimeManga");
 const { providerFetch, settingfetch } = require("./utils/settings");
-const { addToQueue, checkEpisodeDownload } = require("./utils/queue");
-const { MetadataAdd } = require("./utils/Metadata");
-// const { MalAddToList, MalGogo } = require("./utils/mal");
+const {
+  addToQueue,
+  checkEpisodeDownload,
+  addMultipleToQueue,
+} = require("./utils/queue");
+const { MetadataAdd, FindMapping } = require("./utils/Metadata");
 
 // Handles Multiple Episodes Download
 async function downloadAnimeMulti(
@@ -11,7 +14,8 @@ async function downloadAnimeMulti(
   animeid,
   Episodes = [],
   Title,
-  SubDub
+  SubDub,
+  malid = null,
 ) {
   if (Episodes?.length <= 0)
     return {
@@ -19,12 +23,22 @@ async function downloadAnimeMulti(
       message: `No Episode Provided To Download!`,
     };
 
+  Episodes.sort((a, b) => {
+    const numA = parseFloat(a.number) || 0;
+    const numB = parseFloat(b.number) || 0;
+    return numA - numB;
+  });
+
   let Message = {
     type: "info",
     message: "",
   };
 
   let success = 0;
+  const itemsToAdd = [];
+
+  const config = await settingfetch();
+  const Animeprovider = await providerFetch("Anime", provider);
 
   for (let i = 0; i < Episodes.length; i++) {
     let Episode = Episodes[i];
@@ -34,16 +48,27 @@ async function downloadAnimeMulti(
       Episode.id,
       Episode.number,
       Title,
-      i === 0
+      i === 0,
+      config,
+      Animeprovider,
+      true,
+      malid,
+      SubDub,
     );
 
-    // if any error change to error
     if (data?.error) {
-      Message.type = "error";
-      Message.error = true;
-    } else {
+      if (data?.message !== "Already downloaded") {
+        Message.type = "error";
+        Message.error = true;
+      }
+    } else if (data?.queueItem) {
+      itemsToAdd.push(data.queueItem);
       success++;
     }
+  }
+
+  if (itemsToAdd.length > 0) {
+    await addMultipleToQueue(itemsToAdd);
   }
 
   Message.message = `Added ${success} Episodes To Queue!`;
@@ -58,26 +83,40 @@ async function downloadAnimeSingle(
   episodeid,
   number,
   Title,
-  saveinfo = false
+  saveinfo = false,
+  preFetchedConfig = null,
+  preFetchedProvider = null,
+  returnItemOnly = false,
+  malid = null,
+  subdub = null,
 ) {
   try {
-    const config = await settingfetch();
-    const Animeprovider = await providerFetch("Anime", provider);
+    const config = preFetchedConfig || (await settingfetch());
+    const Animeprovider =
+      preFetchedProvider || (await providerFetch("Anime", provider));
+
+    let resolvedSubDub = subdub;
+    if (!resolvedSubDub) {
+      resolvedSubDub = animeid.endsWith("dub") ? "dub" : "sub";
+    }
+
+    const strippedId = animeid.replace(/-(sub|dub|both)$/, "");
+    const dbId = `${strippedId}-${resolvedSubDub}`;
 
     if (saveinfo) {
       const animedata = await animeinfo(
         Animeprovider,
         config?.CustomDownloadLocation,
-        animeid
+        animeid,
       );
       if (animedata) {
         MetadataAdd("Anime", {
-          id: animeid,
+          id: dbId,
           title: `${animedata?.title?.replace(/-(dub|sub|both)$/, ``)} ${
-            animedata?.subOrDub
+            resolvedSubDub
           }`,
           provider: Animeprovider.provider_name,
-          subOrDub: animedata?.subOrDub ?? null,
+          subOrDub: resolvedSubDub,
           type: animedata.type ?? null,
           description: animedata.description ?? null,
           status: animedata.status ?? null,
@@ -86,23 +125,40 @@ async function downloadAnimeSingle(
           aired: animedata?.aired ?? null,
           ImageUrl: animedata?.image,
           EpisodesDataId: animedata?.dataId,
+          MalID: malid ? String(malid) : null,
         });
       }
     }
 
-    let is_downloaded = await checkEpisodeDownload(episodeid);
-    if (is_downloaded) {
+    let is_in_queue = await checkEpisodeDownload(episodeid);
+    if (is_in_queue) {
       return {
         error: true,
-        message: "Already downloaded",
+        message: "Already in queue",
       };
-    } else {
-      await addToQueue({
+    }
+
+    try {
+      let animeMapping = await FindMapping("Anime", dbId, null, config?.CustomDownloadLocation);
+      if (animeMapping && animeMapping.DownloadedEpisodes) {
+        const num = parseFloat(number);
+        const downloadedList = animeMapping.DownloadedEpisodes[resolvedSubDub] || [];
+        if (downloadedList.map(Number).includes(num)) {
+          return {
+            error: true,
+            message: "Already downloaded",
+          };
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+      const queueItem = {
         Type: "Anime",
         EpNum: number,
-        id: animeid,
+        id: dbId,
         Title: Title,
-        SubDub: `${animeid.endsWith("dub") ? "dub" : "sub"}`,
+        SubDub: resolvedSubDub,
         config: {
           Animeprovider: Animeprovider?.provider_name,
           quality: config?.quality,
@@ -113,12 +169,20 @@ async function downloadAnimeSingle(
         epid: episodeid,
         totalSegments: 0,
         currentSegments: 0,
-      });
+      };
+
+      if (returnItemOnly) {
+        return {
+          error: false,
+          queueItem,
+        };
+      }
+
+      await addToQueue(queueItem);
       return {
         error: false,
         message: "Added To Queue!",
       };
-    }
   } catch (err) {
     return {
       error: true,
@@ -132,7 +196,8 @@ async function downloadMangaMulti(
   provider = null,
   mangaid,
   Chapters = [],
-  Title
+  Title,
+  malid = null,
 ) {
   if (Chapters?.length <= 0)
     return {
@@ -140,12 +205,22 @@ async function downloadMangaMulti(
       message: `No Episode Provided To Download!`,
     };
 
+  Chapters.sort((a, b) => {
+    const numA = parseFloat(a.number) || 0;
+    const numB = parseFloat(b.number) || 0;
+    return numA - numB;
+  });
+
   let Message = {
     type: "info",
     message: "",
   };
 
   let success = 0;
+  const itemsToAdd = [];
+
+  const config = await settingfetch();
+  const Mangaprovider = await providerFetch("Manga", provider);
 
   for (let i = 0; i < Chapters.length; i++) {
     let Chapter = Chapters[i];
@@ -155,17 +230,30 @@ async function downloadMangaMulti(
       Chapter.id,
       Chapter.number,
       Title,
-      i === 0
+      i === 0,
+      config,
+      Mangaprovider,
+      true,
+      malid,
     );
-    // if any error change to error
     if (data?.error) {
-      Message.error = true;
-    } else {
+      if (data?.message !== "Already downloaded") {
+        Message.error = true;
+      }
+    } else if (data?.queueItem) {
+      itemsToAdd.push(data.queueItem);
       success++;
     }
   }
 
-  return `Added ${success} Episodes To Queue!`;
+  if (itemsToAdd.length > 0) {
+    await addMultipleToQueue(itemsToAdd);
+  }
+
+  return {
+    error: Message.error ?? false,
+    message: `Added ${success} Chapters To Queue!`,
+  };
 }
 
 // Handles Single Manga Download
@@ -175,11 +263,16 @@ async function downloadMangaSingle(
   chapterid,
   number,
   Title,
-  saveinfo = false
+  saveinfo = false,
+  preFetchedConfig = null,
+  preFetchedProvider = null,
+  returnItemOnly = false,
+  malid = null,
 ) {
   try {
-    const config = await settingfetch();
-    const Mangaprovider = await providerFetch("Manga", provider);
+    const config = preFetchedConfig || (await settingfetch());
+    const Mangaprovider =
+      preFetchedProvider || (await providerFetch("Manga", provider));
 
     if (saveinfo) {
       let mangainfo = await MangaInfo(Mangaprovider, mangaid);
@@ -194,19 +287,34 @@ async function downloadMangaSingle(
           author: mangainfo?.author ?? null,
           released: mangainfo?.released ?? null,
           ImageUrl: mangainfo?.image,
+          MalID: malid ? String(malid) : null,
         });
       }
     }
 
-    let is_downloaded = await checkEpisodeDownload(chapterid);
-
-    if (is_downloaded) {
+    let is_in_queue = await checkEpisodeDownload(chapterid);
+    if (is_in_queue) {
       return {
         error: true,
-        message: "Already downloaded",
+        message: "Already in queue",
       };
-    } else {
-      await addToQueue({
+    }
+
+    try {
+      let mangaMapping = await FindMapping("Manga", mangaid, null, config?.CustomDownloadLocation);
+      if (mangaMapping && mangaMapping.DownloadedChapters) {
+        const num = parseFloat(number);
+        if (mangaMapping.DownloadedChapters.map(Number).includes(num)) {
+          return {
+            error: true,
+            message: "Already downloaded",
+          };
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+      const queueItem = {
         Type: "Manga",
         EpNum: number,
         id: mangaid,
@@ -219,12 +327,20 @@ async function downloadMangaSingle(
         epid: chapterid,
         totalSegments: 0,
         currentSegments: 0,
-      });
+      };
+
+      if (returnItemOnly) {
+        return {
+          error: false,
+          queueItem,
+        };
+      }
+
+      await addToQueue(queueItem);
       return {
         error: false,
         message: "Added To Queue!",
       };
-    }
   } catch (err) {
     return {
       error: true,

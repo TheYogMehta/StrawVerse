@@ -1,10 +1,12 @@
 const { FindMapping } = require("./Metadata");
 const NodeCache = require("node-cache");
 const HLSLogger = require("./logger");
+const { logger } = require("./AppLogger");
 const crypto = require("crypto");
 const JSZip = require("jszip");
 const axios = require("axios");
 const fs = require("fs");
+const { getHeaders } = require("./proxyHeaders");
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
 
@@ -13,11 +15,11 @@ const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
 async function latestAnime(provider, filters) {
   if (!provider?.provider)
     throw new Error(
-      "Missing Provider! ( try downloading from settings > marketplace )"
+      "Missing Provider! ( try downloading from settings > marketplace )",
     );
 
   const cacheKey = CreateHashKey(
-    `latestanime_${provider.provider_name}_${JSON.stringify(filters)}`
+    `latestanime_${provider.provider_name}_${JSON.stringify(filters)}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -35,7 +37,7 @@ async function latestAnime(provider, filters) {
 async function animesearch(provider, Anime_NAME, filters = {}) {
   if (!provider?.provider)
     throw new Error(
-      "Missing Provider! ( try downloading from settings > marketplace )"
+      "Missing Provider! ( try downloading from settings > marketplace )",
     );
 
   let dataarray = { results: [] };
@@ -82,8 +84,8 @@ async function animesearch(provider, Anime_NAME, filters = {}) {
 async function findanime(provider, Anime_NAME, filters) {
   const cacheKey = CreateHashKey(
     `animesearch_${provider.provider_name}_${Anime_NAME}__${JSON.stringify(
-      filters
-    )}`
+      filters,
+    )}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -104,7 +106,7 @@ async function findanime(provider, Anime_NAME, filters) {
         hasNextPage: data.hasNextPage,
         currentPage: data.currentPage,
       },
-      60
+      60,
     );
 
     return {
@@ -119,11 +121,11 @@ async function findanime(provider, Anime_NAME, filters) {
 async function animeinfo(provider, dir, animeId, MalFetch = true) {
   if (!provider?.provider)
     throw new Error(
-      "Missing Provider! ( try downloading from settings > marketplace )"
+      "Missing Provider! ( try downloading from settings > marketplace )",
     );
 
   const cacheKey = CreateHashKey(
-    `animeinfo_${provider.provider_name}_${animeId}`
+    `animeinfo_${provider.provider_name}_${animeId}`,
   );
 
   let cachedData = cache.get(cacheKey);
@@ -140,7 +142,7 @@ async function animeinfo(provider, dir, animeId, MalFetch = true) {
         cachedData?.id,
         cachedData?.malid,
         cachedData?.title,
-        dir
+        dir,
       );
       cachedData = { ...cachedData, ...MyAnimeListData, MalLoggedIn: true };
     }
@@ -155,7 +157,7 @@ async function animeinfo(provider, dir, animeId, MalFetch = true) {
       data?.id,
       data?.malid,
       data?.title,
-      dir
+      dir,
     );
 
     if (MyAnimeListData) {
@@ -179,11 +181,11 @@ async function fetchEpisode(provider, id, page = 1) {
   try {
     if (!provider?.provider)
       throw new Error(
-        "Missing Provider! ( try downloading from settings > marketplace )"
+        "Missing Provider! ( try downloading from settings > marketplace )",
       );
 
     const cacheKey = CreateHashKey(
-      `animeplaylist_${provider.provider_name}_${id}_${page}`
+      `animeplaylist_${provider.provider_name}_${id}_${page}`,
     );
 
     const cachedData = cache.get(cacheKey);
@@ -202,11 +204,11 @@ async function fetchEpisode(provider, id, page = 1) {
 async function fetchEpisodeSources(provider, episodeId) {
   if (!provider?.provider)
     throw new Error(
-      "Missing Provider! ( try downloading from settings > marketplace )"
+      "Missing Provider! ( try downloading from settings > marketplace )",
     );
 
   const cacheKey = CreateHashKey(
-    `animeepisodesources_${provider.provider_name}_${episodeId}`
+    `animeepisodesources_${provider.provider_name}_${episodeId}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -225,7 +227,7 @@ async function fetchEpisodeSources(provider, episodeId) {
 // Latest Manga
 async function latestMangas(provider, Page = 1) {
   const cacheKey = CreateHashKey(
-    `latestmanga_${provider.provider_name}_${Page}`
+    `latestmanga_${provider.provider_name}_${Page}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -243,7 +245,7 @@ async function latestMangas(provider, Page = 1) {
 async function MangaSearch(provider, MANGA_NAME, PAGE = 1) {
   try {
     const cacheKey = CreateHashKey(
-      `mangasearch_${provider.provider_name}_${MANGA_NAME}_${PAGE}`
+      `mangasearch_${provider.provider_name}_${MANGA_NAME}_${PAGE}`,
     );
 
     const cachedData = cache.get(cacheKey);
@@ -263,7 +265,7 @@ async function MangaSearch(provider, MANGA_NAME, PAGE = 1) {
 // Manga Info
 async function MangaInfo(provider, MANGA_ID) {
   const cacheKey = CreateHashKey(
-    `mangainfo${provider.provider_name}_${MANGA_ID}`
+    `mangainfo${provider.provider_name}_${MANGA_ID}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -280,7 +282,7 @@ async function MangaInfo(provider, MANGA_ID) {
 // Manga
 async function fetchChapters(provider, MANGA_ID, page = 1) {
   const cacheKey = CreateHashKey(
-    `mangachapters${provider.provider_name}_${MANGA_ID}_${page}`
+    `mangachapters${provider.provider_name}_${MANGA_ID}_${page}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -297,7 +299,7 @@ async function fetchChapters(provider, MANGA_ID, page = 1) {
 // Chapters Fetch
 async function MangaChapterFetch(provider, MangaChapterID) {
   const cacheKey = CreateHashKey(
-    `mangachapterfetch_${provider.provider_name}_${MangaChapterID}`
+    `mangachapterfetch_${provider.provider_name}_${MangaChapterID}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -312,14 +314,12 @@ async function MangaChapterFetch(provider, MangaChapterID) {
 }
 
 // Download Chapters
-// Download Chapters
 async function DownloadChapters(
   outputFile,
   pages,
   Title,
   ChapterName,
   MangaChapterID,
-  headers = {}
 ) {
   try {
     const zip = new JSZip();
@@ -328,81 +328,205 @@ async function DownloadChapters(
       `Downloading ${Title} || ${ChapterName}`,
       `${MangaChapterID}`,
       0,
-      false
+      false,
     );
 
     logger.totalSegments = pages.length - 1;
 
-    for (let i = 0; i < pages.length; i++) {
-      const imageUrl = pages[i]?.img;
-      if (!imageUrl) {
-        logger.currentSegments = i + 1;
+    const concurrencyLimit = 5;
+    const results = new Array(pages.length);
+    let activeIndex = 0;
+    let currentDelay = 300;
+
+    async function worker() {
+      while (activeIndex < pages.length) {
+        const i = activeIndex++;
+        const imageUrl = pages[i]?.img;
+        if (!imageUrl) {
+          logger.currentSegments++;
+          logger.logProgress();
+          continue;
+        }
+
+        const jitter = Math.floor(Math.random() * 150) - 75;
+        const sleepTime = Math.max(200, Math.min(5000, currentDelay + jitter));
+        await new Promise((resolve) => setTimeout(resolve, sleepTime));
+
+        try {
+          const imageBuffer = await downloadImage(imageUrl, (isFailure) => {
+            if (isFailure) {
+              currentDelay = Math.min(5000, currentDelay + 500);
+            } else {
+              currentDelay = Math.max(200, currentDelay - 20);
+            }
+          });
+
+          let fileExtension = "jpg";
+          if (!imageUrl.startsWith("file://") && !imageUrl.startsWith("/")) {
+            fileExtension = imageUrl.split(".").pop().split(/\#|\?/)[0];
+          } else {
+            const path = require("path");
+            fileExtension =
+              path
+                .extname(
+                  imageUrl.startsWith("file://") ? imageUrl.slice(7) : imageUrl,
+                )
+                .replace(".", "") || "jpg";
+          }
+
+          results[i] = {
+            fileName: `${i + 1}.${fileExtension}`,
+            buffer: imageBuffer,
+          };
+        } catch (error) {
+          console.error(
+            `Failed to download page ${i + 1} from ${imageUrl}:`,
+            error,
+          );
+          throw error;
+        }
+
+        logger.currentSegments++;
         logger.logProgress();
-        continue;
       }
+    }
 
-      const imageBuffer = await downloadImage(imageUrl, headers);
+    const workers = [];
+    for (let w = 0; w < Math.min(concurrencyLimit, pages.length); w++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
 
-      let fileExtension = "jpg";
-      if (!imageUrl.startsWith("file://") && !imageUrl.startsWith("/")) {
-        fileExtension = imageUrl.split(".").pop().split(/\#|\?/)[0];
-      } else {
-        const path = require("path");
-        fileExtension = path.extname(imageUrl.startsWith("file://") ? imageUrl.slice(7) : imageUrl).replace(".", "") || "jpg";
+    for (let i = 0; i < pages.length; i++) {
+      if (results[i]) {
+        zip.file(results[i].fileName, results[i].buffer);
       }
-
-      const fileName = `${i + 1}.${fileExtension}`;
-
-      zip.file(fileName, imageBuffer);
-
-      logger.currentSegments = i + 1;
-      logger.logProgress();
     }
 
     const cbzBuffer = await zip.generateAsync({ type: "nodebuffer" });
     fs.writeFileSync(outputFile, cbzBuffer);
-
-
   } catch (error) {
     throw new Error(error);
   }
 }
 
 // Download Chapter Images Utils
-async function downloadImage(url, headers = {}) {
+async function downloadImage(url, onAttemptResult = null) {
   if (url) {
     url = decodeURIComponent(url);
 
-    if (url.startsWith("data:image/")) {
+    if (url.includes("/api/image?url=")) {
+      url = url.split("/api/image?url=")[1];
+    }
+
+    if (url.startsWith("file://") || url.startsWith("/")) {
+      const filePath = url.slice(7);
+      return fs.readFileSync(filePath);
+    } else if (url.startsWith("data:image/")) {
       const base64Data = url.split("base64,")[1];
       return Buffer.from(base64Data, "base64");
     }
-    if (url.includes("/api/manga/image?url=")) {
-      url = url.split("/api/manga/image?url=")[1];
-    }
-    if (url.startsWith("file://")) {
-      const filePath = url.slice(7);
-      return fs.readFileSync(filePath);
-    }
-    if (url.startsWith("/")) {
-      return fs.readFileSync(url);
-    }
-    const response = await axios(url, {
+
+    const resolvedHeaders = getHeaders(url);
+    const options = {
       responseType: "arraybuffer",
       headers: {
-        Referer: "https://weebcentral.com/",
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
-        ...headers,
+        ...(resolvedHeaders.Referer
+          ? { Referer: resolvedHeaders.Referer }
+          : {}),
+        ...(resolvedHeaders["User-Agent"]
+          ? { "User-Agent": resolvedHeaders["User-Agent"] }
+          : {}),
+        ...(resolvedHeaders.Cookie ? { Cookie: resolvedHeaders.Cookie } : {}),
       },
-    });
-    return Buffer.from(response.data, "binary");
+    };
+    const retries = 3;
+    let delay = 1000;
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        let response;
+        try {
+          response = await global.axios.get(url, options);
+          if (onAttemptResult) onAttemptResult(false);
+        } catch (err) {
+          if (
+            err.response &&
+            (err.response.status === 403 || err.response.status === 503) &&
+            global.cloudflarebypass
+          ) {
+            if (url.includes("animepahe")) {
+              const paheCheck = (title, html) =>
+                title.toLowerCase().includes("animepahe") &&
+                !title.toLowerCase().includes("just a moment");
+              await global
+                .cloudflarebypass("https://animepahe.pw", paheCheck, true)
+                .catch(() => {});
+            } else if (
+              url.includes("allmanga") ||
+              url.includes("allanime") ||
+              url.includes("youtube-anime")
+            ) {
+              const allmangaCheck = (title, html) =>
+                html.includes("__NUXT__") ||
+                title.toLowerCase().includes("allmanga");
+              await global
+                .cloudflarebypass("https://allmanga.to/", allmangaCheck, true)
+                .catch(() => {});
+            } else if (url.includes("anikoto")) {
+              const anikotoCheck = (title, html) =>
+                title.toLowerCase().includes("anikoto") &&
+                !title.toLowerCase().includes("just a moment");
+              await global
+                .cloudflarebypass("https://anikototv.to", anikotoCheck, true)
+                .catch(() => {});
+            }
+            const freshHeaders = getHeaders(url);
+            options.headers = {
+              ...options.headers,
+              ...(freshHeaders.Cookie ? { Cookie: freshHeaders.Cookie } : {}),
+            };
+            response = await global.axios.get(url, options);
+            if (onAttemptResult) onAttemptResult(false);
+          } else {
+            throw err;
+          }
+        }
+        return Buffer.from(response.data, "binary");
+      } catch (err) {
+        if (onAttemptResult) onAttemptResult(true);
+        if (attempt === retries) {
+          logger.error(
+            `Failed to download image after ${retries} attempts: ${url}. Error: ${err.message}`,
+          );
+          return Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+            "base64",
+          );
+        }
+        logger.warn(
+          `Attempt ${attempt} to download ${url} failed: ${err.message}. Retrying in ${delay}ms...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2;
+      }
+    }
   }
   return null;
 }
 
 function CreateHashKey(text) {
   return crypto.createHash("md5").update(text).digest("hex");
+}
+
+function invalidateCache(type, providerName, id) {
+  if (!providerName || !id) return;
+  const key =
+    type === "Anime"
+      ? `animeinfo_${providerName}_${id}`
+      : `mangainfo${providerName}_${id}`;
+  const cacheKey = CreateHashKey(key);
+  cache.del(cacheKey);
 }
 
 module.exports = {
@@ -417,4 +541,5 @@ module.exports = {
   MangaChapterFetch,
   DownloadChapters,
   fetchChapters,
+  invalidateCache,
 };
