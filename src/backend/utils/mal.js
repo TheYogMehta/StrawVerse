@@ -70,6 +70,8 @@ async function MalVerifyToken(code) {
     let token = JSON.stringify(data);
     global.MalLoggedIn = true;
 
+    MalGetUsername(data.access_token).catch(() => {});
+
     return {
       mal_on_off: true,
       malToken: token,
@@ -142,6 +144,8 @@ async function MalRefreshTokenGen(json) {
     global.MalLoggedIn = true;
     MalFetchListAll();
 
+    MalGetUsername(JsonToken.access_token).catch(() => {});
+
     return {
       mal_on_off: true,
       malToken: json,
@@ -157,6 +161,34 @@ async function MalRefreshTokenGen(json) {
       mal_on_off: false,
       malToken: null,
     };
+  }
+}
+
+// Fetch and store MAL username in settings
+async function MalGetUsername(accessToken) {
+  try {
+    const token =
+      accessToken ||
+      JSON.parse(getKeyValue("Settings", "config")?.malToken || "{}")
+        ?.access_token;
+    if (!token) return null;
+    const { data } = await axios.get(
+      "https://api.myanimelist.net/v2/users/@me",
+      {
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+    const username = data?.name || null;
+    if (username) {
+      const config = getKeyValue("Settings", "config") || {};
+      config.malUsername = username;
+      setKeyValue("Settings", "config", config);
+      global.malUsername = username;
+    }
+    return username;
+  } catch (err) {
+    logger.error(`Failed to fetch MAL username: ${err.message}`);
+    return null;
   }
 }
 
@@ -355,7 +387,10 @@ async function MalSearch(query, type = "anime", limit = 10) {
       headers["X-MAL-CLIENT-ID"] = MalAppID;
     }
 
-    const fields = type === "anime" ? "num_episodes,main_picture" : "num_chapters,main_picture";
+    const fields =
+      type === "anime"
+        ? "num_episodes,main_picture"
+        : "num_chapters,main_picture";
     const { data } = await axios.get(
       `https://api.myanimelist.net/v2/${type}?q=${encodeURIComponent(query)}&limit=${limit}&fields=${fields}`,
       { headers },
@@ -382,4 +417,5 @@ module.exports = {
   MalAddToList,
   MalFetchList,
   MalSearch,
+  MalGetUsername,
 };

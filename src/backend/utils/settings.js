@@ -39,6 +39,7 @@ async function settingupdate({
   enableDiscordRPC = null,
   mergeSubtitles = null,
   subtitleFormat = null,
+  malDiscordProfile = null,
 }) {
   const currentSettings = getKeyValue("Settings", "config");
 
@@ -88,6 +89,10 @@ async function settingupdate({
     subtitleFormat = currentSettings?.subtitleFormat || "vtt";
   }
 
+  if (malDiscordProfile === null) {
+    malDiscordProfile = currentSettings?.malDiscordProfile || "off";
+  }
+
   if (CustomDownloadLocation === null) {
     CustomDownloadLocation =
       currentSettings?.CustomDownloadLocation || getDownloadsFolder();
@@ -105,6 +110,7 @@ async function settingupdate({
   config.enableDiscordRPC = enableDiscordRPC;
   config.mergeSubtitles = mergeSubtitles;
   config.subtitleFormat = subtitleFormat;
+  config.malDiscordProfile = malDiscordProfile;
 
   if (config.enableDiscordRPC === "on") {
     try {
@@ -132,6 +138,7 @@ async function settingupdate({
     enableDiscordRPC,
     mergeSubtitles,
     subtitleFormat,
+    malDiscordProfile,
   };
 }
 
@@ -192,6 +199,11 @@ async function settingfetch() {
       changes = true;
     }
 
+    if (!config?.hasOwnProperty("malDiscordProfile")) {
+      config.malDiscordProfile = "off";
+      changes = true;
+    }
+
     if (changes) {
       await settingSave();
     }
@@ -224,6 +236,7 @@ async function SettingsLoad() {
             enableDiscordRPC: "off",
             mergeSubtitles: "off",
             subtitleFormat: "vtt",
+            malDiscordProfile: "off",
           };
 
     if (config.malToken != null) {

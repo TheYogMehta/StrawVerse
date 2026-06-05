@@ -1,8 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
-import { useEffect, useRef, useState } from 'react';
-import Hls from 'hls.js';
-import { ArrowLeft, HardDrive, Globe } from 'lucide-react';
-import './css/VideoPlayer.css';
+import { useEffect, useRef, useState } from "react";
+import Hls from "hls.js";
+import { ArrowLeft, HardDrive, Globe } from "lucide-react";
+import "./css/VideoPlayer.css";
 
 export default function VideoPlayer({
   id,
@@ -11,9 +11,10 @@ export default function VideoPlayer({
   subdub,
   episodesList = [],
   downloadedEpisodes = null,
-  animeTitle = '',
+  animeTitle = "",
   provider,
-  onBack
+  image,
+  onBack,
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -21,26 +22,30 @@ export default function VideoPlayer({
   const [subtitles, setSubtitles] = useState([]);
   const [selectedSource, setSelectedSource] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState("");
 
   // Local navigation states
   const [currentEpisode, setCurrentEpisode] = useState(episodeNumOrId);
   const [isCurrentDownloaded, setIsCurrentDownloaded] = useState(isDownloaded);
-  const [playerSubDub, setPlayerSubDub] = useState(subdub || 'sub');
+  const [playerSubDub, setPlayerSubDub] = useState(subdub || "sub");
 
   // Helper to determine if an episode number is downloaded
   const isEpDownloaded = (num, currentLang = playerSubDub) => {
     if (!downloadedEpisodes) return false;
     const subList = downloadedEpisodes.sub || [];
     const dubList = downloadedEpisodes.dub || [];
-    return currentLang === 'dub' ? dubList.includes(Number(num)) : subList.includes(Number(num));
+    return currentLang === "dub"
+      ? dubList.includes(Number(num))
+      : subList.includes(Number(num));
   };
 
   // Sort episodes list in ascending order to make Next/Prev predictable
-  const sortedEpisodes = [...episodesList].sort((a, b) => Number(a.number) - Number(b.number));
+  const sortedEpisodes = [...episodesList].sort(
+    (a, b) => Number(a.number) - Number(b.number),
+  );
 
   // Find current active episode object
-  const currentEpisodeObj = sortedEpisodes.find(item => {
+  const currentEpisodeObj = sortedEpisodes.find((item) => {
     if (isCurrentDownloaded) {
       return Number(item.number) === Number(currentEpisode);
     } else {
@@ -49,7 +54,11 @@ export default function VideoPlayer({
   });
 
   useEffect(() => {
-    const currentEpNum = currentEpisodeObj ? currentEpisodeObj.number : (typeof currentEpisode === 'number' || !isNaN(Number(currentEpisode)) ? Number(currentEpisode) : null);
+    const currentEpNum = currentEpisodeObj
+      ? currentEpisodeObj.number
+      : typeof currentEpisode === "number" || !isNaN(Number(currentEpisode))
+        ? Number(currentEpisode)
+        : null;
     if (currentEpNum !== null) {
       const isDownloadedInNewLang = isEpDownloaded(currentEpNum, playerSubDub);
       if (isDownloadedInNewLang !== isCurrentDownloaded) {
@@ -57,7 +66,9 @@ export default function VideoPlayer({
         if (isDownloadedInNewLang) {
           setCurrentEpisode(currentEpNum);
         } else {
-          const epObj = sortedEpisodes.find(item => Number(item.number) === Number(currentEpNum));
+          const epObj = sortedEpisodes.find(
+            (item) => Number(item.number) === Number(currentEpNum),
+          );
           if (epObj) {
             setCurrentEpisode(epObj.id);
           }
@@ -66,9 +77,14 @@ export default function VideoPlayer({
     }
   }, [playerSubDub]);
 
-  const currentIndex = currentEpisodeObj ? sortedEpisodes.indexOf(currentEpisodeObj) : -1;
+  const currentIndex = currentEpisodeObj
+    ? sortedEpisodes.indexOf(currentEpisodeObj)
+    : -1;
   const prevIndex = currentIndex > 0 ? currentIndex - 1 : -1;
-  const nextIndex = currentIndex !== -1 && currentIndex < sortedEpisodes.length - 1 ? currentIndex + 1 : -1;
+  const nextIndex =
+    currentIndex !== -1 && currentIndex < sortedEpisodes.length - 1
+      ? currentIndex + 1
+      : -1;
 
   const handleJumpToEpisode = (episodeObj) => {
     const isDownloadedLocal = isEpDownloaded(episodeObj.number);
@@ -94,35 +110,36 @@ export default function VideoPlayer({
     lastTickTimeRef.current = Date.now();
   }, []);
   const savedResumeTimeRef = useRef(0);
-  const animeTitleVal = animeTitle || 'Anime';
+  const animeTitleVal = animeTitle || "Anime";
 
   const saveWatchProgress = async (isFinal = false) => {
     if (!videoRef.current) return;
     const video = videoRef.current;
     const currentTime = video.currentTime;
     const duration = video.duration;
-    
+
     const now = Date.now();
     const timeSpent = (now - lastTickTimeRef.current) / 1000;
     lastTickTimeRef.current = now;
 
     if (duration > 0 && (timeSpent > 0.5 || isFinal)) {
       try {
-        await fetch('/api/history/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        await fetch("/api/history/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             mediaId: id,
-            type: 'Anime',
+            type: "Anime",
             title: animeTitleVal,
             number: currentEpisodeObj ? currentEpisodeObj.number : 1,
             currentTime,
             duration,
-            timeSpent
-          })
+            timeSpent,
+            image,
+          }),
         });
       } catch (err) {
-        console.error('Failed to save watch progress:', err);
+        console.error("Failed to save watch progress:", err);
       }
     }
   };
@@ -135,20 +152,27 @@ export default function VideoPlayer({
     const loadProgress = async () => {
       try {
         const epNum = currentEpisodeObj ? currentEpisodeObj.number : 1;
-        const res = await fetch(`/api/history/progress?mediaId=${encodeURIComponent(id)}&type=Anime`);
+        const res = await fetch(
+          `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=Anime`,
+        );
         const progressData = await res.json();
-        
-        if (progressData?.lastProgress && Number(progressData.lastProgress.number) === Number(epNum)) {
-          const savedTime = parseFloat(progressData.lastProgress.currentTime || 0);
+
+        if (
+          progressData?.lastProgress &&
+          Number(progressData.lastProgress.number) === Number(epNum)
+        ) {
+          const savedTime = parseFloat(
+            progressData.lastProgress.currentTime || 0,
+          );
           const resumeTime = Math.max(0, savedTime - 5);
           savedResumeTimeRef.current = resumeTime;
-          
+
           if (videoRef.current && videoRef.current.readyState >= 1) {
             videoRef.current.currentTime = resumeTime;
           }
         }
       } catch (err) {
-        console.error('Failed to load progress:', err);
+        console.error("Failed to load progress:", err);
       }
     };
 
@@ -164,6 +188,7 @@ export default function VideoPlayer({
     return () => {
       clearInterval(interval);
       saveWatchProgress(true);
+      fetch("/api/discord/reset", { method: "POST" }).catch(() => {});
     };
   }, [id, currentEpisode, currentEpisodeObj]);
 
@@ -180,29 +205,39 @@ export default function VideoPlayer({
       lastTickTimeRef.current = Date.now();
     };
 
-    video.addEventListener('pause', handlePause);
-    video.addEventListener('play', handlePlay);
+    video.addEventListener("pause", handlePause);
+    video.addEventListener("play", handlePlay);
 
     return () => {
       if (video) {
-        video.removeEventListener('pause', handlePause);
-        video.removeEventListener('play', handlePlay);
+        video.removeEventListener("pause", handlePause);
+        video.removeEventListener("play", handlePlay);
       }
     };
   }, [selectedSource, currentEpisode, currentEpisodeObj]);
 
   const fetchStreamData = async () => {
     setLoading(true);
-    setErrorMsg('');
+    setErrorMsg("");
     try {
-      const response = await fetch('/api/watch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/watch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
           isCurrentDownloaded
-            ? { ep: id, epNum: currentEpisode, Downloaded: true, subdub: playerSubDub }
-            : { ep: currentEpisode, Downloaded: false, subdub: playerSubDub, provider: provider }
-        )
+            ? {
+                ep: id,
+                epNum: currentEpisode,
+                Downloaded: true,
+                subdub: playerSubDub,
+              }
+            : {
+                ep: currentEpisode,
+                Downloaded: false,
+                subdub: playerSubDub,
+                provider: provider,
+              },
+        ),
       });
       const data = await response.json();
 
@@ -216,16 +251,17 @@ export default function VideoPlayer({
       setSubtitles(fetchedSubs);
 
       if (fetchedSources.length > 0) {
-        const preferred = fetchedSources.find(s => s.quality === '1080p') || 
-                          fetchedSources.find(s => s.quality === '720p') || 
-                          fetchedSources[0];
+        const preferred =
+          fetchedSources.find((s) => s.quality === "1080p") ||
+          fetchedSources.find((s) => s.quality === "720p") ||
+          fetchedSources[0];
         setSelectedSource(preferred);
       } else {
-        setErrorMsg('No video sources found for this episode.');
+        setErrorMsg("No video sources found for this episode.");
       }
     } catch (err) {
       console.error(err);
-      setErrorMsg('Failed to load video player resources.');
+      setErrorMsg("Failed to load video player resources.");
     } finally {
       setLoading(false);
     }
@@ -233,7 +269,9 @@ export default function VideoPlayer({
 
   useEffect(() => {
     if (hlsRef.current) {
-      console.log('Proactively destroying existing HLS instance on episode switch');
+      console.log(
+        "Proactively destroying existing HLS instance on episode switch",
+      );
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
@@ -244,24 +282,28 @@ export default function VideoPlayer({
     if (!selectedSource || !videoRef.current) return;
 
     const video = videoRef.current;
-    
+
     // Robustly extract stream URL, supporting nested source.url.url structures with proxy conversion
     let url;
-    if (selectedSource?.url && typeof selectedSource.url === 'object' && selectedSource.url.url) {
+    if (
+      selectedSource?.url &&
+      typeof selectedSource.url === "object" &&
+      selectedSource.url.url
+    ) {
       url = `/proxy?url=${encodeURIComponent(selectedSource.url.url)}`;
-    } else if (typeof selectedSource?.url === 'string') {
+    } else if (typeof selectedSource?.url === "string") {
       url = selectedSource.url;
     } else {
-      url = selectedSource?.url || '';
+      url = selectedSource?.url || "";
     }
 
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
-    video.src = '';
+    video.src = "";
 
-    if (url.includes('.m3u8')) {
+    if (url.includes(".m3u8")) {
       if (Hls.isSupported()) {
         const hls = new Hls({
           maxMaxBufferLength: 30,
@@ -296,44 +338,52 @@ export default function VideoPlayer({
               case Hls.ErrorTypes.NETWORK_ERROR:
                 if (networkErrorRetry < 3) {
                   networkErrorRetry++;
-                  console.warn(`Network error: retrying recovery attempt ${networkErrorRetry}...`);
+                  console.warn(
+                    `Network error: retrying recovery attempt ${networkErrorRetry}...`,
+                  );
                   hls.startLoad();
                 } else {
-                  console.error('Fatal network error: retry limit reached.');
-                  setErrorMsg('Network error: Failed to download stream segments. Try selecting a different quality or check your connection.');
+                  console.error("Fatal network error: retry limit reached.");
+                  setErrorMsg(
+                    "Network error: Failed to download stream segments. Try selecting a different quality or check your connection.",
+                  );
                   hls.destroy();
                 }
                 break;
               case Hls.ErrorTypes.MEDIA_ERROR:
                 if (mediaErrorRetry < 3) {
                   mediaErrorRetry++;
-                  console.warn(`Media decoding warning: retrying recovery attempt ${mediaErrorRetry}...`);
+                  console.warn(
+                    `Media decoding warning: retrying recovery attempt ${mediaErrorRetry}...`,
+                  );
                   hls.recoverMediaError();
                 } else {
-                  console.error('Fatal media error: recovery loop prevented.');
-                  setErrorMsg('Playback error: Try selecting a different quality level.');
+                  console.error("Fatal media error: recovery loop prevented.");
+                  setErrorMsg(
+                    "Playback error: Try selecting a different quality level.",
+                  );
                   hls.destroy();
                 }
                 break;
               default:
                 hls.destroy();
-                setErrorMsg('Fatal stream playback error.');
+                setErrorMsg("Fatal stream playback error.");
                 break;
             }
           }
         });
-      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
         video.src = url;
         const handleLoadedMetadata = () => {
           if (savedResumeTimeRef.current > 0) {
             video.currentTime = savedResumeTimeRef.current;
           }
           video.play().catch(() => {});
-          video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
         };
-        video.addEventListener('loadedmetadata', handleLoadedMetadata);
+        video.addEventListener("loadedmetadata", handleLoadedMetadata);
       } else {
-        setErrorMsg('HLS streaming is not supported in this browser.');
+        setErrorMsg("HLS streaming is not supported in this browser.");
       }
     } else {
       video.src = url;
@@ -342,9 +392,9 @@ export default function VideoPlayer({
           video.currentTime = savedResumeTimeRef.current;
         }
         video.play().catch(() => {});
-        video.removeEventListener('loadedmetadata', handleLoadedMetadata);
+        video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       };
-      video.addEventListener('loadedmetadata', handleLoadedMetadata);
+      video.addEventListener("loadedmetadata", handleLoadedMetadata);
     }
   }, [selectedSource]);
 
@@ -364,13 +414,21 @@ export default function VideoPlayer({
           <ArrowLeft size={18} />
           <span>Exit Player</span>
         </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span className="player-episode-title">
-            Playing Episode {currentEpisodeObj ? currentEpisodeObj.number : 'Stream'} ({subdub.toUpperCase()})
+            Playing Episode{" "}
+            {currentEpisodeObj ? currentEpisodeObj.number : "Stream"} (
+            {subdub.toUpperCase()})
           </span>
-          <span className={`player-header-badge ${isCurrentDownloaded ? 'local' : 'online'}`}>
-            {isCurrentDownloaded ? <HardDrive size={13} /> : <Globe size={13} />}
-            <span>{isCurrentDownloaded ? 'Local' : 'Online'}</span>
+          <span
+            className={`player-header-badge ${isCurrentDownloaded ? "local" : "online"}`}
+          >
+            {isCurrentDownloaded ? (
+              <HardDrive size={13} />
+            ) : (
+              <Globe size={13} />
+            )}
+            <span>{isCurrentDownloaded ? "Local" : "Online"}</span>
           </span>
         </div>
       </div>
@@ -386,7 +444,9 @@ export default function VideoPlayer({
           <div className="player-status-overlay">
             <span className="error-icon">⚠️</span>
             <p className="error-msg">{errorMsg}</p>
-            <button onClick={fetchStreamData} className="player-retry-btn">Retry</button>
+            <button onClick={fetchStreamData} className="player-retry-btn">
+              Retry
+            </button>
           </div>
         ) : (
           <video
@@ -400,10 +460,14 @@ export default function VideoPlayer({
             {subtitles.map((sub, idx) => (
               <track
                 key={idx}
-                src={sub.url && sub.url.startsWith('http') ? `/proxy?url=${encodeURIComponent(sub.url)}` : sub.url}
+                src={
+                  sub.url && sub.url.startsWith("http")
+                    ? `/proxy?url=${encodeURIComponent(sub.url)}`
+                    : sub.url
+                }
                 label={sub.lang || `Language ${idx + 1}`}
                 kind="subtitles"
-                srcLang={sub.lang ? sub.lang.slice(0, 2).toLowerCase() : 'en'}
+                srcLang={sub.lang ? sub.lang.slice(0, 2).toLowerCase() : "en"}
                 default={idx === 0}
               />
             ))}
@@ -413,21 +477,29 @@ export default function VideoPlayer({
 
       {/* Control Navigation & Source Section */}
       <div className="player-controls-footer">
-        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
           {/* Language Selector if both are available */}
           {!loading && currentEpisodeObj?.lang === "both" && (
             <div className="player-quality-selector">
-              <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>Language:</span>
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Language:
+              </span>
               <div className="player-qualities-wrapper">
                 <button
-                  onClick={() => setPlayerSubDub('sub')}
-                  className={`player-quality-btn ${playerSubDub === 'sub' ? 'active' : ''}`}
+                  onClick={() => setPlayerSubDub("sub")}
+                  className={`player-quality-btn ${playerSubDub === "sub" ? "active" : ""}`}
                 >
                   SUB
                 </button>
                 <button
-                  onClick={() => setPlayerSubDub('dub')}
-                  className={`player-quality-btn ${playerSubDub === 'dub' ? 'active' : ''}`}
+                  onClick={() => setPlayerSubDub("dub")}
+                  className={`player-quality-btn ${playerSubDub === "dub" ? "active" : ""}`}
                 >
                   DUB
                 </button>
@@ -438,15 +510,23 @@ export default function VideoPlayer({
           {/* Quality Selector */}
           {!loading && sources.length > 0 && (
             <div className="player-quality-selector">
-              <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-muted)' }}>Source:</span>
+              <span
+                style={{
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  color: "var(--text-muted)",
+                }}
+              >
+                Source:
+              </span>
               <div className="player-qualities-wrapper">
                 {sources.map((s, idx) => (
                   <button
                     key={idx}
                     onClick={() => setSelectedSource(s)}
-                    className={`player-quality-btn ${selectedSource === s ? 'active' : ''}`}
+                    className={`player-quality-btn ${selectedSource === s ? "active" : ""}`}
                   >
-                    {s.quality || 'Default'}
+                    {s.quality || "Default"}
                   </button>
                 ))}
               </div>
@@ -467,16 +547,19 @@ export default function VideoPlayer({
 
             <div className="player-select-container">
               <select
-                value={currentEpisodeObj?.id || ''}
+                value={currentEpisodeObj?.id || ""}
                 onChange={(e) => {
-                  const selected = sortedEpisodes.find(item => item.id === e.target.value);
+                  const selected = sortedEpisodes.find(
+                    (item) => item.id === e.target.value,
+                  );
                   if (selected) handleJumpToEpisode(selected);
                 }}
                 className="player-nav-select"
               >
-                {sortedEpisodes.map(item => (
+                {sortedEpisodes.map((item) => (
                   <option key={item.id} value={item.id}>
-                    Ep {item.number}{isEpDownloaded(item.number) ? ' (Downloaded)' : ''}
+                    Ep {item.number}
+                    {isEpDownloaded(item.number) ? " (Downloaded)" : ""}
                   </option>
                 ))}
               </select>

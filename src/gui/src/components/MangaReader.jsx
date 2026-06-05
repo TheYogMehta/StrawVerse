@@ -1,6 +1,15 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useEffect, useState, useRef, useMemo } from "react";
-import { ArrowLeft, Loader2, ChevronsUp, ChevronsDown, ChevronLeft, ChevronRight, HardDrive, Globe } from "lucide-react";
+import {
+  ArrowLeft,
+  Loader2,
+  ChevronsUp,
+  ChevronsDown,
+  ChevronLeft,
+  ChevronRight,
+  HardDrive,
+  Globe,
+} from "lucide-react";
 import "./css/MangaReader.css";
 
 // Lazy-loaded page component with CSS transition fade-in
@@ -17,7 +26,7 @@ function LazyMangaPage({ src, alt, style }) {
           observer.disconnect();
         }
       },
-      { rootMargin: "800px 0px" } // Load pages within 800px of viewport
+      { rootMargin: "800px 0px" }, // Load pages within 800px of viewport
     );
 
     if (ref.current) {
@@ -68,6 +77,7 @@ export default function MangaReader({
   chaptersList = [],
   downloadedChapters = [],
   provider,
+  image,
   onBack,
 }) {
   const [items, setItems] = useState([]);
@@ -110,7 +120,9 @@ export default function MangaReader({
   };
 
   const sortedChapters = useMemo(() => {
-    return [...chaptersList].sort((a, b) => Number(a.number) - Number(b.number));
+    return [...chaptersList].sort(
+      (a, b) => Number(a.number) - Number(b.number),
+    );
   }, [chaptersList]);
 
   // Sync prop updates to local states & resolve initial active ID
@@ -118,7 +130,7 @@ export default function MangaReader({
     setCurrentChapter(chapterNumOrId);
     setIsCurrentDownloaded(isDownloaded);
 
-    const initialChapterObj = sortedChapters.find(c => {
+    const initialChapterObj = sortedChapters.find((c) => {
       if (isDownloaded) {
         return Number(c.number) === Number(chapterNumOrId);
       } else {
@@ -131,29 +143,38 @@ export default function MangaReader({
 
   // Helper to extract a clean chapter number from IDs/hashes when sortedChapters is not loaded yet
   const getCleanChapterNum = (chapterId, fallbackValue) => {
-    const chObj = sortedChapters.find(c => c.id === chapterId);
+    const chObj = sortedChapters.find((c) => c.id === chapterId);
     if (chObj) return chObj.number;
-    
-    if (typeof chapterId === 'string') {
+
+    if (typeof chapterId === "string") {
       const hashMatch = chapterId.match(/_(\d+(?:\.\d+)?)$/);
       if (hashMatch) return hashMatch[1];
 
-      const match = chapterId.match(/(?:chapter[-_]|ch[-_]|\b)(\d+(?:\.\d+)?)(?:\b|$)/i);
+      const match = chapterId.match(
+        /(?:chapter[-_]|ch[-_]|\b)(\d+(?:\.\d+)?)(?:\b|$)/i,
+      );
       if (match) return match[1];
     }
     return fallbackValue || "...";
   };
 
   // Track the indexes of the chapter currently visible in the viewport using unique IDs
-  const currentChapterObj = sortedChapters.find((item) => item.id === activeChapterInView);
-  const currentIndex = currentChapterObj ? sortedChapters.indexOf(currentChapterObj) : -1;
+  const currentChapterObj = sortedChapters.find(
+    (item) => item.id === activeChapterInView,
+  );
+  const currentIndex = currentChapterObj
+    ? sortedChapters.indexOf(currentChapterObj)
+    : -1;
   const prevIndex = currentIndex > 0 ? currentIndex - 1 : -1;
-  const nextIndex = currentIndex !== -1 && currentIndex < sortedChapters.length - 1 ? currentIndex + 1 : -1;
+  const nextIndex =
+    currentIndex !== -1 && currentIndex < sortedChapters.length - 1
+      ? currentIndex + 1
+      : -1;
 
   const handleJumpToChapter = (chapterObj) => {
     const isDownloadedLocal = isChDownloaded(chapterObj.number);
     setIsCurrentDownloaded(isDownloadedLocal);
-    
+
     // currentChapter uses chapter number for downloaded, chapter ID for online
     const targetVal = isDownloadedLocal ? chapterObj.number : chapterObj.id;
     setCurrentChapter(targetVal);
@@ -179,8 +200,12 @@ export default function MangaReader({
   const savedResumePageRef = useRef(1);
 
   const saveReadProgress = async (isFinal = false) => {
-    const chNum = sortedChapters.find(c => c.id === activeChapterInView)?.number || getCleanChapterNum(activeChapterInView, currentChapter);
-    const pagesOfCurrentCh = items.filter(item => item.type === "page" && item.chapterId === activeChapterInView);
+    const chNum =
+      sortedChapters.find((c) => c.id === activeChapterInView)?.number ||
+      getCleanChapterNum(activeChapterInView, currentChapter);
+    const pagesOfCurrentCh = items.filter(
+      (item) => item.type === "page" && item.chapterId === activeChapterInView,
+    );
     const totalPages = pagesOfCurrentCh.length || 1;
 
     const now = Date.now();
@@ -189,21 +214,22 @@ export default function MangaReader({
 
     if (timeSpent > 0.5 || isFinal) {
       try {
-        await fetch('/api/history/update', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        await fetch("/api/history/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             mediaId: id,
-            type: 'Manga',
-            title: mangaTitle || 'Manga',
+            type: "Manga",
+            title: mangaTitle || "Manga",
             number: chNum,
             currentTime: activePageRef.current,
             duration: totalPages,
-            timeSpent
-          })
+            timeSpent,
+            image,
+          }),
         });
       } catch (err) {
-        console.error('Failed to save read progress:', err);
+        console.error("Failed to save read progress:", err);
       }
     }
   };
@@ -215,24 +241,32 @@ export default function MangaReader({
 
     const loadProgress = async () => {
       try {
-        const res = await fetch(`/api/history/progress?mediaId=${encodeURIComponent(id)}&type=Manga`);
+        const res = await fetch(
+          `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=Manga`,
+        );
         const progressData = await res.json();
-        
-        const chNum = sortedChapters.find(c => {
-          if (isCurrentDownloaded) {
-            return Number(c.number) === Number(currentChapter);
-          } else {
-            return c.id === currentChapter;
-          }
-        })?.number || getCleanChapterNum(activeChapterInView, currentChapter);
 
-        if (progressData?.lastProgress && Number(progressData.lastProgress.number) === Number(chNum)) {
-          const savedPage = parseInt(progressData.lastProgress.currentPage || 1);
+        const chNum =
+          sortedChapters.find((c) => {
+            if (isCurrentDownloaded) {
+              return Number(c.number) === Number(currentChapter);
+            } else {
+              return c.id === currentChapter;
+            }
+          })?.number || getCleanChapterNum(activeChapterInView, currentChapter);
+
+        if (
+          progressData?.lastProgress &&
+          Number(progressData.lastProgress.number) === Number(chNum)
+        ) {
+          const savedPage = parseInt(
+            progressData.lastProgress.currentPage || 1,
+          );
           const resumePage = Math.max(1, savedPage - 1);
           savedResumePageRef.current = resumePage;
         }
       } catch (err) {
-        console.error('Failed to load progress:', err);
+        console.error("Failed to load progress:", err);
       }
     };
 
@@ -248,6 +282,7 @@ export default function MangaReader({
     return () => {
       clearInterval(interval);
       saveReadProgress(true);
+      fetch("/api/discord/reset", { method: "POST" }).catch(() => {});
     };
   }, [id, activeChapterInView, items]);
 
@@ -257,7 +292,9 @@ export default function MangaReader({
       setTimeout(() => {
         const container = containerRef.current;
         if (container) {
-          const pageEl = container.querySelector(`[data-page="${savedResumePageRef.current}"]`);
+          const pageEl = container.querySelector(
+            `[data-page="${savedResumePageRef.current}"]`,
+          );
           if (pageEl) {
             pageEl.scrollIntoView();
           }
@@ -276,11 +313,15 @@ export default function MangaReader({
     }
 
     try {
-      const isDownloadedLocal = isAppend ? isChDownloaded(chapterObj.number) : isCurrentDownloaded;
-      
+      const isDownloadedLocal = isAppend
+        ? isChDownloaded(chapterObj.number)
+        : isCurrentDownloaded;
+
       // API expects chapter number if downloaded, ID if online
-      const apiChapterID = isAppend 
-        ? (isDownloadedLocal ? chapterObj.number : chapterObj.id) 
+      const apiChapterID = isAppend
+        ? isDownloadedLocal
+          ? chapterObj.number
+          : chapterObj.id
         : currentChapter;
 
       // Cache and elements should always use chapterObj.id
@@ -288,7 +329,7 @@ export default function MangaReader({
       if (isAppend) {
         cacheID = chapterObj.id;
       } else {
-        const initialChapterObj = sortedChapters.find(c => {
+        const initialChapterObj = sortedChapters.find((c) => {
           if (isCurrentDownloaded) {
             return Number(c.number) === Number(currentChapter);
           } else {
@@ -312,15 +353,22 @@ export default function MangaReader({
 
       if (data && data.length > 0) {
         const sortedPages = [...data].sort((a, b) => a.page - b.page);
-        
-        const chNum = isAppend ? chapterObj.number : (sortedChapters.find(c => c.id === cacheID)?.number || getCleanChapterNum(cacheID, currentChapter));
 
-        const isActuallyLocal = data[0].img && data[0].img.startsWith("data:image/");
+        const chNum = isAppend
+          ? chapterObj.number
+          : sortedChapters.find((c) => c.id === cacheID)?.number ||
+            getCleanChapterNum(cacheID, currentChapter);
+
+        const isActuallyLocal =
+          data[0].img && data[0].img.startsWith("data:image/");
 
         // Auto-heal downloaded list and state
         if (isActuallyLocal) {
           const num = Number(chNum);
-          if (downloadedChapters && !downloadedChapters.map(Number).includes(num)) {
+          if (
+            downloadedChapters &&
+            !downloadedChapters.map(Number).includes(num)
+          ) {
             downloadedChapters.push(num);
           }
         }
@@ -333,7 +381,7 @@ export default function MangaReader({
           isDownloaded: isActuallyLocal,
         };
 
-        const newPages = sortedPages.map(p => ({
+        const newPages = sortedPages.map((p) => ({
           id: `page-${cacheID}-${p.page}`,
           type: "page",
           img: p.img,
@@ -343,8 +391,8 @@ export default function MangaReader({
         }));
 
         if (isAppend) {
-          setItems(prev => [...prev, newHeader, ...newPages]);
-          setLoadedChapters(prev => [...prev, cacheID]);
+          setItems((prev) => [...prev, newHeader, ...newPages]);
+          setLoadedChapters((prev) => [...prev, cacheID]);
         } else {
           setItems([newHeader, ...newPages]);
           setLoadedChapters([cacheID]);
@@ -418,7 +466,7 @@ export default function MangaReader({
       if (activeId && activeId !== activeChapterInView) {
         setActiveChapterInView(activeId);
         activeChapterRef.current = activeId;
-        const targetObj = sortedChapters.find(item => item.id === activeId);
+        const targetObj = sortedChapters.find((item) => item.id === activeId);
         if (targetObj) {
           setIsCurrentDownloaded(isChDownloaded(targetObj.number));
         }
@@ -426,9 +474,18 @@ export default function MangaReader({
 
       // Check if scrolled near the bottom of the container
       const threshold = 350; // pixels from the bottom
-      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
-      
-      if (isNearBottom && autoLoadNext && !loading && !appendingLoading && !errorMsg && nextIndex !== -1) {
+      const isNearBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight <
+        threshold;
+
+      if (
+        isNearBottom &&
+        autoLoadNext &&
+        !loading &&
+        !appendingLoading &&
+        !errorMsg &&
+        nextIndex !== -1
+      ) {
         if (!isTransitioningRef.current) {
           const nextChapterObj = sortedChapters[nextIndex];
           if (!loadedChapters.includes(nextChapterObj.id)) {
@@ -440,9 +497,18 @@ export default function MangaReader({
     };
 
     container.addEventListener("scroll", handleScroll);
-    return () =>
-      container.removeEventListener("scroll", handleScroll);
-  }, [id, activeChapterInView, autoLoadNext, nextIndex, loading, appendingLoading, errorMsg, loadedChapters, sortedChapters]);
+    return () => container.removeEventListener("scroll", handleScroll);
+  }, [
+    id,
+    activeChapterInView,
+    autoLoadNext,
+    nextIndex,
+    loading,
+    appendingLoading,
+    errorMsg,
+    loadedChapters,
+    sortedChapters,
+  ]);
 
   const scrollToTop = () => {
     if (containerRef.current) {
@@ -479,7 +545,7 @@ export default function MangaReader({
           animation: spin 1s linear infinite;
         }
       `}</style>
- 
+
       {/* Top Header controls */}
       <div className="reader-header glass-panel">
         <div className="header-left-section">
@@ -488,7 +554,7 @@ export default function MangaReader({
             <span>Exit Reader</span>
           </button>
         </div>
- 
+
         {sortedChapters.length > 0 && (
           <div className="reader-navigation">
             <button
@@ -499,24 +565,27 @@ export default function MangaReader({
             >
               <ChevronLeft size={16} />
             </button>
- 
+
             <div className="select-container">
               <select
-                value={activeChapterInView || ''}
+                value={activeChapterInView || ""}
                 onChange={(e) => {
-                  const selected = sortedChapters.find(item => item.id === e.target.value);
+                  const selected = sortedChapters.find(
+                    (item) => item.id === e.target.value,
+                  );
                   if (selected) handleJumpToChapter(selected);
                 }}
                 className="select-nav"
               >
-                {sortedChapters.map(item => (
+                {sortedChapters.map((item) => (
                   <option key={item.id} value={item.id}>
-                    Ch {item.number}{isChDownloaded(item.number) ? ' (Downloaded)' : ''}
+                    Ch {item.number}
+                    {isChDownloaded(item.number) ? " (Downloaded)" : ""}
                   </option>
                 ))}
               </select>
             </div>
- 
+
             <button
               onClick={handleNextChapter}
               disabled={nextIndex === -1}
@@ -527,14 +596,23 @@ export default function MangaReader({
             </button>
           </div>
         )}
- 
+
         <div className="header-right-section">
           <span className="chapter-title" title={mangaTitle || id}>
-            {mangaTitle ? `${mangaTitle.slice(0, 20)}${mangaTitle.length > 20 ? '...' : ''}` : "Manga"} - Ch {getCleanChapterNum(activeChapterInView, chapterNumOrId)}
+            {mangaTitle
+              ? `${mangaTitle.slice(0, 20)}${mangaTitle.length > 20 ? "..." : ""}`
+              : "Manga"}{" "}
+            - Ch {getCleanChapterNum(activeChapterInView, chapterNumOrId)}
           </span>
-          <span className={`header-badge ${isCurrentDownloaded ? 'local' : 'online'}`}>
-            {isCurrentDownloaded ? <HardDrive size={13} /> : <Globe size={13} />}
-            <span>{isCurrentDownloaded ? 'Local' : 'Online'}</span>
+          <span
+            className={`header-badge ${isCurrentDownloaded ? "local" : "online"}`}
+          >
+            {isCurrentDownloaded ? (
+              <HardDrive size={13} />
+            ) : (
+              <Globe size={13} />
+            )}
+            <span>{isCurrentDownloaded ? "Local" : "Online"}</span>
           </span>
         </div>
       </div>
@@ -549,16 +627,18 @@ export default function MangaReader({
               className="loading-gif"
             />
             <p>
-              Loading pages for Chapter {getCleanChapterNum(activeChapterInView, chapterNumOrId)}...
+              Loading pages for Chapter{" "}
+              {getCleanChapterNum(activeChapterInView, chapterNumOrId)}...
             </p>
           </div>
         ) : errorMsg ? (
           <div className="status-overlay">
             <span className="error-icon">⚠️</span>
-            <p className="error-msg">
-              {errorMsg}
-            </p>
-            <button onClick={() => fetchChapterPages(null, false)} className="btn-retry">
+            <p className="error-msg">{errorMsg}</p>
+            <button
+              onClick={() => fetchChapterPages(null, false)}
+              className="btn-retry"
+            >
               Retry
             </button>
           </div>
@@ -567,20 +647,35 @@ export default function MangaReader({
             {items.map((item) => {
               if (item.type === "header") {
                 return (
-                  <div key={item.id} data-chapter={item.chapterId} className="splash-card">
+                  <div
+                    key={item.id}
+                    data-chapter={item.chapterId}
+                    className="splash-card"
+                  >
                     <div className="splash-card-overlay" />
                     <div className="splash-card-content">
                       <span className="splash-manga-title">
                         {mangaTitle || id || "Manga Stream"}
                       </span>
                       <h1 className="splash-chapter-num">
-                        Chapter {getCleanChapterNum(item.chapterId, item.chapterNum)}
+                        Chapter{" "}
+                        {getCleanChapterNum(item.chapterId, item.chapterNum)}
                       </h1>
-                      <div className={`splash-status-badge ${item.isDownloaded ? 'local' : 'online'}`}>
-                        {item.isDownloaded ? <HardDrive size={13} /> : <Globe size={13} />}
-                        <span>{item.isDownloaded ? "Downloaded Chapter" : "Online Stream"}</span>
+                      <div
+                        className={`splash-status-badge ${item.isDownloaded ? "local" : "online"}`}
+                      >
+                        {item.isDownloaded ? (
+                          <HardDrive size={13} />
+                        ) : (
+                          <Globe size={13} />
+                        )}
+                        <span>
+                          {item.isDownloaded
+                            ? "Downloaded Chapter"
+                            : "Online Stream"}
+                        </span>
                       </div>
-                      
+
                       <div className="splash-chevron splash-scroll-hint">
                         <span>SCROLL TO READ</span>
                         <ChevronsDown size={20} />
@@ -590,11 +685,13 @@ export default function MangaReader({
                 );
               } else {
                 return (
-                  <div key={item.id} data-chapter={item.chapterId} data-page={item.page} className="page-wrapper">
-                    <LazyMangaPage
-                      src={item.img}
-                      alt={`Page ${item.page}`}
-                    />
+                  <div
+                    key={item.id}
+                    data-chapter={item.chapterId}
+                    data-page={item.page}
+                    className="page-wrapper"
+                  >
+                    <LazyMangaPage src={item.img} alt={`Page ${item.page}`} />
                     <div className="page-num">Page {item.page}</div>
                   </div>
                 );
@@ -608,12 +705,13 @@ export default function MangaReader({
                 <span>Pre-fetching next chapter...</span>
               </div>
             )}
- 
+
             {/* Bottom Navigation Controls */}
             {sortedChapters.length > 0 && !appendingLoading && (
               <div className="bottom-controls-panel glass-panel">
                 <p className="bottom-controls-title">
-                  You've reached the end of Chapter {getCleanChapterNum(activeChapterInView, chapterNumOrId)}
+                  You've reached the end of Chapter{" "}
+                  {getCleanChapterNum(activeChapterInView, chapterNumOrId)}
                 </p>
                 <div className="bottom-nav-row">
                   <button
@@ -624,22 +722,25 @@ export default function MangaReader({
                     <ChevronLeft size={16} />
                     <span>Previous Chapter</span>
                   </button>
- 
+
                   <select
-                    value={activeChapterInView || ''}
+                    value={activeChapterInView || ""}
                     onChange={(e) => {
-                      const selected = sortedChapters.find(item => item.id === e.target.value);
+                      const selected = sortedChapters.find(
+                        (item) => item.id === e.target.value,
+                      );
                       if (selected) handleJumpToChapter(selected);
                     }}
                     className="bottom-nav-select"
                   >
-                    {sortedChapters.map(item => (
+                    {sortedChapters.map((item) => (
                       <option key={item.id} value={item.id}>
-                        Chapter {item.number}{isChDownloaded(item.number) ? ' (Downloaded)' : ''}
+                        Chapter {item.number}
+                        {isChDownloaded(item.number) ? " (Downloaded)" : ""}
                       </option>
                     ))}
                   </select>
- 
+
                   <button
                     onClick={handleNextChapter}
                     disabled={nextIndex === -1}
@@ -654,7 +755,7 @@ export default function MangaReader({
           </div>
         )}
       </div>
- 
+
       {/* Floating Scroll Top button */}
       {showScrollTop && (
         <button onClick={scrollToTop} className="btn-scroll-top">

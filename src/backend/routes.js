@@ -102,6 +102,7 @@ router.get("/api/settings", async (req, res) => {
       settings: settingsWithProviders,
       url: url,
       MalLoggedIn: global.MalLoggedIn || false,
+      malUsername: setting?.malUsername || global.malUsername || null,
     });
   } catch (err) {
     logger.error(err);
@@ -208,6 +209,7 @@ router.post("/api/settings", async (req, res) => {
     enableDiscordRPC,
     mergeSubtitles,
     subtitleFormat,
+    malDiscordProfile,
   } = req.body;
   try {
     if (
@@ -241,6 +243,7 @@ router.post("/api/settings", async (req, res) => {
       enableDiscordRPC: enableDiscordRPC,
       mergeSubtitles: mergeSubtitles,
       subtitleFormat: subtitleFormat,
+      malDiscordProfile: malDiscordProfile,
     });
 
     res.status(200).json({ message: "Settings saved successfully." });
@@ -1059,7 +1062,7 @@ router.get("/api/mal/search", async (req, res) => {
 // Link/Unlink MyAnimeList mapping
 router.post("/api/mal/link", async (req, res) => {
   try {
-    const { type, id, MalID, provider } = req.body;
+    const { type, id, MalID, provider, title, ImageUrl } = req.body;
     if (!type || !id) {
       throw new Error("Missing type or id");
     }
@@ -1088,9 +1091,60 @@ router.post("/api/mal/link", async (req, res) => {
     const resolvedMalID = MalID ? String(MalID) : null;
 
     if (existing) {
-      db.prepare(
-        `UPDATE ${type} SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
-      ).run(resolvedMalID, existing.id);
+      const updates = ["MalID = ?", "last_updated = CURRENT_TIMESTAMP"];
+      const params = [resolvedMalID];
+      if (title && (!existing.title || existing.title === "")) {
+        updates.push("title = ?");
+        params.push(title);
+      }
+      let finalImageUrl = existing.image_url;
+      let needsImageUrlUpdate = false;
+      if (ImageUrl && (!existing.image_url || existing.image_url === "")) {
+        finalImageUrl = ImageUrl;
+        needsImageUrlUpdate = true;
+      }
+      if (ImageUrl && (!existing.image || existing.image === "")) {
+        try {
+          let fetchUrl = ImageUrl.trim();
+          if (fetchUrl.startsWith("data:image/")) {
+            updates.push("image = ?");
+            params.push(fetchUrl);
+          } else {
+            if (fetchUrl.includes("/api/image?url=")) {
+              fetchUrl = fetchUrl.split("/api/image?url=")[1];
+            }
+            const client = global.axios || require("axios");
+            const { getHeaders } = require("./utils/proxyHeaders");
+            const headersObj = getHeaders(fetchUrl);
+            const requestHeaders = {};
+            if (headersObj.Referer)
+              requestHeaders["Referer"] = headersObj.Referer;
+            if (headersObj["User-Agent"])
+              requestHeaders["User-Agent"] = headersObj["User-Agent"];
+            if (headersObj.Cookie) requestHeaders["Cookie"] = headersObj.Cookie;
+
+            const imgResponse = await client.get(fetchUrl, {
+              headers: requestHeaders,
+              responseType: "arraybuffer",
+            });
+            const base64Image = `data:image/png;base64,${Buffer.from(imgResponse.data).toString("base64")}`;
+            updates.push("image = ?");
+            params.push(base64Image);
+          }
+        } catch (imgErr) {
+          logger.error(
+            `Failed to fetch image for linking record ${id}: ${imgErr.message}`,
+          );
+        }
+      }
+      if (needsImageUrlUpdate) {
+        updates.push("image_url = ?");
+        params.push(finalImageUrl);
+      }
+      params.push(existing.id);
+      db.prepare(`UPDATE ${type} SET ${updates.join(", ")} WHERE id = ?`).run(
+        ...params,
+      );
     } else {
       // Create minimal database entry for tracking without adding it to user's library tags
       const baseFolderName = id;
@@ -1109,12 +1163,54 @@ router.post("/api/mal/link", async (req, res) => {
         }
       } catch (_) {}
 
+      let base64Image = null;
+      let finalImageUrl = ImageUrl || "";
+      if (ImageUrl) {
+        try {
+          let fetchUrl = ImageUrl.trim();
+          if (fetchUrl.startsWith("data:image/")) {
+            base64Image = fetchUrl;
+          } else {
+            if (fetchUrl.includes("/api/image?url=")) {
+              fetchUrl = fetchUrl.split("/api/image?url=")[1];
+            }
+            const client = global.axios || require("axios");
+            const { getHeaders } = require("./utils/proxyHeaders");
+            const headersObj = getHeaders(fetchUrl);
+            const requestHeaders = {};
+            if (headersObj.Referer)
+              requestHeaders["Referer"] = headersObj.Referer;
+            if (headersObj["User-Agent"])
+              requestHeaders["User-Agent"] = headersObj["User-Agent"];
+            if (headersObj.Cookie) requestHeaders["Cookie"] = headersObj.Cookie;
+
+            const imgResponse = await client.get(fetchUrl, {
+              headers: requestHeaders,
+              responseType: "arraybuffer",
+            });
+            base64Image = `data:image/png;base64,${Buffer.from(imgResponse.data).toString("base64")}`;
+          }
+        } catch (imgErr) {
+          logger.error(
+            `Failed to fetch image for new linking record ${id}: ${imgErr.message}`,
+          );
+        }
+      }
+
       db.prepare(
         `
-        INSERT INTO ${type} (id, title, image, description, genres, provider, folder_name, MalID, CustomTag, last_updated)
-        VALUES (?, '', null, '', '', ?, ?, ?, '[]', CURRENT_TIMESTAMP)
+        INSERT INTO ${type} (id, title, image, image_url, description, genres, provider, folder_name, MalID, CustomTag, last_updated)
+        VALUES (?, ?, ?, ?, '', '', ?, ?, ?, '[]', CURRENT_TIMESTAMP)
       `,
-      ).run(id, provider || "", folderName, resolvedMalID);
+      ).run(
+        id,
+        title || "",
+        base64Image,
+        ImageUrl || "",
+        provider || "",
+        folderName,
+        resolvedMalID,
+      );
     }
 
     // Invalidate cached metadata so details reload cleanly
@@ -1261,6 +1357,61 @@ router.post("/api/local/add", async (req, res) => {
         updates.push("CustomTag = ?");
         params.push(tagValue);
       }
+      // Fill in title and provider if the stub record has them blank
+      if (title && (!existing.title || existing.title === "")) {
+        updates.push("title = ?");
+        params.push(title);
+      }
+      if (provider && (!existing.provider || existing.provider === "")) {
+        updates.push("provider = ?");
+        params.push(provider);
+      }
+      let finalImageUrl = existing.image_url;
+      let needsImageUrlUpdate = false;
+      if (ImageUrl && (!existing.image_url || existing.image_url === "")) {
+        finalImageUrl = ImageUrl;
+        needsImageUrlUpdate = true;
+      }
+      // If the record has no image yet but a URL was supplied, fetch and save it now
+      if (ImageUrl && (!existing.image || existing.image === "")) {
+        try {
+          let fetchUrl = ImageUrl.trim();
+          if (fetchUrl.startsWith("data:image/")) {
+            // Already a base64 data URI — store directly
+            updates.push("image = ?");
+            params.push(fetchUrl);
+          } else {
+            if (fetchUrl.includes("/api/image?url=")) {
+              fetchUrl = fetchUrl.split("/api/image?url=")[1];
+            }
+            const client = global.axios || require("axios");
+            const { getHeaders } = require("./utils/proxyHeaders");
+            const headersObj = getHeaders(fetchUrl);
+            const requestHeaders = {};
+            if (headersObj.Referer)
+              requestHeaders["Referer"] = headersObj.Referer;
+            if (headersObj["User-Agent"])
+              requestHeaders["User-Agent"] = headersObj["User-Agent"];
+            if (headersObj.Cookie) requestHeaders["Cookie"] = headersObj.Cookie;
+
+            const imgResponse = await client.get(fetchUrl, {
+              headers: requestHeaders,
+              responseType: "arraybuffer",
+            });
+            const base64Image = `data:image/png;base64,${Buffer.from(imgResponse.data).toString("base64")}`;
+            updates.push("image = ?");
+            params.push(base64Image);
+          }
+        } catch (imgErr) {
+          logger.error(
+            `Failed to fetch image for existing record ${id}: ${imgErr.message}`,
+          );
+        }
+      }
+      if (needsImageUrlUpdate) {
+        updates.push("image_url = ?");
+        params.push(finalImageUrl);
+      }
       if (updates.length > 0) {
         params.push(existing.id);
         db.prepare(
@@ -1278,6 +1429,7 @@ router.post("/api/local/add", async (req, res) => {
         type,
         MalID: MalID ? String(MalID) : "",
         CustomTag: tagValue,
+        image_url: ImageUrl,
       };
       await MetadataAdd(type, values);
       // Ensure MalID and CustomTag are updated since MetadataAdd inserts values dynamically
@@ -1978,11 +2130,30 @@ async function autoTrackMAL(type, mediaId, number) {
   }
 }
 
+// Reset Discord RPC to Idle (called when leaving player/reader)
+router.post("/api/discord/reset", async (req, res) => {
+  try {
+    const { UpdateDiscordRPC } = require("./utils/discord");
+    UpdateDiscordRPC().catch(() => {});
+    res.json({ success: true });
+  } catch (err) {
+    res.json({ success: false });
+  }
+});
+
 // Update tracking/history progress
 router.post("/api/history/update", async (req, res) => {
   try {
-    const { mediaId, type, title, number, currentTime, duration, timeSpent } =
-      req.body;
+    const {
+      mediaId,
+      type,
+      title,
+      number,
+      currentTime,
+      duration,
+      timeSpent,
+      image,
+    } = req.body;
     if (!mediaId || !type || !number) {
       throw new Error("Missing parameters for history update");
     }
@@ -2112,6 +2283,20 @@ router.post("/api/history/update", async (req, res) => {
           await autoTrackMAL("Anime", mediaId, parsedNum);
         }
       }
+
+      // Call Discord RPC Update
+      try {
+        const { UpdateDiscordRPC } = require("./utils/discord");
+        UpdateDiscordRPC(
+          animeTitle || "Anime",
+          parsedNum,
+          "Anime",
+          image,
+          mediaId,
+          currentTime,
+          duration,
+        ).catch(() => {});
+      } catch (rpcErr) {}
     } else {
       // Find or build correct manga title
       let mangaTitle = title;
@@ -2227,6 +2412,20 @@ router.post("/api/history/update", async (req, res) => {
           await autoTrackMAL("Manga", mediaId, parsedNum);
         }
       }
+
+      // Call Discord RPC Update
+      try {
+        const { UpdateDiscordRPC } = require("./utils/discord");
+        UpdateDiscordRPC(
+          mangaTitle || "Manga",
+          parsedNum,
+          "Manga",
+          image,
+          mediaId,
+          currentTime,
+          duration,
+        ).catch(() => {});
+      } catch (rpcErr) {}
     }
 
     res.json({ success: true });

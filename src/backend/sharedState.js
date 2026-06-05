@@ -23,7 +23,7 @@ function registerSharedStateHandlers() {
     NewRpcStatus = `${AnimeName}${Episode}`;
     if (OldRpcStatus !== NewRpcStatus) {
       OldRpcStatus = NewRpcStatus;
-      UpdateDiscordRPC(AnimeName, Episode);
+      UpdateDiscordRPC(AnimeName, Episode, "Anime");
     }
   });
 

@@ -1,20 +1,23 @@
-import { useState, useEffect } from 'react';
-import Sidebar from './components/Sidebar';
-import Catalog from './components/Catalog';
-import InfoView from './components/InfoView';
-import VideoPlayer from './components/VideoPlayer';
-import MangaReader from './components/MangaReader';
-import DownloadsTracker from './components/DownloadsTracker';
-import LogsView from './components/LogsView';
-import SettingsView from './components/SettingsView';
-import Marketplace from './components/Marketplace';
+import { useState, useEffect } from "react";
+import Sidebar from "./components/Sidebar";
+import Catalog from "./components/Catalog";
+import InfoView from "./components/InfoView";
+import VideoPlayer from "./components/VideoPlayer";
+import MangaReader from "./components/MangaReader";
+import DownloadsTracker from "./components/DownloadsTracker";
+import LogsView from "./components/LogsView";
+import SettingsView from "./components/SettingsView";
+import Marketplace from "./components/Marketplace";
 
 export default function App() {
-  const [history, setHistory] = useState([{ view: 'local-anime', params: {} }]);
+  const [history, setHistory] = useState([{ view: "local-anime", params: {} }]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [malLoggedIn, setMalLoggedIn] = useState(false);
 
-  const current = history[history.length - 1] || { view: 'local-anime', params: {} };
+  const current = history[history.length - 1] || {
+    view: "local-anime",
+    params: {},
+  };
 
   const navigateTo = (view, params = {}) => {
     setHistory((prev) => [...prev, { view, params }]);
@@ -29,11 +32,11 @@ export default function App() {
   // Sync basic configurations and MAL connections from server
   const syncSettings = async () => {
     try {
-      const settingsRes = await fetch('/api/settings');
+      const settingsRes = await fetch("/api/settings");
       const settingsData = await settingsRes.json();
       setMalLoggedIn(settingsData.MalLoggedIn || false);
     } catch (err) {
-      console.error('Failed to sync app info:', err);
+      console.error("Failed to sync app info:", err);
     }
   };
 
@@ -45,7 +48,7 @@ export default function App() {
 
     // Listen to MAL connection events from main thread
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
-      window.sharedStateAPI.on('mal', (data) => {
+      window.sharedStateAPI.on("mal", (data) => {
         setMalLoggedIn(data?.LoggedIn || false);
       });
     }
@@ -55,40 +58,68 @@ export default function App() {
 
   const renderActiveView = () => {
     switch (current.view) {
-      case 'local-anime':
+      case "local-anime":
         return (
           <Catalog
             type="Anime"
             provider="local"
-            onSelectMedia={(id, prov, backText) => navigateTo('info', { id, type: 'Anime', provider: 'local', backText })}
+            onSelectMedia={(id, prov, backText) =>
+              navigateTo("info", {
+                id,
+                type: "Anime",
+                provider: "local",
+                backText,
+              })
+            }
           />
         );
-      case 'local-manga':
+      case "local-manga":
         return (
           <Catalog
             type="Manga"
             provider="local"
-            onSelectMedia={(id, prov, backText) => navigateTo('info', { id, type: 'Manga', provider: 'local', backText })}
+            onSelectMedia={(id, prov, backText) =>
+              navigateTo("info", {
+                id,
+                type: "Manga",
+                provider: "local",
+                backText,
+              })
+            }
           />
         );
 
-      case 'anime-catalog':
+      case "anime-catalog":
         return (
           <Catalog
             type="Anime"
             provider="provider"
-            onSelectMedia={(id, prov, backText) => navigateTo('info', { id, type: 'Anime', provider: 'provider', backText })}
+            onSelectMedia={(id, prov, backText) =>
+              navigateTo("info", {
+                id,
+                type: "Anime",
+                provider: "provider",
+                backText,
+              })
+            }
           />
         );
-      case 'manga-catalog':
+      case "manga-catalog":
         return (
           <Catalog
             type="Manga"
             provider="provider"
-            onSelectMedia={(id, prov, backText) => navigateTo('info', { id, type: 'Manga', provider: 'provider', backText })}
+            onSelectMedia={(id, prov, backText) =>
+              navigateTo("info", {
+                id,
+                type: "Manga",
+                provider: "provider",
+                backText,
+              })
+            }
           />
         );
-      case 'info':
+      case "info":
         return (
           <InfoView
             id={current.params.id}
@@ -96,15 +127,53 @@ export default function App() {
             localMalProvider={current.params.provider}
             backText={current.params.backText}
             onBack={navigateBack}
-            onWatch={(animeId, epIdOrNum, isDownloaded, subdub, episodesList, downloadedEpisodes, animeTitle, provider) => 
-              navigateTo('watch', { id: animeId, ep: epIdOrNum, isDownloaded, subdub, episodesList, downloadedEpisodes, animeTitle, provider })
+            onWatch={(
+              animeId,
+              epIdOrNum,
+              isDownloaded,
+              subdub,
+              episodesList,
+              downloadedEpisodes,
+              animeTitle,
+              provider,
+              image,
+            ) =>
+              navigateTo("watch", {
+                id: animeId,
+                ep: epIdOrNum,
+                isDownloaded,
+                subdub,
+                episodesList,
+                downloadedEpisodes,
+                animeTitle,
+                provider,
+                image,
+              })
             }
-            onRead={(mangaId, chapterIdOrNum, isDownloaded, chaptersList, downloadedChapters, mangaTitle, provider) =>
-              navigateTo('read', { id: mangaId, chapter: chapterIdOrNum, isDownloaded, chaptersList, downloadedChapters, mangaTitle, provider })
+            onRead={(
+              mangaId,
+              chapterIdOrNum,
+              isDownloaded,
+              chaptersList,
+              downloadedChapters,
+              mangaTitle,
+              provider,
+              image,
+            ) =>
+              navigateTo("read", {
+                id: mangaId,
+                chapter: chapterIdOrNum,
+                isDownloaded,
+                chaptersList,
+                downloadedChapters,
+                mangaTitle,
+                provider,
+                image,
+              })
             }
           />
         );
-      case 'watch':
+      case "watch":
         return (
           <VideoPlayer
             id={current.params.id}
@@ -113,40 +182,40 @@ export default function App() {
             subdub={current.params.subdub}
             episodesList={current.params.episodesList || []}
             downloadedEpisodes={current.params.downloadedEpisodes}
-            animeTitle={current.params.animeTitle || ''}
+            animeTitle={current.params.animeTitle || ""}
             provider={current.params.provider}
+            image={current.params.image || ""}
             onBack={navigateBack}
           />
         );
-      case 'read':
+      case "read":
         return (
           <MangaReader
             id={current.params.id}
-            mangaTitle={current.params.mangaTitle || ''}
+            mangaTitle={current.params.mangaTitle || ""}
             chapterNumOrId={current.params.chapter}
             isDownloaded={current.params.isDownloaded}
             chaptersList={current.params.chaptersList || []}
             downloadedChapters={current.params.downloadedChapters || []}
             provider={current.params.provider}
+            image={current.params.image || ""}
             onBack={navigateBack}
           />
         );
-      case 'downloads':
+      case "downloads":
         return <DownloadsTracker />;
-      case 'logs':
+      case "logs":
         return <LogsView />;
-      case 'settings':
+      case "settings":
         return (
           <SettingsView
-            onMarketplaceOpen={(initialType) => navigateTo('marketplace', { type: initialType })}
+            onMarketplaceOpen={(initialType) =>
+              navigateTo("marketplace", { type: initialType })
+            }
           />
         );
-      case 'marketplace':
-        return (
-          <Marketplace
-            initialType={current.params.type || 'Anime'}
-          />
-        );
+      case "marketplace":
+        return <Marketplace initialType={current.params.type || "Anime"} />;
       default:
         return <div>View not implemented: {current.view}</div>;
     }
@@ -161,7 +230,7 @@ export default function App() {
         toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         malLoggedIn={malLoggedIn}
       />
-      <main style={{ flex: 1, height: '100%', overflow: 'hidden' }}>
+      <main style={{ flex: 1, height: "100%", overflow: "hidden" }}>
         {renderActiveView()}
       </main>
     </>

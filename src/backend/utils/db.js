@@ -38,6 +38,7 @@ const tables = {
     aired: "TEXT",
     EpisodesDataId: "TEXT",
     image: "BLOB",
+    image_url: "TEXT",
     last_updated: "DATE",
     MalID: "TEXT",
     CustomTag: "TEXT",
@@ -53,6 +54,7 @@ const tables = {
     author: "TEXT",
     released: "TEXT",
     image: "BLOB",
+    image_url: "TEXT",
     last_updated: "DATE",
     MalID: "TEXT",
     CustomTag: "TEXT",
@@ -122,6 +124,11 @@ const tables = {
     is_completed: "INTEGER",
     last_read: "TEXT",
     completed_at: "TEXT",
+  },
+  CatboxCache: {
+    original_url: "TEXT PRIMARY KEY",
+    catbox_url: "TEXT",
+    created_at: "INTEGER",
   },
 };
 

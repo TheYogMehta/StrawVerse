@@ -26,7 +26,8 @@ export default function InfoView({
   onRead,
 }) {
   const [id, setId] = useState(propId);
-  const [localMalProvider, setLocalMalProvider] = useState(propLocalMalProvider);
+  const [localMalProvider, setLocalMalProvider] =
+    useState(propLocalMalProvider);
   const [details, setDetails] = useState(null);
   const [loading, setLoading] = useState(true);
   const [episodesOrChapters, setEpisodesOrChapters] = useState([]);
@@ -91,7 +92,9 @@ export default function InfoView({
       const data = await response.json();
       setDetails(data);
 
-      const isAnimePahe = data?.provider?.toLowerCase() === "animepahe" || data?.provider?.toLowerCase() === "pahe";
+      const isAnimePahe =
+        data?.provider?.toLowerCase() === "animepahe" ||
+        data?.provider?.toLowerCase() === "pahe";
       if (isAnimePahe) {
         setSortOrder("desc");
       } else {
@@ -130,12 +133,14 @@ export default function InfoView({
 
       // Fetch history progress
       try {
-        const progressRes = await fetch(`/api/history/progress?mediaId=${encodeURIComponent(id)}&type=${type}`);
+        const progressRes = await fetch(
+          `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=${type}`,
+        );
         const progressData = await progressRes.json();
         setHasProgress(progressData.hasProgress || false);
         setHistoryProgress(progressData);
       } catch (err) {
-        console.error('Failed to fetch history progress:', err);
+        console.error("Failed to fetch history progress:", err);
       }
 
       // Load first page of episodes/chapters
@@ -176,7 +181,12 @@ export default function InfoView({
         } else {
           setEpisodesOrChapters(resList);
         }
-        const hasNext = !!(data.hasNextPage || (data.totalPages && data.currentPage ? data.currentPage < data.totalPages : false));
+        const hasNext = !!(
+          data.hasNextPage ||
+          (data.totalPages && data.currentPage
+            ? data.currentPage < data.totalPages
+            : false)
+        );
         setItemsHasNext(hasNext);
         setItemsPage(page);
         if (data.totalPages) {
@@ -249,7 +259,9 @@ export default function InfoView({
   };
 
   const getEpsPerPage = () => {
-    const isAnimePahe = details?.provider?.toLowerCase() === "animepahe" || details?.provider?.toLowerCase() === "pahe";
+    const isAnimePahe =
+      details?.provider?.toLowerCase() === "animepahe" ||
+      details?.provider?.toLowerCase() === "pahe";
     if (isAnimePahe) {
       return detectedPageSize;
     }
@@ -260,8 +272,11 @@ export default function InfoView({
     if (type === "Anime") {
       const subList = details?.DownloadedEpisodes?.sub || [];
       const dubList = details?.DownloadedEpisodes?.dub || [];
-      const isDownloadedLocal = dubSelect === 'dub' ? dubList.includes(Number(targetItem.number)) : subList.includes(Number(targetItem.number));
-      
+      const isDownloadedLocal =
+        dubSelect === "dub"
+          ? dubList.includes(Number(targetItem.number))
+          : subList.includes(Number(targetItem.number));
+
       onWatch(
         id,
         isDownloadedLocal ? targetItem.number : targetItem.id,
@@ -271,10 +286,13 @@ export default function InfoView({
         details?.DownloadedEpisodes,
         details?.title,
         details?.provider,
+        details?.image,
       );
     } else {
-      const isDownloadedLocal = (details?.DownloadedChapters || []).map(Number).includes(Number(targetItem.number));
-      
+      const isDownloadedLocal = (details?.DownloadedChapters || [])
+        .map(Number)
+        .includes(Number(targetItem.number));
+
       onRead(
         id,
         isDownloadedLocal ? targetItem.number : targetItem.id,
@@ -283,6 +301,7 @@ export default function InfoView({
         details?.DownloadedChapters,
         details?.title,
         details?.provider,
+        details?.image,
       );
     }
   };
@@ -312,7 +331,9 @@ export default function InfoView({
 
   useEffect(() => {
     if (pendingPlayEpisodeNum && !itemsLoading) {
-      const targetItem = episodesOrChapters.find(item => Number(item.number) === Number(pendingPlayEpisodeNum));
+      const targetItem = episodesOrChapters.find(
+        (item) => Number(item.number) === Number(pendingPlayEpisodeNum),
+      );
       if (targetItem) {
         setPendingPlayEpisodeNum(null);
         playItem(targetItem);
@@ -327,10 +348,13 @@ export default function InfoView({
     const timer = setTimeout(() => {
       const num = parseInt(episodeSearchQuery);
       if (!isNaN(num) && num > 0) {
-        const isAnimePahe = details?.provider?.toLowerCase() === "animepahe" || details?.provider?.toLowerCase() === "pahe";
+        const isAnimePahe =
+          details?.provider?.toLowerCase() === "animepahe" ||
+          details?.provider?.toLowerCase() === "pahe";
         if (isAnimePahe && totalPages > 1 && totalItemsCount > 0) {
           const epsPerPage = getEpsPerPage();
-          const targetPage = 1 + Math.floor((totalItemsCount - num) / epsPerPage);
+          const targetPage =
+            1 + Math.floor((totalItemsCount - num) / epsPerPage);
           const safePage = Math.max(1, Math.min(totalPages, targetPage));
           if (safePage !== itemsPage) {
             fetchItems(safePage);
@@ -340,15 +364,26 @@ export default function InfoView({
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [episodeSearchQuery, totalPages, totalItemsCount, details, detectedPageSize, itemsPage]);
+  }, [
+    episodeSearchQuery,
+    totalPages,
+    totalItemsCount,
+    details,
+    detectedPageSize,
+    itemsPage,
+  ]);
 
   // Calculate next episode/chapter number and progress
-  const maxEpNumber = episodesOrChapters.length > 0
-    ? Math.max(...episodesOrChapters.map(item => Number(item.number) || 0))
-    : 0;
+  const maxEpNumber =
+    episodesOrChapters.length > 0
+      ? Math.max(...episodesOrChapters.map((item) => Number(item.number) || 0))
+      : 0;
 
-  const localNext = historyProgress?.suggestedNumber || historyProgress?.lastProgress?.number || 0;
-  const malNext = (details?.malid && malWatched) ? Number(malWatched) + 1 : 0;
+  const localNext =
+    historyProgress?.suggestedNumber ||
+    historyProgress?.lastProgress?.number ||
+    0;
+  const malNext = details?.malid && malWatched ? Number(malWatched) + 1 : 0;
 
   let nextToPlay = 1;
   let hasAnyProgress = false;
@@ -357,7 +392,8 @@ export default function InfoView({
     nextToPlay = Math.max(localNext, malNext);
   }
 
-  const isFinished = hasAnyProgress && maxEpNumber > 0 && nextToPlay > maxEpNumber;
+  const isFinished =
+    hasAnyProgress && maxEpNumber > 0 && nextToPlay > maxEpNumber;
 
   // Bulk Selection Helper
   const handleSelectToggle = (itemId) => {
@@ -371,9 +407,13 @@ export default function InfoView({
   };
 
   const handleSelectAll = () => {
-    const selectableItems = episodesOrChapters.filter((item) => !isItemUnavailable(item));
+    const selectableItems = episodesOrChapters.filter(
+      (item) => !isItemUnavailable(item),
+    );
     const selectableIds = selectableItems.map((item) => item.id);
-    const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedItems.has(id));
+    const allSelected =
+      selectableIds.length > 0 &&
+      selectableIds.every((id) => selectedItems.has(id));
 
     if (allSelected) {
       const nextSelected = new Set(selectedItems);
@@ -388,16 +428,23 @@ export default function InfoView({
 
   const handleContinueWatchRead = async () => {
     const targetNum = isFinished ? 1 : nextToPlay;
-    const sorted = [...episodesOrChapters].sort((a, b) => Number(a.number) - Number(b.number));
-    let targetItem = sorted.find(item => Number(item.number) === Number(targetNum));
-    
+    const sorted = [...episodesOrChapters].sort(
+      (a, b) => Number(a.number) - Number(b.number),
+    );
+    let targetItem = sorted.find(
+      (item) => Number(item.number) === Number(targetNum),
+    );
+
     if (targetItem) {
       playItem(targetItem);
     } else {
-      const isAnimePahe = details?.provider?.toLowerCase() === "animepahe" || details?.provider?.toLowerCase() === "pahe";
+      const isAnimePahe =
+        details?.provider?.toLowerCase() === "animepahe" ||
+        details?.provider?.toLowerCase() === "pahe";
       if (isAnimePahe && totalPages > 1 && totalItemsCount > 0) {
         const epsPerPage = getEpsPerPage();
-        const targetPage = 1 + Math.floor((totalItemsCount - targetNum) / epsPerPage);
+        const targetPage =
+          1 + Math.floor((totalItemsCount - targetNum) / epsPerPage);
         const safePage = Math.max(1, Math.min(totalPages, targetPage));
         setPendingPlayEpisodeNum(targetNum);
         await fetchItems(safePage);
@@ -408,14 +455,19 @@ export default function InfoView({
   };
 
   const handleStartFromBegin = () => {
-    const sorted = [...episodesOrChapters].sort((a, b) => Number(a.number) - Number(b.number));
+    const sorted = [...episodesOrChapters].sort(
+      (a, b) => Number(a.number) - Number(b.number),
+    );
     if (sorted.length > 0) {
       const targetItem = sorted[0];
       if (type === "Anime") {
         const subList = details?.DownloadedEpisodes?.sub || [];
         const dubList = details?.DownloadedEpisodes?.dub || [];
-        const isDownloadedLocal = dubSelect === 'dub' ? dubList.includes(Number(targetItem.number)) : subList.includes(Number(targetItem.number));
-        
+        const isDownloadedLocal =
+          dubSelect === "dub"
+            ? dubList.includes(Number(targetItem.number))
+            : subList.includes(Number(targetItem.number));
+
         onWatch(
           id,
           isDownloadedLocal ? targetItem.number : targetItem.id,
@@ -425,10 +477,13 @@ export default function InfoView({
           details?.DownloadedEpisodes,
           details?.title,
           details?.provider,
+          details?.image,
         );
       } else {
-        const isDownloadedLocal = (details?.DownloadedChapters || []).map(Number).includes(Number(targetItem.number));
-        
+        const isDownloadedLocal = (details?.DownloadedChapters || [])
+          .map(Number)
+          .includes(Number(targetItem.number));
+
         onRead(
           id,
           isDownloadedLocal ? targetItem.number : targetItem.id,
@@ -437,20 +492,26 @@ export default function InfoView({
           details?.DownloadedChapters,
           details?.title,
           details?.provider,
+          details?.image,
         );
       }
     }
   };
 
   const handleWatchReadLatest = () => {
-    const sorted = [...episodesOrChapters].sort((a, b) => Number(a.number) - Number(b.number));
+    const sorted = [...episodesOrChapters].sort(
+      (a, b) => Number(a.number) - Number(b.number),
+    );
     if (sorted.length > 0) {
       const targetItem = sorted[sorted.length - 1];
       if (type === "Anime") {
         const subList = details?.DownloadedEpisodes?.sub || [];
         const dubList = details?.DownloadedEpisodes?.dub || [];
-        const isDownloadedLocal = dubSelect === 'dub' ? dubList.includes(Number(targetItem.number)) : subList.includes(Number(targetItem.number));
-        
+        const isDownloadedLocal =
+          dubSelect === "dub"
+            ? dubList.includes(Number(targetItem.number))
+            : subList.includes(Number(targetItem.number));
+
         onWatch(
           id,
           isDownloadedLocal ? targetItem.number : targetItem.id,
@@ -460,10 +521,13 @@ export default function InfoView({
           details?.DownloadedEpisodes,
           details?.title,
           details?.provider,
+          details?.image,
         );
       } else {
-        const isDownloadedLocal = (details?.DownloadedChapters || []).map(Number).includes(Number(targetItem.number));
-        
+        const isDownloadedLocal = (details?.DownloadedChapters || [])
+          .map(Number)
+          .includes(Number(targetItem.number));
+
         onRead(
           id,
           isDownloadedLocal ? targetItem.number : targetItem.id,
@@ -472,6 +536,7 @@ export default function InfoView({
           details?.DownloadedChapters,
           details?.title,
           details?.provider,
+          details?.image,
         );
       }
     }
@@ -488,8 +553,12 @@ export default function InfoView({
 
       if (isAnime) {
         if (singleItem) {
-          const hasSub = singleItem.lang === "sub" || singleItem.lang === "both" || !singleItem.lang;
-          const hasDub = singleItem.lang === "dub" || singleItem.lang === "both";
+          const hasSub =
+            singleItem.lang === "sub" ||
+            singleItem.lang === "both" ||
+            !singleItem.lang;
+          const hasDub =
+            singleItem.lang === "dub" || singleItem.lang === "both";
 
           if (hasSub && hasDub) {
             const result = await Swal.fire({
@@ -560,8 +629,12 @@ export default function InfoView({
           ...(isAnime ? { subdub: chosenLang } : {}),
         };
       } else {
-        const selectedList = episodesOrChapters.filter((item) => selectedItems.has(item.id));
-        const selectedNotDownloaded = selectedList.filter((item) => !isItemFullyDownloaded(item) && !isItemUnavailable(item));
+        const selectedList = episodesOrChapters.filter((item) =>
+          selectedItems.has(item.id),
+        );
+        const selectedNotDownloaded = selectedList.filter(
+          (item) => !isItemFullyDownloaded(item) && !isItemUnavailable(item),
+        );
         const itemsToDownload = selectedNotDownloaded;
         bodyData = {
           id: id,
@@ -791,6 +864,8 @@ export default function InfoView({
           id: details.id,
           provider: details.provider,
           MalID: selectedMalId,
+          title: details.title,
+          ImageUrl: details.image,
         }),
       });
       const linkData = await linkRes.json();
@@ -1010,8 +1085,12 @@ export default function InfoView({
   // Bulk Delete Trigger
   const handleBulkDelete = async () => {
     const isAnime = type === "Anime";
-    const selectedList = episodesOrChapters.filter((item) => selectedItems.has(item.id));
-    const selectedDownloaded = selectedList.filter((item) => isItemFullyDownloaded(item));
+    const selectedList = episodesOrChapters.filter((item) =>
+      selectedItems.has(item.id),
+    );
+    const selectedDownloaded = selectedList.filter((item) =>
+      isItemFullyDownloaded(item),
+    );
     if (selectedDownloaded.length === 0) return;
 
     const numbersToDelete = selectedDownloaded.map((item) => item.number);
@@ -1093,7 +1172,8 @@ export default function InfoView({
 
   const isItemUnavailable = (item) => {
     if (type !== "Anime") return false;
-    const hasSubLang = item.lang === "sub" || item.lang === "both" || !item.lang;
+    const hasSubLang =
+      item.lang === "sub" || item.lang === "both" || !item.lang;
     const hasDubLang = item.lang === "dub" || item.lang === "both";
     if (dubSelect === "sub") {
       return !hasSubLang;
@@ -1118,12 +1198,22 @@ export default function InfoView({
     );
   }
 
-  const selectableItems = episodesOrChapters.filter((item) => !isItemUnavailable(item));
-  const allSelectableSelected = selectableItems.length > 0 && selectableItems.every((item) => selectedItems.has(item.id));
+  const selectableItems = episodesOrChapters.filter(
+    (item) => !isItemUnavailable(item),
+  );
+  const allSelectableSelected =
+    selectableItems.length > 0 &&
+    selectableItems.every((item) => selectedItems.has(item.id));
 
-  const selectedList = episodesOrChapters.filter((item) => selectedItems.has(item.id));
-  const selectedDownloaded = selectedList.filter((item) => isItemFullyDownloaded(item));
-  const selectedNotDownloaded = selectedList.filter((item) => !isItemFullyDownloaded(item) && !isItemUnavailable(item));
+  const selectedList = episodesOrChapters.filter((item) =>
+    selectedItems.has(item.id),
+  );
+  const selectedDownloaded = selectedList.filter((item) =>
+    isItemFullyDownloaded(item),
+  );
+  const selectedNotDownloaded = selectedList.filter(
+    (item) => !isItemFullyDownloaded(item) && !isItemUnavailable(item),
+  );
 
   const numToDownload = selectedNotDownloaded.length;
   const numToDelete = selectedDownloaded.length;
@@ -1173,7 +1263,9 @@ export default function InfoView({
               </span>
             ))}
             {details?.type && (
-              <span className="info-tag-meta">{details.type.toUpperCase()}</span>
+              <span className="info-tag-meta">
+                {details.type.toUpperCase()}
+              </span>
             )}
             {details?.status && (
               <span className="info-tag-status">{details.status}</span>
@@ -1202,7 +1294,7 @@ export default function InfoView({
                   value={details.provider}
                   onChange={(e) => {
                     const selectedRecord = details.linkedProviders.find(
-                      (p) => p.provider === e.target.value
+                      (p) => p.provider === e.target.value,
                     );
                     if (selectedRecord) {
                       handleProviderSwitch(selectedRecord.id, "provider");
@@ -1224,7 +1316,11 @@ export default function InfoView({
                   }}
                 >
                   {details.linkedProviders
-                    .filter((p, index, self) => self.findIndex(t => t.provider === p.provider) === index)
+                    .filter(
+                      (p, index, self) =>
+                        self.findIndex((t) => t.provider === p.provider) ===
+                        index,
+                    )
                     .map((p) => (
                       <option key={p.provider} value={p.provider}>
                         {p.provider}
@@ -1241,17 +1337,31 @@ export default function InfoView({
           <div className="actions-row">
             {/* Quick Resumption / Play Actions */}
             <div className="quick-actions-wrapper">
-              <button onClick={handleContinueWatchRead} className="btn-action-base btn-continue">
-                <Play size={16} style={{ marginRight: '6px' }} />
-                {!hasAnyProgress 
-                  ? (type === "Anime" ? "Watch from Episode 1" : "Read from Chapter 1")
+              <button
+                onClick={handleContinueWatchRead}
+                className="btn-action-base btn-continue"
+              >
+                <Play size={16} style={{ marginRight: "6px" }} />
+                {!hasAnyProgress
+                  ? type === "Anime"
+                    ? "Watch from Episode 1"
+                    : "Read from Chapter 1"
                   : isFinished
-                    ? (type === "Anime" ? "Rewatch from Episode 1" : "Rewatch from Chapter 1")
-                    : (type === "Anime" ? `Continue Watching Episode ${nextToPlay}` : `Continue Reading Chapter ${nextToPlay}`)}
+                    ? type === "Anime"
+                      ? "Rewatch from Episode 1"
+                      : "Rewatch from Chapter 1"
+                    : type === "Anime"
+                      ? `Continue Watching Episode ${nextToPlay}`
+                      : `Continue Reading Chapter ${nextToPlay}`}
               </button>
-              <button onClick={handleWatchReadLatest} className="btn-action-base btn-watch-latest">
-                <Play size={16} style={{ marginRight: '6px' }} />
-                {type === "Anime" ? "Watch Latest Episode" : "Read Latest Chapter"}
+              <button
+                onClick={handleWatchReadLatest}
+                className="btn-action-base btn-watch-latest"
+              >
+                <Play size={16} style={{ marginRight: "6px" }} />
+                {type === "Anime"
+                  ? "Watch Latest Episode"
+                  : "Read Latest Chapter"}
               </button>
             </div>
 
@@ -1416,7 +1526,9 @@ export default function InfoView({
                 <Search size={14} className="search-icon" />
                 <input
                   type="text"
-                  placeholder={type === "Anime" ? "Search episode..." : "Search chapter..."}
+                  placeholder={
+                    type === "Anime" ? "Search episode..." : "Search chapter..."
+                  }
                   value={episodeSearchQuery}
                   onChange={(e) => setEpisodeSearchQuery(e.target.value)}
                   className="search-input-box"
@@ -1435,7 +1547,9 @@ export default function InfoView({
                 onClick={() => {
                   const newOrder = sortOrder === "asc" ? "desc" : "asc";
                   setSortOrder(newOrder);
-                  const isAnimePahe = details?.provider?.toLowerCase() === "animepahe" || details?.provider?.toLowerCase() === "pahe";
+                  const isAnimePahe =
+                    details?.provider?.toLowerCase() === "animepahe" ||
+                    details?.provider?.toLowerCase() === "pahe";
                   if (isAnimePahe) {
                     if (newOrder === "asc") {
                       fetchItems(totalPages);
@@ -1461,21 +1575,28 @@ export default function InfoView({
               {/* Action buttons if online provider is available */}
               {details?.provider && details?.provider !== "local source" && (
                 <>
-                  {type === "Anime" && details?.subOrDub === "both" && episodesOrChapters.some(ep => ep.lang === "both" || ep.lang === "dub") && (
-                    <select
-                      value={dubSelect}
-                      onChange={(e) => setDubSelect(e.target.value)}
-                      className="select-val"
-                    >
-                      <option value="sub">SUB</option>
-                      <option value="dub">DUB</option>
-                    </select>
-                  )}
+                  {type === "Anime" &&
+                    details?.subOrDub === "both" &&
+                    episodesOrChapters.some(
+                      (ep) => ep.lang === "both" || ep.lang === "dub",
+                    ) && (
+                      <select
+                        value={dubSelect}
+                        onChange={(e) => setDubSelect(e.target.value)}
+                        className="select-val"
+                      >
+                        <option value="sub">SUB</option>
+                        <option value="dub">DUB</option>
+                      </select>
+                    )}
                   <button
                     onClick={handleSelectAll}
                     style={{
                       opacity: selectableItems.length === 0 ? 0.5 : 1,
-                      cursor: selectableItems.length === 0 ? "not-allowed" : "pointer"
+                      cursor:
+                        selectableItems.length === 0
+                          ? "not-allowed"
+                          : "pointer",
                     }}
                     className="btn-bulk"
                     disabled={selectableItems.length === 0}
@@ -1512,12 +1633,19 @@ export default function InfoView({
             const hasDub = isDownloaded(item.number, "dub");
             const isLocal = localMalProvider === "local";
 
-            const epStatus = type === "Anime" 
-              ? (historyProgress?.episodesStatus || []).find(h => Number(h.number) === Number(item.number))
-              : (historyProgress?.chaptersStatus || []).find(h => Number(h.number) === Number(item.number));
+            const epStatus =
+              type === "Anime"
+                ? (historyProgress?.episodesStatus || []).find(
+                    (h) => Number(h.number) === Number(item.number),
+                  )
+                : (historyProgress?.chaptersStatus || []).find(
+                    (h) => Number(h.number) === Number(item.number),
+                  );
 
-            const isMalCompleted = malWatched && Number(item.number) <= Number(malWatched);
-            const isCompleted = (epStatus && epStatus.isCompleted) || isMalCompleted;
+            const isMalCompleted =
+              malWatched && Number(item.number) <= Number(malWatched);
+            const isCompleted =
+              (epStatus && epStatus.isCompleted) || isMalCompleted;
             const isStarted = epStatus && !epStatus.isCompleted;
 
             let customBorderClass = "";
@@ -1534,7 +1662,10 @@ export default function InfoView({
               details?.provider && details?.provider !== "local source";
 
             return (
-              <div key={item.id} className={`item-card glass-panel ${customBorderClass}`}>
+              <div
+                key={item.id}
+                className={`item-card glass-panel ${customBorderClass}`}
+              >
                 <div
                   style={{
                     display: "flex",
@@ -1550,7 +1681,9 @@ export default function InfoView({
                       disabled={isItemUnavailable(item)}
                       onChange={() => handleSelectToggle(item.id)}
                       style={{
-                        cursor: isItemUnavailable(item) ? "not-allowed" : "pointer",
+                        cursor: isItemUnavailable(item)
+                          ? "not-allowed"
+                          : "pointer",
                         width: "18px",
                         height: "18px",
                         opacity: isItemUnavailable(item) ? 0.4 : 1,
@@ -1587,6 +1720,7 @@ export default function InfoView({
                                 details?.DownloadedEpisodes,
                                 details?.title,
                                 details?.provider,
+                                details?.image,
                               )
                             }
                             className="btn-play"
@@ -1618,6 +1752,7 @@ export default function InfoView({
                                 details?.DownloadedEpisodes,
                                 details?.title,
                                 details?.provider,
+                                details?.image,
                               )
                             }
                             className="btn-stream"
@@ -1644,6 +1779,7 @@ export default function InfoView({
                                 details?.DownloadedEpisodes,
                                 details?.title,
                                 details?.provider,
+                                details?.image,
                               )
                             }
                             className="btn-play"
@@ -1675,6 +1811,7 @@ export default function InfoView({
                                 details?.DownloadedEpisodes,
                                 details?.title,
                                 details?.provider,
+                                details?.image,
                               )
                             }
                             className="btn-stream"
@@ -1691,16 +1828,25 @@ export default function InfoView({
                         <div className="badge-and-action">
                           <span className="badge-manga">Downloaded</span>
                           <button
-                            onClick={() => onRead(id, item.number, true, sortedItems, details?.DownloadedChapters, details?.title, details?.provider)}
+                            onClick={() =>
+                              onRead(
+                                id,
+                                item.number,
+                                true,
+                                sortedItems,
+                                details?.DownloadedChapters,
+                                details?.title,
+                                details?.provider,
+                                details?.image,
+                              )
+                            }
                             className="btn-read"
                           >
                             <BookOpen size={18} />
                           </button>
                           {isLocal && (
                             <button
-                              onClick={() =>
-                                handleDeleteChapter(item.number)
-                              }
+                              onClick={() => handleDeleteChapter(item.number)}
                               className="btn-action-trash"
                             >
                               <Trash2 size={18} />
@@ -1710,7 +1856,18 @@ export default function InfoView({
                       ) : (
                         showOnlineActions && (
                           <button
-                            onClick={() => onRead(id, item.id, false, sortedItems, details?.DownloadedChapters, details?.title, details?.provider)}
+                            onClick={() =>
+                              onRead(
+                                id,
+                                item.id,
+                                false,
+                                sortedItems,
+                                details?.DownloadedChapters,
+                                details?.title,
+                                details?.provider,
+                                details?.image,
+                              )
+                            }
                             className="btn-stream"
                           >
                             <span>Read Online</span>
@@ -1721,15 +1878,21 @@ export default function InfoView({
                   )}
 
                   {/* Single Download button */}
-                  {showOnlineActions && !isItemFullyDownloaded(item) && !isItemUnavailable(item) && (
-                    <button
-                      onClick={() => handleDownload(item)}
-                      className="btn-single-dl"
-                      title={type === "Anime" ? "Download Episode" : "Download Chapter"}
-                    >
-                      <Download size={18} />
-                    </button>
-                  )}
+                  {showOnlineActions &&
+                    !isItemFullyDownloaded(item) &&
+                    !isItemUnavailable(item) && (
+                      <button
+                        onClick={() => handleDownload(item)}
+                        className="btn-single-dl"
+                        title={
+                          type === "Anime"
+                            ? "Download Episode"
+                            : "Download Chapter"
+                        }
+                      >
+                        <Download size={18} />
+                      </button>
+                    )}
                 </div>
               </div>
             );
@@ -1737,15 +1900,30 @@ export default function InfoView({
         </div>
 
         {(() => {
-          const isAnimePahe = details?.provider?.toLowerCase() === "animepahe" || details?.provider?.toLowerCase() === "pahe";
-          const disableFirstPrev = isAnimePahe && sortOrder === "asc" ? itemsPage === totalPages : itemsPage === 1;
-          const disableNextLast = isAnimePahe && sortOrder === "asc" ? itemsPage === 1 : itemsPage === totalPages;
-          const firstPageTarget = isAnimePahe && sortOrder === "asc" ? totalPages : 1;
-          const lastPageTarget = isAnimePahe && sortOrder === "asc" ? 1 : totalPages;
-          const prevPageTarget = isAnimePahe && sortOrder === "asc" ? itemsPage + 1 : itemsPage - 1;
-          const nextPageTarget = isAnimePahe && sortOrder === "asc" ? itemsPage - 1 : itemsPage + 1;
+          const isAnimePahe =
+            details?.provider?.toLowerCase() === "animepahe" ||
+            details?.provider?.toLowerCase() === "pahe";
+          const disableFirstPrev =
+            isAnimePahe && sortOrder === "asc"
+              ? itemsPage === totalPages
+              : itemsPage === 1;
+          const disableNextLast =
+            isAnimePahe && sortOrder === "asc"
+              ? itemsPage === 1
+              : itemsPage === totalPages;
+          const firstPageTarget =
+            isAnimePahe && sortOrder === "asc" ? totalPages : 1;
+          const lastPageTarget =
+            isAnimePahe && sortOrder === "asc" ? 1 : totalPages;
+          const prevPageTarget =
+            isAnimePahe && sortOrder === "asc" ? itemsPage + 1 : itemsPage - 1;
+          const nextPageTarget =
+            isAnimePahe && sortOrder === "asc" ? itemsPage - 1 : itemsPage + 1;
 
-          const logicalPage = isAnimePahe && sortOrder === "asc" ? (totalPages - itemsPage + 1) : itemsPage;
+          const logicalPage =
+            isAnimePahe && sortOrder === "asc"
+              ? totalPages - itemsPage + 1
+              : itemsPage;
 
           return totalPages > 1 ? (
             <div className="pagination-controls">
@@ -1763,7 +1941,7 @@ export default function InfoView({
               >
                 Prev
               </button>
-              
+
               <span className="pagination-label">
                 Page {logicalPage} of {totalPages}
               </span>
@@ -1772,19 +1950,22 @@ export default function InfoView({
                 value={logicalPage}
                 onChange={(e) => {
                   const targetLogical = Number(e.target.value);
-                  const targetBackend = isAnimePahe && sortOrder === "asc" 
-                    ? (totalPages - targetLogical + 1) 
-                    : targetLogical;
+                  const targetBackend =
+                    isAnimePahe && sortOrder === "asc"
+                      ? totalPages - targetLogical + 1
+                      : targetLogical;
                   fetchItems(targetBackend);
                 }}
                 disabled={itemsLoading}
                 className="pagination-select"
               >
-                {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                  <option key={p} value={p}>
-                    Page {p}
-                  </option>
-                ))}
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(
+                  (p) => (
+                    <option key={p} value={p}>
+                      Page {p}
+                    </option>
+                  ),
+                )}
               </select>
 
               <button
@@ -1805,7 +1986,9 @@ export default function InfoView({
           ) : (
             itemsHasNext && (
               <button
-                onClick={() => fetchItems(itemsPage + 1, details?.provider, details, true)}
+                onClick={() =>
+                  fetchItems(itemsPage + 1, details?.provider, details, true)
+                }
                 disabled={itemsLoading}
                 className="btn-load-more"
               >
@@ -1836,15 +2019,14 @@ export default function InfoView({
                 <X size={18} />
               </button>
             </div>
-            
+
             <div className="mal-modal-search-bar">
               <input
                 type="text"
                 value={malSearchQuery}
                 onChange={(e) => setMalSearchQuery(e.target.value)}
                 onKeyDown={(e) =>
-                  e.key === "Enter" &&
-                  performMalSearch(malSearchQuery)
+                  e.key === "Enter" && performMalSearch(malSearchQuery)
                 }
                 className="mal-modal-search-input"
                 placeholder="Search MyAnimeList..."
@@ -1914,7 +2096,8 @@ export default function InfoView({
                 )
               ) : (
                 <div className="mal-modal-status-initial">
-                  Ready to search. Adjust title above if needed and click Search.
+                  Ready to search. Adjust title above if needed and click
+                  Search.
                 </div>
               )}
             </div>
