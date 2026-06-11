@@ -491,20 +491,29 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                   />
 
                   {/* Indicator badges for downloaded or watched counts */}
-                  {item.Downloaded && item.Downloaded.length > 0 && (
-                    <div className="indicator-badge">
-                      <Download size={12} style={{ marginRight: "4px" }} />
-                      {item.Downloaded.length}{" "}
-                      {type === "Anime" ? "Eps" : "Chs"}
-                    </div>
-                  )}
+                  <div className="card-badges-container">
+                    {item.Downloaded && item.Downloaded.length > 0 && (
+                      <div className="indicator-badge">
+                        <Download size={12} style={{ marginRight: "4px" }} />
+                        {item.Downloaded.length}{" "}
+                        {type === "Anime" ? "Eps" : "Chs"}
+                      </div>
+                    )}
 
-                  {item.watched !== undefined && item.watched !== null && (
-                    <div className="indicator-badge">
-                      <Eye size={12} style={{ marginRight: "4px" }} />
-                      {item.watched}/{item.totalEpisodes || "?"}
-                    </div>
-                  )}
+                    {item.nextEpisodeIn ? (
+                      <div className="indicator-badge schedule-badge" title="Next release countdown">
+                        <Film size={12} style={{ marginRight: "4px" }} />
+                        {item.nextEpisodeIn}
+                      </div>
+                    ) : (
+                      item.watched !== undefined && item.watched !== null && (
+                        <div className="indicator-badge">
+                          <Eye size={12} style={{ marginRight: "4px" }} />
+                          {item.watched}/{item.totalEpisodes || "?"}
+                        </div>
+                      )
+                    )}
+                  </div>
 
                   {/* Provider badge — bottom-right of card image */}
                   {(provider === "local" || provider === "mal") &&
@@ -519,9 +528,6 @@ export default function Catalog({ type, provider, onSelectMedia }) {
 
                 <div className="card-info">
                   <h4 className="card-title">{item.title}</h4>
-                  {item.type && (
-                    <span className="card-meta">{item.type.toUpperCase()}</span>
-                  )}
                 </div>
               </div>
             ))}

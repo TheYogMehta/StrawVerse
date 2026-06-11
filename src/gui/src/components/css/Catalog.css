@@ -201,6 +201,27 @@
   align-items: center;
 }
 
+.card-badges-container {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  z-index: 2;
+}
+
+.card-badges-container .indicator-badge {
+  position: static;
+}
+
+.indicator-badge.schedule-badge {
+  background-color: rgba(0, 0, 0, 0.75);
+  border: 1px solid rgba(52, 211, 153, 0.45);
+  color: #34d399;
+}
+
 .card-info {
   padding: 14px;
   display: flex;

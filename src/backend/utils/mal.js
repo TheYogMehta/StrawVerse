@@ -7,7 +7,7 @@ const {
   processAndSortMyMangaList,
 } = require("./Metadata");
 const verifyChallenge = require("./pkce");
-const { getKeyValue, setKeyValue, db } = require("./db");
+const { getKeyValue, setKeyValue } = require("./db");
 
 const MalAppID = "d0b22d129a541dac4d28207f77b15b5f";
 let MalAcount = null;
@@ -246,7 +246,7 @@ async function MalSyncType(type, force = false) {
   if (force || isSyncExpired || !MalMappingDate) {
     if (MalMappingDate && !force) {
       try {
-        let latestLocal = db
+        let latestLocal = global.db
           .prepare(
             `SELECT id, updated_at FROM ${tableName} ORDER BY updated_at DESC LIMIT 1`,
           )

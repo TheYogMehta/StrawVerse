@@ -60,9 +60,9 @@ const {
   FindMapping,
   getSourceById,
   MalPage,
-  db,
 } = require("./utils/Metadata");
 const { getHeaders } = require("./utils/proxyHeaders");
+const { getKeyValue, setKeyValue } = require("./utils/db");
 
 // ===================== API routes =====================
 // Get settings data
@@ -274,7 +274,8 @@ router.post("/api/settings", async (req, res) => {
 router.post("/api/logger", async (req, res) => {
   const { caption, totalSegments, currentSegments, epid } = req.body;
   try {
-    let queue = (await updateQueue(epid, totalSegments, currentSegments, caption)) ?? [];
+    let queue =
+      (await updateQueue(epid, totalSegments, currentSegments, caption)) ?? [];
 
     if (currentSegments < totalSegments) {
       global.win.webContents.send("download-logger", {
@@ -517,7 +518,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
       let localRecord = null;
       if (AnimeManga === "Anime") {
         const strippedId = id.replace(/-(dub|sub|both)$/, "");
-        localRecord = db
+        localRecord = global.db
           .prepare(
             `SELECT MalID, CustomTag, provider FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ?`,
           )
@@ -528,7 +529,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             `${strippedId}-both`,
           );
       } else {
-        localRecord = db
+        localRecord = global.db
           .prepare(`SELECT MalID, CustomTag, provider FROM Manga WHERE id = ?`)
           .get(id);
       }
@@ -544,7 +545,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
           try {
             const tableName =
               AnimeManga === "Anime" ? "MyAnimeList" : "MyMangaList";
-            let MalInfo = db
+            let MalInfo = global.db
               .prepare(`SELECT * FROM ${tableName} WHERE id = ?`)
               .get(String(data.malid));
             if (MalInfo) {
@@ -605,10 +606,64 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
       throw err;
     }
 
+    if (data && !data.malid && global.mappingDb) {
+      try {
+        const unlinkedMap = getKeyValue("Settings", "unlinked_mal_ids") || {};
+        const cleanId = id.replace(/-(dub|sub|both)$/, "");
+        if (!unlinkedMap[id] && !unlinkedMap[cleanId]) {
+          const lowerProv = (data.provider || "").toLowerCase();
+          let mappingTable = null;
+          if (lowerProv.includes("pahe")) {
+            mappingTable = "animepahe";
+          } else if (lowerProv.includes("anikoto")) {
+            mappingTable = "anikototv";
+          }
+
+          if (mappingTable) {
+            let row = null;
+            if (mappingTable === "animepahe") {
+              row = global.mappingDb
+                .prepare(`SELECT malid FROM animepahe WHERE id = ? OR uuid = ?`)
+                .get(cleanId, cleanId);
+            } else {
+              row = global.mappingDb
+                .prepare(`SELECT malid FROM ${mappingTable} WHERE id = ?`)
+                .get(cleanId);
+            }
+
+            if (row && row.malid) {
+              data.malid = parseInt(row.malid);
+
+              if (global.MalLoggedIn) {
+                try {
+                  const tableName =
+                    AnimeManga === "Anime" ? "MyAnimeList" : "MyMangaList";
+                  let MalInfo = global.db
+                    .prepare(`SELECT * FROM ${tableName} WHERE id = ?`)
+                    .get(String(data.malid));
+                  if (MalInfo) {
+                    data.watched =
+                      (AnimeManga === "Anime"
+                        ? MalInfo.watched
+                        : MalInfo.read) ?? 0;
+                    data.status = MalInfo.status ?? "";
+                  }
+                } catch (err) {
+                  // ignore
+                }
+              }
+            }
+          }
+        }
+      } catch (mappingErr) {
+        logger.error(`Error querying mappingDb: ${mappingErr.message}`);
+      }
+    }
+
     // Resolve alternative provider mappings linked to the same MAL ID
     if (data && data.malid) {
       try {
-        const linkedRecords = db
+        const linkedRecords = global.db
           .prepare(
             `SELECT id, provider, title, folder_name FROM ${AnimeManga} WHERE MalID = ?`,
           )
@@ -625,6 +680,47 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
     }
 
     if (data) {
+      if (AnimeManga === "Anime" && data.malid) {
+        try {
+          const mappingRow = global.mappingDb
+            .prepare("SELECT livechart_id FROM anime WHERE malid = ?")
+            .get(Number(data.malid));
+
+          if (mappingRow && mappingRow.livechart_id) {
+            const livechartId = mappingRow.livechart_id;
+            const now = Math.floor(Date.now() / 1000);
+            const nextEp = global.db
+              .prepare(
+                `
+                SELECT episode, date FROM next_episodes 
+                WHERE livechart_id = ? AND date > ? 
+                ORDER BY date ASC LIMIT 1
+              `,
+              )
+              .get(livechartId, now);
+
+            if (nextEp) {
+              const diff = nextEp.date - now;
+              const minutes = Math.ceil(diff / 60);
+              const hours = Math.ceil(diff / 3600);
+              const days = Math.ceil(diff / (24 * 3600));
+
+              if (days > 0) {
+                data.nextEpisodeIn = `Ep ${nextEp.episode}: ${days} day${days > 1 ? "s" : ""}`;
+              } else if (hours > 0) {
+                data.nextEpisodeIn = `Ep ${nextEp.episode}: ${hours} hr${hours > 1 ? "s" : ""}`;
+              } else if (minutes > 0) {
+                data.nextEpisodeIn = `Ep ${nextEp.episode}: ${minutes} min${minutes > 1 ? "s" : ""}`;
+              } else {
+                data.nextEpisodeIn = `Ep ${nextEp.episode}: soon`;
+              }
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
       try {
         const localMapping = await FindMapping(
           AnimeManga,
@@ -729,7 +825,7 @@ router.post("/downloads", async (req, res) => {
       if (itemWithSegments.Type === "Anime") {
         caption = `Downloading ${itemWithSegments.Title} || EP ${itemWithSegments.EpNum}`;
       } else if (itemWithSegments.Type === "Manga") {
-        caption = `Downloading ${itemWithSegments.Title} || ${itemWithSegments.ChapterTitle || 'Chapter ' + itemWithSegments.EpNum}`;
+        caption = `Downloading ${itemWithSegments.Title} || ${itemWithSegments.ChapterTitle || "Chapter " + itemWithSegments.EpNum}`;
       } else {
         caption = "Downloading...";
       }
@@ -762,7 +858,7 @@ router.get("/api/download/remove", async (req, res) => {
             if (itemWithSegments.Type === "Anime") {
               caption = `Downloading ${itemWithSegments.Title} || EP ${itemWithSegments.EpNum}`;
             } else if (itemWithSegments.Type === "Manga") {
-              caption = `Downloading ${itemWithSegments.Title} || ${itemWithSegments.ChapterTitle || 'Chapter ' + itemWithSegments.EpNum}`;
+              caption = `Downloading ${itemWithSegments.Title} || ${itemWithSegments.ChapterTitle || "Chapter " + itemWithSegments.EpNum}`;
             } else {
               caption = "Downloading...";
             }
@@ -1107,7 +1203,7 @@ router.post("/api/mal/link", async (req, res) => {
     let existing = null;
     if (type === "Anime") {
       const strippedId = id.replace(/-(dub|sub|both)$/, "");
-      existing = db
+      existing = global.db
         .prepare(
           `SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
         )
@@ -1120,12 +1216,30 @@ router.post("/api/mal/link", async (req, res) => {
           strippedId,
         );
     } else {
-      existing = db
+      existing = global.db
         .prepare(`SELECT * FROM Manga WHERE id = ? OR folder_name = ?`)
         .get(id, id);
     }
 
     const resolvedMalID = MalID ? String(MalID) : null;
+
+    try {
+      const unlinkedMap = getKeyValue("Settings", "unlinked_mal_ids") || {};
+      if (!resolvedMalID) {
+        unlinkedMap[id] = true;
+        const cleanId = id.replace(/-(dub|sub|both)$/, "");
+        unlinkedMap[cleanId] = true;
+      } else {
+        if (unlinkedMap[id]) delete unlinkedMap[id];
+        const cleanId = id.replace(/-(dub|sub|both)$/, "");
+        if (unlinkedMap[cleanId]) delete unlinkedMap[cleanId];
+      }
+      setKeyValue("Settings", "unlinked_mal_ids", unlinkedMap);
+    } catch (err) {
+      logger.error(
+        `Error updating unlinked_mal_ids in /api/mal/link: ${err.message}`,
+      );
+    }
 
     if (existing) {
       const updates = ["MalID = ?", "last_updated = CURRENT_TIMESTAMP"];
@@ -1179,16 +1293,16 @@ router.post("/api/mal/link", async (req, res) => {
         params.push(finalImageUrl);
       }
       params.push(existing.id);
-      db.prepare(`UPDATE ${type} SET ${updates.join(", ")} WHERE id = ?`).run(
-        ...params,
-      );
+      global.db
+        .prepare(`UPDATE ${type} SET ${updates.join(", ")} WHERE id = ?`)
+        .run(...params);
     } else {
       // Create minimal database entry for tracking without adding it to user's library tags
       const baseFolderName = id;
 
       let folderName = baseFolderName;
       try {
-        const existingByFolder = db
+        const existingByFolder = global.db
           .prepare(`SELECT provider FROM ${type} WHERE folder_name = ?`)
           .get(baseFolderName);
         if (
@@ -1234,20 +1348,22 @@ router.post("/api/mal/link", async (req, res) => {
         }
       }
 
-      db.prepare(
-        `
+      global.db
+        .prepare(
+          `
         INSERT INTO ${type} (id, title, image, image_url, description, genres, provider, folder_name, MalID, CustomTag, last_updated)
         VALUES (?, ?, ?, ?, '', '', ?, ?, ?, '[]', CURRENT_TIMESTAMP)
       `,
-      ).run(
-        id,
-        title || "",
-        base64Image,
-        ImageUrl || "",
-        provider || "",
-        folderName,
-        resolvedMalID,
-      );
+        )
+        .run(
+          id,
+          title || "",
+          base64Image,
+          ImageUrl || "",
+          provider || "",
+          folderName,
+          resolvedMalID,
+        );
     }
 
     // Invalidate cached metadata so details reload cleanly
@@ -1287,7 +1403,7 @@ router.get("/api/local/tags/:type", async (req, res) => {
         ? ["Reading", "Plan to Read"]
         : ["Watching", "Plan to Watch"];
 
-    const rows = db
+    const rows = global.db
       .prepare(
         `SELECT CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`,
       )
@@ -1348,6 +1464,20 @@ router.post("/api/local/add", async (req, res) => {
       throw new Error("Missing type or id");
     }
 
+    if (MalID) {
+      try {
+        const unlinkedMap = getKeyValue("Settings", "unlinked_mal_ids") || {};
+        if (unlinkedMap[id]) delete unlinkedMap[id];
+        const cleanId = id.replace(/-(dub|sub|both)$/, "");
+        if (unlinkedMap[cleanId]) delete unlinkedMap[cleanId];
+        setKeyValue("Settings", "unlinked_mal_ids", unlinkedMap);
+      } catch (err) {
+        logger.error(
+          `Error updating unlinked_mal_ids in /api/local/add: ${err.message}`,
+        );
+      }
+    }
+
     const { MetadataAdd } = require("./utils/Metadata");
 
     let tagValue = "[]";
@@ -1365,7 +1495,7 @@ router.post("/api/local/add", async (req, res) => {
     let existing = null;
     if (type === "Anime") {
       const strippedId = id.replace(/-(dub|sub|both)$/, "");
-      existing = db
+      existing = global.db
         .prepare(
           `SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
         )
@@ -1378,7 +1508,7 @@ router.post("/api/local/add", async (req, res) => {
           strippedId,
         );
     } else {
-      existing = db
+      existing = global.db
         .prepare(`SELECT * FROM Manga WHERE id = ? OR folder_name = ?`)
         .get(id, id);
     }
@@ -1451,9 +1581,11 @@ router.post("/api/local/add", async (req, res) => {
       }
       if (updates.length > 0) {
         params.push(existing.id);
-        db.prepare(
-          `UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
-        ).run(...params);
+        global.db
+          .prepare(
+            `UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+          )
+          .run(...params);
       }
     } else {
       const values = {
@@ -1470,9 +1602,9 @@ router.post("/api/local/add", async (req, res) => {
       };
       await MetadataAdd(type, values);
       // Ensure MalID and CustomTag are updated since MetadataAdd inserts values dynamically
-      db.prepare(
-        `UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`,
-      ).run(MalID ? String(MalID) : "", tagValue, id);
+      global.db
+        .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
+        .run(MalID ? String(MalID) : "", tagValue, id);
     }
 
     try {
@@ -1860,7 +1992,7 @@ router.post("/api/local/remove", async (req, res) => {
 
     if (!fs.existsSync(typeDir)) {
       try {
-        const downloads = db
+        const downloads = global.db
           .prepare(`SELECT * FROM ${type} WHERE id = ?`)
           .all(id);
         if (downloads && downloads.length > 0) {
@@ -1870,7 +2002,7 @@ router.post("/api/local/remove", async (req, res) => {
           typeDir = path.join(baseDir, type, folderName);
         }
       } catch (e) {
-        // ignore db errors
+        // ignore global.db errors
       }
     }
 
@@ -1901,7 +2033,7 @@ router.post("/api/local/delete-episode", async (req, res) => {
 
     if (!fs.existsSync(typeDir)) {
       const idStripped = id.replace(/-(dub|sub|both)$/, "");
-      const downloads = db
+      const downloads = global.db
         .prepare("SELECT * FROM Anime WHERE id = ?")
         .all(`${idStripped}-${subdub}`);
       if (downloads && downloads.length > 0) {
@@ -1974,7 +2106,7 @@ router.post("/api/local/delete-multiple", async (req, res) => {
     if (!fs.existsSync(typeDir)) {
       if (type === "Anime") {
         const idStripped = id.replace(/-(dub|sub|both)$/, "");
-        const downloads = db
+        const downloads = global.db
           .prepare("SELECT * FROM Anime WHERE id = ?")
           .all(subdub ? `${idStripped}-${subdub}` : id);
         if (downloads && downloads.length > 0) {
@@ -1984,7 +2116,7 @@ router.post("/api/local/delete-multiple", async (req, res) => {
           typeDir = path.join(baseDir, "Anime", folderName);
         }
       } else {
-        const downloads = db
+        const downloads = global.db
           .prepare("SELECT * FROM Manga WHERE id = ?")
           .all(id);
         if (downloads && downloads.length > 0) {
@@ -2077,7 +2209,7 @@ async function autoTrackMAL(type, mediaId, number) {
 
     if (type === "Anime") {
       const strippedId = mediaId.replace(/-(dub|sub|both)$/, "");
-      localRecord = db
+      localRecord = global.db
         .prepare(
           `
         SELECT MalID FROM Anime 
@@ -2093,7 +2225,7 @@ async function autoTrackMAL(type, mediaId, number) {
           strippedId,
         );
     } else {
-      localRecord = db
+      localRecord = global.db
         .prepare(`SELECT MalID FROM Manga WHERE id = ? OR folder_name = ?`)
         .get(mediaId, mediaId);
     }
@@ -2104,7 +2236,7 @@ async function autoTrackMAL(type, mediaId, number) {
         const { MalAddToList } = require("./utils/mal");
         const malListTable = type === "Anime" ? "MyAnimeList" : "MyMangaList";
         const totalCol = type === "Anime" ? "totalEpisodes" : "totalChapters";
-        const malInfo = db
+        const malInfo = global.db
           .prepare(
             `SELECT status, ${totalCol} FROM ${malListTable} WHERE id = ?`,
           )
@@ -2125,13 +2257,15 @@ async function autoTrackMAL(type, mediaId, number) {
         // Update local database cache immediately
         const progressCol = type === "Anime" ? "watched" : "read";
         try {
-          db.prepare(
-            `
+          global.db
+            .prepare(
+              `
             UPDATE ${malListTable}
             SET ${progressCol} = ?, status = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
           `,
-          ).run(number, nextStatus, String(malid));
+            )
+            .run(number, nextStatus, String(malid));
         } catch (dbErr) {
           logger.error(
             `Error updating local MAL table in autoTrackMAL: ${dbErr.message}`,
@@ -2141,7 +2275,7 @@ async function autoTrackMAL(type, mediaId, number) {
         // Show native system notification
         try {
           let displayTitle = type;
-          const titleRecord = db
+          const titleRecord = global.db
             .prepare(`SELECT title FROM ${tableName} WHERE id = ?`)
             .get(mediaId);
           displayTitle = titleRecord?.title || type;
@@ -2203,7 +2337,7 @@ router.post("/api/history/update", async (req, res) => {
       let animeTitle = title;
       if (!animeTitle || animeTitle === "Anime") {
         try {
-          const localRec = db
+          const localRec = global.db
             .prepare(`SELECT title FROM Anime WHERE id = ?`)
             .get(mediaId);
           if (localRec && localRec.title) {
@@ -2225,11 +2359,11 @@ router.post("/api/history/update", async (req, res) => {
       // Sync across all sibling provider IDs linked to same MAL ID
       let siblingIds = [mediaId];
       try {
-        const localRec = db
+        const localRec = global.db
           .prepare(`SELECT MalID FROM Anime WHERE id = ?`)
           .get(mediaId);
         if (localRec && localRec.MalID) {
-          const siblings = db
+          const siblings = global.db
             .prepare(`SELECT id FROM Anime WHERE MalID = ?`)
             .all(localRec.MalID);
           siblings.forEach((s) => {
@@ -2247,7 +2381,7 @@ router.post("/api/history/update", async (req, res) => {
       queryIds = Array.from(new Set(queryIds));
 
       const placeholders = queryIds.map(() => "?").join(",");
-      let record = db
+      let record = global.db
         .prepare(
           `
         SELECT * FROM WatchHistory 
@@ -2257,7 +2391,7 @@ router.post("/api/history/update", async (req, res) => {
         .get(...queryIds, parsedNum);
 
       if (!record && animeTitle && animeTitle !== "Anime") {
-        record = db
+        record = global.db
           .prepare(
             `
           SELECT * FROM WatchHistory 
@@ -2278,43 +2412,47 @@ router.post("/api/history/update", async (req, res) => {
             ? new Date().toISOString()
             : record.completed_at;
 
-        db.prepare(
-          `
+        global.db
+          .prepare(
+            `
           UPDATE WatchHistory 
           SET anime_id = ?, anime_title = ?, current_time = ?, duration = ?, time_spent = time_spent + ?, is_completed = ?, last_watched = CURRENT_TIMESTAMP, completed_at = ?
           WHERE id = ?
         `,
-        ).run(
-          mediaId,
-          animeTitle || "Anime",
-          curTime,
-          dur,
-          tSpent,
-          nextComp,
-          compAt,
-          record.id,
-        );
+          )
+          .run(
+            mediaId,
+            animeTitle || "Anime",
+            curTime,
+            dur,
+            tSpent,
+            nextComp,
+            compAt,
+            record.id,
+          );
 
         if (record.is_completed === 0 && nextComp === 1) {
           await autoTrackMAL("Anime", mediaId, parsedNum);
         }
       } else {
         const compAt = isComp === 1 ? new Date().toISOString() : null;
-        db.prepare(
-          `
+        global.db
+          .prepare(
+            `
           INSERT INTO WatchHistory (anime_id, anime_title, episode_number, current_time, duration, time_spent, is_completed, last_watched, completed_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
         `,
-        ).run(
-          mediaId,
-          animeTitle || "Anime",
-          parsedNum,
-          curTime,
-          dur,
-          tSpent,
-          isComp,
-          compAt,
-        );
+          )
+          .run(
+            mediaId,
+            animeTitle || "Anime",
+            parsedNum,
+            curTime,
+            dur,
+            tSpent,
+            isComp,
+            compAt,
+          );
 
         if (isComp === 1) {
           await autoTrackMAL("Anime", mediaId, parsedNum);
@@ -2339,7 +2477,7 @@ router.post("/api/history/update", async (req, res) => {
       let mangaTitle = title;
       if (!mangaTitle || mangaTitle === "Manga") {
         try {
-          const localRec = db
+          const localRec = global.db
             .prepare(`SELECT title FROM Manga WHERE id = ?`)
             .get(mediaId);
           if (localRec && localRec.title) {
@@ -2361,11 +2499,11 @@ router.post("/api/history/update", async (req, res) => {
       // Sync across all sibling provider IDs linked to same MAL ID
       let siblingIds = [mediaId];
       try {
-        const localRec = db
+        const localRec = global.db
           .prepare(`SELECT MalID FROM Manga WHERE id = ?`)
           .get(mediaId);
         if (localRec && localRec.MalID) {
-          const siblings = db
+          const siblings = global.db
             .prepare(`SELECT id FROM Manga WHERE MalID = ?`)
             .all(localRec.MalID);
           siblings.forEach((s) => {
@@ -2376,7 +2514,7 @@ router.post("/api/history/update", async (req, res) => {
 
       let queryIds = Array.from(new Set(siblingIds));
       const placeholders = queryIds.map(() => "?").join(",");
-      let record = db
+      let record = global.db
         .prepare(
           `
         SELECT * FROM ReadHistory 
@@ -2386,7 +2524,7 @@ router.post("/api/history/update", async (req, res) => {
         .get(...queryIds, parsedNum);
 
       if (!record && mangaTitle && mangaTitle !== "Manga") {
-        record = db
+        record = global.db
           .prepare(
             `
           SELECT * FROM ReadHistory 
@@ -2407,43 +2545,47 @@ router.post("/api/history/update", async (req, res) => {
             ? new Date().toISOString()
             : record.completed_at;
 
-        db.prepare(
-          `
+        global.db
+          .prepare(
+            `
           UPDATE ReadHistory 
           SET manga_id = ?, manga_title = ?, current_page = ?, total_pages = ?, time_spent = time_spent + ?, is_completed = ?, last_read = CURRENT_TIMESTAMP, completed_at = ?
           WHERE id = ?
         `,
-        ).run(
-          mediaId,
-          mangaTitle || "Manga",
-          curPage,
-          totPages,
-          tSpent,
-          nextComp,
-          compAt,
-          record.id,
-        );
+          )
+          .run(
+            mediaId,
+            mangaTitle || "Manga",
+            curPage,
+            totPages,
+            tSpent,
+            nextComp,
+            compAt,
+            record.id,
+          );
 
         if (record.is_completed === 0 && nextComp === 1) {
           await autoTrackMAL("Manga", mediaId, parsedNum);
         }
       } else {
         const compAt = isComp === 1 ? new Date().toISOString() : null;
-        db.prepare(
-          `
+        global.db
+          .prepare(
+            `
           INSERT INTO ReadHistory (manga_id, manga_title, chapter_number, current_page, total_pages, time_spent, is_completed, last_read, completed_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
         `,
-        ).run(
-          mediaId,
-          mangaTitle || "Manga",
-          parsedNum,
-          curPage,
-          totPages,
-          tSpent,
-          isComp,
-          compAt,
-        );
+          )
+          .run(
+            mediaId,
+            mangaTitle || "Manga",
+            parsedNum,
+            curPage,
+            totPages,
+            tSpent,
+            isComp,
+            compAt,
+          );
 
         if (isComp === 1) {
           await autoTrackMAL("Manga", mediaId, parsedNum);
@@ -2476,7 +2618,7 @@ router.delete("/api/history/:type/:id", async (req, res) => {
   try {
     const { type, id } = req.params;
     const historyTable = type === "Anime" ? "WatchHistory" : "ReadHistory";
-    db.prepare(`DELETE FROM ${historyTable} WHERE id = ?`).run(id);
+    global.db.prepare(`DELETE FROM ${historyTable} WHERE id = ?`).run(id);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2507,12 +2649,12 @@ router.get("/api/history/progress", async (req, res) => {
       // Resolve sibling IDs from DB if linked via MalID
       let resolvedTitle = null;
       try {
-        const localRec = db
+        const localRec = global.db
           .prepare(`SELECT MalID, title FROM Anime WHERE id = ?`)
           .get(mediaId);
         if (localRec) {
           if (localRec.MalID) {
-            const siblings = db
+            const siblings = global.db
               .prepare(`SELECT id FROM Anime WHERE MalID = ?`)
               .all(localRec.MalID);
             siblings.forEach((s) => {
@@ -2534,7 +2676,7 @@ router.get("/api/history/progress", async (req, res) => {
         params.push(resolvedTitle);
       }
 
-      const history = db.prepare(sql).all(...params);
+      const history = global.db.prepare(sql).all(...params);
 
       // Sort chronological descending
       history.sort(
@@ -2570,12 +2712,12 @@ router.get("/api/history/progress", async (req, res) => {
       let queryIds = [mediaId];
       let resolvedTitle = null;
       try {
-        const localRec = db
+        const localRec = global.db
           .prepare(`SELECT MalID, title FROM Manga WHERE id = ?`)
           .get(mediaId);
         if (localRec) {
           if (localRec.MalID) {
-            const siblings = db
+            const siblings = global.db
               .prepare(`SELECT id FROM Manga WHERE MalID = ?`)
               .all(localRec.MalID);
             siblings.forEach((s) => {
@@ -2597,7 +2739,7 @@ router.get("/api/history/progress", async (req, res) => {
         params.push(resolvedTitle);
       }
 
-      const history = db.prepare(sql).all(...params);
+      const history = global.db.prepare(sql).all(...params);
       history.sort(
         (a, b) =>
           new Date(b.last_read).getTime() - new Date(a.last_read).getTime(),
@@ -2643,7 +2785,7 @@ router.get("/api/history/progress", async (req, res) => {
 // Fetch overall history statistics
 router.get("/api/history/stats", async (req, res) => {
   try {
-    const watchStats = db
+    const watchStats = global.db
       .prepare(
         `
       SELECT 
@@ -2655,7 +2797,7 @@ router.get("/api/history/stats", async (req, res) => {
       )
       .get();
 
-    const readStats = db
+    const readStats = global.db
       .prepare(
         `
       SELECT 
@@ -2685,7 +2827,7 @@ router.get("/api/history/list", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || 50);
 
-    const watchLogs = db
+    const watchLogs = global.db
       .prepare(
         `
       SELECT 
@@ -2706,7 +2848,7 @@ router.get("/api/history/list", async (req, res) => {
       )
       .all(limit);
 
-    const readLogs = db
+    const readLogs = global.db
       .prepare(
         `
       SELECT 

@@ -12,6 +12,7 @@ import {
   ArrowUpDown,
   Search,
   X,
+  Film,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import "./css/InfoView.css";
@@ -81,8 +82,10 @@ export default function InfoView({
   const [historyProgress, setHistoryProgress] = useState(null);
   const [hasProgress, setHasProgress] = useState(false);
 
-  const fetchDetails = async () => {
-    setLoading(true);
+  const fetchDetails = async (isInitial = false) => {
+    if (isInitial) {
+      setLoading(true);
+    }
     try {
       const response = await fetch(`/api/info/${type}/${localMalProvider}`, {
         method: "POST",
@@ -92,13 +95,15 @@ export default function InfoView({
       const data = await response.json();
       setDetails(data);
 
-      const isAnimePahe =
-        data?.provider?.toLowerCase() === "animepahe" ||
-        data?.provider?.toLowerCase() === "pahe";
-      if (isAnimePahe) {
-        setSortOrder("desc");
-      } else {
-        setSortOrder("asc");
+      if (isInitial) {
+        const isAnimePahe =
+          data?.provider?.toLowerCase() === "animepahe" ||
+          data?.provider?.toLowerCase() === "pahe";
+        if (isAnimePahe) {
+          setSortOrder("desc");
+        } else {
+          setSortOrder("asc");
+        }
       }
 
       if (data?.watched !== undefined) setMalWatched(data.watched);
@@ -144,11 +149,13 @@ export default function InfoView({
       }
 
       // Load first page of episodes/chapters
-      await fetchItems(1, data?.provider, data);
+      await fetchItems(isInitial ? 1 : itemsPage, data?.provider, data);
     } catch (err) {
       console.error(err);
     } finally {
-      setLoading(false);
+      if (isInitial) {
+        setLoading(false);
+      }
     }
   };
 
@@ -312,7 +319,7 @@ export default function InfoView({
   }, [propId, propLocalMalProvider]);
 
   useEffect(() => {
-    fetchDetails();
+    fetchDetails(true);
   }, [id, type, localMalProvider]);
 
   // Sync dubSelect automatically with details.subOrDub
@@ -1267,8 +1274,11 @@ export default function InfoView({
                 {details.type.toUpperCase()}
               </span>
             )}
-            {details?.status && (
-              <span className="info-tag-status">{details.status}</span>
+            {details?.nextEpisodeIn && (
+              <span className="info-tag-schedule" title="Next release countdown">
+                <Film size={12} style={{ marginRight: "4px" }} />
+                {details.nextEpisodeIn}
+              </span>
             )}
           </div>
 

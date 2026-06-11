@@ -32,6 +32,18 @@ function formatFallbackTitle(str) {
     .trim();
 }
 
+function cleanStringForMatching(s) {
+  if (!s) return "";
+  return s
+    .toLowerCase()
+    .replace(/\s+(sub|dub|both|sub\/dub)$/i, "")
+    .replace(/-(sub|dub|both)$/i, "")
+    .replace(/-[a-z0-9]{5}$/i, "")
+    .replace(/[^a-z0-9]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const VIDEO_EXTENSIONS = [
   ".mp4",
   ".mkv",
@@ -71,7 +83,7 @@ async function MetadataAdd(type, valuesToAdd) {
   if (valuesToAdd?.title && (!valuesToAdd.MalID || valuesToAdd.MalID === "")) {
     try {
       const baseTitle = valuesToAdd.title.replace(/\s+(sub|dub|both)$/i, "");
-      const match = db
+      const match = global.db
         .prepare(
           `SELECT MalID FROM ${type} WHERE (title LIKE ? OR folder_name LIKE ?) AND MalID IS NOT NULL AND MalID != '' LIMIT 1`,
         )
@@ -82,7 +94,7 @@ async function MetadataAdd(type, valuesToAdd) {
     } catch (_) {}
   }
 
-  let existingRecord = db
+  let existingRecord = global.db
     .prepare(`SELECT * FROM ${type} WHERE id = ?`)
     .get(valuesToAdd?.id);
 
@@ -126,7 +138,7 @@ async function MetadataAdd(type, valuesToAdd) {
       const baseFolderName = valuesToAdd.title.replace(/[^a-zA-Z0-9]/g, "_");
       let existingByFolder = null;
       try {
-        existingByFolder = db
+        existingByFolder = global.db
           .prepare(`SELECT provider FROM ${type} WHERE folder_name = ?`)
           .get(baseFolderName);
       } catch (_) {}
@@ -212,7 +224,7 @@ async function MetadataAdd(type, valuesToAdd) {
             /\s+(sub|dub|both)$/i,
             "",
           );
-          const match = db
+          const match = global.db
             .prepare(
               `SELECT MalID FROM ${type} WHERE (title LIKE ? OR folder_name LIKE ?) AND MalID IS NOT NULL AND MalID != '' LIMIT 1`,
             )
@@ -270,13 +282,13 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
     try {
       if (tag && tag !== "All" && tag !== "") {
         const likeTag = `%"${tag}"%`;
-        storedMetadata = db
+        storedMetadata = global.db
           .prepare(
             `SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`,
           )
           .all(tag, likeTag);
       } else {
-        storedMetadata = db
+        storedMetadata = global.db
           .prepare(`SELECT * FROM ${type} ORDER BY last_updated DESC`)
           .all();
       }
@@ -296,7 +308,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
     missingFolders.forEach((folder) => {
       if (folder) {
-        queryRun(`DELETE FROM ${type} WHERE folder_name = ?`, [folder]);
+        run(`DELETE FROM ${type} WHERE folder_name = ?`, [folder]);
       }
     });
 
@@ -346,6 +358,16 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
       });
     });
 
+    storedMetadata.forEach((entry) => {
+      if (entry.title) {
+        entry.title = entry.title
+          .replace(/\s+sub$/i, "")
+          .replace(/\s+dub$/i, "")
+          .replace(/\s+both$/i, "")
+          .replace(/\s+sub\/dub$/i, "");
+      }
+    });
+
     // Filter out pure backend links (no local folders and no custom tags)
     storedMetadata = storedMetadata.filter((entry) => {
       const folderExists = entry.folder_name
@@ -375,6 +397,58 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
       const group = malIdGroups[malId];
       const mainEntry = group[0];
 
+      let bestTitle = mainEntry.title;
+
+      try {
+        const malRow = global.db
+          .prepare("SELECT title FROM MyAnimeList WHERE id = ?")
+          .get(String(malId));
+        if (malRow && malRow.title) {
+          bestTitle = malRow.title;
+        }
+      } catch (e) {}
+
+      if (bestTitle === mainEntry.title) {
+        const cleanedFolderNames = group
+          .map((g) => cleanStringForMatching(g.folder_name || g.id))
+          .filter(Boolean);
+
+        const matchingEntry = group.find((g) => {
+          if (!g.title) return false;
+          const cleanedTitle = cleanStringForMatching(g.title);
+          return cleanedFolderNames.includes(cleanedTitle);
+        });
+
+        if (matchingEntry) {
+          bestTitle = matchingEntry.title;
+        } else {
+          for (const folderName of cleanedFolderNames) {
+            const match = group.find((g) => {
+              if (!g.title) return false;
+              const cleanedTitle = cleanStringForMatching(g.title);
+              return (
+                cleanedTitle.includes(folderName) ||
+                folderName.includes(cleanedTitle)
+              );
+            });
+            if (match) {
+              bestTitle = match.title;
+              break;
+            }
+          }
+        }
+      }
+
+      if (bestTitle) {
+        bestTitle = bestTitle
+          .replace(/\s+sub$/i, "")
+          .replace(/\s+dub$/i, "")
+          .replace(/\s+both$/i, "")
+          .replace(/\s+sub\/dub$/i, "");
+      }
+
+      mainEntry.title = bestTitle;
+
       mainEntry.linkedProviders = group.map((g) => ({
         id: g.id,
         provider: g.provider,
@@ -384,6 +458,217 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
       }));
 
       groupedMetadata.push(mainEntry);
+    });
+
+    const malMap = {};
+    try {
+      const tableName = type === "Anime" ? "MyAnimeList" : "MyMangaList";
+      const columns =
+        type === "Anime"
+          ? "id, totalEpisodes, watched, status"
+          : "id, totalChapters as totalEpisodes, read as watched, status";
+      const malRows = global.db
+        .prepare(`SELECT ${columns} FROM ${tableName}`)
+        .all();
+      malRows.forEach((r) => {
+        malMap[String(r.id)] = {
+          totalEpisodes: r.totalEpisodes || 0,
+          watched: r.watched || 0,
+          status: r.status || "",
+        };
+      });
+    } catch (e) {}
+
+    const siblingsMap = {};
+    if (type === "Anime") {
+      try {
+        const animeRows = global.db
+          .prepare(
+            "SELECT id, MalID FROM Anime WHERE MalID IS NOT NULL AND MalID != ''",
+          )
+          .all();
+        animeRows.forEach((r) => {
+          if (!siblingsMap[r.MalID]) {
+            siblingsMap[r.MalID] = [];
+          }
+          siblingsMap[r.MalID].push(r.id);
+        });
+      } catch (e) {}
+    }
+
+    const watchMap = {};
+    if (type === "Anime") {
+      try {
+        const watchRows = global.db
+          .prepare(
+            `
+          SELECT anime_id, COUNT(DISTINCT episode_number) as count 
+          FROM WatchHistory 
+          WHERE is_completed = 1 
+          GROUP BY anime_id
+        `,
+          )
+          .all();
+        watchRows.forEach((r) => {
+          watchMap[r.anime_id] = r.count;
+        });
+      } catch (e) {}
+    }
+
+    const mappingMap = {};
+    if (type === "Anime") {
+      try {
+        const mappingRows = global.mappingDb
+          .prepare("SELECT malid, livechart_id FROM anime")
+          .all();
+        mappingRows.forEach((r) => {
+          mappingMap[Number(r.malid)] = r.livechart_id;
+        });
+      } catch (e) {}
+    }
+
+    const upcomingMap = {};
+    const maxAiredMap = {};
+    if (type === "Anime") {
+      try {
+        const now = Math.floor(Date.now() / 1000);
+        const upcomingRows = global.db
+          .prepare(
+            `
+          SELECT livechart_id, episode, date 
+          FROM next_episodes 
+          WHERE date > ?
+        `,
+          )
+          .all(now);
+        upcomingRows.forEach((r) => {
+          if (
+            !upcomingMap[r.livechart_id] ||
+            upcomingMap[r.livechart_id].date > r.date
+          ) {
+            upcomingMap[r.livechart_id] = { episode: r.episode, date: r.date };
+          }
+        });
+
+        const maxAiredRows = global.db
+          .prepare(
+            `
+          SELECT livechart_id, MAX(episode) as max_aired 
+          FROM next_episodes 
+          WHERE date <= ? 
+          GROUP BY livechart_id
+        `,
+          )
+          .all(now);
+        maxAiredRows.forEach((r) => {
+          maxAiredMap[r.livechart_id] = r.max_aired;
+        });
+      } catch (e) {}
+    }
+
+    groupedMetadata.forEach((item) => {
+      let totalEpisodes = 0;
+      let watchedEpisodes = 0;
+      let nextEpisodeIn = null;
+      let maxAired = null;
+      let malStatus = "";
+
+      if (item.MalID && malMap[String(item.MalID)]) {
+        const malInfo = malMap[String(item.MalID)];
+        totalEpisodes = malInfo.totalEpisodes;
+        watchedEpisodes = malInfo.watched;
+        malStatus = malInfo.status;
+      }
+
+      if (type === "Anime") {
+        const animeIds = Array.from(
+          new Set([item.id, ...(siblingsMap[item.MalID] || [])]),
+        );
+
+        let localWatched = 0;
+        animeIds.forEach((animeId) => {
+          if (watchMap[animeId]) {
+            localWatched = Math.max(localWatched, watchMap[animeId]);
+          }
+        });
+        watchedEpisodes = Math.max(watchedEpisodes, localWatched);
+
+        if (item.MalID && mappingMap[Number(item.MalID)]) {
+          const livechartId = mappingMap[Number(item.MalID)];
+
+          if (maxAiredMap[livechartId] !== undefined) {
+            maxAired = maxAiredMap[livechartId];
+          }
+
+          if (upcomingMap[livechartId]) {
+            const nextEp = upcomingMap[livechartId];
+            if (watchedEpisodes >= nextEp.episode - 1) {
+              const now = Math.floor(Date.now() / 1000);
+              const diff = nextEp.date - now;
+              const minutes = Math.ceil(diff / 60);
+              const hours = Math.ceil(diff / 3600);
+              const days = Math.ceil(diff / (24 * 3600));
+
+              if (days > 0) {
+                nextEpisodeIn = `Ep ${nextEp.episode}: ${days} day${days > 1 ? "s" : ""}`;
+              } else if (hours > 0) {
+                nextEpisodeIn = `Ep ${nextEp.episode}: ${hours} hr${hours > 1 ? "s" : ""}`;
+              } else if (minutes > 0) {
+                nextEpisodeIn = `Ep ${nextEp.episode}: ${minutes} min${minutes > 1 ? "s" : ""}`;
+              } else {
+                nextEpisodeIn = `Ep ${nextEp.episode}: soon`;
+              }
+            }
+          }
+        }
+      }
+
+      const isCompleted =
+        malStatus === "completed" ||
+        (totalEpisodes > 0 && watchedEpisodes >= totalEpisodes);
+
+      let sortWeight = 30; // Default: Plan to Watch / Not Started (watched === 0)
+
+      if (isCompleted && nextEpisodeIn === null) {
+        sortWeight = 50; // Fully Completed (move to bottom)
+      } else if (nextEpisodeIn !== null) {
+        sortWeight = 40; // Caught up / Completed but waiting for next release (nothing to watch right now)
+      } else if (watchedEpisodes > 0) {
+        if (
+          type === "Anime" &&
+          maxAired !== null &&
+          watchedEpisodes < maxAired
+        ) {
+          sortWeight = 10; // Watching with new aired episodes (priority 1)
+        } else {
+          sortWeight = 20; // Active Watching - behind or no schedule info
+        }
+      }
+
+      item.sortWeight = sortWeight;
+      item.watched = watchedEpisodes;
+      item.totalEpisodes = totalEpisodes;
+      item.nextEpisodeIn = nextEpisodeIn;
+    });
+
+    // Sort storedMetadata by weight groups, watched progress, and finally recency
+    groupedMetadata.sort((a, b) => {
+      if (a.sortWeight !== b.sortWeight) {
+        return a.sortWeight - b.sortWeight;
+      }
+      if (
+        a.sortWeight === 10 ||
+        a.sortWeight === 20 ||
+        a.sortWeight === 30 ||
+        a.sortWeight === 40
+      ) {
+        if (b.watched !== a.watched) {
+          return b.watched - a.watched;
+        }
+      }
+      const timeA = a.last_updated ? new Date(a.last_updated).getTime() : 0;
+      const timeB = b.last_updated ? new Date(b.last_updated).getTime() : 0;
+      return timeB - timeA;
     });
 
     storedMetadata = groupedMetadata;
@@ -411,7 +696,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
         (!metadata.CustomTag || metadata.CustomTag === "") &&
         (!metadata.MalID || metadata.MalID === "")
       ) {
-        queryRun(`DELETE FROM ${type} WHERE id = ?`, [metadata.id]);
+        run(`DELETE FROM ${type} WHERE id = ?`, [metadata.id]);
         continue;
       }
 
@@ -448,9 +733,16 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
         }
       }
 
+      let totalEpisodes = metadata.totalEpisodes || 0;
+      let watchedEpisodes = metadata.watched || 0;
+      let nextEpisodeIn = metadata.nextEpisodeIn || null;
+
       updatedMetadata.push({
         ...metadata,
         Downloaded: content,
+        totalEpisodes: totalEpisodes,
+        watched: watchedEpisodes,
+        nextEpisodeIn: nextEpisodeIn,
       });
     }
 
@@ -544,7 +836,10 @@ async function getSourceById(type, baseDir, id, number, subdub) {
 
     if (malId) {
       try {
-        const linked = queryAll(`SELECT folder_name, subOrDub FROM ${type} WHERE MalID = ?`, [String(malId)]);
+        const linked = queryAll(
+          `SELECT folder_name, subOrDub FROM ${type} WHERE MalID = ?`,
+          [String(malId)],
+        );
 
         if (subdub) {
           linked.forEach((r) => {
@@ -655,7 +950,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             id,
             `${id}-sub`,
             `${id}-dub`,
-          ]
+          ],
         );
 
         data.CustomTag = FoundRow?.CustomTag || "";
@@ -668,7 +963,9 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
         // if mal id find in list if it exists
         if (data.malid && global.MalLoggedIn) {
-          let MalInfo = queryOne(`SELECT * FROM MyAnimeList WHERE id = ?`, [String(data.malid)]);
+          let MalInfo = queryOne(`SELECT * FROM MyAnimeList WHERE id = ?`, [
+            String(data.malid),
+          ]);
 
           data = {
             ...data,
@@ -691,7 +988,9 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
       try {
         let Downloads = [];
         if (data.malid) {
-          Downloads = queryAll("SELECT * FROM Anime WHERE MalID = ?", [String(data.malid)]);
+          Downloads = queryAll("SELECT * FROM Anime WHERE MalID = ?", [
+            String(data.malid),
+          ]);
         }
         if (Downloads.length === 0) {
           Downloads = queryAll(
@@ -705,7 +1004,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
               id,
               `${id}-sub`,
               `${id}-dub`,
-            ]
+            ],
           );
         }
 
@@ -797,13 +1096,18 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         let downloadsList = [];
         let malIdToUse = malid;
 
-        const mainRecord = queryOne("SELECT * FROM Manga WHERE id = ? or folder_name = ?", [AnimeMangaid, AnimeMangaid]);
+        const mainRecord = queryOne(
+          "SELECT * FROM Manga WHERE id = ? or folder_name = ?",
+          [AnimeMangaid, AnimeMangaid],
+        );
         if (mainRecord) {
           malIdToUse = mainRecord.MalID || malIdToUse;
         }
 
         if (malIdToUse) {
-          downloadsList = queryAll("SELECT * FROM Manga WHERE MalID = ?", [String(malIdToUse)]);
+          downloadsList = queryAll("SELECT * FROM Manga WHERE MalID = ?", [
+            String(malIdToUse),
+          ]);
         }
         if (downloadsList.length === 0 && mainRecord) {
           downloadsList = [mainRecord];
@@ -829,7 +1133,9 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
           if (data.malid && global.MalLoggedIn) {
             try {
-              let MalInfo = queryOne(`SELECT * FROM MyMangaList WHERE id = ?`, [String(data.malid)]);
+              let MalInfo = queryOne(`SELECT * FROM MyMangaList WHERE id = ?`, [
+                String(data.malid),
+              ]);
               if (MalInfo) {
                 data = {
                   ...data,
@@ -897,10 +1203,8 @@ async function MalEpMap(data = []) {
     const ids = data.map((entry) => entry.id.toString());
 
     const existingEntries = queryAll(
-      `SELECT * FROM MyAnimeList WHERE id IN (${ids
-        .map(() => "?")
-        .join(",")})`,
-      ids
+      `SELECT * FROM MyAnimeList WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
     );
 
     const existingMap = new Map(
@@ -967,7 +1271,9 @@ async function MalEpMap(data = []) {
 // Mal Sort
 async function processAndSortMyAnimeList() {
   try {
-    let animeList = queryAll(`SELECT * FROM MyAnimeList WHERE status = 'watching'`);
+    let animeList = queryAll(
+      `SELECT * FROM MyAnimeList WHERE status = 'watching'`,
+    );
     if (animeList.length === 0) return;
 
     // Sort by updated_at descending (latest first)
@@ -1015,10 +1321,13 @@ async function MalPage(type = "Anime", provider_name, page = 1) {
        AND sortOrder > 0 
        ORDER BY sortOrder 
        LIMIT ? OFFSET ?`,
-      [statusVal, limit, offset]
+      [statusVal, limit, offset],
     );
 
-    let totalRecords = queryOne(`SELECT COUNT(*) AS total FROM ${tableName} WHERE status = ?`, [statusVal])?.total || 0;
+    let totalRecords =
+      queryOne(`SELECT COUNT(*) AS total FROM ${tableName} WHERE status = ?`, [
+        statusVal,
+      ])?.total || 0;
 
     let hasNextPage = offset + limit < totalRecords;
     let totalPages = Math.ceil(totalRecords / limit);
@@ -1032,7 +1341,7 @@ async function MalPage(type = "Anime", provider_name, page = 1) {
       `SELECT MalID, id, provider FROM ${type} WHERE MalID IN (${malIds
         .map(() => "?")
         .join(",")})`,
-      malIds.map(String)
+      malIds.map(String),
     );
 
     // Get all ids from linkedItems and look up recent activity in history to determine last used
@@ -1065,7 +1374,7 @@ async function MalPage(type = "Anime", provider_name, page = 1) {
           WHERE ${idCol} IN (${placeholders}) 
           GROUP BY ${idCol}
           `,
-          queryIds
+          queryIds,
         );
 
         historyRows.forEach((row) => {
@@ -1161,7 +1470,7 @@ async function MalMangaMap(data = []) {
 
     const ids = data.map((entry) => entry.id.toString());
 
-    const existingEntries = db
+    const existingEntries = global.db
       .prepare(
         `SELECT * FROM MyMangaList WHERE id IN (${ids
           .map(() => "?")
@@ -1175,7 +1484,7 @@ async function MalMangaMap(data = []) {
 
     let NotChanged = false;
 
-    let InsertOrUpdateQuery = db.prepare(`
+    let InsertOrUpdateQuery = global.db.prepare(`
       INSERT INTO MyMangaList (id, title, image, totalChapters, read, status, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET 
@@ -1215,9 +1524,9 @@ async function MalMangaMap(data = []) {
           entry.updated_at,
         );
       }
-      db.exec("COMMIT");
+      global.db.exec("COMMIT");
     } catch (e) {
-      db.exec("ROLLBACK");
+      global.db.exec("ROLLBACK");
       throw e;
     }
 

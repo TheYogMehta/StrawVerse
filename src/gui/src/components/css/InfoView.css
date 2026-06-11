@@ -120,6 +120,18 @@
   font-weight: 700;
 }
 
+.info-tag-schedule {
+  background-color: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(52, 211, 153, 0.45);
+  color: #34d399;
+  padding: 4px 10px;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+}
+
 .info-description {
   font-size: 15px;
   line-height: 1.6;
