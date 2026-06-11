@@ -138,7 +138,11 @@ router.get("/api/version", (req, res) => {
 // Get application changelog / release notes
 router.get("/api/changelog", (req, res) => {
   try {
-    const changelogPath = path.join(__dirname, "../../CHANGELOG.md");
+    let changelogPath = path.join(__dirname, "..", "..", "CHANGELOG.md");
+    if (!fs.existsSync(changelogPath)) {
+      changelogPath = path.join(__dirname, "..", "CHANGELOG.md");
+    }
+
     if (fs.existsSync(changelogPath)) {
       const changelog = fs.readFileSync(changelogPath, "utf-8");
       res.json({ changelog });
