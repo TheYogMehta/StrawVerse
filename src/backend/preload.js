@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld("sharedStateAPI", {
   marketplace: (AnimeManga) => ipcRenderer.send("marketplace", AnimeManga),
   extensions: (TaskType, AnimeManga, ExtentionName) =>
     ipcRenderer.invoke("extensions", TaskType, AnimeManga, ExtentionName),
+  checkWhatsNew: () => ipcRenderer.invoke("check-whats-new"),
 });

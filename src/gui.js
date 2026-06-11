@@ -24,6 +24,7 @@ const { exec } = require("child_process");
 const express = require("express");
 const path = require("node:path");
 const net = require("net");
+const fs = require("fs");
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -83,6 +84,9 @@ try {
 
 //  functions
 const { logger } = require("./backend/utils/AppLogger");
+const { getKeyValue, setKeyValue } = require("./backend/utils/db");
+const { runLiveChartScheduleIfNeeded } = require("./backend/utils/LiveChart");
+
 const {
   SettingsLoad,
   patchModulePaths,
@@ -152,25 +156,20 @@ const createWindow = () => {
   );
 
   global.win.webContents.on("will-navigate", (event, url) => {
+    if (url.startsWith(`http://localhost:${global.PORT}`)) {
+      return;
+    }
     event.preventDefault();
-
-    if (
-      url.startsWith("https://myanimelist.net") ||
-      url.includes("discord.gg") ||
-      url.includes("discord.com")
-    ) {
+    if (url.startsWith("http://") || url.startsWith("https://")) {
       shell.openExternal(url);
-    } else {
-      global.win.loadURL(url);
     }
   });
 
   global.win.webContents.setWindowOpenHandler(({ url }) => {
-    if (
-      url.startsWith("https://myanimelist.net") ||
-      url.includes("discord.gg") ||
-      url.includes("discord.com")
-    ) {
+    if (url.startsWith(`http://localhost:${global.PORT}`)) {
+      return { action: "allow" };
+    }
+    if (url.startsWith("http://") || url.startsWith("https://")) {
       shell.openExternal(url);
       return { action: "deny" };
     }
@@ -184,6 +183,42 @@ const createWindow = () => {
   global.win.webContents.on("before-input-event", (event, input) => {
     if (input.control && input.key.toLowerCase() === "i") {
       event.preventDefault();
+    }
+  });
+
+  ipcMain.handle("check-whats-new", async () => {
+    try {
+      const currentSettings = getKeyValue("Settings", "config") || {};
+      const showWhatsNew = !!currentSettings.showWhatsNew;
+
+      let changelogContent = "";
+      if (showWhatsNew) {
+        let changelogPath = path.join(__dirname, "..", "CHANGELOG.md");
+        if (!fs.existsSync(changelogPath)) {
+          changelogPath = path.join(__dirname, "CHANGELOG.md");
+        }
+        if (fs.existsSync(changelogPath)) {
+          changelogContent = fs.readFileSync(changelogPath, "utf8");
+          const parts = changelogContent.split(/## \[\d+\.\d+\.\d+\][^\n]*/);
+          if (parts.length > 1) {
+            const match = changelogContent.match(
+              /## (\[\d+\.\d+\.\d+\]\s*-\s*\d{4}-\d{2}-\d{2})/,
+            );
+            const versionHeader = match ? match[1] : "What's New";
+            changelogContent = `## ${versionHeader}\n\n${parts[1].trim()}`;
+          }
+        }
+        currentSettings.showWhatsNew = false;
+        setKeyValue("Settings", "config", currentSettings);
+      }
+
+      return {
+        showWhatsNew,
+        changelog: changelogContent,
+      };
+    } catch (err) {
+      logger.error("Failed to check whats new: " + err.message);
+      return { showWhatsNew: false, changelog: "" };
     }
   });
 
@@ -283,14 +318,13 @@ app.whenReady().then(async () => {
   });
 
   await patchModulePaths();
+  await SettingsLoad();
   createWindow();
   createScrapperWindow();
   loadQueue();
-  SettingsLoad();
 
   checkForMappingUpdates()
     .then(() => {
-      const { runLiveChartScheduleIfNeeded } = require("./backend/utils/LiveChart");
       return runLiveChartScheduleIfNeeded();
     })
     .catch((err) => {

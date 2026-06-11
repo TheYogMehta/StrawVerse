@@ -13,6 +13,9 @@ export default function App() {
   const [history, setHistory] = useState([{ view: "local-anime", params: {} }]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [malLoggedIn, setMalLoggedIn] = useState(false);
+  const [whatsNewData, setWhatsNewData] = useState(null);
+  const [whatsNewVersion, setWhatsNewVersion] = useState("");
+  const [whatsNewDate, setWhatsNewDate] = useState("");
 
   const current = history[history.length - 1] || {
     view: "local-anime",
@@ -29,6 +32,137 @@ export default function App() {
     }
   };
 
+
+
+  const handleCloseWhatsNew = () => {
+    setWhatsNewData(null);
+  };
+
+  const parseInlineMarkdown = (text) => {
+    if (!text) return "";
+    const emojiRegex =
+      /[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF]/g;
+    const clean = text.replace(emojiRegex, "").trim();
+
+    const parts = [];
+    let lastIndex = 0;
+    const regex = /\[([^\]]+)\]\(([^)]+)\)|\*\*([^*]+)\*\*|`([^`]+)`/g;
+
+    let match;
+    while ((match = regex.exec(clean)) !== null) {
+      const matchIndex = match.index;
+      if (matchIndex > lastIndex) {
+        parts.push(clean.substring(lastIndex, matchIndex));
+      }
+
+      if (match[1] && match[2]) {
+        parts.push(
+          <a
+            key={`link-${matchIndex}`}
+            href={match[2]}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: "var(--accent-hover)",
+              textDecoration: "underline",
+            }}
+          >
+            {match[1]}
+          </a>,
+        );
+      } else if (match[3]) {
+        parts.push(
+          <strong
+            key={`bold-${matchIndex}`}
+            style={{ color: "#fff", fontWeight: "600" }}
+          >
+            {match[3]}
+          </strong>,
+        );
+      } else if (match[4]) {
+        parts.push(
+          <code
+            key={`code-${matchIndex}`}
+            style={{
+              background: "rgba(255, 255, 255, 0.06)",
+              padding: "2px 6px",
+              borderRadius: "4px",
+              fontFamily: "monospace",
+              fontSize: "0.9em",
+              color: "var(--accent-hover)",
+              border: "1px solid rgba(255, 255, 255, 0.04)",
+            }}
+          >
+            {match[4]}
+          </code>,
+        );
+      }
+
+      lastIndex = regex.lastIndex;
+    }
+
+    if (lastIndex < clean.length) {
+      parts.push(clean.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : clean;
+  };
+
+  const renderMarkdown = (md) => {
+    if (!md) return null;
+    const lines = md.split("\n");
+    const elements = [];
+    let currentList = [];
+    let listKey = 0;
+    const emojiRegex =
+      /[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF]/g;
+
+    lines.forEach((line, index) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("###")) {
+        if (currentList.length > 0) {
+          elements.push(<ul key={`list-${listKey++}`}>{currentList}</ul>);
+          currentList = [];
+        }
+        const title = trimmed.replace("###", "").trim();
+        elements.push(
+          <h3 key={index}>{title.replace(emojiRegex, "").trim()}</h3>,
+        );
+      } else if (trimmed.startsWith("##")) {
+        if (currentList.length > 0) {
+          elements.push(<ul key={`list-${listKey++}`}>{currentList}</ul>);
+          currentList = [];
+        }
+        const title = trimmed.replace("##", "").trim();
+        elements.push(
+          <h2 key={index}>{title.replace(emojiRegex, "").trim()}</h2>,
+        );
+      } else if (trimmed.startsWith("-") || trimmed.startsWith("*")) {
+        const cleanLine = trimmed.replace(/^[-*]\s*/, "");
+        const isIndented = line.startsWith("  ") || line.startsWith("\t");
+        currentList.push(
+          <li key={index} className={isIndented ? "nested-li" : ""}>
+            {parseInlineMarkdown(cleanLine)}
+          </li>,
+        );
+      } else if (trimmed === "") {
+        // ignore
+      } else {
+        if (currentList.length > 0) {
+          elements.push(<ul key={`list-${listKey++}`}>{currentList}</ul>);
+          currentList = [];
+        }
+        elements.push(<p key={index}>{parseInlineMarkdown(trimmed)}</p>);
+      }
+    });
+
+    if (currentList.length > 0) {
+      elements.push(<ul key={`list-${listKey++}`}>{currentList}</ul>);
+    }
+
+    return elements;
+  };
+
   // Sync basic configurations and MAL connections from server
   const syncSettings = async () => {
     try {
@@ -41,8 +175,21 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Delay settings fetch to prevent blocking the main page load on startup
-    const timer = setTimeout(() => {
+    if (window.sharedStateAPI && window.sharedStateAPI.checkWhatsNew) {
+      window.sharedStateAPI.checkWhatsNew()
+        .then((data) => {
+          if (data && data.showWhatsNew) {
+            setWhatsNewVersion(data.version || "");
+            setWhatsNewDate(data.date || "");
+            setWhatsNewData(data.changelog || "");
+          }
+        })
+        .catch((err) => {
+          console.error("Failed to check whats new info via IPC:", err);
+        });
+    }
+
+    const settingsTimer = setTimeout(() => {
       syncSettings();
     }, 2000);
 
@@ -53,8 +200,25 @@ export default function App() {
       });
     }
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(settingsTimer);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!whatsNewData) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        handleCloseWhatsNew();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [whatsNewData]);
 
   const renderActiveView = () => {
     switch (current.view) {
@@ -233,6 +397,44 @@ export default function App() {
       <main style={{ flex: 1, height: "100%", overflow: "hidden" }}>
         {renderActiveView()}
       </main>
+
+      {whatsNewData && (
+        <div className="whats-new-overlay">
+          <div className="whats-new-card">
+            <div className="whats-new-header">
+              <div className="whats-new-header-main">
+                <div className="whats-new-title-container">
+                  <h2 className="whats-new-title">What's New</h2>
+                  {whatsNewVersion && (
+                    <span className="whats-new-version-badge">
+                      v{whatsNewVersion}
+                    </span>
+                  )}
+                </div>
+                {whatsNewDate && (
+                  <span className="whats-new-date">{whatsNewDate}</span>
+                )}
+              </div>
+              <button
+                className="whats-new-close"
+                onClick={handleCloseWhatsNew}
+                aria-label="Close dialog"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="whats-new-body">{renderMarkdown(whatsNewData)}</div>
+            <div className="whats-new-footer">
+              <button
+                className="whats-new-button"
+                onClick={handleCloseWhatsNew}
+              >
+                Got it!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -239,6 +239,12 @@ async function SettingsLoad() {
             malDiscordProfile: "off",
           };
 
+    const currentVersion = app.getVersion();
+    if (!config.lastVersion || config.lastVersion !== currentVersion) {
+      config.showWhatsNew = true;
+      config.lastVersion = currentVersion;
+    }
+
     if (config.malToken != null) {
       let Tosave = await MalRefreshTokenGen(config.malToken);
       await settingupdate(Tosave);

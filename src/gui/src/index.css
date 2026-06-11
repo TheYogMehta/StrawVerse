@@ -442,3 +442,227 @@ body {
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* What's New Modal styles */
+.whats-new-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(10, 11, 14, 0.85);
+  backdrop-filter: blur(16px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: malFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.whats-new-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  width: 92vw;
+  height: 88vh;
+  max-width: 920px;
+  max-height: 680px;
+  border-radius: 12px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: whatsNewSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes whatsNewSlideUp {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.whats-new-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 20px;
+}
+
+.whats-new-header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.whats-new-title-container {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.whats-new-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: white;
+  letter-spacing: -0.01em;
+}
+
+.whats-new-version-badge {
+  background: rgba(124, 58, 237, 0.15);
+  color: var(--accent-hover);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 20px;
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  letter-spacing: 0.02em;
+}
+
+.whats-new-date {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.whats-new-close {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+  margin-top: -6px;
+  margin-right: -4px;
+  border-radius: 4px;
+  transition: var(--transition);
+}
+
+.whats-new-close:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.whats-new-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 8px;
+  color: var(--text-main);
+  line-height: 1.6;
+}
+
+.whats-new-body h3 {
+  margin-top: 28px;
+  margin-bottom: 14px;
+  color: var(--accent-hover);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.whats-new-body h3::before {
+  content: "";
+  display: inline-block;
+  width: 3px;
+  height: 12px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.whats-new-body > h3:first-of-type {
+  margin-top: 4px;
+}
+
+.whats-new-body h2 {
+  font-size: 17px;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 8px;
+}
+
+.whats-new-body ul {
+  list-style: none;
+  padding-left: 0;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.whats-new-body li {
+  position: relative;
+  padding-left: 20px;
+  font-size: 14px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.whats-new-body li::before {
+  content: "•";
+  position: absolute;
+  left: 4px;
+  color: var(--accent);
+  font-weight: bold;
+}
+
+.whats-new-body li.nested-li {
+  padding-left: 36px;
+  color: var(--text-muted);
+  opacity: 0.85;
+  font-size: 13.5px;
+}
+
+.whats-new-body li.nested-li::before {
+  content: "◦";
+  left: 20px;
+  color: var(--text-muted);
+  font-weight: normal;
+}
+
+.whats-new-body p {
+  font-size: 14px;
+  color: var(--text-main);
+  margin-bottom: 14px;
+}
+
+.whats-new-footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+}
+
+.whats-new-button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: var(--transition);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.15);
+}
+
+.whats-new-button:hover {
+  background: var(--accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.25);
+}
+
+.whats-new-button:active {
+  transform: translateY(0);
+}
+
+
