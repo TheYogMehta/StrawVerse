@@ -3,7 +3,7 @@ const { logger } = require("./AppLogger");
 const axios = require("axios");
 const path = require("path");
 const fs = require("fs");
-const { db, tables } = require("./db");
+const { tables, exec, queryAll, queryOne, run } = require("./db");
 const { getHeaders } = require("./proxyHeaders");
 
 function sanitizeImage(imageVal) {
@@ -179,9 +179,9 @@ async function MetadataAdd(type, valuesToAdd) {
           .join(", ") + ", CURRENT_TIMESTAMP";
       const values = Object.values(filteredValues);
 
-      db.prepare(
-        `INSERT INTO ${type} (${fields}) VALUES (${placeholders})`,
-      ).run(...values);
+      global.db
+        .prepare(`INSERT INTO ${type} (${fields}) VALUES (${placeholders})`)
+        .run(...values);
     } catch (error) {
       throw new Error(`Error inserting into ${type}: ${error.message}`);
     }
@@ -196,9 +196,11 @@ async function MetadataAdd(type, valuesToAdd) {
       const defaultTag = JSON.stringify([
         type === "Manga" ? "Reading" : "Watching",
       ]);
-      db.prepare(
-        `UPDATE ${type} SET CustomTag = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
-      ).run(defaultTag, existingRecord.id);
+      global.db
+        .prepare(
+          `UPDATE ${type} SET CustomTag = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+        )
+        .run(defaultTag, existingRecord.id);
     }
 
     // Auto-update empty MalID in existing record if we have one available now
@@ -221,9 +223,11 @@ async function MetadataAdd(type, valuesToAdd) {
         } catch (_) {}
       }
       if (malIdToUpdate) {
-        db.prepare(
-          `UPDATE ${type} SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
-        ).run(String(malIdToUpdate), existingRecord.id);
+        global.db
+          .prepare(
+            `UPDATE ${type} SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+          )
+          .run(String(malIdToUpdate), existingRecord.id);
       }
     }
   }
@@ -236,10 +240,9 @@ function MetadataRemove(type, id) {
   }
 
   try {
-    db.prepare(`DELETE FROM ${type} WHERE id = ? OR folder_name = ?`).run(
-      id,
-      id,
-    );
+    global.db
+      .prepare(`DELETE FROM ${type} WHERE id = ? OR folder_name = ?`)
+      .run(id, id);
   } catch (error) {
     throw new Error(`Error deleting from ${type}: ${error.message}`);
   }
@@ -293,20 +296,20 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
     missingFolders.forEach((folder) => {
       if (folder) {
-        db.exec(`DELETE FROM ${type} WHERE folder_name = '${folder}'`);
+        queryRun(`DELETE FROM ${type} WHERE folder_name = ?`, [folder]);
       }
     });
 
     try {
       if (tag && tag !== "All" && tag !== "") {
         const likeTag = `%"${tag}"%`;
-        storedMetadata = db
+        storedMetadata = global.db
           .prepare(
             `SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`,
           )
           .all(tag, likeTag);
       } else {
-        storedMetadata = db
+        storedMetadata = global.db
           .prepare(`SELECT * FROM ${type} ORDER BY last_updated DESC`)
           .all();
       }
@@ -408,7 +411,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
         (!metadata.CustomTag || metadata.CustomTag === "") &&
         (!metadata.MalID || metadata.MalID === "")
       ) {
-        db.exec(`DELETE FROM ${type} WHERE id = '${metadata.id}'`);
+        queryRun(`DELETE FROM ${type} WHERE id = ?`, [metadata.id]);
         continue;
       }
 
@@ -469,7 +472,7 @@ async function FetchLocalProviderInfo(type, id) {
   }
 
   try {
-    const metadata = db.prepare(`SELECT * FROM ${type} WHERE id = ?`).get(id);
+    const metadata = queryOne(`SELECT * FROM ${type} WHERE id = ?`, [id]);
     if (!metadata) {
       throw new Error(`No metadata found for ID: ${id}`);
     }
@@ -503,7 +506,7 @@ async function getSourceById(type, baseDir, id, number, subdub) {
   let malId = null;
   let mainSubOrDub = null;
   try {
-    const metadata = db.prepare(`SELECT * FROM ${type} WHERE id = ?`).get(id);
+    const metadata = queryOne(`SELECT * FROM ${type} WHERE id = ?`, [id]);
     if (metadata) {
       folder_name = metadata.folder_name;
       malId = metadata.MalID;
@@ -541,9 +544,7 @@ async function getSourceById(type, baseDir, id, number, subdub) {
 
     if (malId) {
       try {
-        const linked = db
-          .prepare(`SELECT folder_name, subOrDub FROM ${type} WHERE MalID = ?`)
-          .all(String(malId));
+        const linked = queryAll(`SELECT folder_name, subOrDub FROM ${type} WHERE MalID = ?`, [String(malId)]);
 
         if (subdub) {
           linked.forEach((r) => {
@@ -643,11 +644,9 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
       let id = AnimeMangaid?.replace(/-(dub|sub|both)$/, "");
 
       try {
-        const FoundRow = db
-          .prepare(
-            "SELECT MalID, CustomTag FROM Anime WHERE id = ? or id = ? or id = ? or id = ? or folder_name = ? or folder_name = ? or folder_name = ? or folder_name = ?",
-          )
-          .get(
+        const FoundRow = queryOne(
+          "SELECT MalID, CustomTag FROM Anime WHERE id = ? or id = ? or id = ? or id = ? or folder_name = ? or folder_name = ? or folder_name = ? or folder_name = ?",
+          [
             `${id}-sub`,
             `${id}-dub`,
             `${id}-both`,
@@ -656,7 +655,8 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             id,
             `${id}-sub`,
             `${id}-dub`,
-          );
+          ]
+        );
 
         data.CustomTag = FoundRow?.CustomTag || "";
 
@@ -668,9 +668,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
         // if mal id find in list if it exists
         if (data.malid && global.MalLoggedIn) {
-          let MalInfo = db
-            .prepare(`SELECT * FROM MyAnimeList WHERE id = ?`)
-            .get(String(data.malid));
+          let MalInfo = queryOne(`SELECT * FROM MyAnimeList WHERE id = ?`, [String(data.malid)]);
 
           data = {
             ...data,
@@ -693,16 +691,12 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
       try {
         let Downloads = [];
         if (data.malid) {
-          Downloads = db
-            .prepare("SELECT * FROM Anime WHERE MalID = ?")
-            .all(String(data.malid));
+          Downloads = queryAll("SELECT * FROM Anime WHERE MalID = ?", [String(data.malid)]);
         }
         if (Downloads.length === 0) {
-          Downloads = db
-            .prepare(
-              "SELECT * FROM Anime WHERE id = ? or id = ? or id = ? or id = ? or folder_name = ? or folder_name = ? or folder_name = ? or folder_name = ?",
-            )
-            .all(
+          Downloads = queryAll(
+            "SELECT * FROM Anime WHERE id = ? or id = ? or id = ? or id = ? or folder_name = ? or folder_name = ? or folder_name = ? or folder_name = ?",
+            [
               `${id}-sub`,
               `${id}-dub`,
               `${id}-both`,
@@ -711,7 +705,8 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
               id,
               `${id}-sub`,
               `${id}-dub`,
-            );
+            ]
+          );
         }
 
         if (Downloads?.length > 0) {
@@ -802,17 +797,13 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         let downloadsList = [];
         let malIdToUse = malid;
 
-        const mainRecord = db
-          .prepare("SELECT * FROM Manga WHERE id = ? or folder_name = ?")
-          .get(AnimeMangaid, AnimeMangaid);
+        const mainRecord = queryOne("SELECT * FROM Manga WHERE id = ? or folder_name = ?", [AnimeMangaid, AnimeMangaid]);
         if (mainRecord) {
           malIdToUse = mainRecord.MalID || malIdToUse;
         }
 
         if (malIdToUse) {
-          downloadsList = db
-            .prepare("SELECT * FROM Manga WHERE MalID = ?")
-            .all(String(malIdToUse));
+          downloadsList = queryAll("SELECT * FROM Manga WHERE MalID = ?", [String(malIdToUse)]);
         }
         if (downloadsList.length === 0 && mainRecord) {
           downloadsList = [mainRecord];
@@ -838,9 +829,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
           if (data.malid && global.MalLoggedIn) {
             try {
-              let MalInfo = db
-                .prepare(`SELECT * FROM MyMangaList WHERE id = ?`)
-                .get(String(data.malid));
+              let MalInfo = queryOne(`SELECT * FROM MyMangaList WHERE id = ?`, [String(data.malid)]);
               if (MalInfo) {
                 data = {
                   ...data,
@@ -907,13 +896,12 @@ async function MalEpMap(data = []) {
 
     const ids = data.map((entry) => entry.id.toString());
 
-    const existingEntries = db
-      .prepare(
-        `SELECT * FROM MyAnimeList WHERE id IN (${ids
-          .map(() => "?")
-          .join(",")})`,
-      )
-      .all(...ids);
+    const existingEntries = queryAll(
+      `SELECT * FROM MyAnimeList WHERE id IN (${ids
+        .map(() => "?")
+        .join(",")})`,
+      ids
+    );
 
     const existingMap = new Map(
       existingEntries.map((entry) => [entry.id, entry]),
@@ -921,7 +909,7 @@ async function MalEpMap(data = []) {
 
     let NotChanged = false;
 
-    let InsertOrUpdateQuery = db.prepare(`
+    let InsertOrUpdateQuery = global.db.prepare(`
       INSERT INTO MyAnimeList (id, title, image, totalEpisodes, watched, status, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET 
@@ -933,7 +921,7 @@ async function MalEpMap(data = []) {
         updated_at = excluded.updated_at
     `);
 
-    db.exec("BEGIN");
+    global.db.exec("BEGIN");
     try {
       for (const entry of data) {
         const existing = existingMap.get(entry.id.toString());
@@ -961,9 +949,9 @@ async function MalEpMap(data = []) {
           entry.updated_at,
         );
       }
-      db.exec("COMMIT");
+      global.db.exec("COMMIT");
     } catch (e) {
-      db.exec("ROLLBACK");
+      global.db.exec("ROLLBACK");
       throw e;
     }
 
@@ -979,9 +967,7 @@ async function MalEpMap(data = []) {
 // Mal Sort
 async function processAndSortMyAnimeList() {
   try {
-    let animeList = db
-      .prepare(`SELECT * FROM MyAnimeList WHERE status = 'watching'`)
-      .all();
+    let animeList = queryAll(`SELECT * FROM MyAnimeList WHERE status = 'watching'`);
     if (animeList.length === 0) return;
 
     // Sort by updated_at descending (latest first)
@@ -991,20 +977,20 @@ async function processAndSortMyAnimeList() {
       return dateB - dateA;
     });
 
-    let updateQuery = db.prepare(`
+    let updateQuery = global.db.prepare(`
       UPDATE MyAnimeList 
       SET sortOrder = ?
       WHERE id = ?
     `);
 
-    db.exec("BEGIN");
+    global.db.exec("BEGIN");
     try {
       animeList.forEach((entry, index) => {
         updateQuery.run(index + 1, entry.id);
       });
-      db.exec("COMMIT");
+      global.db.exec("COMMIT");
     } catch (e) {
-      db.exec("ROLLBACK");
+      global.db.exec("ROLLBACK");
       throw e;
     }
 
@@ -1023,20 +1009,16 @@ async function MalPage(type = "Anime", provider_name, page = 1) {
 
     const limit = 30;
     const offset = (page - 1) * limit;
-    let list = db
-      .prepare(
-        `SELECT * FROM ${tableName} 
+    let list = queryAll(
+      `SELECT * FROM ${tableName} 
        WHERE status = ? 
        AND sortOrder > 0 
        ORDER BY sortOrder 
        LIMIT ? OFFSET ?`,
-      )
-      .all(statusVal, limit, offset);
+      [statusVal, limit, offset]
+    );
 
-    let totalRecords =
-      db
-        .prepare(`SELECT COUNT(*) AS total FROM ${tableName} WHERE status = ?`)
-        .get(statusVal)?.total || 0;
+    let totalRecords = queryOne(`SELECT COUNT(*) AS total FROM ${tableName} WHERE status = ?`, [statusVal])?.total || 0;
 
     let hasNextPage = offset + limit < totalRecords;
     let totalPages = Math.ceil(totalRecords / limit);
@@ -1046,13 +1028,12 @@ async function MalPage(type = "Anime", provider_name, page = 1) {
     let malIds = list.map((item) => item.id);
 
     // Find all linked local entries for these MAL IDs
-    let linkedItems = db
-      .prepare(
-        `SELECT MalID, id, provider FROM ${type} WHERE MalID IN (${malIds
-          .map(() => "?")
-          .join(",")})`,
-      )
-      .all(...malIds.map(String));
+    let linkedItems = queryAll(
+      `SELECT MalID, id, provider FROM ${type} WHERE MalID IN (${malIds
+        .map(() => "?")
+        .join(",")})`,
+      malIds.map(String)
+    );
 
     // Get all ids from linkedItems and look up recent activity in history to determine last used
     const linkedIds = linkedItems.map((m) => m.id);
@@ -1077,16 +1058,15 @@ async function MalPage(type = "Anime", provider_name, page = 1) {
 
       const placeholders = queryIds.map(() => "?").join(",");
       try {
-        const historyRows = db
-          .prepare(
-            `
+        const historyRows = queryAll(
+          `
           SELECT ${idCol}, MAX(${dateCol}) as max_date 
           FROM ${historyTable} 
           WHERE ${idCol} IN (${placeholders}) 
           GROUP BY ${idCol}
-        `,
-          )
-          .all(...queryIds);
+          `,
+          queryIds
+        );
 
         historyRows.forEach((row) => {
           recentHistoryMap[row[idCol]] = new Date(row.max_date).getTime();
@@ -1253,7 +1233,7 @@ async function MalMangaMap(data = []) {
 // Manga Sort
 async function processAndSortMyMangaList() {
   try {
-    let mangaList = db
+    let mangaList = global.db
       .prepare(`SELECT * FROM MyMangaList WHERE status = 'reading'`)
       .all();
     if (mangaList.length === 0) return;
@@ -1265,20 +1245,20 @@ async function processAndSortMyMangaList() {
       return dateB - dateA;
     });
 
-    let updateQuery = db.prepare(`
+    let updateQuery = global.db.prepare(`
       UPDATE MyMangaList 
       SET sortOrder = ?
       WHERE id = ?
     `);
 
-    db.exec("BEGIN");
+    global.db.exec("BEGIN");
     try {
       mangaList.forEach((entry, index) => {
         updateQuery.run(index + 1, entry.id);
       });
-      db.exec("COMMIT");
+      global.db.exec("COMMIT");
     } catch (e) {
-      db.exec("ROLLBACK");
+      global.db.exec("ROLLBACK");
       throw e;
     }
 
@@ -1300,7 +1280,6 @@ module.exports = {
   FetchLocalProviderInfo,
   MalMangaMap,
   processAndSortMyMangaList,
-  db,
   sanitizeImage,
   formatFallbackTitle,
 };

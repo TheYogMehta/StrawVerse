@@ -97,6 +97,7 @@ const {
 } = require("./backend/utils/scrapper");
 const { getHeaders } = require("./backend/utils/proxyHeaders");
 const { registerSharedStateHandlers } = require("./backend/sharedState");
+const { checkForMappingUpdates } = require("./backend/utils/mappingUpdater");
 
 // Express Server
 const routes = require("./backend/routes");
@@ -286,6 +287,18 @@ app.whenReady().then(async () => {
   createScrapperWindow();
   loadQueue();
   SettingsLoad();
+
+  checkForMappingUpdates()
+    .then(() => {
+      const { runLiveChartScheduleIfNeeded } = require("./backend/utils/LiveChart");
+      return runLiveChartScheduleIfNeeded();
+    })
+    .catch((err) => {
+      logger.error(
+        `[databaseUpdater] Error during startup database updates: ${err.message}`,
+      );
+    });
+
   await loadAllScrapers();
   globalShortcut.register("CommandOrControl+Shift+I", () => {});
   app.on("activate", () => {

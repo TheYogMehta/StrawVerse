@@ -5,7 +5,7 @@ const net = require("net");
 const RPC = require("discord-rpc");
 const settingsDb = require("./db");
 const pkg = require("../../package.json");
-const { db, getKeyValue } = require("./db");
+const { getKeyValue } = require("./db");
 const { logger } = require("./AppLogger");
 
 const clientId = "1372260492982358016";
@@ -442,9 +442,9 @@ async function resolveAndUploadToCatbox(imageUrl, mediaId, type) {
               params.push(base64Image);
             }
             params.push(localRec.id);
-            db.prepare(
-              `UPDATE ${table} SET ${updates.join(", ")} WHERE id = ?`,
-            ).run(...params);
+            global.db
+              .prepare(`UPDATE ${table} SET ${updates.join(", ")} WHERE id = ?`)
+              .run(...params);
           }
         } catch (dbErr) {
           // ignore
@@ -506,7 +506,7 @@ async function uploadToCatbox(imageBuffer) {
 function getCachedCatboxUrl(originalUrl) {
   if (!originalUrl || typeof originalUrl !== "string") return null;
   try {
-    const row = db
+    const row = global.db
       .prepare(
         "SELECT catbox_url, created_at FROM CatboxCache WHERE original_url = ?",
       )
@@ -516,9 +516,9 @@ function getCachedCatboxUrl(originalUrl) {
     const oneHourMs = 3600000;
     if (!row.created_at || Date.now() - row.created_at > oneHourMs) {
       try {
-        db.prepare("DELETE FROM CatboxCache WHERE original_url = ?").run(
-          originalUrl,
-        );
+        global.db
+          .prepare("DELETE FROM CatboxCache WHERE original_url = ?")
+          .run(originalUrl);
       } catch (err) {
         // ignore
       }
@@ -533,9 +533,11 @@ function getCachedCatboxUrl(originalUrl) {
 function setCachedCatboxUrl(originalUrl, catboxUrl) {
   if (!originalUrl || !catboxUrl) return;
   try {
-    db.prepare(
-      "INSERT INTO CatboxCache (original_url, catbox_url, created_at) VALUES (?, ?, ?) ON CONFLICT(original_url) DO UPDATE SET catbox_url = excluded.catbox_url, created_at = excluded.created_at",
-    ).run(originalUrl, catboxUrl, Date.now());
+    global.db
+      .prepare(
+        "INSERT INTO CatboxCache (original_url, catbox_url, created_at) VALUES (?, ?, ?) ON CONFLICT(original_url) DO UPDATE SET catbox_url = excluded.catbox_url, created_at = excluded.created_at",
+      )
+      .run(originalUrl, catboxUrl, Date.now());
   } catch (err) {
     // ignore
   }

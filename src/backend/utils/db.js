@@ -7,22 +7,8 @@ const { logger } = require("./AppLogger");
 // database create [ gets created in /user/your_name/AppData/Roaming ]
 const userDataPath = app.getPath("userData");
 
-const oldDbPath = path.join(userDataPath, "metadata.db");
-const dbPath = path.join(userDataPath, "database.db");
-
-if (fs.existsSync(oldDbPath) && !fs.existsSync(dbPath)) {
-  try {
-    fs.copyFileSync(oldDbPath, dbPath);
-    logger.info("Migrated SQLite database from metadata.db to database.db");
-    fs.renameSync(oldDbPath, oldDbPath + ".bak");
-  } catch (err) {
-    logger.error(
-      `Failed to migrate metadata.db to database.db: ${err.message}`,
-    );
-  }
-}
-
-const db = new DatabaseSync(dbPath);
+global.db = new DatabaseSync(path.join(userDataPath, "database.db"));
+global.mappingDb = new DatabaseSync(path.join(userDataPath, "mapping.db"));
 
 const tables = {
   Anime: {
@@ -130,11 +116,16 @@ const tables = {
     catbox_url: "TEXT",
     created_at: "INTEGER",
   },
+  next_episodes: {
+    livechart_id: "TEXT",
+    episode: "INTEGER",
+    date: "INTEGER",
+  },
 };
 
 function getKeyValue(tableName, key) {
   try {
-    const row = db
+    const row = global.db
       .prepare(`SELECT value FROM ${tableName} WHERE key = ?`)
       .get(key);
     return row ? JSON.parse(row.value) : null;
@@ -145,9 +136,11 @@ function getKeyValue(tableName, key) {
 
 function setKeyValue(tableName, key, value) {
   try {
-    db.prepare(
-      `INSERT INTO ${tableName} (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    ).run(key, JSON.stringify(value));
+    global.db
+      .prepare(
+        `INSERT INTO ${tableName} (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(key, JSON.stringify(value));
   } catch (e) {
     logger.error(
       `Error writing key ${key} to SQLite table ${tableName}: ${e.message}`,
@@ -157,7 +150,7 @@ function setKeyValue(tableName, key, value) {
 
 function queryAll(sql, params = []) {
   try {
-    return db.prepare(sql).all(...params);
+    return global.db.prepare(sql).all(...params);
   } catch (e) {
     logger.error(`Database queryAll error on "${sql}": ${e.message}`);
     throw e;
@@ -166,7 +159,7 @@ function queryAll(sql, params = []) {
 
 function queryOne(sql, params = []) {
   try {
-    return db.prepare(sql).get(...params);
+    return global.db.prepare(sql).get(...params);
   } catch (e) {
     logger.error(`Database queryOne error on "${sql}": ${e.message}`);
     throw e;
@@ -175,7 +168,7 @@ function queryOne(sql, params = []) {
 
 function run(sql, params = []) {
   try {
-    return db.prepare(sql).run(...params);
+    return global.db.prepare(sql).run(...params);
   } catch (e) {
     logger.error(`Database run error on "${sql}": ${e.message}`);
     throw e;
@@ -184,7 +177,7 @@ function run(sql, params = []) {
 
 function exec(sql) {
   try {
-    return db.exec(sql);
+    return global.db.exec(sql);
   } catch (e) {
     logger.error(`Database exec error on "${sql}": ${e.message}`);
     throw e;
@@ -193,7 +186,7 @@ function exec(sql) {
 
 // Drop deprecated/unused tables from user database file dynamically
 try {
-  const existingTables = db
+  const existingTables = global.db
     .prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
     )
@@ -201,7 +194,7 @@ try {
     .map((r) => r.name);
   existingTables.forEach((name) => {
     if (!tables.hasOwnProperty(name)) {
-      db.exec(`DROP TABLE IF EXISTS ${name}`);
+      global.db.exec(`DROP TABLE IF EXISTS ${name}`);
       logger.info(`Dropped deprecated table: ${name}`);
     }
   });
@@ -216,23 +209,34 @@ Object.entries(tables).forEach(([tableName, columns]) => {
     .join(", ");
 
   try {
-    db.exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnsString})`);
+    global.db.exec(
+      `CREATE TABLE IF NOT EXISTS ${tableName} (${columnsString})`,
+    );
     updateTableSchema(tableName, columns);
   } catch (error) {
     throw new Error(`Error creating table ${tableName}: ${error.message}`);
   }
 });
 
+// Create unique index for next_episodes
+try {
+  global.db.exec(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_next_episodes_id_ep ON next_episodes (livechart_id, episode)"
+  );
+} catch (e) {
+  logger.error("Failed to create unique index on next_episodes: " + e.message);
+}
+
 function updateTableSchema(tableName, expectedColumns) {
   try {
-    const existingColumns = db
+    const existingColumns = global.db
       .prepare(`PRAGMA table_info(${tableName})`)
       .all()
       .map((col) => col.name);
 
     Object.entries(expectedColumns).forEach(([col, definition]) => {
       if (!existingColumns.includes(col)) {
-        db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${col} ${definition}`);
+        global.db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${col} ${definition}`);
       }
     });
   } catch (error) {
@@ -242,41 +246,7 @@ function updateTableSchema(tableName, expectedColumns) {
   }
 }
 
-// --- Migrations from JSON files to SQLite tables ---
-if (userDataPath) {
-  const databaseJsonPath = path.join(userDataPath, "database.json");
-  if (fs.existsSync(databaseJsonPath)) {
-    try {
-      const raw = fs.readFileSync(databaseJsonPath, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.config) {
-        setKeyValue("Settings", "config", parsed.config);
-        logger.info("Migrated settings from database.json to SQLite");
-      }
-      fs.renameSync(databaseJsonPath, databaseJsonPath + ".bak");
-    } catch (err) {
-      logger.error(`Failed to migrate database.json: ${err.message}`);
-    }
-  }
-
-  const queueJsonPath = path.join(userDataPath, "queue.json");
-  if (fs.existsSync(queueJsonPath)) {
-    try {
-      const raw = fs.readFileSync(queueJsonPath, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.queue) {
-        setKeyValue("Queue", "queue", parsed.queue);
-        logger.info("Migrated queue from queue.json to SQLite");
-      }
-      fs.renameSync(queueJsonPath, queueJsonPath + ".bak");
-    } catch (err) {
-      logger.error(`Failed to migrate queue.json: ${err.message}`);
-    }
-  }
-}
-
 module.exports = {
-  db,
   tables,
   getKeyValue,
   setKeyValue,
