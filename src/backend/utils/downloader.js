@@ -5,9 +5,149 @@ const iso6391 = require("iso-639-1");
 const path = require("path");
 const got = require("got").default || require("got");
 const fs = require("fs");
+const os = require("os");
+const zlib = require("zlib");
+const stream = require("stream");
+const { promisify } = require("util");
+const { app } = require("electron");
+const crypto = require("crypto");
 const { getHeaders } = require("./proxyHeaders");
 
-const ffmpegPath = ffmpeg.replace("app.asar", "app.asar.unpacked");
+const pipeline = promisify(stream.pipeline);
+
+let resolvedFfmpegPath = null;
+
+function resolveUrl(relativeUrl, baseUrl) {
+  if (!relativeUrl) return relativeUrl;
+  try {
+    const baseObj = new URL(baseUrl);
+    const resolvedObj = new URL(relativeUrl, baseUrl);
+
+    if (!resolvedObj.search && baseObj.search) {
+      resolvedObj.search = baseObj.search;
+    }
+    return resolvedObj.href;
+  } catch (e) {
+    return relativeUrl;
+  }
+}
+
+function stripPngHeader(buffer) {
+  if (!buffer || buffer.length < 8) return buffer;
+
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47 &&
+    buffer[4] === 0x0d &&
+    buffer[5] === 0x0a &&
+    buffer[6] === 0x1a &&
+    buffer[7] === 0x0a
+  ) {
+    const iendOffset = buffer.indexOf(Buffer.from([0x49, 0x45, 0x4e, 0x44]));
+    if (iendOffset !== -1 && iendOffset < 1024) {
+      return buffer.subarray(iendOffset + 8);
+    }
+  }
+  return buffer;
+}
+
+async function getFfmpegPath() {
+  if (resolvedFfmpegPath) {
+    return resolvedFfmpegPath;
+  }
+
+  const defaultPath = ffmpeg.replace("app.asar", "app.asar.unpacked");
+  if (fs.existsSync(defaultPath)) {
+    resolvedFfmpegPath = defaultPath;
+    return resolvedFfmpegPath;
+  }
+
+  let userDataDir;
+  try {
+    userDataDir = app.getPath("userData");
+  } catch (e) {
+    userDataDir = path.join(os.homedir(), ".strawverse");
+  }
+
+  const binDir = path.join(userDataDir, "bin");
+  const localFfmpegPath = path.join(
+    binDir,
+    process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
+  );
+
+  if (fs.existsSync(localFfmpegPath)) {
+    resolvedFfmpegPath = localFfmpegPath;
+    return resolvedFfmpegPath;
+  }
+
+  const isGlobalAvailable = await new Promise((resolve) => {
+    const child = spawn("ffmpeg", ["-version"], { stdio: "ignore" });
+    child.on("close", (code) => {
+      resolve(code === 0);
+    });
+    child.on("error", () => {
+      resolve(false);
+    });
+  });
+
+  if (isGlobalAvailable) {
+    logger.info(
+      "FFmpeg not found in package but found globally in system PATH.",
+    );
+    resolvedFfmpegPath = "ffmpeg";
+    return resolvedFfmpegPath;
+  }
+
+  logger.info(
+    `FFmpeg binary not found. Downloading for ${process.platform}-${process.arch}...`,
+  );
+  if (!fs.existsSync(binDir)) {
+    fs.mkdirSync(binDir, { recursive: true });
+  }
+
+  const release = "b6.1.1";
+  const platform = process.platform;
+  const arch = process.arch;
+  const supported = {
+    darwin: ["x64", "arm64"],
+    freebsd: ["x64"],
+    linux: ["x64", "ia32", "arm64", "arm"],
+    win32: ["x64", "ia32"],
+  };
+
+  if (!supported[platform] || !supported[platform].includes(arch)) {
+    throw new Error(
+      `Unsupported platform/architecture for downloading FFmpeg: ${platform}-${arch}`,
+    );
+  }
+
+  const downloadUrl = `https://github.com/eugeneware/ffmpeg-static/releases/download/${release}/ffmpeg-${platform}-${arch}.gz`;
+
+  try {
+    const downloadStream = got.stream(downloadUrl);
+    const gunzip = zlib.createGunzip();
+    const writer = fs.createWriteStream(localFfmpegPath);
+
+    await pipeline(downloadStream, gunzip, writer);
+
+    fs.chmodSync(localFfmpegPath, 0o755);
+    logger.info(
+      `FFmpeg downloaded successfully and saved at ${localFfmpegPath}`,
+    );
+    resolvedFfmpegPath = localFfmpegPath;
+    return resolvedFfmpegPath;
+  } catch (err) {
+    logger.error(`Failed to download FFmpeg: ${err.message}`);
+    if (fs.existsSync(localFfmpegPath)) {
+      try {
+        fs.unlinkSync(localFfmpegPath);
+      } catch (_) {}
+    }
+    throw new Error(`FFmpeg missing and download failed: ${err.message}`);
+  }
+}
 
 class downloader {
   constructor({
@@ -108,7 +248,7 @@ class downloader {
             currentInfo = line;
           } else if (line && !line.startsWith("#")) {
             try {
-              const absoluteUrl = new URL(line, this.streamUrl).href;
+              const absoluteUrl = resolveUrl(line, this.streamUrl);
               let resolution = "";
               let bandwidth = 0;
 
@@ -140,7 +280,9 @@ class downloader {
           }
 
           if (!selectedStream) {
-            streams.sort((a, b) => b.height - a.height || b.bandwidth - a.bandwidth);
+            streams.sort(
+              (a, b) => b.height - a.height || b.bandwidth - a.bandwidth,
+            );
             selectedStream = streams[0];
           }
 
@@ -149,7 +291,8 @@ class downloader {
             headers: this.headers ?? {},
           }).text();
 
-          if (!Playlist) throw new Error("No Stream Found for selected quality!");
+          if (!Playlist)
+            throw new Error("No Stream Found for selected quality!");
         }
       }
 
@@ -175,23 +318,33 @@ class downloader {
         if (!line) continue;
 
         if (line.startsWith("#")) {
-          if (line.startsWith("#EXT-X-KEY:METHOD=AES-128")) {
-            const keyMatch = line.match(
-              /METHOD=AES-128,URI="([^"]+)"(?:,IV=([^,]+))?/,
-            );
-            if (keyMatch) {
-              let rawUri = keyMatch[1];
+          if (line.startsWith("#EXT-X-KEY:")) {
+            const params = {};
+            const attrString = line.substring("#EXT-X-KEY:".length);
+            const regex = /([A-Z0-9_-]+)=(?:"([^"]*)"|([^,]*))/g;
+            let match;
+            while ((match = regex.exec(attrString)) !== null) {
+              const key = match[1];
+              const value = match[2] !== undefined ? match[2] : match[3];
+              params[key] = value;
+            }
+
+            const method = (params.METHOD || "").toUpperCase();
+            if (method === "AES-128") {
+              let rawUri = params.URI;
               let absoluteKeyUri = rawUri;
               if (
+                rawUri &&
                 !rawUri.startsWith("http://") &&
                 !rawUri.startsWith("https://")
               ) {
-                try {
-                  absoluteKeyUri = new URL(rawUri, this.streamUrl).href;
-                } catch (e) {}
+                absoluteKeyUri = resolveUrl(rawUri, this.streamUrl);
               }
-              currentKeyUrl = absoluteKeyUri;
-              currentIv = keyMatch[2] || null;
+              currentKeyUrl = absoluteKeyUri || null;
+              currentIv = params.IV || null;
+            } else {
+              currentKeyUrl = null;
+              currentIv = null;
             }
           }
           continue;
@@ -199,26 +352,21 @@ class downloader {
 
         // It's a segment or playlist URL
         let absoluteUrl = line;
-        if (
-          !line.startsWith("http://") &&
-          !line.startsWith("https://")
-        ) {
-          try {
-            absoluteUrl = new URL(line, this.streamUrl).href;
-          } catch (e) {
-            Segments.push(line);
-            continue;
-          }
+        if (!line.startsWith("http://") && !line.startsWith("https://")) {
+          absoluteUrl = resolveUrl(line, this.streamUrl);
         }
 
         if (currentKeyUrl) {
           const segIv = currentIv || String(mediaSequence + segmentCount);
           segmentCount++;
-          const port = global.PORT || 3000;
-          const proxyUrl = `http://localhost:${port}/proxy?url=${encodeURIComponent(absoluteUrl)}&keyUrl=${encodeURIComponent(currentKeyUrl)}&iv=${encodeURIComponent(segIv)}`;
-          Segments.push(proxyUrl);
+          Segments.push({
+            url: absoluteUrl,
+            keyUrl: currentKeyUrl,
+            iv: segIv,
+            encrypted: true,
+          });
         } else {
-          Segments.push(absoluteUrl);
+          Segments.push({ url: absoluteUrl, encrypted: false });
         }
       }
 
@@ -261,6 +409,7 @@ class downloader {
       let currentIndex = 0;
       let stopDownloading = false;
       let downloadError = null;
+      let failedSegmentsCount = 0;
 
       await new Promise((resolve, reject) => {
         const startNext = async () => {
@@ -302,12 +451,52 @@ class downloader {
               let Segment = this.Segments[index];
               if (!Segment) throw new Error("[ STOPPING ] Segment Missing!");
 
-              const response = await got(Segment, {
-                headers: this.headers ?? {},
-                responseType: "buffer",
-              });
+              const segUrl =
+                typeof Segment === "object" ? Segment.url : Segment;
+              let body;
 
-              await fs.promises.writeFile(segmentFile, response.body);
+              if (typeof Segment === "object" && Segment.encrypted) {
+                if (!this._keyCache) this._keyCache = {};
+                if (!this._keyCache[Segment.keyUrl]) {
+                  const keyRes = await got(Segment.keyUrl, {
+                    headers: this.headers ?? {},
+                    responseType: "buffer",
+                  });
+                  this._keyCache[Segment.keyUrl] = keyRes.body;
+                }
+                const keyBuffer = this._keyCache[Segment.keyUrl];
+                const iv = Buffer.alloc(16);
+                if (
+                  typeof Segment.iv === "string" &&
+                  Segment.iv.startsWith("0x")
+                ) {
+                  Buffer.from(Segment.iv.slice(2), "hex").copy(iv);
+                } else {
+                  iv.writeUInt32BE(parseInt(Segment.iv, 10), 12);
+                }
+                const encRes = await got(segUrl, {
+                  headers: this.headers ?? {},
+                  responseType: "buffer",
+                });
+                const cipherText = stripPngHeader(encRes.body);
+                const decipher = crypto.createDecipheriv(
+                  "aes-128-cbc",
+                  keyBuffer,
+                  iv,
+                );
+                body = Buffer.concat([
+                  decipher.update(cipherText),
+                  decipher.final(),
+                ]);
+              } else {
+                const response = await got(segUrl, {
+                  headers: this.headers ?? {},
+                  responseType: "buffer",
+                });
+                body = stripPngHeader(response.body);
+              }
+
+              await fs.promises.writeFile(segmentFile, body);
               this.currentSegments++;
               await this.logProgress();
               activeDownloads--;
@@ -315,8 +504,13 @@ class downloader {
             } catch (err) {
               const maxRetries = 5;
               if (retryCount >= maxRetries) {
-                logger.warn(`Failed to download segment ${index} after ${maxRetries} attempts: ${err.message}. Writing empty segment to continue.`);
-                await fs.promises.writeFile(segmentFile, Buffer.alloc(0)).catch(() => {});
+                logger.warn(
+                  `Failed to download segment ${index} after ${maxRetries} attempts: ${err.message}. Writing empty segment to continue.`,
+                );
+                failedSegmentsCount++;
+                await fs.promises
+                  .writeFile(segmentFile, Buffer.alloc(0))
+                  .catch(() => {});
                 this.currentSegments++;
                 await this.logProgress();
                 activeDownloads--;
@@ -324,7 +518,9 @@ class downloader {
                 return;
               }
               const delay = Math.min(30000, 5000 * Math.pow(2, retryCount));
-              this.logProgress(`Failed To Download Segment ${index}! ( Retrying in ${delay / 1000}s )`);
+              this.logProgress(
+                `Failed To Download Segment ${index}! ( Retrying in ${delay / 1000}s )`,
+              );
               await new Promise((res) => setTimeout(res, delay));
               await downloadSegment(retryCount + 1);
             }
@@ -338,6 +534,10 @@ class downloader {
           startNext();
         }
       });
+
+      logger.info(
+        `[Download] Finished downloading segments. Total: ${this.Segments.length}, Failed/Empty: ${failedSegmentsCount}`,
+      );
 
       // Concatenate segments
       this.logProgress("Concatenating segments...");
@@ -504,11 +704,13 @@ class downloader {
     return `${h}:${m}:${s},${msStr}`;
   }
 
-  // Merge .ts to mp4
   async MergeSegments() {
     try {
+      const currentFfmpegPath = await getFfmpegPath();
       const ffmpegArgs = [
         "-y",
+        "-f",
+        "mpegts",
         "-i",
         this.SegmentsFile,
         "-c",
@@ -516,10 +718,32 @@ class downloader {
         this.mp4,
       ];
 
+      try {
+        const stats = fs.statSync(this.SegmentsFile);
+        logger.info(
+          `[Merge] Concatenated TS file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB (${stats.size} bytes)`,
+        );
+      } catch (e) {
+        logger.error(`[Merge] Failed to check TS file size: ${e.message}`);
+      }
+
       await new Promise((resolve, reject) => {
-        const child = spawn(ffmpegPath, ffmpegArgs, { stdio: "ignore" });
+        const child = spawn(currentFfmpegPath, ffmpegArgs);
+        let ffmpegOutput = "";
+
+        if (child.stdout) {
+          child.stdout.on("data", (data) => {
+            ffmpegOutput += data.toString();
+          });
+        }
+        if (child.stderr) {
+          child.stderr.on("data", (data) => {
+            ffmpegOutput += data.toString();
+          });
+        }
 
         child.on("close", (code) => {
+          logger.info(`[Merge] FFmpeg output:\n${ffmpegOutput}`);
           if (code !== 0) {
             return reject(new Error(`FFmpeg exited with code ${code}`));
           }
@@ -530,6 +754,15 @@ class downloader {
           reject(new Error(`Failed to start FFmpeg: ${err.message}`));
         });
       });
+
+      try {
+        const stats = fs.statSync(this.mp4);
+        logger.info(
+          `[Merge] Output MP4 file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB (${stats.size} bytes)`,
+        );
+      } catch (e) {
+        logger.error(`[Merge] Failed to check MP4 file size: ${e.message}`);
+      }
 
       this.currentSegments++;
       await this.logProgress();

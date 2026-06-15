@@ -17,6 +17,7 @@ const {
   ipcMain,
   protocol,
   shell,
+  session,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const bodyParser = require("body-parser");
@@ -118,6 +119,50 @@ appExpress.use(routes);
 
 registerSharedStateHandlers();
 
+function stripElectronBrands(value = "") {
+  return value
+    .replace(/,?\s*"Electron";v="[^"]+"/g, "")
+    .replace(/"Electron";v="[^"]+",?\s*/g, "");
+}
+
+function normalizeHttpOrigin(value) {
+  if (!value) return "";
+  try {
+    const url = new URL(decodeURIComponent(value));
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.origin + "/";
+  } catch (e) {
+    return "";
+  }
+}
+
+function setRefererHeaders(headers, referer) {
+  const originReferer = normalizeHttpOrigin(referer);
+  if (originReferer) {
+    headers.Referer = originReferer;
+    headers.Origin = originReferer.slice(0, -1);
+  } else if (referer) {
+    headers.Referer = referer;
+  }
+}
+
+function mergeCookie(headers, cookie) {
+  if (!cookie) return;
+  const existingCookie = headers.Cookie || headers.cookie || "";
+  if (!existingCookie) {
+    headers.Cookie = cookie;
+    return;
+  }
+  if (!existingCookie.includes("cf_clearance=")) {
+    headers.Cookie = existingCookie + "; " + cookie;
+    return;
+  }
+  headers.Cookie = existingCookie.replace(
+    /cf_clearance=[^;]+/g,
+    cookie.trim().replace(/;$/, ""),
+  );
+}
+
 const createWindow = () => {
   global.win = new BrowserWindow({
     resizable: true,
@@ -142,16 +187,131 @@ const createWindow = () => {
   nativeTheme.themeSource = "dark";
   global.win.loadURL(`http://localhost:${global.PORT}`);
 
-  global.win.webContents.session.webRequest.onBeforeSendHeaders(
+  session.defaultSession.webRequest.onBeforeSendHeaders(
     {
       urls: ["*://*/*"],
     },
     (details, callback) => {
-      const url = details.url;
-      const { Referer: referer, "User-Agent": userAgent } = getHeaders(url);
-      if (referer) details.requestHeaders["Referer"] = referer;
+      try {
+        const requestUrl = new URL(details.url);
+        if (
+          requestUrl.hostname === "localhost" &&
+          requestUrl.port === String(global.PORT)
+        ) {
+          callback({ requestHeaders: details.requestHeaders });
+          return;
+        }
+      } catch (e) {}
+
+      const {
+        Referer: referer,
+        "User-Agent": userAgent,
+        Cookie: Cookie,
+      } = getHeaders(details.url);
+      setRefererHeaders(details.requestHeaders, referer);
       if (userAgent) details.requestHeaders["User-Agent"] = userAgent;
+      mergeCookie(details.requestHeaders, Cookie);
+
+      if (details.requestHeaders["sec-ch-ua"]) {
+        details.requestHeaders["sec-ch-ua"] = stripElectronBrands(
+          details.requestHeaders["sec-ch-ua"],
+        );
+      }
+      if (details.requestHeaders["sec-ch-ua-full-version-list"]) {
+        details.requestHeaders["sec-ch-ua-full-version-list"] =
+          stripElectronBrands(
+            details.requestHeaders["sec-ch-ua-full-version-list"],
+          );
+      }
+
       callback({ requestHeaders: details.requestHeaders });
+    },
+  );
+
+  const bypassingDomains = new Set();
+  const bypassQueue = [];
+  let bypassRunning = false;
+
+  const getParentDomain = (hostname) => {
+    const parts = hostname.replace("www.", "").split(".");
+    return parts.length > 2 ? parts.slice(-2).join(".") : parts.join(".");
+  };
+
+  const runBypassQueue = async () => {
+    if (bypassRunning || bypassQueue.length === 0) return;
+    bypassRunning = true;
+    const { url, domain, referer, resolve } = bypassQueue.shift();
+    try {
+      console.log(`[WebRequest] Running CF bypass for ${domain}...`);
+      await global.cloudflarebypass(url, true, referer);
+      console.log(`[WebRequest] CF bypass completed for ${domain}`);
+    } catch (err) {
+      console.error(
+        `[WebRequest] CF bypass failed for ${domain}:`,
+        err.message,
+      );
+    } finally {
+      setTimeout(() => bypassingDomains.delete(domain), 30000);
+      bypassRunning = false;
+      if (resolve) resolve();
+      runBypassQueue();
+    }
+  };
+
+  const queueBypass = (url, domain, referer) => {
+    return new Promise((resolve) => {
+      bypassQueue.push({ url, domain, referer, resolve });
+      runBypassQueue();
+    });
+  };
+
+  ipcMain.handle(
+    "ensure-cf-bypass",
+    async (event, targetUrl, sourceReferer) => {
+      try {
+        const urlObj = new URL(targetUrl);
+        const domain = getParentDomain(urlObj.hostname);
+        const explicitReferer = normalizeHttpOrigin(sourceReferer);
+        if (explicitReferer && global.setDynamicReferer) {
+          global.setDynamicReferer(urlObj.hostname, explicitReferer);
+          global.setFallbackReferer(explicitReferer);
+        }
+        const headers = getHeaders(targetUrl);
+        if (headers.Cookie && headers.Cookie.includes("cf_clearance")) {
+          return { ok: true };
+        }
+
+        const testOptions = {
+          method: "HEAD",
+          headers: { "User-Agent": headers["User-Agent"] || "" },
+        };
+        if (explicitReferer) {
+          testOptions.referrer = explicitReferer;
+          testOptions.referrerPolicy = "unsafe-url";
+        }
+        const testRes = await session.defaultSession
+          .fetch(targetUrl, testOptions)
+          .catch(() => null);
+        if (testRes && testRes.status !== 403 && testRes.status !== 503) {
+          return { ok: true };
+        }
+        if (!bypassingDomains.has(domain) && global.cloudflarebypass) {
+          bypassingDomains.add(domain);
+          await queueBypass(urlObj.origin + "/", domain, explicitReferer);
+        } else if (bypassingDomains.has(domain)) {
+          // Wait for existing bypass to finish
+          await new Promise((resolve) => {
+            const check = () => {
+              if (!bypassingDomains.has(domain) || !bypassRunning) resolve();
+              else setTimeout(check, 500);
+            };
+            setTimeout(check, 1000);
+          });
+        }
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
     },
   );
 

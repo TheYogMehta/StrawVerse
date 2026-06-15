@@ -12,4 +12,6 @@ contextBridge.exposeInMainWorld("sharedStateAPI", {
   extensions: (TaskType, AnimeManga, ExtentionName) =>
     ipcRenderer.invoke("extensions", TaskType, AnimeManga, ExtentionName),
   checkWhatsNew: () => ipcRenderer.invoke("check-whats-new"),
+  ensureCfBypass: (url, referer) =>
+    ipcRenderer.invoke("ensure-cf-bypass", url, referer),
 });

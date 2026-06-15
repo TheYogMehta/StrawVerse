@@ -39,7 +39,13 @@ async function continuousExecution() {
           if (currentTask?.Type === "Anime") {
             let { config, Title, EpNum, epid, SubDub } = currentTask;
             if (config && Title && EpNum && epid && SubDub) {
-              await downloadep(config, `${Title} ${SubDub}`, EpNum, epid, SubDub);
+              await downloadep(
+                config,
+                `${Title} ${SubDub}`,
+                EpNum,
+                epid,
+                SubDub,
+              );
             } else {
               logger.error(
                 `Error message: Some Anime Data missing [ removing from queue ]`,
@@ -129,10 +135,28 @@ async function downloadEpisodeByQuality(
     let preferredQualities = ["1080p", "720p", "360p", "default", "backup"];
     const provider = await providerFetch("Anime", config.Animeprovider);
     let resolvedEpid = epid;
-    if (subdub && !epid.endsWith("-sub") && !epid.endsWith("-dub") && !epid.endsWith("-both")) {
+    if (
+      subdub &&
+      !epid.endsWith("-sub") &&
+      !epid.endsWith("-dub") &&
+      !epid.endsWith("-both")
+    ) {
       resolvedEpid = `${epid}-${subdub}`;
     }
     const sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
+    if (sourcesArray?.sources) {
+      for (const src of sourcesArray.sources) {
+        if (src?.url) {
+          try {
+            const cdnDomain = new URL(
+              typeof src.url === "string" ? src.url : src.url?.url || "",
+            ).hostname;
+            const ref = src.headers?.Referer || src.headers?.referer;
+            if (cdnDomain && ref) global.setDynamicReferer(cdnDomain, ref);
+          } catch (e) {}
+        }
+      }
+    }
 
     let selectedSource = sourcesArray?.sources?.find(
       (source) => source?.quality === config?.quality ?? "1080p",

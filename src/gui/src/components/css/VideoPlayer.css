@@ -283,7 +283,7 @@
   position: absolute;
   top: 50%;
   left: 50%;
-  transform: translate3d(-50%, -50%, 0);
+  transform: translate3d(-50%, -50%, 0) scale(0.85);
   background-color: rgba(15, 15, 15, 0.95);
   border: 1px solid rgba(255, 255, 255, 0.12);
   color: white;
@@ -299,7 +299,13 @@
   pointer-events: none;
   z-index: 200;
   box-shadow: 0 15px 30px rgba(0, 0, 0, 0.65);
-  animation: indicatorFade 500ms cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  opacity: 0;
+  transition: opacity 150ms cubic-bezier(0.25, 1, 0.5, 1), transform 150ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.player-indicator-overlay.visible {
+  opacity: 1;
+  transform: translate3d(-50%, -50%, 0) scale(1);
 }
 
 .player-indicator-text {
@@ -310,22 +316,387 @@
   white-space: nowrap;
 }
 
-@keyframes indicatorFade {
-  0% {
+/* Force hide Chrome/Chromium native media controls under all conditions */
+video::-webkit-media-controls,
+video::-webkit-media-controls-enclosure,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-play-button,
+video::-webkit-media-controls-timeline,
+video::-webkit-media-controls-current-time-display,
+video::-webkit-media-controls-time-remaining-display,
+video::-webkit-media-controls-time-display,
+video::-webkit-media-controls-mute-button,
+video::-webkit-media-controls-toggle-closed-captions-button,
+video::-webkit-media-controls-volume-slider,
+video::-webkit-media-controls-fullscreen-button {
+  display: none !important;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Custom Controls Bar styling */
+.player-custom-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.5) 60%, rgba(0, 0, 0, 0) 100%);
+  padding: 24px 20px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: auto;
+}
+
+.player-custom-controls.hide-ui {
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+}
+
+/* Timeline Container & Slider */
+.player-timeline-container {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  position: relative;
+  height: 12px;
+  cursor: pointer;
+}
+
+.player-timeline-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  transition: height 0.15s ease;
+  cursor: pointer;
+  background: linear-gradient(
+    to right,
+    var(--accent, #3b82f6) 0%,
+    var(--accent, #3b82f6) var(--progress-percent),
+    rgba(255, 255, 255, 0.25) var(--progress-percent),
+    rgba(255, 255, 255, 0.25) var(--buffered-percent),
+    rgba(255, 255, 255, 0.08) var(--buffered-percent),
+    rgba(255, 255, 255, 0.08) 100%
+  );
+}
+
+.player-timeline-container:hover .player-timeline-slider {
+  height: 6px;
+}
+
+.player-timeline-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  transform: scale(0);
+}
+
+.player-timeline-container:hover .player-timeline-slider::-webkit-slider-thumb {
+  transform: scale(1);
+}
+
+.player-timeline-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.6);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+  transform: scale(0);
+}
+
+.player-timeline-container:hover .player-timeline-slider::-moz-range-thumb {
+  transform: scale(1);
+}
+
+/* Controls Layout Row */
+.player-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.player-controls-left,
+.player-controls-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+/* Custom buttons */
+.player-control-btn {
+  background: none;
+  border: none;
+  outline: none;
+  color: #e5e7eb;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 6px;
+  transition: color 0.2s ease, background-color 0.2s ease, transform 0.1s ease;
+}
+
+.player-control-btn:hover {
+  color: #fff;
+  background-color: rgba(255, 255, 255, 0.1);
+  transform: scale(1.08);
+}
+
+.player-control-btn:active {
+  transform: scale(0.95);
+}
+
+/* Time display formatting */
+.player-time-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #e5e7eb;
+  font-family: 'Outfit', sans-serif;
+  user-select: none;
+}
+
+.player-time-divider {
+  color: #9ca3af;
+  font-weight: 400;
+}
+
+.player-duration {
+  color: #9ca3af;
+}
+
+/* Volume control container & range input slider */
+.player-volume-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.player-volume-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  opacity: 0;
+  transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease;
+  cursor: pointer;
+  background: linear-gradient(
+    to right,
+    #fff 0%,
+    #fff var(--volume-percent),
+    rgba(255, 255, 255, 0.2) var(--volume-percent),
+    rgba(255, 255, 255, 0.2) 100%
+  );
+}
+
+.player-volume-container:hover .player-volume-slider {
+  width: 64px;
+  opacity: 1;
+  margin-left: 4px;
+}
+
+.player-volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+}
+
+.player-volume-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  border: none;
+  cursor: pointer;
+}
+
+/* Fullscreen adjustments to avoid overlap */
+.player-wrapper:fullscreen .player-custom-controls {
+  bottom: 80px; /* Offset to sit nicely above the absolute positioned footer */
+  padding: 24px 32px 16px 32px;
+}
+
+/* Custom Settings Menu and Submenus */
+.player-settings-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.player-settings-menu {
+  position: absolute;
+  bottom: calc(100% + 14px);
+  right: 0;
+  background-color: rgba(18, 20, 29, 0.95);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 6px 0;
+  width: 220px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65);
+  z-index: 100;
+  animation: settingsSlideUp 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes settingsSlideUp {
+  from {
     opacity: 0;
-    transform: translate3d(-50%, -50%, 0) scale(0.8);
+    transform: translateY(8px);
   }
-  15% {
+  to {
     opacity: 1;
-    transform: translate3d(-50%, -50%, 0) scale(1);
-  }
-  80% {
-    opacity: 1;
-    transform: translate3d(-50%, -50%, 0) scale(1);
-  }
-  100% {
-    opacity: 0;
-    transform: translate3d(-50%, -50%, 0) scale(0.9);
+    transform: translateY(0);
   }
 }
+
+.settings-menu-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  color: #d1d5db;
+  padding: 10px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.settings-menu-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-menu-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.settings-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9ca3af;
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  margin-bottom: 4px;
+  transition: color 0.15s ease;
+}
+
+.settings-menu-header:hover {
+  color: #fff;
+}
+
+.settings-menu-options {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.settings-menu-options::-webkit-scrollbar {
+  width: 4px;
+}
+
+.settings-menu-options::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+}
+
+.settings-menu-option-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: none;
+  border: none;
+  color: #d1d5db;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.settings-menu-option-item:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  color: #fff;
+}
+
+.settings-menu-option-item.active {
+  color: var(--accent, #7c3aed);
+  font-weight: 600;
+}
+
+.settings-menu-option-item .checkmark {
+  color: var(--accent, #7c3aed);
+  font-size: 14px;
+}
+
+/* Spin animation for active settings button */
+.spin-animation {
+  animation: settingsSpin 4s linear infinite;
+}
+
+@keyframes settingsSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+
 

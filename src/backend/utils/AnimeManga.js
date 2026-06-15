@@ -455,32 +455,8 @@ async function downloadImage(url, onAttemptResult = null) {
             (err.response.status === 403 || err.response.status === 503) &&
             global.cloudflarebypass
           ) {
-            if (url.includes("animepahe")) {
-              const paheCheck = (title, html) =>
-                title.toLowerCase().includes("animepahe") &&
-                !title.toLowerCase().includes("just a moment");
-              await global
-                .cloudflarebypass("https://animepahe.pw", paheCheck, true)
-                .catch(() => {});
-            } else if (
-              url.includes("allmanga") ||
-              url.includes("allanime") ||
-              url.includes("youtube-anime")
-            ) {
-              const allmangaCheck = (title, html) =>
-                html.includes("__NUXT__") ||
-                title.toLowerCase().includes("allmanga");
-              await global
-                .cloudflarebypass("https://allmanga.to/", allmangaCheck, true)
-                .catch(() => {});
-            } else if (url.includes("anikoto")) {
-              const anikotoCheck = (title, html) =>
-                title.toLowerCase().includes("anikoto") &&
-                !title.toLowerCase().includes("just a moment");
-              await global
-                .cloudflarebypass("https://anikototv.to", anikotoCheck, true)
-                .catch(() => {});
-            }
+            await global.cloudflarebypass(url, true).catch(() => {});
+
             const freshHeaders = getHeaders(url);
             options.headers = {
               ...options.headers,

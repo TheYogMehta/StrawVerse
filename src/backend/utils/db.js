@@ -116,6 +116,11 @@ const tables = {
     catbox_url: "TEXT",
     created_at: "INTEGER",
   },
+  StreamReferer: {
+    domain: "TEXT PRIMARY KEY",
+    referer: "TEXT",
+    updatedAt: "INTEGER",
+  },
   next_episodes: {
     livechart_id: "TEXT",
     episode: "INTEGER",
@@ -221,7 +226,7 @@ Object.entries(tables).forEach(([tableName, columns]) => {
 // Create unique index for next_episodes
 try {
   global.db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_next_episodes_id_ep ON next_episodes (livechart_id, episode)"
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_next_episodes_id_ep ON next_episodes (livechart_id, episode)",
   );
 } catch (e) {
   logger.error("Failed to create unique index on next_episodes: " + e.message);
@@ -236,7 +241,9 @@ function updateTableSchema(tableName, expectedColumns) {
 
     Object.entries(expectedColumns).forEach(([col, definition]) => {
       if (!existingColumns.includes(col)) {
-        global.db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${col} ${definition}`);
+        global.db.exec(
+          `ALTER TABLE ${tableName} ADD COLUMN ${col} ${definition}`,
+        );
       }
     });
   } catch (error) {

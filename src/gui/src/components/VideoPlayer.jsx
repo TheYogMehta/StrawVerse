@@ -1,7 +1,21 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
-import { ArrowLeft, HardDrive, Globe, Play, Pause, Volume2, VolumeX, Maximize, Minimize, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ArrowLeft,
+  HardDrive,
+  Globe,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Maximize,
+  Minimize,
+  ChevronLeft,
+  ChevronRight,
+  Settings,
+  Subtitles,
+} from "lucide-react";
 import "./css/VideoPlayer.css";
 
 export default function VideoPlayer({
@@ -22,15 +36,124 @@ export default function VideoPlayer({
   const uiTimeoutRef = useRef(null);
   const indicatorTimeoutRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const settingsRef = useRef(null);
 
   const [sources, setSources] = useState([]);
   const [subtitles, setSubtitles] = useState([]);
+  const [processedSubtitles, setProcessedSubtitles] = useState([]);
   const [selectedSource, setSelectedSource] = useState(null);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState("");
 
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsActiveMenu, setSettingsActiveMenu] = useState("main");
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
+
   const [showUI, setShowUI] = useState(true);
-  const [indicator, setIndicator] = useState({ visible: false, icon: null, text: "" });
+  const [indicator, setIndicator] = useState({
+    visible: false,
+    icon: null,
+    text: "",
+  });
+
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [buffered, setBuffered] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const formatTime = (time) => {
+    if (isNaN(time) || time === Infinity) return "0:00";
+    const hrs = Math.floor(time / 3600);
+    const mins = Math.floor((time % 3600) / 60);
+    const secs = Math.floor(time % 60);
+
+    const pad = (n) => (n < 10 ? `0${n}` : n);
+
+    if (hrs > 0) {
+      return `${hrs}:${pad(mins)}:${pad(secs)}`;
+    }
+    return `${mins}:${pad(secs)}`;
+  };
+
+  const togglePlay = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.paused) {
+      showIndicator(Play, "Play");
+      video.play().catch(() => {});
+    } else {
+      showIndicator(Pause, "Pause");
+      video.pause();
+    }
+  };
+
+  const toggleMute = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.muted = !video.muted;
+    showIndicator(
+      video.muted ? VolumeX : Volume2,
+      video.muted ? "Muted" : "Unmuted",
+    );
+  };
+
+  const handleVolumeSliderChange = (e) => {
+    const val = parseFloat(e.target.value);
+    setVolume(val);
+    const video = videoRef.current;
+    if (video) {
+      video.volume = val;
+      video.muted = val === 0;
+    }
+    setIsMuted(val === 0);
+  };
+
+  const handleTimelineChange = (e) => {
+    const val = parseFloat(e.target.value);
+    setCurrentTime(val);
+    if (videoRef.current) {
+      videoRef.current.currentTime = val;
+    }
+  };
+
+  const handleTimeUpdate = () => {
+    if (videoRef.current) {
+      setCurrentTime(videoRef.current.currentTime);
+    }
+  };
+
+  const handleDurationChange = () => {
+    if (videoRef.current) {
+      setDuration(videoRef.current.duration);
+    }
+  };
+
+  const handleVolumeChange = () => {
+    if (videoRef.current) {
+      setVolume(videoRef.current.volume);
+      setIsMuted(videoRef.current.muted);
+    }
+  };
+
+  const handleProgress = () => {
+    if (videoRef.current && videoRef.current.buffered.length > 0) {
+      const buf = videoRef.current.buffered;
+      const curr = videoRef.current.currentTime;
+      for (let i = 0; i < buf.length; i++) {
+        if (buf.start(i) <= curr && buf.end(i) >= curr) {
+          setBuffered(buf.end(i));
+          return;
+        }
+      }
+      setBuffered(buf.end(buf.length - 1));
+    } else {
+      setBuffered(0);
+    }
+  };
 
   const resetUITimeout = () => {
     setShowUI(true);
@@ -50,8 +173,8 @@ export default function VideoPlayer({
       clearTimeout(indicatorTimeoutRef.current);
     }
     indicatorTimeoutRef.current = setTimeout(() => {
-      setIndicator({ visible: false, icon: null, text: "" });
-    }, 600);
+      setIndicator((prev) => ({ ...prev, visible: false }));
+    }, 500);
   };
 
   const toggleFullscreen = () => {
@@ -355,18 +478,60 @@ export default function VideoPlayer({
   }, [id, currentEpisode, isCurrentDownloaded, playerSubDub]);
 
   useEffect(() => {
+    const blobUrls = [];
+    let cancelled = false;
+    const processSubtitles = async () => {
+      if (!subtitles || subtitles.length === 0) {
+        setProcessedSubtitles([]);
+        return;
+      }
+      const processed = [];
+      for (const sub of subtitles) {
+        if (!sub.url) continue;
+        if (sub.url.startsWith("blob:")) {
+          processed.push(sub);
+          continue;
+        }
+        try {
+          const res = await fetch(sub.url);
+          if (!res.ok) continue;
+          let text = await res.text();
+          if (!text.trim().startsWith("WEBVTT")) {
+            text =
+              "WEBVTT\n\n" +
+              text.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+          }
+          const blob = new Blob([text], { type: "text/vtt" });
+          const blobUrl = URL.createObjectURL(blob);
+          blobUrls.push(blobUrl);
+          if (!cancelled) {
+            processed.push({ ...sub, url: blobUrl });
+          }
+        } catch (err) {
+          console.warn(`Failed to fetch subtitle: ${sub.url}`, err.message);
+        }
+      }
+      if (!cancelled) setProcessedSubtitles(processed);
+    };
+    processSubtitles();
+    return () => {
+      cancelled = true;
+      blobUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [subtitles]);
+
+  useEffect(() => {
     if (!selectedSource || !videoRef.current) return;
 
     const video = videoRef.current;
 
-    // Robustly extract stream URL, supporting nested source.url.url structures with proxy conversion
     let url;
     if (
       selectedSource?.url &&
       typeof selectedSource.url === "object" &&
       selectedSource.url.url
     ) {
-      url = `/proxy?url=${encodeURIComponent(selectedSource.url.url)}`;
+      url = selectedSource.url.url;
     } else if (typeof selectedSource?.url === "string") {
       url = selectedSource.url;
     } else {
@@ -379,25 +544,58 @@ export default function VideoPlayer({
     }
     video.src = "";
 
-    if (url.includes(".m3u8")) {
+    const selectedSourceUrlStr =
+      typeof selectedSource?.url === "string"
+        ? selectedSource.url
+        : selectedSource?.url &&
+            typeof selectedSource.url === "object" &&
+            selectedSource.url.url
+          ? selectedSource.url.url
+          : "";
+
+    const isM3U8 =
+      url.includes(".m3u8") ||
+      selectedSourceUrlStr.includes(".m3u8") ||
+      selectedSource?.isM3U8;
+
+    if (isM3U8) {
       if (Hls.isSupported()) {
         const hls = new Hls({
           maxMaxBufferLength: 30,
           enableWorker: true,
           lowLatencyMode: false,
           backBufferLength: 90,
-          fragLoadingTimeOut: 20000,
-          fragLoadingMaxRetry: 5,
-          fragLoadingRetryDelay: 1000,
-          fragLoadingMaxRetryDelay: 8000,
-          manifestLoadingTimeOut: 20000,
-          manifestLoadingMaxRetry: 5,
-          manifestLoadingRetryDelay: 1000,
-          manifestLoadingMaxRetryDelay: 8000,
+          fragLoadingTimeOut: 30000,
+          fragLoadingMaxRetry: 8,
+          fragLoadingRetryDelay: 2000,
+          fragLoadingMaxRetryDelay: 15000,
+          manifestLoadingTimeOut: 30000,
+          manifestLoadingMaxRetry: 8,
+          manifestLoadingRetryDelay: 2000,
+          manifestLoadingMaxRetryDelay: 15000,
+          levelLoadingTimeOut: 30000,
+          levelLoadingMaxRetry: 8,
+          levelLoadingRetryDelay: 2000,
+          levelLoadingMaxRetryDelay: 15000,
         });
-        hls.loadSource(url);
-        hls.attachMedia(video);
         hlsRef.current = hls;
+        hls.attachMedia(video);
+
+        (async () => {
+          try {
+            if (window.sharedStateAPI?.ensureCfBypass) {
+              await window.sharedStateAPI.ensureCfBypass(
+                url,
+                selectedSource?.headers?.Referer ||
+                  selectedSource?.headers?.referer ||
+                  "",
+              );
+            }
+          } catch (e) {
+            console.warn("CF bypass pre-flight failed:", e);
+          }
+          hls.loadSource(url);
+        })();
 
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           if (savedResumeTimeRef.current > 0) {
@@ -412,7 +610,7 @@ export default function VideoPlayer({
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
-                if (networkErrorRetry < 3) {
+                if (networkErrorRetry < 6) {
                   networkErrorRetry++;
                   console.warn(
                     `Network error: retrying recovery attempt ${networkErrorRetry}...`,
@@ -484,6 +682,7 @@ export default function VideoPlayer({
 
   useEffect(() => {
     const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
       resetUITimeout();
     };
 
@@ -508,6 +707,76 @@ export default function VideoPlayer({
       );
     };
   }, []);
+
+  useEffect(() => {
+    if (subtitles.length > 0) {
+      setSelectedSubtitleIndex(0);
+    } else {
+      setSelectedSubtitleIndex(-1);
+    }
+  }, [subtitles]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !video.textTracks) return;
+
+    const applySubtitleTrack = () => {
+      for (let i = 0; i < video.textTracks.length; i++) {
+        if (i === selectedSubtitleIndex) {
+          video.textTracks[i].mode = "showing";
+        } else {
+          video.textTracks[i].mode = "disabled";
+        }
+      }
+    };
+
+    video.textTracks.addEventListener("addtrack", applySubtitleTrack);
+    video.addEventListener("loadedmetadata", applySubtitleTrack);
+    applySubtitleTrack();
+
+    return () => {
+      if (video && video.textTracks) {
+        video.textTracks.removeEventListener("addtrack", applySubtitleTrack);
+      }
+      if (video) {
+        video.removeEventListener("loadedmetadata", applySubtitleTrack);
+      }
+    };
+  }, [selectedSource, subtitles, selectedSubtitleIndex]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const applySpeed = () => {
+      video.playbackRate = playbackSpeed;
+    };
+
+    video.addEventListener("loadedmetadata", applySpeed);
+    video.addEventListener("play", applySpeed);
+    applySpeed();
+
+    return () => {
+      video.removeEventListener("loadedmetadata", applySpeed);
+      video.removeEventListener("play", applySpeed);
+    };
+  }, [selectedSource, playbackSpeed]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (settingsRef.current && !settingsRef.current.contains(event.target)) {
+        setShowSettings(false);
+        setSettingsActiveMenu("main");
+      }
+    };
+
+    if (showSettings) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [showSettings]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -556,11 +825,11 @@ export default function VideoPlayer({
         case "k":
           e.preventDefault();
           if (video.paused) {
-            video.play().catch(() => {});
             showIndicator(Play, "Play");
+            video.play().catch(() => {});
           } else {
-            video.pause();
             showIndicator(Pause, "Pause");
+            video.pause();
           }
           break;
 
@@ -608,7 +877,38 @@ export default function VideoPlayer({
         case "m":
           e.preventDefault();
           video.muted = !video.muted;
-          showIndicator(video.muted ? VolumeX : Volume2, video.muted ? "Muted" : "Unmuted");
+          showIndicator(
+            video.muted ? VolumeX : Volume2,
+            video.muted ? "Muted" : "Unmuted",
+          );
+          break;
+
+        case ">":
+        case ".":
+          if (e.shiftKey) {
+            e.preventDefault();
+            const speeds = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+            const idx = speeds.indexOf(playbackSpeed);
+            if (idx !== -1 && idx < speeds.length - 1) {
+              const nextSpeed = speeds[idx + 1];
+              setPlaybackSpeed(nextSpeed);
+              showIndicator(Settings, `${nextSpeed}x Speed`);
+            }
+          }
+          break;
+
+        case "<":
+        case ",":
+          if (e.shiftKey) {
+            e.preventDefault();
+            const speeds = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+            const idx = speeds.indexOf(playbackSpeed);
+            if (idx > 0) {
+              const nextSpeed = speeds[idx - 1];
+              setPlaybackSpeed(nextSpeed);
+              showIndicator(Settings, `${nextSpeed}x Speed`);
+            }
+          }
           break;
 
         default:
@@ -620,7 +920,7 @@ export default function VideoPlayer({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [selectedSource]);
+  }, [selectedSource, playbackSpeed]);
 
   useEffect(() => {
     return () => {
@@ -663,10 +963,14 @@ export default function VideoPlayer({
 
       {/* Main player viewport */}
       <div className="player-viewport">
-        {indicator.visible && (
-          <div className="player-indicator-overlay">
-            {indicator.icon && <indicator.icon size={36} />}
-            {indicator.text && <span className="player-indicator-text">{indicator.text}</span>}
+        {indicator.icon && (
+          <div
+            className={`player-indicator-overlay ${indicator.visible ? "visible" : ""}`}
+          >
+            <indicator.icon size={36} />
+            {indicator.text && (
+              <span className="player-indicator-text">{indicator.text}</span>
+            )}
           </div>
         )}
         {loading ? (
@@ -683,30 +987,262 @@ export default function VideoPlayer({
             </button>
           </div>
         ) : (
-          <video
-            ref={videoRef}
-            controls
-            controlsList="nodownload"
-            onDoubleClick={toggleFullscreen}
-            onContextMenu={(e) => e.preventDefault()}
-            className="player-video"
-            crossOrigin="anonymous"
-          >
-            {subtitles.map((sub, idx) => (
-              <track
-                key={idx}
-                src={
-                  sub.url && sub.url.startsWith("http")
-                    ? `/proxy?url=${encodeURIComponent(sub.url)}`
-                    : sub.url
-                }
-                label={sub.lang || `Language ${idx + 1}`}
-                kind="subtitles"
-                srcLang={sub.lang ? sub.lang.slice(0, 2).toLowerCase() : "en"}
-                default={idx === 0}
-              />
-            ))}
-          </video>
+          <>
+            <video
+              ref={videoRef}
+              controls={false}
+              onDoubleClick={toggleFullscreen}
+              onContextMenu={(e) => e.preventDefault()}
+              className="player-video"
+              crossOrigin="anonymous"
+              onClick={togglePlay}
+              onPlay={() => setIsPlaying(true)}
+              onPause={() => setIsPlaying(false)}
+              onTimeUpdate={handleTimeUpdate}
+              onDurationChange={handleDurationChange}
+              onVolumeChange={handleVolumeChange}
+              onProgress={handleProgress}
+            >
+              {processedSubtitles.map((sub, idx) => {
+                const sourceKey =
+                  typeof selectedSource?.url === "object"
+                    ? selectedSource?.url?.url
+                    : selectedSource?.url;
+                return (
+                  <track
+                    key={`${currentEpisode}-${sourceKey || ""}-${idx}`}
+                    src={sub.url || ""}
+                    label={sub.lang || `Language ${idx + 1}`}
+                    kind="subtitles"
+                    srcLang={
+                      sub.lang ? sub.lang.slice(0, 2).toLowerCase() : "en"
+                    }
+                    default={idx === 0}
+                  />
+                );
+              })}
+            </video>
+
+            {/* Custom Controls Bar */}
+            <div
+              className={`player-custom-controls ${!showUI ? "hide-ui" : ""}`}
+            >
+              {/* Timeline Progress Bar */}
+              <div className="player-timeline-container">
+                <input
+                  type="range"
+                  min="0"
+                  max={duration || 100}
+                  value={currentTime}
+                  onChange={handleTimelineChange}
+                  className="player-timeline-slider"
+                  style={{
+                    "--progress-percent": `${(currentTime / (duration || 1)) * 100}%`,
+                    "--buffered-percent": `${(buffered / (duration || 1)) * 100}%`,
+                  }}
+                />
+              </div>
+
+              {/* Controls Controls Row */}
+              <div className="player-controls-row">
+                <div className="player-controls-left">
+                  <button
+                    onClick={togglePlay}
+                    className="player-control-btn"
+                    aria-label="Toggle Play"
+                  >
+                    {isPlaying ? (
+                      <Pause size={16} fill="#fff" color="#fff" />
+                    ) : (
+                      <Play size={16} fill="#fff" color="#fff" />
+                    )}
+                  </button>
+                  <div className="player-time-display">
+                    <span>{formatTime(currentTime)}</span>
+                    <span className="player-time-divider">/</span>
+                    <span className="player-duration">
+                      {formatTime(duration)}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="player-controls-right">
+                  <div className="player-volume-container">
+                    <button
+                      onClick={toggleMute}
+                      className="player-control-btn"
+                      aria-label="Toggle Mute"
+                    >
+                      {isMuted || volume === 0 ? (
+                        <VolumeX size={16} />
+                      ) : (
+                        <Volume2 size={16} />
+                      )}
+                    </button>
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.05"
+                      value={isMuted ? 0 : volume}
+                      onChange={handleVolumeSliderChange}
+                      className="player-volume-slider"
+                      style={{
+                        "--volume-percent": `${(isMuted ? 0 : volume) * 100}%`,
+                      }}
+                    />
+                  </div>
+
+                  {/* Settings Menu Button & Popover */}
+                  <div ref={settingsRef} className="player-settings-container">
+                    <button
+                      onClick={() => setShowSettings(!showSettings)}
+                      className={`player-control-btn ${showSettings ? "active" : ""}`}
+                      aria-label="Settings"
+                    >
+                      <Settings
+                        size={16}
+                        className={showSettings ? "spin-animation" : ""}
+                      />
+                    </button>
+                    {showSettings && (
+                      <div className="player-settings-menu">
+                        {settingsActiveMenu === "main" && (
+                          <div className="settings-menu-panel">
+                            <button
+                              onClick={() => setSettingsActiveMenu("speed")}
+                              className="settings-menu-item"
+                            >
+                              <div className="settings-menu-item-left">
+                                <Settings size={14} />
+                                <span>Speed</span>
+                              </div>
+                              <div className="settings-menu-item-right">
+                                <span>
+                                  {playbackSpeed === 1
+                                    ? "Normal"
+                                    : `${playbackSpeed}x`}
+                                </span>
+                                <ChevronRight size={14} />
+                              </div>
+                            </button>
+
+                            <button
+                              onClick={() => setSettingsActiveMenu("subtitles")}
+                              className="settings-menu-item"
+                            >
+                              <div className="settings-menu-item-left">
+                                <Subtitles size={14} />
+                                <span>Subtitles</span>
+                              </div>
+                              <div className="settings-menu-item-right">
+                                <span>
+                                  {selectedSubtitleIndex === -1
+                                    ? "Off"
+                                    : subtitles[selectedSubtitleIndex]?.lang ||
+                                      `Track ${selectedSubtitleIndex + 1}`}
+                                </span>
+                                <ChevronRight size={14} />
+                              </div>
+                            </button>
+                          </div>
+                        )}
+
+                        {settingsActiveMenu === "speed" && (
+                          <div className="settings-menu-panel">
+                            <button
+                              onClick={() => setSettingsActiveMenu("main")}
+                              className="settings-menu-header"
+                            >
+                              <ChevronLeft size={14} />
+                              <span>Playback Speed</span>
+                            </button>
+                            <div className="settings-menu-options">
+                              {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(
+                                (speed) => (
+                                  <button
+                                    key={speed}
+                                    onClick={() => {
+                                      setPlaybackSpeed(speed);
+                                      setSettingsActiveMenu("main");
+                                      setShowSettings(false);
+                                    }}
+                                    className={`settings-menu-option-item ${playbackSpeed === speed ? "active" : ""}`}
+                                  >
+                                    <span>
+                                      {speed === 1 ? "Normal" : `${speed}x`}
+                                    </span>
+                                    {playbackSpeed === speed && (
+                                      <span className="checkmark">✓</span>
+                                    )}
+                                  </button>
+                                ),
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {settingsActiveMenu === "subtitles" && (
+                          <div className="settings-menu-panel">
+                            <button
+                              onClick={() => setSettingsActiveMenu("main")}
+                              className="settings-menu-header"
+                            >
+                              <ChevronLeft size={14} />
+                              <span>Subtitles</span>
+                            </button>
+                            <div className="settings-menu-options">
+                              <button
+                                onClick={() => {
+                                  setSelectedSubtitleIndex(-1);
+                                  setSettingsActiveMenu("main");
+                                  setShowSettings(false);
+                                }}
+                                className={`settings-menu-option-item ${selectedSubtitleIndex === -1 ? "active" : ""}`}
+                              >
+                                <span>Off</span>
+                                {selectedSubtitleIndex === -1 && (
+                                  <span className="checkmark">✓</span>
+                                )}
+                              </button>
+                              {subtitles.map((sub, idx) => (
+                                <button
+                                  key={idx}
+                                  onClick={() => {
+                                    setSelectedSubtitleIndex(idx);
+                                    setSettingsActiveMenu("main");
+                                    setShowSettings(false);
+                                  }}
+                                  className={`settings-menu-option-item ${selectedSubtitleIndex === idx ? "active" : ""}`}
+                                >
+                                  <span>{sub.lang || `Track ${idx + 1}`}</span>
+                                  {selectedSubtitleIndex === idx && (
+                                    <span className="checkmark">✓</span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={toggleFullscreen}
+                    className="player-control-btn"
+                    aria-label="Toggle Fullscreen"
+                  >
+                    {isFullscreen ? (
+                      <Minimize size={16} />
+                    ) : (
+                      <Maximize size={16} />
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
         )}
       </div>
 
