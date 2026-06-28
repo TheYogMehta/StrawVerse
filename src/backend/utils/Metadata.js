@@ -19,21 +19,6 @@ const VIDEO_EXTENSIONS = [
   ".3gp",
 ];
 
-function sanitizeImage(imageVal) {
-  if (!imageVal) return null;
-  if (typeof imageVal === "string") {
-    return imageVal;
-  }
-  if (Buffer.isBuffer(imageVal) || imageVal instanceof Uint8Array) {
-    const str = Buffer.from(imageVal).toString("utf-8");
-    if (str.startsWith("data:image/") || str.startsWith("http")) {
-      return str;
-    }
-    return `data:image/png;base64,${Buffer.from(imageVal).toString("base64")}`;
-  }
-  return null;
-}
-
 function formatFallbackTitle(str) {
   if (!str) return "Untitled";
   return str
@@ -355,13 +340,16 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
           (!entry.CustomTag || entry.CustomTag === "") &&
           (!entry.MalID || entry.MalID === ""),
       )
-      .map((entry) => entry.folder_name);
+      .map((entry) => entry.folder_name)
+      .filter(Boolean);
 
-    missingFolders.forEach((folder) => {
-      if (folder) {
-        run(`DELETE FROM ${type} WHERE folder_name = ?`, [folder]);
-      }
-    });
+    if (missingFolders.length > 0) {
+      const placeholders = missingFolders.map(() => "?").join(",");
+      run(
+        `DELETE FROM ${type} WHERE folder_name IN (${placeholders})`,
+        missingFolders,
+      );
+    }
 
     try {
       if (tag && tag !== "All" && tag !== "") {
@@ -390,7 +378,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
           entry.title = "Untitled";
         }
       }
-      entry.image = sanitizeImage(entry.image) || entry.image_url || null;
+      entry.image = entry.image_url || null;
     });
 
     const storedFolderSet = new Set(storedMetadata.map((m) => m.folder_name));
@@ -429,6 +417,41 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
       return folderExists || hasTags;
     });
 
+    const malMap = {};
+    const uniqueMalIds = Array.from(
+      new Set(
+        storedMetadata
+          .map((entry) => entry.MalID)
+          .filter((malId) => malId && malId !== ""),
+      ),
+    );
+
+    if (uniqueMalIds.length > 0) {
+      try {
+        const tableName = type === "Anime" ? "MyAnimeList" : "MyMangaList";
+        const columns =
+          type === "Anime"
+            ? "id, title, totalEpisodes, watched, status"
+            : "id, title, totalChapters as totalEpisodes, read as watched, status";
+        const placeholders = uniqueMalIds.map(() => "?").join(",");
+        const malRows = global.db
+          .prepare(
+            `SELECT ${columns} FROM ${tableName} WHERE id IN (${placeholders})`,
+          )
+          .all(...uniqueMalIds.map(String));
+        malRows.forEach((r) => {
+          malMap[String(r.id)] = {
+            title: r.title || null,
+            totalEpisodes: r.totalEpisodes || 0,
+            watched: r.watched || 0,
+            status: r.status || "",
+          };
+        });
+      } catch (e) {
+        logger.error(`Error fetching malMap for unique MAL IDs: ${e.message}`);
+      }
+    }
+
     // Group and merge entries by MalID
     const groupedMetadata = [];
     const malIdGroups = {};
@@ -450,14 +473,10 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
       let bestTitle = mainEntry.title;
 
-      try {
-        const malRow = global.db
-          .prepare("SELECT title FROM MyAnimeList WHERE id = ?")
-          .get(String(malId));
-        if (malRow && malRow.title) {
-          bestTitle = malRow.title;
-        }
-      } catch (e) {}
+      const malInfo = malMap[String(malId)];
+      if (malInfo && malInfo.title) {
+        bestTitle = malInfo.title;
+      }
 
       if (bestTitle === mainEntry.title) {
         const cleanedFolderNames = group
@@ -510,25 +529,6 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
       groupedMetadata.push(mainEntry);
     });
-
-    const malMap = {};
-    try {
-      const tableName = type === "Anime" ? "MyAnimeList" : "MyMangaList";
-      const columns =
-        type === "Anime"
-          ? "id, totalEpisodes, watched, status"
-          : "id, totalChapters as totalEpisodes, read as watched, status";
-      const malRows = global.db
-        .prepare(`SELECT ${columns} FROM ${tableName}`)
-        .all();
-      malRows.forEach((r) => {
-        malMap[String(r.id)] = {
-          totalEpisodes: r.totalEpisodes || 0,
-          watched: r.watched || 0,
-          status: r.status || "",
-        };
-      });
-    } catch (e) {}
 
     const siblingsMap = {};
     if (type === "Anime") {
@@ -734,74 +734,85 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
     );
     const hasNextPage = page < totalPages;
 
-    const updatedMetadata = [];
+    const updatedMetadata = await Promise.all(
+      paginatedMetadata.map(async (metadata) => {
+        const folderPath = path.join(baseDir, type, metadata.folder_name || "");
+        let folderExists = false;
 
-    for (const metadata of paginatedMetadata) {
-      const folderPath = path.join(baseDir, type, metadata.folder_name || "");
-      const folderExists = metadata.folder_name
-        ? fs.existsSync(folderPath)
-        : false;
+        try {
+          if (metadata.folder_name) {
+            await fs.promises.access(folderPath);
+            folderExists = true;
+          }
+        } catch (_) {}
 
-      if (
-        !folderExists &&
-        (!metadata.CustomTag || metadata.CustomTag === "") &&
-        (!metadata.MalID || metadata.MalID === "")
-      ) {
-        run(`DELETE FROM ${type} WHERE id = ?`, [metadata.id]);
-        continue;
-      }
-
-      let content = [];
-      if (folderExists) {
-        const filesAndFolders = await fs.promises.readdir(folderPath, {
-          withFileTypes: true,
-        });
-
-        if (type === "Anime") {
-          content = filesAndFolders
-            .filter((file) => file.isFile())
-            .map((file) => getEpisodeNumberFromFilename(file.name))
-            .filter((num) => num !== null && !isNaN(num))
-            .sort((a, b) => a - b);
-        } else if (type === "Manga") {
-          content = filesAndFolders
-            .filter(
-              (file) =>
-                file.isFile() &&
-                file.name.endsWith(".cbz") &&
-                file.name.toLowerCase().includes("chapter"),
-            )
-            .map((file) =>
-              parseInt(
-                file?.name
-                  ?.toLowerCase()
-                  ?.split("chapter")?.[1]
-                  ?.split(".cbz")[0],
-              ),
-            )
-            .filter(Boolean)
-            .sort((a, b) => a - b);
+        if (
+          !folderExists &&
+          (!metadata.CustomTag || metadata.CustomTag === "") &&
+          (!metadata.MalID || metadata.MalID === "")
+        ) {
+          run(`DELETE FROM ${type} WHERE id = ?`, [metadata.id]);
+          return null;
         }
-      }
 
-      let totalEpisodes = metadata.totalEpisodes || 0;
-      let watchedEpisodes = metadata.watched || 0;
-      let nextEpisodeIn = metadata.nextEpisodeIn || null;
+        let content = [];
+        if (folderExists) {
+          try {
+            const filesAndFolders = await fs.promises.readdir(folderPath, {
+              withFileTypes: true,
+            });
 
-      updatedMetadata.push({
-        ...metadata,
-        Downloaded: content,
-        totalEpisodes: totalEpisodes,
-        watched: watchedEpisodes,
-        nextEpisodeIn: nextEpisodeIn,
-      });
-    }
+            if (type === "Anime") {
+              content = filesAndFolders
+                .filter((file) => file.isFile())
+                .map((file) => getEpisodeNumberFromFilename(file.name))
+                .filter((num) => num !== null && !isNaN(num))
+                .sort((a, b) => a - b);
+            } else if (type === "Manga") {
+              content = filesAndFolders
+                .filter(
+                  (file) =>
+                    file.isFile() &&
+                    file.name.endsWith(".cbz") &&
+                    file.name.toLowerCase().includes("chapter"),
+                )
+                .map((file) =>
+                  parseInt(
+                    file?.name
+                      ?.toLowerCase()
+                      ?.split("chapter")?.[1]
+                      ?.split(".cbz")[0],
+                  ),
+                )
+                .filter(Boolean)
+                .sort((a, b) => a - b);
+            }
+          } catch (readdirErr) {
+            logger.error(
+              `Error reading directory ${folderPath}: ${readdirErr.message}`,
+            );
+          }
+        }
+
+        let totalEpisodes = metadata.totalEpisodes || 0;
+        let watchedEpisodes = metadata.watched || 0;
+        let nextEpisodeIn = metadata.nextEpisodeIn || null;
+
+        return {
+          ...metadata,
+          Downloaded: content,
+          totalEpisodes: totalEpisodes,
+          watched: watchedEpisodes,
+          nextEpisodeIn: nextEpisodeIn,
+        };
+      }),
+    );
 
     return {
       totalPages,
       currentPage: page,
       hasNextPage,
-      results: updatedMetadata,
+      results: updatedMetadata.filter(Boolean),
     };
   } catch (err) {
     throw new Error(`Error fetching metadata: ${err.message}`);
@@ -851,7 +862,9 @@ async function getSourceById(type, baseDir, id, number, subdub) {
   try {
     const metadata = queryOne(`SELECT * FROM ${type} WHERE id = ?`, [id]);
     if (metadata) {
-      folder_name = metadata.folder_name;
+      folder_name =
+        metadata.folder_name ||
+        (metadata.title ? metadata.title.replace(/[^a-zA-Z0-9]/g, "_") : id);
       malId = metadata.MalID;
       mainSubOrDub = metadata.subOrDub;
     }
@@ -1055,8 +1068,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           Downloads[0].dataId = Downloads[0]?.EpisodesDataId;
           delete Downloads[0].EpisodesDataId;
 
-          const baseImage =
-            sanitizeImage(Downloads[0].image) || Downloads[0].image_url || null;
+          const baseImage = Downloads[0].image_url || null;
           const baseTitle =
             Downloads[0].title && Downloads[0].title.trim() !== ""
               ? Downloads[0].title
@@ -1158,8 +1170,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
         if (downloadsList.length > 0) {
           const firstRecord = downloadsList[0];
-          const baseImage =
-            sanitizeImage(firstRecord.image) || firstRecord.image_url || null;
+          const baseImage = firstRecord.image_url || null;
           const baseTitle =
             firstRecord.title && firstRecord.title.trim() !== ""
               ? firstRecord.title
@@ -1396,6 +1407,5 @@ module.exports = {
   MalEpMap,
   FetchLocalProviderInfo,
   MalMangaMap,
-  sanitizeImage,
   formatFallbackTitle,
 };

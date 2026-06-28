@@ -1,5 +1,8 @@
 const { queryOne, run } = require("./db");
 
+const cookieCache = {};
+const refererCache = {};
+
 function normalizeDomain(domain) {
   if (!domain) return null;
   try {
@@ -29,6 +32,7 @@ function saveStreamReferer(domain, referer) {
   const normalizedDomain = normalizeDomain(domain);
   const normalizedReferer = normalizeReferer(referer);
   if (!normalizedDomain || !normalizedReferer) return;
+  refererCache[normalizedDomain] = normalizedReferer;
 
   try {
     run(
@@ -58,12 +62,19 @@ function getStoredStreamReferer(domain) {
   }
 
   for (const candidate of candidates) {
+    if (refererCache[candidate]) return refererCache[candidate];
+  }
+
+  for (const candidate of candidates) {
     try {
       const row = queryOne(
         "SELECT referer FROM StreamReferer WHERE domain = ? LIMIT 1",
         [candidate],
       );
-      if (row?.referer) return row.referer;
+      if (row?.referer) {
+        refererCache[candidate] = row.referer;
+        return row.referer;
+      }
     } catch (e) {}
   }
   return null;
@@ -74,6 +85,7 @@ global.setDynamicReferer = (domain, referer) => {
 };
 
 global.setFallbackReferer = (referer) => {
+  delete refererCache["__fallback__"];
   saveStreamReferer("__fallback__", referer);
 };
 
@@ -129,35 +141,62 @@ function getHeaders(url) {
   }
 
   if (!headers.Referer) {
-    try {
-      const hostname = new URL(url).hostname;
-      if (!hostname.includes("localhost")) {
-        const row = queryOne(
-          "SELECT referer FROM StreamReferer WHERE domain = ? LIMIT 1",
-          ["__fallback__"],
-        );
-        if (row?.referer) headers.Referer = row.referer;
-      }
-    } catch (e) {}
+    if (refererCache["__fallback__"]) {
+      headers.Referer = refererCache["__fallback__"];
+    } else {
+      try {
+        const hostname = new URL(url).hostname;
+        if (!hostname.includes("localhost")) {
+          const row = queryOne(
+            "SELECT referer FROM StreamReferer WHERE domain = ? LIMIT 1",
+            ["__fallback__"],
+          );
+          if (row?.referer) {
+            refererCache["__fallback__"] = row.referer;
+            headers.Referer = row.referer;
+          }
+        }
+      } catch (e) {}
+    }
   }
 
-  let cookieDomain = new URL(url).hostname;
+  let cookieDomain = "";
+  try {
+    cookieDomain = new URL(url).hostname;
+  } catch (e) {}
+
   if (cookieDomain) {
-    try {
-      const row = queryOne(
-        "SELECT value FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))) AND CAST(expirationDate AS REAL) > ? ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-        [
-          `${cookieDomain}-cf_clearance`,
-          cookieDomain,
-          cookieDomain,
-          Date.now(),
-        ],
-      );
-      if (row && row.value) {
-        headers.Cookie = `cf_clearance=${row.value};`;
+    const cached = cookieCache[cookieDomain];
+    if (cached && cached.expiry > Date.now()) {
+      if (cached.value) {
+        headers.Cookie = `cf_clearance=${cached.value};`;
       }
-    } catch (e) {
-      // ignore
+    } else {
+      try {
+        const row = queryOne(
+          "SELECT value, expirationDate FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))) AND CAST(expirationDate AS REAL) > ? ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          [
+            `${cookieDomain}-cf_clearance`,
+            cookieDomain,
+            cookieDomain,
+            Date.now(),
+          ],
+        );
+        if (row && row.value) {
+          headers.Cookie = `cf_clearance=${row.value};`;
+          cookieCache[cookieDomain] = {
+            value: row.value,
+            expiry: Number(row.expirationDate || Date.now() + 10 * 60 * 1000),
+          };
+        } else {
+          cookieCache[cookieDomain] = {
+            value: null,
+            expiry: Date.now() + 30 * 1000,
+          };
+        }
+      } catch (e) {
+        // ignore
+      }
     }
   }
 

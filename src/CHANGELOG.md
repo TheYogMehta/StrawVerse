@@ -1,5 +1,28 @@
 # Changelog
 
+## [7.2.1] - 2026-06-29
+
+### Performance & Idle CPU Optimizations
+
+- **Background Throttling**: Enabled Electron renderer background throttling (`backgroundThrottling: true`) and removed the disable renderer backgrounding switch to let Chromium release resources when minimized or backgrounded.
+- **Dynamic Power Save Blocker**: Refactored the power save blocker to activate dynamically only when download items are active in the queue, letting the system sleep at idle.
+- **Event-Driven Queue Worker**: Converted the continuous 1-second database polling loop into an event-driven model that wakes the queue processor only when items are added and shuts down fully on idle.
+- **Module Simplification**: Merged the queue worker (`queueWorker.js`) and queue manager (`queue.js`) into a single file to resolve circular dependencies and simplify function calls.
+
+### Audio & Player Engine Fixes
+
+- **AAC Audio Codec Remap**: Patched `MediaSource.prototype.addSourceBuffer` to transparently rewrite `mp4a.40.1` (AAC-Main) to `mp4a.40.5` (AAC-LC) to fix audio playback issues on specific platforms/environments.
+- **Kwik HLS Fragment Loader**: Integrated a custom Hls.js segment loader (`KwikFragmentLoader`) to reliably proxy, decrypt, and handle fragment streaming for Pahe/Kwik networks.
+
+### Database & Image Cache Migration
+
+- **Image Disk Cache Migration**: Migrated Base64-encoded image blobs from local SQLite tables to the disk cache, dropped the legacy `image` column, and ran database `VACUUM` to decrease database size.
+- **Watch/Read History Auto-Cleanup**: Automatically cleans up orphaned `WatchHistory` and `ReadHistory` database records when their related Anime/Manga items are deleted.
+
+### Bug Fixes
+
+- **Local Playback Path Fix**: Added a folder-name fallback inside local file-retrieval helpers in `Metadata.js` to resolve the path-null error when playing local downloaded anime.
+
 ## [7.2.0] - 2026-06-28
 
 ### Image Caching & Optimization

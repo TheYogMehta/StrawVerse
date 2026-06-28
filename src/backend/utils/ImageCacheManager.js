@@ -251,53 +251,101 @@ async function migrateDatabaseBase64Images() {
     let migratedCount = 0;
 
     for (const type of types) {
+      const cols = global.db
+        .prepare(`PRAGMA table_info(${type})`)
+        .all()
+        .map((col) => col.name);
+      if (!cols.includes("image")) {
+        continue;
+      }
+
       const rows = global.db
         .prepare(
-          `SELECT id, image, image_url FROM ${type} WHERE image LIKE 'data:image/%'`,
+          `SELECT id, image, image_url FROM ${type} WHERE image IS NOT NULL`,
         )
         .all();
-      if (rows.length === 0) continue;
+      if (rows.length === 0) {
+        global.db.exec(`ALTER TABLE ${type} DROP COLUMN image`);
+        logger.info(`Dropped empty 'image' column from ${type} table.`);
+        continue;
+      }
 
       logger.info(
-        `Migrating ${rows.length} base64 images from ${type} table...`,
-      );
-      const updateStmt = global.db.prepare(
-        `UPDATE ${type} SET image = NULL WHERE id = ?`,
+        `Migrating ${rows.length} images from database ${type} table to cache directory...`,
       );
 
       for (const row of rows) {
-        const imageStr = row.image;
-        const imageUrl =
-          row.image_url ||
-          `https://strawverse.internal/fallback-image/${type}/${row.id}`;
+        let buffer = null;
+        let ext = "jpg";
 
-        const match = imageStr.match(/^data:image\/([a-zA-Z+]+);base64,(.+)$/);
-        if (match) {
-          const base64Data = match[2];
-          const buffer = Buffer.from(base64Data, "base64");
+        if (typeof row.image === "string") {
+          const match = row.image.match(
+            /^data:image\/([a-zA-Z+]+);base64,(.+)$/,
+          );
+          if (match) {
+            ext = match[1];
+            buffer = Buffer.from(match[2], "base64");
+          } else {
+            if (
+              row.image.startsWith("http://") ||
+              row.image.startsWith("https://")
+            ) {
+              global.db
+                .prepare(
+                  `UPDATE ${type} SET image = NULL, image_url = COALESCE(image_url, ?) WHERE id = ?`,
+                )
+                .run(row.image, row.id);
+              migratedCount++;
+              continue;
+            }
+          }
+        } else if (
+          Buffer.isBuffer(row.image) ||
+          row.image instanceof Uint8Array
+        ) {
+          buffer = Buffer.from(row.image);
+          ext = "jpg";
+        }
+
+        if (buffer) {
+          const imageUrl =
+            row.image_url ||
+            `https://strawverse.internal/fallback-image/${type}/${row.id}`;
+
           await cacheImage(imageUrl, buffer);
-          updateStmt.run(row.id);
+          global.db
+            .prepare(
+              `UPDATE ${type} SET image = NULL, image_url = ? WHERE id = ?`,
+            )
+            .run(imageUrl, row.id);
           migratedCount++;
         }
       }
+
+      global.db.exec(`ALTER TABLE ${type} DROP COLUMN image`);
+      logger.info(
+        `Successfully dropped migrated 'image' column from ${type} table.`,
+      );
     }
 
     if (migratedCount > 0) {
       logger.info(
-        `Successfully migrated ${migratedCount} database base64 images to disk cache. Running vacuum...`,
+        `Successfully migrated ${migratedCount} database images to disk cache. Running vacuum...`,
       );
       global.db.exec("VACUUM");
       logger.info("Database vacuum completed.");
     }
   } catch (e) {
-    logger.error("Error migrating database base64 images: " + e.message);
+    logger.error("Error migrating database base64/BLOB images: " + e.message);
   }
 }
 
 async function removeCachedImage(url) {
   try {
     if (!url) return;
-    const row = global.db.prepare("SELECT filename FROM ImageCache WHERE url = ?").get(url);
+    const row = global.db
+      .prepare("SELECT filename FROM ImageCache WHERE url = ?")
+      .get(url);
     if (row) {
       const cacheDir = getImageCacheDir();
       const filePath = path.join(cacheDir, row.filename);

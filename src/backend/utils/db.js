@@ -23,7 +23,6 @@ const tables = {
     genres: "TEXT",
     aired: "TEXT",
     EpisodesDataId: "TEXT",
-    image: "BLOB",
     image_url: "TEXT",
     last_updated: "DATE",
     MalID: "TEXT",
@@ -39,7 +38,6 @@ const tables = {
     type: "TEXT",
     author: "TEXT",
     released: "TEXT",
-    image: "BLOB",
     image_url: "TEXT",
     last_updated: "DATE",
     MalID: "TEXT",
@@ -291,10 +289,20 @@ function updateTableSchema(tableName, expectedColumns) {
 
 // Clean up history records that don't have matching local Anime/Manga metadata
 try {
-  const watchDeleted = global.db.prepare("DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)").run();
-  const readDeleted = global.db.prepare("DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)").run();
+  const watchDeleted = global.db
+    .prepare(
+      "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
+    )
+    .run();
+  const readDeleted = global.db
+    .prepare(
+      "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
+    )
+    .run();
   if (watchDeleted.changes > 0 || readDeleted.changes > 0) {
-    logger.info(`Database cleanup: Deleted ${watchDeleted.changes} orphaned watch history entries and ${readDeleted.changes} read history entries.`);
+    logger.info(
+      `Database cleanup: Deleted ${watchDeleted.changes} orphaned watch history entries and ${readDeleted.changes} read history entries.`,
+    );
   }
 } catch (e) {
   logger.error("Failed to run database history cleanup: " + e.message);

@@ -572,6 +572,13 @@ async function HandleExtensions(TaskType, AnimeManga, ExtensionName) {
   }
 }
 
+function disableWhatsNew() {
+  if (config) {
+    config.showWhatsNew = false;
+    settingSave();
+  }
+}
+
 module.exports = {
   settingupdate,
   settingfetch,
@@ -581,5 +588,6 @@ module.exports = {
   loadAllScrapers,
   HandleExtensions,
   patchModulePaths,
+  disableWhatsNew,
   getScraperIconsPath: () => ScraperIcons,
 };

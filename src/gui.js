@@ -32,8 +32,6 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
-app.commandLine.appendSwitch("disable-renderer-backgrounding");
-
 app.on("second-instance", (event, commandLine) => {
   logger.info(
     "[Protocol] second-instance triggered. Command line: " +
@@ -93,9 +91,9 @@ const {
   SettingsLoad,
   patchModulePaths,
   loadAllScrapers,
+  disableWhatsNew,
 } = require("./backend/utils/settings");
-const { loadQueue } = require("./backend/utils/queue");
-const { continuousExecution } = require("./backend/queueWorker");
+const { loadQueue, continuousExecution } = require("./backend/utils/queue");
 const { StopDiscordRPC } = require("./backend/utils/discord");
 const {
   createScrapperWindow,
@@ -179,7 +177,7 @@ const createWindow = () => {
     resizable: true,
     webPreferences: {
       nodeIntegration: true,
-      backgroundThrottling: false,
+      backgroundThrottling: true,
       contextIsolation: true,
       webSecurity: false,
       preload: path.join(__dirname, "backend", "preload.js"),
@@ -397,8 +395,7 @@ const createWindow = () => {
             changelogContent = `## ${versionHeader}\n\n${parts[1].trim()}`;
           }
         }
-        currentSettings.showWhatsNew = false;
-        setKeyValue("Settings", "config", currentSettings);
+        disableWhatsNew();
       }
 
       return {
@@ -484,10 +481,37 @@ const createWindow = () => {
     }
   }
 
-  // Prevent Sleep
-  let id = powerSaveBlocker.start("prevent-app-suspension");
+  global.updatePowerSaveBlocker();
+};
 
-  logger.info("Power save blocker active:", powerSaveBlocker.isStarted(id));
+let powerSaveBlockerId = null;
+
+global.updatePowerSaveBlocker = () => {
+  try {
+    const queueLength = global.getQueueNumber ? global.getQueueNumber() : 0;
+    if (queueLength > 0) {
+      if (
+        powerSaveBlockerId === null ||
+        !powerSaveBlocker.isStarted(powerSaveBlockerId)
+      ) {
+        powerSaveBlockerId = powerSaveBlocker.start("prevent-app-suspension");
+        logger.info(
+          `Power save blocker active: ${powerSaveBlocker.isStarted(powerSaveBlockerId)}`,
+        );
+      }
+    } else {
+      if (
+        powerSaveBlockerId !== null &&
+        powerSaveBlocker.isStarted(powerSaveBlockerId)
+      ) {
+        powerSaveBlocker.stop(powerSaveBlockerId);
+        logger.info("Power save blocker stopped.");
+        powerSaveBlockerId = null;
+      }
+    }
+  } catch (err) {
+    logger.error("Failed to update power save blocker: " + err.message);
+  }
 };
 
 app.whenReady().then(async () => {
@@ -511,7 +535,8 @@ app.whenReady().then(async () => {
   runStartupCleanup();
   createWindow();
   createScrapperWindow();
-  loadQueue();
+  await loadQueue();
+  global.updatePowerSaveBlocker();
 
   checkForMappingUpdates()
     .then(() => {
@@ -546,7 +571,9 @@ app.whenReady().then(async () => {
     handleCustomProtocolUrl(request.url);
   });
 
-  autoUpdater.checkForUpdatesAndNotify();
+  if (app.isPackaged) {
+    autoUpdater.checkForUpdatesAndNotify();
+  }
 
   try {
     continuousExecution();

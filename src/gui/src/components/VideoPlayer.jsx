@@ -1,6 +1,86 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
+
+if (
+  typeof window !== "undefined" &&
+  window.MediaSource &&
+  MediaSource.prototype.addSourceBuffer
+) {
+  const origAddSourceBuffer = MediaSource.prototype.addSourceBuffer;
+  MediaSource.prototype.addSourceBuffer = function (type) {
+    const remapped = type.replace(/mp4a\.40\.1/g, "mp4a.40.5");
+    if (remapped !== type) {
+      console.log("[CODEC REMAP]", type, "→", remapped);
+    }
+    return origAddSourceBuffer.call(this, remapped);
+  };
+}
+
+class KwikFragmentLoader {
+  constructor(config) {
+    this.config = config;
+    this.loader = new Hls.DefaultConfig.loader(config);
+  }
+
+  get stats() {
+    return this.loader.stats;
+  }
+
+  get context() {
+    return this.loader.context;
+  }
+
+  load(context, config, callbacks) {
+    const customCallbacks = {
+      ...callbacks,
+      onSuccess: (response, stats, context, networkDetails) => {
+        let data = response.data;
+        if (data instanceof ArrayBuffer) {
+          const uint8 = new Uint8Array(data);
+          if (
+            uint8.length >= 8 &&
+            uint8[0] === 0x89 &&
+            uint8[1] === 0x50 &&
+            uint8[2] === 0x4e &&
+            uint8[3] === 0x47 &&
+            uint8[4] === 0x0d &&
+            uint8[5] === 0x0a &&
+            uint8[6] === 0x1a &&
+            uint8[7] === 0x0a
+          ) {
+            let iendOffset = -1;
+            for (let i = 0; i < Math.min(uint8.length - 3, 1024); i++) {
+              if (
+                uint8[i] === 0x49 &&
+                uint8[i + 1] === 0x45 &&
+                uint8[i + 2] === 0x4e &&
+                uint8[i + 3] === 0x44
+              ) {
+                iendOffset = i;
+                break;
+              }
+            }
+            if (iendOffset !== -1) {
+              response.data = data.slice(iendOffset + 8);
+            }
+          }
+        }
+        callbacks.onSuccess(response, stats, context, networkDetails);
+      },
+    };
+
+    this.loader.load(context, config, customCallbacks);
+  }
+
+  abort() {
+    this.loader.abort();
+  }
+
+  destroy() {
+    this.loader.destroy();
+  }
+}
 import {
   ArrowLeft,
   HardDrive,
@@ -73,15 +153,6 @@ export default function VideoPlayer({
       : selectedSource?.url && typeof selectedSource.url === "object"
         ? selectedSource.url.url
         : "";
-  const isKwikCdn = sourceUrl.includes("owocdn.top") || sourceUrl.includes("uwucdn.top");
-  const needsTranscode = useTranscodeFallback || isKwikCdn;
-
-  const transcodeUrl = (() => {
-    const referer = selectedSource?.headers?.Referer || selectedSource?.headers?.referer || "";
-    const params = new URLSearchParams({ url: sourceUrl });
-    if (referer) params.set("referer", referer);
-    return `/api/stream-hls-proxy?${params.toString()}`;
-  })();
 
   const formatTime = (time) => {
     if (isNaN(time) || time === Infinity) return "0:00";
@@ -546,8 +617,6 @@ export default function VideoPlayer({
 
     const video = videoRef.current;
 
-
-
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
@@ -556,63 +625,108 @@ export default function VideoPlayer({
 
     setDuration(0);
 
-    const url = needsTranscode ? transcodeUrl : sourceUrl;
+    const url = sourceUrl;
 
-    const isM3U8 =
-      needsTranscode ||
-      url.includes(".m3u8") ||
-      sourceUrl.includes(".m3u8") ||
-      selectedSource?.isM3U8;
+    const isM3U8 = url.includes(".m3u8") || selectedSource?.isM3U8;
 
     if (isM3U8) {
       if (Hls.isSupported()) {
         const hls = new Hls({
-          maxMaxBufferLength: 30,
+          fLoader: KwikFragmentLoader,
+          maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          maxBufferSize: 60 * 1000 * 1000,
           enableWorker: true,
           lowLatencyMode: false,
-          backBufferLength: 90,
-          fragLoadingTimeOut: 30000,
-          fragLoadingMaxRetry: 8,
-          fragLoadingRetryDelay: 2000,
-          fragLoadingMaxRetryDelay: 15000,
-          manifestLoadingTimeOut: 30000,
-          manifestLoadingMaxRetry: 8,
-          manifestLoadingRetryDelay: 2000,
-          manifestLoadingMaxRetryDelay: 15000,
-          levelLoadingTimeOut: 30000,
-          levelLoadingMaxRetry: 8,
-          levelLoadingRetryDelay: 2000,
-          levelLoadingMaxRetryDelay: 15000,
+          backBufferLength: 30,
+          stretchShortVideoTrack: true,
+          maxBufferHole: 0.5,
+          highBufferWatchdogPeriod: 3,
+          nudgeOffset: 0.1,
+          nudgeMaxRetry: 5,
+          startPosition: 0.15,
+          progressive: false,
+          fragLoadingTimeOut: 20000,
+          fragLoadingMaxRetry: 5,
+          fragLoadingRetryDelay: 1000,
+          fragLoadingMaxRetryDelay: 8000,
+          manifestLoadingTimeOut: 20000,
+          manifestLoadingMaxRetry: 5,
+          manifestLoadingRetryDelay: 1000,
+          manifestLoadingMaxRetryDelay: 8000,
+          levelLoadingTimeOut: 20000,
+          levelLoadingMaxRetry: 5,
+          levelLoadingRetryDelay: 1000,
+          levelLoadingMaxRetryDelay: 8000,
         });
         hlsRef.current = hls;
         hls.attachMedia(video);
 
-        (async () => {
-          try {
-            if (window.sharedStateAPI?.ensureCfBypass) {
-              await window.sharedStateAPI.ensureCfBypass(
-                url,
-                selectedSource?.headers?.Referer ||
-                  selectedSource?.headers?.referer ||
-                  "",
-              );
-            }
-          } catch (e) {
-            console.warn("CF bypass pre-flight failed:", e);
-          }
-          hls.loadSource(url);
-        })();
+        if (window.sharedStateAPI?.ensureCfBypass) {
+          const referer =
+            selectedSource?.headers?.Referer ||
+            selectedSource?.headers?.referer ||
+            "";
+          window.sharedStateAPI
+            .ensureCfBypass(url, referer)
+            .then(() => {
+              if (
+                url.includes("owocdn.top") ||
+                url.includes("uwucdn.top") ||
+                url.includes("kwik.cx")
+              ) {
+                window.sharedStateAPI
+                  .ensureCfBypass("https://kwik.cx/", referer)
+                  .catch(() => {});
+              }
+            })
+            .catch((e) => {
+              console.warn("Background CF bypass check failed:", e);
+            });
+        }
+        hls.loadSource(url);
 
-        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          console.log("[HLS MANIFEST_PARSED]", data.levels.length, "level(s)");
           if (savedResumeTimeRef.current > 0) {
             video.currentTime = savedResumeTimeRef.current;
+            video.play().catch(() => {});
+          } else {
+            const onBufferAppended = () => {
+              hls.off(Hls.Events.BUFFER_APPENDED, onBufferAppended);
+              if (video.buffered.length > 0 && video.buffered.start(0) > 0.01) {
+                const seekTo = video.buffered.start(0) + 0.01;
+                console.log(
+                  "[HLS] Skipping initial PTS gap, seeking to",
+                  seekTo.toFixed(3),
+                );
+                video.currentTime = seekTo;
+              }
+              video.play().catch(() => {});
+            };
+            hls.on(Hls.Events.BUFFER_APPENDED, onBufferAppended);
           }
-          video.play().catch(() => {});
+        });
+
+        video.addEventListener("error", () => {
+          console.error(
+            "[VIDEO ELEMENT ERROR]",
+            video.error?.code,
+            video.error?.message,
+          );
         });
 
         let networkErrorRetry = 0;
         let mediaErrorRetry = 0;
         hls.on(Hls.Events.ERROR, (event, data) => {
+          console.log(
+            "[HLS ERROR]",
+            data.type,
+            data.details,
+            data.fatal,
+            data.reason || "",
+            data.error || "",
+          );
           if (data.fatal) {
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
@@ -689,7 +803,7 @@ export default function VideoPlayer({
       };
       video.addEventListener("loadedmetadata", handleLoadedMetadata);
     }
-  }, [selectedSource, useTranscodeFallback, sourceUrl, needsTranscode]);
+  }, [selectedSource, sourceUrl]);
 
   useEffect(() => {
     return () => {
@@ -994,7 +1108,7 @@ export default function VideoPlayer({
         )}
         {loading ? (
           <div className="player-status-overlay">
-            <img src="/images/loading.gif" alt="loading" />
+            <div className="player-spinner"></div>
             <p>Initializing stream buffer...</p>
           </div>
         ) : errorMsg ? (
@@ -1041,6 +1155,13 @@ export default function VideoPlayer({
                 );
               })}
             </video>
+
+            {/* Custom Big Play Button Overlay */}
+            {!isPlaying && !loading && !errorMsg && (
+              <div className="player-big-play-btn" onClick={togglePlay}>
+                <Play size={28} fill="#fff" color="#fff" />
+              </div>
+            )}
 
             {/* Custom Controls Bar */}
             <div
