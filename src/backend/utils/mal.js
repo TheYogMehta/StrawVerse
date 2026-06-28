@@ -1,11 +1,6 @@
 const { logger } = require("./AppLogger");
 const axios = require("axios");
-const {
-  MalEpMap,
-  processAndSortMyAnimeList,
-  MalMangaMap,
-  processAndSortMyMangaList,
-} = require("./Metadata");
+const { MalEpMap, MalMangaMap } = require("./Metadata");
 const verifyChallenge = require("./pkce");
 const { getKeyValue, setKeyValue } = require("./db");
 
@@ -241,14 +236,12 @@ async function MalSyncType(type, force = false) {
     MalMappingDate &&
     Date.now() - new Date(MalMappingDate).getTime() > 5 * 60 * 1000;
 
-  const tableName = type === "anime" ? "MyAnimeList" : "MyMangaList";
-
   if (force || isSyncExpired || !MalMappingDate) {
     if (MalMappingDate && !force) {
       try {
         let latestLocal = global.db
           .prepare(
-            `SELECT id, updated_at FROM ${tableName} ORDER BY updated_at DESC LIMIT 1`,
+            `SELECT id, updated_at FROM ${type === "anime" ? "MyAnimeList" : "MyMangaList"} ORDER BY updated_at DESC LIMIT 1`,
           )
           .get();
         if (latestLocal) {
@@ -296,12 +289,6 @@ async function MalSyncType(type, force = false) {
     logger.info(`[MAL-${type.toUpperCase()}-LIST] Successfully Saved`);
     config[syncKey] = new Date().toISOString();
     setKeyValue("Settings", "config", config);
-
-    if (type === "anime") {
-      await processAndSortMyAnimeList();
-    } else {
-      await processAndSortMyMangaList();
-    }
   } else {
     logger.info(`[MAL-${type.toUpperCase()}-LIST] SKIPED FETCH!`);
   }
@@ -410,12 +397,179 @@ async function MalSearch(query, type = "anime", limit = 10) {
   }
 }
 
+// Helper for MyAnimeList auto-tracking at 75% progress
+async function autoTrackMAL(type, mediaId, number) {
+  try {
+    if (!global.MalLoggedIn) return false;
+    let localRecord = null;
+
+    if (type === "Anime") {
+      const strippedId = mediaId.replace(/-(dub|sub|both)$/, "");
+      localRecord = global.db
+        .prepare(
+          `
+        SELECT MalID FROM Anime 
+        WHERE id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
+      `,
+        )
+        .get(
+          mediaId,
+          `${strippedId}-sub`,
+          `${strippedId}-dub`,
+          `${strippedId}-both`,
+          mediaId,
+          strippedId,
+        );
+    } else {
+      localRecord = global.db
+        .prepare(`SELECT MalID FROM Manga WHERE id = ? OR folder_name = ?`)
+        .get(mediaId, mediaId);
+    }
+
+    let malid = null;
+    if (localRecord && localRecord.MalID) {
+      malid = parseInt(localRecord.MalID);
+    }
+
+    if (!malid && global.mappingDb && type === "Anime") {
+      try {
+        const strippedId = mediaId.replace(/-(dub|sub|both)$/, "");
+        const row = global.mappingDb
+          .prepare(`
+            SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
+            UNION
+            SELECT malid FROM anikototv WHERE id = ?
+            LIMIT 1
+          `)
+          .get(strippedId, strippedId, strippedId);
+        if (row?.malid) {
+          malid = parseInt(row.malid);
+        }
+      } catch (err) {}
+    }
+
+    if (malid) {
+      const malListTable = type === "Anime" ? "MyAnimeList" : "MyMangaList";
+      const totalCol = type === "Anime" ? "totalEpisodes" : "totalChapters";
+      const progressCol = type === "Anime" ? "watched" : "read";
+      const malInfo = global.db
+        .prepare(
+          `SELECT status, ${progressCol}, ${totalCol} FROM ${malListTable} WHERE id = ?`,
+        )
+        .get(String(malid));
+
+      const currentProgress = malInfo ? parseInt(malInfo[progressCol] || 0) : 0;
+      if (number <= currentProgress) {
+        logger.info(
+          `[MAL Auto-Tracking] Skipping update for ${type} ${mediaId} (MAL ID: ${malid}) because current MAL progress (${currentProgress}) is >= watched progress (${number})`,
+        );
+        return false;
+      }
+
+      let nextStatus =
+        malInfo?.status || (type === "Anime" ? "watching" : "reading");
+
+      const total = malInfo ? malInfo[totalCol] : null;
+      if (total && number >= total) {
+        nextStatus = "completed";
+      }
+
+      logger.info(
+        `[MAL Auto-Tracking] Syncing ${type} ${mediaId} (MAL ID: ${malid}) progress: ${number} with status: ${nextStatus}`,
+      );
+      await MalAddToList(type.toLowerCase(), malid, nextStatus, number);
+
+      // Update local database cache immediately
+      try {
+        global.db
+          .prepare(
+            `
+          UPDATE ${malListTable}
+          SET ${progressCol} = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `,
+          )
+          .run(number, nextStatus, String(malid));
+      } catch (dbErr) {
+        logger.error(
+          `Error updating local MAL table in autoTrackMAL: ${dbErr.message}`,
+        );
+      }
+
+      // Send in-app notification via IPC
+      try {
+        let displayTitle = type;
+        const titleRecord = global.db
+          .prepare(
+            `SELECT title FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ?`,
+          )
+          .get(mediaId);
+        displayTitle = titleRecord?.title || type;
+
+        if (global.win && !global.win.isDestroyed()) {
+          global.win.webContents.send("mal-sync-notification", {
+            title: "MAL Auto-Tracking Sync",
+            body: `Synced "${displayTitle}" ${type === "Anime" ? "Episode" : "Chapter"} ${number} (${nextStatus.toUpperCase()}) to MAL.`,
+            icon: "/assets/luffy.png",
+          });
+        }
+      } catch (notifErr) {
+        logger.error(
+          `Failed to send MAL sync notification: ${notifErr.message}`,
+        );
+      }
+      return true;
+    }
+    return false;
+  } catch (err) {
+    logger.error(`Error in MAL Auto-Tracking: ${err.message}`);
+    return false;
+  }
+}
+
+// Remove From List (Delete List Entry)
+async function MalRemoveFromList(type = "anime", malid) {
+  try {
+    if (!MalAcount?.access_token)
+      throw new Error("No access token please login");
+
+    const isAnime = type === "anime";
+    const endpoint = isAnime ? "anime" : "manga";
+
+    await axios.delete(
+      `https://api.myanimelist.net/v2/${endpoint}/${malid}/my_list_status`,
+      {
+        headers: {
+          Authorization: `Bearer ${MalAcount.access_token}`,
+        },
+      },
+    );
+
+    const table = isAnime ? "MyAnimeList" : "MyMangaList";
+    try {
+      global.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(String(malid));
+    } catch (_) {}
+
+    await MalSyncType(type, true);
+
+    return { title: "Removed from MyAnimeList successfully!", icon: "success" };
+  } catch (err) {
+    return {
+      title: "MyAnimeList Update Fail!",
+      icon: "error",
+      text: `Error : ${err.message}`,
+    };
+  }
+}
+
 module.exports = {
   MalCreateUrl,
   MalVerifyToken,
   MalRefreshTokenGen,
   MalAddToList,
+  MalRemoveFromList,
   MalFetchList,
   MalSearch,
   MalGetUsername,
+  autoTrackMAL,
 };

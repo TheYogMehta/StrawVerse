@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, no-unused-vars */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Loader2,
   ArrowLeft,
@@ -13,6 +13,8 @@ import {
   Search,
   X,
   Film,
+  ChevronDown,
+  Plus,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import "./css/InfoView.css";
@@ -22,14 +24,34 @@ export default function InfoView({
   type,
   localMalProvider: propLocalMalProvider,
   backText,
+  autoPlay,
   onBack,
-  onWatch,
-  onRead,
+  onWatch: propOnWatch,
+  onRead: propOnRead,
 }) {
   const [id, setId] = useState(propId);
   const [localMalProvider, setLocalMalProvider] =
     useState(propLocalMalProvider);
   const [details, setDetails] = useState(null);
+
+  const onWatch = (...args) => {
+    const newArgs = [...args];
+    while (newArgs.length < 9) {
+      newArgs.push(undefined);
+    }
+    newArgs[9] = details?.malid;
+    propOnWatch(...newArgs);
+  };
+
+  const onRead = (...args) => {
+    const newArgs = [...args];
+    while (newArgs.length < 8) {
+      newArgs.push(undefined);
+    }
+    newArgs[8] = details?.malid;
+    propOnRead(...newArgs);
+  };
+
   const [loading, setLoading] = useState(true);
   const [episodesOrChapters, setEpisodesOrChapters] = useState([]);
   const [itemsPage, setItemsPage] = useState(1);
@@ -67,10 +89,28 @@ export default function InfoView({
 
   // MAL Status Sync form states
   const [malSyncing, setMalSyncing] = useState(false);
-  const [malStatus, setMalStatus] = useState("plan_to_watch");
+  const [malStatus, setMalStatus] = useState("not_in_list");
   const [malWatched, setMalWatched] = useState(0);
   const [customTags, setCustomTags] = useState([]);
   const [currentTags, setCurrentTags] = useState([]);
+
+  const getMalStatusLabel = (status) => {
+    const labels = {
+      not_in_list: "Not In List",
+      plan_to_watch: "Plan To Watch",
+      watching: "Watching",
+      completed: "Completed",
+      on_hold: "On Hold",
+      dropped: "Dropped",
+      plan_to_read: "Plan To Read",
+      reading: "Reading",
+    };
+    return labels[status] || status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  };
+
+  const malStatusOptions = type === "Anime"
+    ? ["plan_to_watch", "watching", "completed", "on_hold", "dropped"]
+    : ["plan_to_read", "reading", "completed", "on_hold", "dropped"];
   const [newTagInput, setNewTagInput] = useState("");
 
   // Inline MAL Search states
@@ -81,6 +121,15 @@ export default function InfoView({
 
   const [historyProgress, setHistoryProgress] = useState(null);
   const [hasProgress, setHasProgress] = useState(false);
+
+  // Custom dropdown states
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const dropdownRef = useRef(null);
+  const [isProviderDropdownOpen, setIsProviderDropdownOpen] = useState(false);
+  const providerDropdownRef = useRef(null);
+  const [isMalStatusDropdownOpen, setIsMalStatusDropdownOpen] = useState(false);
+  const malStatusDropdownRef = useRef(null);
+  const hasAutoPlayed = useRef(false);
 
   const fetchDetails = async (isInitial = false) => {
     if (isInitial) {
@@ -94,6 +143,12 @@ export default function InfoView({
       });
       const data = await response.json();
       setDetails(data);
+      if (data && data.id && data.id !== id) {
+        setId(data.id);
+      }
+      if (data && data.provider && data.provider !== localMalProvider) {
+        setLocalMalProvider(data.provider);
+      }
 
       if (isInitial) {
         const isAnimePahe =
@@ -107,7 +162,7 @@ export default function InfoView({
       }
 
       if (data?.watched !== undefined) setMalWatched(data.watched);
-      if (data?.status) setMalStatus(data.status);
+      setMalStatus(data?.malStatus || "not_in_list");
 
       if (data?.MalLoggedIn && !data?.malid && data?.title) {
         setMalSearchQuery(data.title);
@@ -132,7 +187,7 @@ export default function InfoView({
       setCurrentTags(parsedTags);
 
       // Fetch custom tags
-      const tagsRes = await fetch(`/api/local/tags/${type}`);
+      const tagsRes = await fetch(`/api/local/tags/view/${type}`);
       const tagsData = await tagsRes.json();
       setCustomTags(tagsData);
 
@@ -316,7 +371,30 @@ export default function InfoView({
   useEffect(() => {
     setId(propId);
     setLocalMalProvider(propLocalMalProvider);
+    hasAutoPlayed.current = false;
   }, [propId, propLocalMalProvider]);
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+        setIsDropdownOpen(false);
+      }
+      if (
+        providerDropdownRef.current &&
+        !providerDropdownRef.current.contains(event.target)
+      ) {
+        setIsProviderDropdownOpen(false);
+      }
+      if (
+        malStatusDropdownRef.current &&
+        !malStatusDropdownRef.current.contains(event.target)
+      ) {
+        setIsMalStatusDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   useEffect(() => {
     fetchDetails(true);
@@ -335,6 +413,13 @@ export default function InfoView({
   useEffect(() => {
     setSelectedItems(new Set());
   }, [dubSelect]);
+
+  useEffect(() => {
+    if (autoPlay && !loading && !itemsLoading && !hasAutoPlayed.current) {
+      hasAutoPlayed.current = true;
+      handleContinueWatchRead();
+    }
+  }, [autoPlay, loading, itemsLoading]);
 
   useEffect(() => {
     if (pendingPlayEpisodeNum && !itemsLoading) {
@@ -385,6 +470,18 @@ export default function InfoView({
     episodesOrChapters.length > 0
       ? Math.max(...episodesOrChapters.map((item) => Number(item.number) || 0))
       : 0;
+
+  const hasAnyDownloads = useMemo(() => {
+    if (!details) return false;
+    if (type === "Anime") {
+      const subList = details.DownloadedEpisodes?.sub || [];
+      const dubList = details.DownloadedEpisodes?.dub || [];
+      return subList.length > 0 || dubList.length > 0;
+    } else {
+      const chList = details.DownloadedChapters || [];
+      return chList.length > 0;
+    }
+  }, [details, type]);
 
   const localNext =
     historyProgress?.suggestedNumber ||
@@ -660,6 +757,17 @@ export default function InfoView({
   // MAL Status sync
   const handleMalSync = async () => {
     if (!details?.malid) return;
+    if (malStatus === "not_in_list") {
+      Swal.fire({
+        title: "Status Required",
+        text: "Please select a watch status (e.g., Watching, Plan to Watch) to add this title to MyAnimeList.",
+        icon: "warning",
+        background: "var(--bg-secondary)",
+        color: "var(--text-main)",
+        confirmButtonColor: "var(--accent)",
+      });
+      return;
+    }
     setMalSyncing(true);
     try {
       const response = await fetch("/api/mal/update", {
@@ -696,10 +804,74 @@ export default function InfoView({
     }
   };
 
+  const handleMalRemove = async () => {
+    if (!details?.malid) return;
+
+    const result = await Swal.fire({
+      title: "Remove from MyAnimeList?",
+      text: "Are you sure you want to remove this title from your MyAnimeList list?",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, Remove",
+      cancelButtonText: "Cancel",
+      background: "var(--bg-secondary)",
+      color: "var(--text-main)",
+      confirmButtonColor: "var(--danger)",
+      cancelButtonColor: "var(--bg-tertiary)",
+    });
+
+    if (!result.isConfirmed) return;
+
+    setMalSyncing(true);
+    try {
+      const response = await fetch("/api/mal/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          malid: details.malid,
+          type: type,
+        }),
+      });
+      const data = await response.json();
+
+      if (data.icon === "success") {
+        setMalStatus("not_in_list");
+        Swal.fire({
+          title: "Removed",
+          text: data.title || "Successfully removed from MyAnimeList!",
+          icon: "success",
+          background: "var(--bg-secondary)",
+          color: "var(--text-main)",
+          confirmButtonColor: "var(--accent)",
+        });
+      } else {
+        Swal.fire({
+          title: "Failed",
+          text: data.text || "Failed to remove entry.",
+          icon: "error",
+          background: "var(--bg-secondary)",
+          color: "var(--text-main)",
+          confirmButtonColor: "var(--accent)",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+      Swal.fire({
+        title: "Remove Failed",
+        text: "MyAnimeList removal request failed.",
+        icon: "error",
+        background: "var(--bg-secondary)",
+        color: "var(--text-main)",
+        confirmButtonColor: "var(--accent)",
+      });
+    } finally {
+      setMalSyncing(false);
+    }
+  };
+
   const handleSetSingleTag = async (tagText) => {
     const trimmed = tagText ? tagText.trim() : "";
-    const updatedTags = trimmed ? [trimmed] : [];
-    await saveTags(updatedTags);
+    await saveTags(trimmed);
   };
 
   const handleCreateCustomTag = async () => {
@@ -715,55 +887,44 @@ export default function InfoView({
     });
     if (customTagName) {
       const trimmed = customTagName.trim();
-      if (trimmed.toLowerCase() === "myanimelist") {
-        Swal.fire({
-          title: "Reserved Tag Name",
-          text: 'The tag name "MyAnimeList" is reserved for system integration.',
-          icon: "warning",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-          confirmButtonColor: "var(--accent)",
-        });
-        return;
-      }
       if (trimmed) {
         handleSetSingleTag(trimmed);
       }
     }
   };
 
-  const saveTags = async (updatedTags) => {
+  const saveTags = async (updatedTag) => {
     try {
-      const response = await fetch("/api/local/add", {
+      const activeProvider = (details?.provider && details.provider !== "provider" && details.provider !== "local source") 
+        ? details.provider 
+        : (localMalProvider !== "provider" && localMalProvider !== "local" ? localMalProvider : undefined);
+
+      const response = await fetch("/api/local/tags/add", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           type: type,
-          id: details.id,
-          title: details.title,
-          ImageUrl: details.image,
-          description: details.description,
-          genres: details.genres,
-          provider: details.provider,
-          CustomTags: updatedTags,
+          id: details?.id || id,
+          provider: activeProvider,
+          MalID: details?.malid || details?.MalID,
+          CustomTag: updatedTag,
         }),
       });
       const data = await response.json();
       if (!data.error) {
-        setCurrentTags(updatedTags);
+        setCurrentTags(updatedTag ? [updatedTag] : []);
 
         // Refresh custom tag list
-        fetch(`/api/local/tags/${type}`)
+        fetch(`/api/local/tags/view/${type}`)
           .then((res) => res.json())
           .then((tags) => setCustomTags(tags))
           .catch((err) => console.error(err));
 
         Swal.fire({
           title: "Library Updated",
-          text:
-            updatedTags.length > 0
-              ? `Status set to "${updatedTags[0]}"`
-              : "Removed from Library",
+          text: updatedTag
+            ? `Status set to "${updatedTag}"`
+            : "Removed from Library",
           icon: "success",
           toast: true,
           position: "top-end",
@@ -816,10 +977,10 @@ export default function InfoView({
       setDetails(data);
       if (data?.malid) {
         setMalWatched(data.watched !== undefined ? data.watched : 0);
-        setMalStatus(data.status || "plan_to_watch");
+        setMalStatus(data.malStatus || "not_in_list");
       } else {
         setMalWatched(0);
-        setMalStatus("");
+        setMalStatus("not_in_list");
       }
     } catch (err) {
       console.error(err);
@@ -831,7 +992,22 @@ export default function InfoView({
     }
   };
 
-  const handleProviderSwitch = (newId, newProvider) => {
+  const handleProviderSwitch = async (newId, newProvider) => {
+    const oldId = id;
+    try {
+      await fetch("/api/metadata/switch-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: type,
+          oldId: oldId,
+          newId: newId,
+          newProvider: newProvider,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to migrate provider in database:", err);
+    }
     setId(newId);
     setLocalMalProvider(newProvider);
   };
@@ -846,8 +1022,6 @@ export default function InfoView({
           id: details.id,
           provider: details.provider,
           MalID: selectedMalId,
-          title: details.title,
-          ImageUrl: details.image,
         }),
       });
       const linkData = await linkRes.json();
@@ -939,7 +1113,7 @@ export default function InfoView({
     });
     if (!confirmResult.isConfirmed) return;
     try {
-      const response = await fetch("/api/local/remove", {
+      const response = await fetch("/api/local/tags/remove", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, type }),
@@ -954,7 +1128,7 @@ export default function InfoView({
           color: "var(--text-main)",
           confirmButtonColor: "var(--accent)",
         });
-        onBack();
+        fetchDetails(false);
       } else {
         Swal.fire({
           title: "Error",
@@ -1180,6 +1354,48 @@ export default function InfoView({
     );
   }
 
+  if (!details || details.error) {
+    return (
+      <div className="info-wrapper">
+        <div className="back-header">
+          <button onClick={onBack} className="btn-back">
+            <ArrowLeft size={20} />
+            <span>{backText || "Back to Collection"}</span>
+          </button>
+        </div>
+        <div
+          className="glass-panel"
+          style={{ padding: "40px", textAlign: "center", marginTop: "20px" }}
+        >
+          <img
+            src="/images/image-404.png"
+            alt="404 Not Found"
+            style={{
+              width: "180px",
+              height: "auto",
+              marginBottom: "24px",
+              opacity: 0.85,
+            }}
+          />
+          <h2 style={{ color: "var(--text-main)", marginBottom: "10px" }}>
+            {type === "Anime" ? "Anime" : "Manga"} Data Not Found
+          </h2>
+          <p style={{ color: "var(--text-muted)", marginBottom: "20px" }}>
+            {details?.message ||
+              `The requested ${type.toLowerCase()} could not be found or failed to load.`}
+          </p>
+          <button
+            onClick={onBack}
+            className="btn-back"
+            style={{ display: "inline-flex", padding: "10px 20px" }}
+          >
+            <span>Go Back</span>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const selectableItems = episodesOrChapters.filter(
     (item) => !isItemUnavailable(item),
   );
@@ -1208,12 +1424,6 @@ export default function InfoView({
           <ArrowLeft size={20} />
           <span>{backText || "Back to Collection"}</span>
         </button>
-        {localMalProvider === "local" && (
-          <button onClick={handleDeleteLocal} className="btn-delete-show">
-            <Trash2 size={16} />
-            <span>Delete All Downloads</span>
-          </button>
-        )}
       </div>
 
       {/* Main Details Panel */}
@@ -1250,7 +1460,10 @@ export default function InfoView({
               </span>
             )}
             {details?.nextEpisodeIn && (
-              <span className="info-tag-schedule" title="Next release countdown">
+              <span
+                className="info-tag-schedule"
+                title="Next release countdown"
+              >
                 <Film size={12} style={{ marginRight: "4px" }} />
                 {details.nextEpisodeIn}
               </span>
@@ -1269,52 +1482,6 @@ export default function InfoView({
           {details?.author && (
             <div className="meta-item">
               <strong>Author:</strong> {details.author}
-            </div>
-          )}
-          {details?.provider && (
-            <div className="meta-item">
-              <strong>Source Provider:</strong>{" "}
-              {details.linkedProviders && details.linkedProviders.length > 1 ? (
-                <select
-                  value={details.provider}
-                  onChange={(e) => {
-                    const selectedRecord = details.linkedProviders.find(
-                      (p) => p.provider === e.target.value,
-                    );
-                    if (selectedRecord) {
-                      handleProviderSwitch(selectedRecord.id, "provider");
-                    }
-                  }}
-                  style={{
-                    background: "var(--bg-tertiary)",
-                    color: "var(--text-main)",
-                    border: "1.5px solid var(--accent)",
-                    borderRadius: "20px",
-                    padding: "4px 16px 4px 12px",
-                    marginLeft: "8px",
-                    cursor: "pointer",
-                    outline: "none",
-                    fontWeight: "600",
-                    fontSize: "13px",
-                    boxShadow: "0 0 8px rgba(168, 85, 247, 0.25)",
-                    transition: "all 0.2s ease-in-out",
-                  }}
-                >
-                  {details.linkedProviders
-                    .filter(
-                      (p, index, self) =>
-                        self.findIndex((t) => t.provider === p.provider) ===
-                        index,
-                    )
-                    .map((p) => (
-                      <option key={p.provider} value={p.provider}>
-                        {p.provider}
-                      </option>
-                    ))}
-                </select>
-              ) : (
-                details.provider
-              )}
             </div>
           )}
 
@@ -1339,162 +1506,265 @@ export default function InfoView({
                       ? `Continue Watching Episode ${nextToPlay}`
                       : `Continue Reading Chapter ${nextToPlay}`}
               </button>
-              <button
-                onClick={handleWatchReadLatest}
-                className="btn-action-base btn-watch-latest"
-              >
-                <Play size={16} style={{ marginRight: "6px" }} />
-                {type === "Anime"
-                  ? "Watch Latest Episode"
-                  : "Read Latest Chapter"}
-              </button>
+
+              {hasAnyDownloads && (
+                <button
+                  onClick={handleDeleteLocal}
+                  className="btn-action-base"
+                  style={{
+                    background: "rgba(239, 68, 68, 0.15)",
+                    border: "1.5px solid var(--danger)",
+                    color: "var(--danger)",
+                    marginLeft: "8px",
+                  }}
+                >
+                  <Trash2 size={16} style={{ marginRight: "6px" }} />
+                  <span>Delete All Downloads</span>
+                </button>
+              )}
             </div>
 
-            {/* Library Tags & MAL Connection */}
+            {/* Library Tags & Source Provider Selection */}
             <div className="tracking-group">
-              <div className="input-group" style={{ minWidth: "250px" }}>
+              <div
+                className="input-group"
+                style={{ minWidth: "240px", position: "relative" }}
+                ref={dropdownRef}
+              >
                 <label className="input-label">Library Tags</label>
-                {/* Select tag dropdown */}
-                <select
-                  value={currentTags[0] || ""}
-                  onChange={(e) => {
-                    if (e.target.value === "__new_tag__") {
-                      handleCreateCustomTag();
-                    } else {
-                      handleSetSingleTag(e.target.value);
-                    }
-                  }}
-                  className="select-val"
+                <div
+                  className={`custom-dropdown-trigger ${isDropdownOpen ? "open" : ""}`}
+                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 >
-                  <option value="">None (Not in Library)</option>
-                  {customTags
-                    .filter((tag) => tag.toLowerCase() !== "myanimelist")
-                    .map((tag) => (
-                      <option key={tag} value={tag}>
-                        {tag}
-                      </option>
-                    ))}
-                  <option value="__new_tag__">+ Create Custom Tag...</option>
-                </select>
+                  <span className="custom-dropdown-trigger-text">
+                    {currentTags[0] || "None (Not in Library)"}
+                  </span>
+                  <ChevronDown className="custom-dropdown-chevron" size={16} />
+                </div>
 
-                {/* Assigned tags */}
-                {currentTags.length > 0 ? (
-                  <div className="tag-chips-row">
-                    <span className="tag-chip-with-remove">
-                      Status: {currentTags[0]}
-                      <button
-                        onClick={() => handleSetSingleTag("")}
-                        className="btn-tag-chip-remove"
-                        title="Remove from Library"
+                {isDropdownOpen && (
+                  <div className="custom-dropdown-menu">
+                    <div
+                      className={`custom-dropdown-item ${!currentTags[0] ? "selected" : ""}`}
+                      onClick={() => {
+                        handleSetSingleTag("");
+                        setIsDropdownOpen(false);
+                      }}
+                    >
+                      None (Not in Library)
+                    </div>
+                    {customTags.map((tag) => (
+                      <div
+                        key={tag}
+                        className={`custom-dropdown-item ${currentTags[0] === tag ? "selected" : ""}`}
+                        onClick={() => {
+                          handleSetSingleTag(tag);
+                          setIsDropdownOpen(false);
+                        }}
                       >
-                        &times;
-                      </button>
-                    </span>
-                  </div>
-                ) : (
-                  <div
-                    style={{
-                      fontSize: "12px",
-                      color: "var(--text-muted)",
-                      fontStyle: "italic",
-                      margin: "4px 0",
-                    }}
-                  >
-                    Not in Library. Choose status above to add.
+                        {tag}
+                      </div>
+                    ))}
+                    <div className="custom-dropdown-divider"></div>
+                    <div
+                      className="custom-dropdown-item create-new"
+                      onClick={() => {
+                        handleCreateCustomTag();
+                        setIsDropdownOpen(false);
+                      }}
+                    >
+                      <Plus size={14} style={{ marginRight: "6px" }} />
+                      Create Custom Tag...
+                    </div>
                   </div>
                 )}
               </div>
 
-              {/* MyAnimeList Connection */}
-              {details && details.MalLoggedIn && (
-                <div className="input-group" style={{ minWidth: "180px" }}>
-                  <label className="input-label">MyAnimeList Connection</label>
-                  {details.malid ? (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        height: "38px",
-                      }}
-                    >
-                      <span className="mal-link-badge">
-                        Linked (ID: {details.malid})
-                      </span>
-                      <button onClick={handleUnlinkMal} className="btn-unlink">
-                        Unlink
-                      </button>
-                    </div>
+              {/* Source Provider selector */}
+              {details?.provider && (
+                <div className="input-group" style={{ minWidth: "180px", position: "relative" }} ref={providerDropdownRef}>
+                  <label className="input-label">Source Provider</label>
+                  {details.linkedProviders && details.linkedProviders.length > 1 ? (
+                    <>
+                      <div 
+                        className={`custom-dropdown-trigger ${isProviderDropdownOpen ? "open" : ""}`}
+                        onClick={() => setIsProviderDropdownOpen(!isProviderDropdownOpen)}
+                      >
+                        <span className="custom-dropdown-trigger-text">
+                          {details.provider}
+                        </span>
+                        <ChevronDown className="custom-dropdown-chevron" size={16} />
+                      </div>
+
+                      {isProviderDropdownOpen && (
+                        <div className="custom-dropdown-menu">
+                          {details.linkedProviders
+                            .filter(
+                              (p, index, self) =>
+                                p.provider !== "provider" &&
+                                self.findIndex((t) => t.provider === p.provider) ===
+                                index,
+                            )
+                            .map((p) => (
+                              <div 
+                                key={p.provider} 
+                                className={`custom-dropdown-item ${details.provider === p.provider ? "selected" : ""}`}
+                                onClick={() => {
+                                  const selectedRecord = details.linkedProviders.find(
+                                    (record) => record.provider === p.provider,
+                                  );
+                                  if (selectedRecord) {
+                                    handleProviderSwitch(selectedRecord.id, p.provider);
+                                  }
+                                  setIsProviderDropdownOpen(false);
+                                }}
+                              >
+                                {p.provider}
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </>
                   ) : (
-                    <button
-                      onClick={startMalLink}
-                      className="btn-link-mal"
-                      style={{ height: "38px" }}
-                    >
-                      Link MAL Title
-                    </button>
+                    <div className="provider-static-badge">
+                      {details.provider === "local source" ? "📁 Local Source" : details.provider}
+                    </div>
                   )}
                 </div>
               )}
             </div>
           </div>
 
-          {/* MAL Configuration sync Panel */}
-          {details?.malid && details?.MalLoggedIn && (
-            <div className="mal-box">
-              <h3 className="mal-title">MyAnimeList Sync</h3>
-              <div className="mal-row">
-                <div className="input-group">
-                  <label className="input-label">
-                    {type === "Anime" ? "Watched Episodes" : "Read Chapters"}
-                  </label>
-                  <input
-                    type="number"
-                    value={malWatched}
-                    onChange={(e) =>
-                      setMalWatched(parseInt(e.target.value) || 0)
-                    }
-                    className="input-val"
-                  />
-                </div>
-                <div className="input-group">
-                  <label className="input-label">Status</label>
-                  <select
-                    value={malStatus}
-                    onChange={(e) => setMalStatus(e.target.value)}
-                    className="select-val"
+          {/* Consolidated MyAnimeList Integration Box */}
+          {details?.MalLoggedIn && (
+            <div className="mal-box glass-panel">
+              <div
+                className="mal-box-header"
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "12px",
+                  borderBottom: "1px solid var(--border)",
+                  paddingBottom: "12px",
+                  marginBottom: "14px",
+                }}
+              >
+                <h3 className="mal-title" style={{ margin: 0 }}>
+                  MyAnimeList Integration
+                </h3>
+                {details.malid ? (
+                  <div
+                    className="mal-link-status"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                    }}
                   >
-                    {type === "Anime" ? (
-                      <>
-                        <option value="plan_to_watch">Plan To Watch</option>
-                        <option value="watching">Watching</option>
-                        <option value="completed">Completed</option>
-                        <option value="on_hold">On Hold</option>
-                        <option value="dropped">Dropped</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="plan_to_read">Plan To Read</option>
-                        <option value="reading">Reading</option>
-                        <option value="completed">Completed</option>
-                        <option value="on_hold">On Hold</option>
-                        <option value="dropped">Dropped</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-                <button
-                  onClick={handleMalSync}
-                  disabled={malSyncing}
-                  className="btn-sync glow-button"
-                >
-                  {malSyncing ? (
-                    <Loader2 size={16} className="spin" />
-                  ) : (
-                    "Save status"
-                  )}
-                </button>
+                    <span className="mal-link-badge">
+                      Linked (ID: {details.malid})
+                    </span>
+                    <button onClick={handleUnlinkMal} className="btn-unlink">
+                      Unlink
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={startMalLink} className="btn-link-mal">
+                    Link MyAnimeList Title
+                  </button>
+                )}
               </div>
+
+              {details.malid ? (
+                <div className="mal-row">
+                  <div className="input-group">
+                    <label className="input-label">
+                      {type === "Anime" ? "Watched Episodes" : "Read Chapters"}
+                    </label>
+                    <input
+                      type="number"
+                      value={malWatched}
+                      onChange={(e) =>
+                        setMalWatched(parseInt(e.target.value) || 0)
+                      }
+                      className="input-val"
+                    />
+                  </div>
+                  <div className="input-group" style={{ minWidth: "160px", position: "relative" }} ref={malStatusDropdownRef}>
+                    <label className="input-label">Status</label>
+                    <div 
+                      className={`custom-dropdown-trigger ${isMalStatusDropdownOpen ? "open" : ""}`}
+                      onClick={() => setIsMalStatusDropdownOpen(!isMalStatusDropdownOpen)}
+                    >
+                      <span className="custom-dropdown-trigger-text">
+                        {getMalStatusLabel(malStatus)}
+                      </span>
+                      <ChevronDown className="custom-dropdown-chevron" size={16} />
+                    </div>
+
+                    {isMalStatusDropdownOpen && (
+                      <div className="custom-dropdown-menu">
+                        {malStatusOptions.map((statusOption) => (
+                          <div 
+                            key={statusOption} 
+                            className={`custom-dropdown-item ${malStatus === statusOption ? "selected" : ""}`}
+                            onClick={() => {
+                              setMalStatus(statusOption);
+                              setIsMalStatusDropdownOpen(false);
+                            }}
+                          >
+                            {getMalStatusLabel(statusOption)}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleMalSync}
+                    disabled={malSyncing}
+                    className="btn-sync glow-button"
+                  >
+                    {malSyncing ? (
+                      <Loader2 size={16} className="spin" />
+                    ) : (
+                      "Save Status"
+                    )}
+                  </button>
+                  {malStatus !== "not_in_list" && (
+                    <button
+                      onClick={handleMalRemove}
+                      disabled={malSyncing}
+                      className="btn-unlink"
+                      style={{
+                        background: "rgba(239, 68, 68, 0.15)",
+                        borderColor: "var(--danger)",
+                        color: "var(--danger)",
+                      }}
+                    >
+                      {malSyncing ? (
+                        <Loader2 size={16} className="spin" />
+                      ) : (
+                        "Remove from List"
+                      )}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <p
+                  className="mal-unlinked-placeholder"
+                  style={{
+                    fontSize: "13px",
+                    color: "var(--text-muted)",
+                    margin: 0,
+                    fontStyle: "italic",
+                  }}
+                >
+                  This title is not linked to a MyAnimeList entry. Link it to
+                  synchronize your status and watch history automatically.
+                </p>
+              )}
             </div>
           )}
         </div>

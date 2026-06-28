@@ -1,4 +1,3 @@
-const { FindMapping } = require("./Metadata");
 const NodeCache = require("node-cache");
 const HLSLogger = require("./logger");
 const { logger } = require("./AppLogger");
@@ -118,7 +117,7 @@ async function findanime(provider, Anime_NAME, filters) {
 }
 
 // anime info
-async function animeinfo(provider, dir, animeId, MalFetch = true) {
+async function animeinfo(provider, dir, animeId) {
   if (!provider?.provider)
     throw new Error(
       "Missing Provider! ( try downloading from settings > marketplace )",
@@ -128,50 +127,12 @@ async function animeinfo(provider, dir, animeId, MalFetch = true) {
     `animeinfo_${provider.provider_name}_${animeId}`,
   );
 
-  let cachedData = cache.get(cacheKey);
-
+  const cachedData = cache.get(cacheKey);
   if (cachedData) {
-    if (
-      global?.MalLoggedIn &&
-      cachedData?.MalLoggedIn &&
-      cachedData?.malid &&
-      MalFetch
-    ) {
-      let MyAnimeListData = await FindMapping(
-        "Anime",
-        cachedData?.id,
-        cachedData?.malid,
-        cachedData?.title,
-        dir,
-      );
-      cachedData = { ...cachedData, ...MyAnimeListData, MalLoggedIn: true };
-    }
     return cachedData;
   }
 
-  let data = await provider.provider.AnimeInfo(animeId);
-
-  if (MalFetch) {
-    let MyAnimeListData = await FindMapping(
-      "Anime",
-      data?.id,
-      data?.malid,
-      data?.title,
-      dir,
-    );
-
-    if (MyAnimeListData) {
-      data = {
-        ...data,
-        ...MyAnimeListData,
-      };
-    }
-
-    if (global?.MalLoggedIn) {
-      data = { ...data, MalLoggedIn: true };
-    }
-  }
-
+  const data = await provider.provider.AnimeInfo(animeId);
   cache.set(cacheKey, data, 60);
   return data;
 }

@@ -92,7 +92,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-  margin-bottom: 24px;
+  margin-bottom: 36px;
 }
 
 .tag-chip {
@@ -158,15 +158,17 @@
 .media-card {
   cursor: pointer;
   overflow: hidden;
-  transition: var(--transition);
+  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out;
   position: relative;
   display: flex;
   flex-direction: column;
+  border-radius: 12px;
 }
 
 .media-card:hover {
-  transform: translateY(-4px);
+  transform: scale(1.03);
   border-color: var(--accent);
+  box-shadow: 0 10px 25px rgba(124, 58, 237, 0.25), 0 0 15px rgba(124, 58, 237, 0.15);
 }
 
 .img-container {
@@ -174,6 +176,7 @@
   width: 100%;
   padding-bottom: 140%; /* Aspect ratio 1:1.4 */
   overflow: hidden;
+  border-radius: 8px;
 }
 
 .media-img {
@@ -194,11 +197,12 @@
   color: #fff;
   font-size: 11px;
   font-weight: 700;
-  padding: 4px 8px;
-  border-radius: 4px;
+  padding: 5px 10px;
+  border-radius: 20px;
   backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
+  gap: 4px;
 }
 
 .card-badges-container {
@@ -235,6 +239,7 @@
   font-size: 14px;
   font-weight: 600;
   line-height: 1.4;
+  height: 2.8em;
   color: var(--text-main);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -381,4 +386,231 @@
   overflow: hidden;
   text-overflow: ellipsis;
   letter-spacing: 0.2px;
+}
+
+/* ===================== Stats & Continue Shelf ===================== */
+
+.library-stats-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 30px;
+  width: 100%;
+}
+
+.library-stat-card {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  flex: 1;
+  min-width: 220px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--glass);
+}
+
+.stat-icon-wrapper {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.stat-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.purple-glow {
+  background: rgba(124, 58, 237, 0.12);
+  color: var(--accent-hover);
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.15);
+}
+
+.green-glow {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.15);
+}
+
+.blue-glow {
+  background: rgba(59, 130, 246, 0.12);
+  color: #3b82f6;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.15);
+}
+
+.stat-content {
+  margin-left: 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #e5e7eb;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-value {
+  font-size: 18px;
+  font-weight: 800;
+  color: #ffffff;
+  margin-top: 2px;
+}
+
+/* Continue Shelf */
+.continue-shelf-container {
+  margin-bottom: 30px;
+  width: 100%;
+}
+
+.shelf-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 16px;
+  color: #ffffff;
+  letter-spacing: -0.2px;
+}
+
+.continue-shelf-scroll {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  width: 100%;
+}
+
+.continue-shelf-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.continue-shelf-scroll::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 3px;
+}
+
+.continue-shelf-scroll::-webkit-scrollbar-thumb {
+  background: var(--bg-tertiary);
+  border-radius: 3px;
+}
+
+.continue-shelf-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+.continue-card {
+  width: 220px;
+  flex-shrink: 0;
+  cursor: pointer;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  transition: var(--transition);
+  display: flex;
+  flex-direction: column;
+}
+
+.continue-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--accent);
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+.continue-card:hover .continue-play-overlay {
+  opacity: 1;
+}
+
+.continue-card:hover .continue-play-icon {
+  transform: scale(1);
+}
+
+.continue-card:hover .continue-img {
+  transform: scale(1.05);
+}
+
+.continue-img-container {
+  position: relative;
+  width: 100%;
+  height: 124px;
+  overflow: hidden;
+  background-color: var(--bg-tertiary);
+}
+
+.continue-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: var(--transition);
+}
+
+.continue-play-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: var(--transition);
+  z-index: 1;
+}
+
+.continue-play-icon {
+  color: #ffffff;
+  transform: scale(0.85);
+  transition: transform 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.continue-progress-container {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.2);
+  z-index: 2;
+  overflow: hidden;
+}
+
+.continue-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.continue-info {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background-color: rgba(22, 24, 31, 0.5);
+  flex-grow: 1;
+}
+
+.continue-number {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent-hover);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.continue-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

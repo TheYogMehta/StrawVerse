@@ -16,6 +16,29 @@ export default function App() {
   const [whatsNewData, setWhatsNewData] = useState(null);
   const [whatsNewVersion, setWhatsNewVersion] = useState("");
   const [whatsNewDate, setWhatsNewDate] = useState("");
+  const [toasts, setToasts] = useState([]);
+
+  const showToast = (title, body, icon) => {
+    const id = Date.now();
+    setToasts((prev) => [...prev, { id, title, body, icon, fadeOut: false }]);
+    setTimeout(() => {
+      setToasts((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, fadeOut: true } : t))
+      );
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 300);
+    }, 5000);
+  };
+
+  const removeToast = (id) => {
+    setToasts((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, fadeOut: true } : t))
+    );
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, 300);
+  };
 
   const current = history[history.length - 1] || {
     view: "local-anime",
@@ -40,6 +63,61 @@ export default function App() {
 
   const parseInlineMarkdown = (text) => {
     if (!text) return "";
+    
+    // Check for keyboard shortcut pattern: "Key Name: Description"
+    const shortcutRegex = /^([^:]+):\s*(.*)$/;
+    const shortcutMatch = text.match(shortcutRegex);
+    if (shortcutMatch) {
+      const keysPart = shortcutMatch[1].trim();
+      const descPart = shortcutMatch[2].trim();
+      
+      const isShortcut = /^[a-zA-Z0-9\s+/→←↑↓`&,|-]+$/.test(keysPart) && 
+                         keysPart.length < 45 && 
+                         !keysPart.includes("  ") &&
+                         !/^(http|https|fix|add|implement|split|update|remove|rebranded|re-added|select|choose|join|join\s+our)/i.test(keysPart);
+      
+      if (isShortcut) {
+        const tokens = keysPart.split(/(\s*\/\s*|\s+or\s+|\s*\+\s*|\s*,\s*)/g);
+        const renderedKeys = tokens.map((token, index) => {
+          const isSeparator = /^\s*(\/|or|\+|,)\s*$/.test(token);
+          if (isSeparator) {
+            return <span key={index} className="kbd-separator" style={{ color: "var(--text-muted)", fontSize: "12px", margin: "0 4px" }}>{token}</span>;
+          }
+          const cleanKey = token.replace(/`/g, "").trim();
+          if (!cleanKey) return null;
+          return (
+            <kbd
+              key={index}
+              className="changelog-kbd"
+              style={{
+                backgroundColor: "var(--bg-primary)",
+                border: "1px solid var(--border)",
+                borderBottom: "2px solid var(--border)",
+                borderRadius: "4px",
+                color: "var(--text-main)",
+                fontFamily: "monospace",
+                fontSize: "11px",
+                padding: "2px 6px",
+                margin: "0 2px",
+                boxShadow: "0 1px 0 rgba(0,0,0,0.2)",
+                display: "inline-block",
+              }}
+            >
+              {cleanKey}
+            </kbd>
+          );
+        });
+
+        return (
+          <span className="changelog-shortcut-row" style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap" }}>
+            <span className="changelog-keys-wrapper">{renderedKeys}</span>
+            <span className="kbd-desc-separator" style={{ color: "var(--text-muted)", marginRight: "8px" }}>:</span>
+            <span className="changelog-desc">{parseInlineMarkdown(descPart)}</span>
+          </span>
+        );
+      }
+    }
+
     const emojiRegex =
       /[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDC00-\uDFFF]/g;
     const clean = text.replace(emojiRegex, "").trim();
@@ -198,6 +276,9 @@ export default function App() {
       window.sharedStateAPI.on("mal", (data) => {
         setMalLoggedIn(data?.LoggedIn || false);
       });
+      window.sharedStateAPI.on("mal-sync-notification", (data) => {
+        showToast(data.title, data.body, data.icon);
+      });
     }
 
     return () => {
@@ -227,12 +308,13 @@ export default function App() {
           <Catalog
             type="Anime"
             provider="local"
-            onSelectMedia={(id, prov, backText) =>
+            onSelectMedia={(id, prov, backText, autoPlay) =>
               navigateTo("info", {
                 id,
                 type: "Anime",
                 provider: "local",
                 backText,
+                autoPlay,
               })
             }
           />
@@ -242,12 +324,13 @@ export default function App() {
           <Catalog
             type="Manga"
             provider="local"
-            onSelectMedia={(id, prov, backText) =>
+            onSelectMedia={(id, prov, backText, autoPlay) =>
               navigateTo("info", {
                 id,
                 type: "Manga",
                 provider: "local",
                 backText,
+                autoPlay,
               })
             }
           />
@@ -258,12 +341,13 @@ export default function App() {
           <Catalog
             type="Anime"
             provider="provider"
-            onSelectMedia={(id, prov, backText) =>
+            onSelectMedia={(id, prov, backText, autoPlay) =>
               navigateTo("info", {
                 id,
                 type: "Anime",
                 provider: "provider",
                 backText,
+                autoPlay,
               })
             }
           />
@@ -273,12 +357,13 @@ export default function App() {
           <Catalog
             type="Manga"
             provider="provider"
-            onSelectMedia={(id, prov, backText) =>
+            onSelectMedia={(id, prov, backText, autoPlay) =>
               navigateTo("info", {
                 id,
                 type: "Manga",
                 provider: "provider",
                 backText,
+                autoPlay,
               })
             }
           />
@@ -290,6 +375,7 @@ export default function App() {
             type={current.params.type}
             localMalProvider={current.params.provider}
             backText={current.params.backText}
+            autoPlay={current.params.autoPlay}
             onBack={navigateBack}
             onWatch={(
               animeId,
@@ -301,19 +387,36 @@ export default function App() {
               animeTitle,
               provider,
               image,
-            ) =>
-              navigateTo("watch", {
-                id: animeId,
-                ep: epIdOrNum,
-                isDownloaded,
-                subdub,
-                episodesList,
-                downloadedEpisodes,
-                animeTitle,
-                provider,
-                image,
-              })
-            }
+              malid,
+            ) => {
+              setHistory((prev) => {
+                const next = [...prev];
+                if (next.length > 0) {
+                  const last = next[next.length - 1];
+                  if (last.view === "info" && last.params) {
+                    last.params = { ...last.params, autoPlay: false };
+                  }
+                }
+                return [
+                  ...next,
+                  {
+                    view: "watch",
+                    params: {
+                      id: animeId,
+                      ep: epIdOrNum,
+                      isDownloaded,
+                      subdub,
+                      episodesList,
+                      downloadedEpisodes,
+                      animeTitle,
+                      provider,
+                      image,
+                      malid,
+                    },
+                  },
+                ];
+              });
+            }}
             onRead={(
               mangaId,
               chapterIdOrNum,
@@ -323,18 +426,35 @@ export default function App() {
               mangaTitle,
               provider,
               image,
-            ) =>
-              navigateTo("read", {
-                id: mangaId,
-                chapter: chapterIdOrNum,
-                isDownloaded,
-                chaptersList,
-                downloadedChapters,
-                mangaTitle,
-                provider,
-                image,
-              })
-            }
+              malid,
+            ) => {
+              setHistory((prev) => {
+                const next = [...prev];
+                if (next.length > 0) {
+                  const last = next[next.length - 1];
+                  if (last.view === "info" && last.params) {
+                    last.params = { ...last.params, autoPlay: false };
+                  }
+                }
+                return [
+                  ...next,
+                  {
+                    view: "read",
+                    params: {
+                      id: mangaId,
+                      chapter: chapterIdOrNum,
+                      isDownloaded,
+                      chaptersList,
+                      downloadedChapters,
+                      mangaTitle,
+                      provider,
+                      image,
+                      malid,
+                    },
+                  },
+                ];
+              });
+            }}
           />
         );
       case "watch":
@@ -350,6 +470,7 @@ export default function App() {
             provider={current.params.provider}
             image={current.params.image || ""}
             onBack={navigateBack}
+            malid={current.params.malid}
           />
         );
       case "read":
@@ -364,6 +485,7 @@ export default function App() {
             provider={current.params.provider}
             image={current.params.image || ""}
             onBack={navigateBack}
+            malid={current.params.malid}
           />
         );
       case "downloads":
@@ -375,6 +497,14 @@ export default function App() {
           <SettingsView
             onMarketplaceOpen={(initialType) =>
               navigateTo("marketplace", { type: initialType })
+            }
+            onSelectMedia={(id, type, prov, backText) =>
+              navigateTo("info", {
+                id,
+                type,
+                provider: prov,
+                backText,
+              })
             }
           />
         );
@@ -433,6 +563,46 @@ export default function App() {
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* toast notifications */}
+      {toasts.length > 0 && (
+        <div className="toast-container">
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              className={`toast-card ${toast.fadeOut ? "fade-out" : ""}`}
+            >
+              <div className="toast-icon-container success">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="3"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="toast-check-svg"
+                >
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <div className="toast-content">
+                <div className="toast-title">{toast.title}</div>
+                <div className="toast-body">{toast.body}</div>
+              </div>
+              <button
+                className="toast-close-btn"
+                onClick={() => removeToast(toast.id)}
+                aria-label="Close notification"
+              >
+                &times;
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </>

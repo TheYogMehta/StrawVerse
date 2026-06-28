@@ -87,6 +87,7 @@ try {
 const { logger } = require("./backend/utils/AppLogger");
 const { getKeyValue, setKeyValue } = require("./backend/utils/db");
 const { runLiveChartScheduleIfNeeded } = require("./backend/utils/LiveChart");
+const { runStartupCleanup } = require("./backend/utils/ImageCacheManager");
 
 const {
   SettingsLoad,
@@ -280,7 +281,11 @@ const createWindow = () => {
     async (event, targetUrl, sourceReferer) => {
       try {
         if (!targetUrl) return { ok: true };
-        if (targetUrl.startsWith("file:") || targetUrl.startsWith("data:") || targetUrl.startsWith("/")) {
+        if (
+          targetUrl.startsWith("file:") ||
+          targetUrl.startsWith("data:") ||
+          targetUrl.startsWith("/")
+        ) {
           return { ok: true };
         }
         const urlObj = new URL(targetUrl);
@@ -503,6 +508,7 @@ app.whenReady().then(async () => {
 
   await patchModulePaths();
   await SettingsLoad();
+  runStartupCleanup();
   createWindow();
   createScrapperWindow();
   loadQueue();

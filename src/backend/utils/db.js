@@ -126,6 +126,16 @@ const tables = {
     episode: "INTEGER",
     date: "INTEGER",
   },
+  unlinked_mal_ids: {
+    id: "TEXT PRIMARY KEY",
+    malid: "TEXT",
+  },
+  ImageCache: {
+    url: "TEXT PRIMARY KEY",
+    filename: "TEXT",
+    file_size: "INTEGER",
+    last_accessed: "INTEGER",
+  },
 };
 
 function getKeyValue(tableName, key) {
@@ -232,6 +242,32 @@ try {
   logger.error("Failed to create unique index on next_episodes: " + e.message);
 }
 
+// Migrate old Settings unlinked_mal_ids to dedicated table
+try {
+  const row = global.db
+    .prepare("SELECT value FROM Settings WHERE key = 'unlinked_mal_ids'")
+    .get();
+  if (row && row.value) {
+    const map = JSON.parse(row.value);
+    const insertStmt = global.db.prepare(
+      "INSERT OR IGNORE INTO unlinked_mal_ids (id, malid) VALUES (?, NULL)",
+    );
+    Object.keys(map).forEach((id) => {
+      if (map[id]) {
+        insertStmt.run(id);
+      }
+    });
+    global.db
+      .prepare("DELETE FROM Settings WHERE key = 'unlinked_mal_ids'")
+      .run();
+    logger.info(
+      "Migrated Settings unlinked_mal_ids to dedicated database table.",
+    );
+  }
+} catch (e) {
+  logger.error("Failed to migrate unlinked_mal_ids to table: " + e.message);
+}
+
 function updateTableSchema(tableName, expectedColumns) {
   try {
     const existingColumns = global.db
@@ -251,6 +287,17 @@ function updateTableSchema(tableName, expectedColumns) {
       `Error updating table schema for ${tableName}: ${error.message}`,
     );
   }
+}
+
+// Clean up history records that don't have matching local Anime/Manga metadata
+try {
+  const watchDeleted = global.db.prepare("DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)").run();
+  const readDeleted = global.db.prepare("DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)").run();
+  if (watchDeleted.changes > 0 || readDeleted.changes > 0) {
+    logger.info(`Database cleanup: Deleted ${watchDeleted.changes} orphaned watch history entries and ${readDeleted.changes} read history entries.`);
+  }
+} catch (e) {
+  logger.error("Failed to run database history cleanup: " + e.message);
 }
 
 module.exports = {

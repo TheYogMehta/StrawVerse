@@ -79,6 +79,7 @@ export default function MangaReader({
   provider,
   image,
   onBack,
+  malid,
 }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -226,6 +227,8 @@ export default function MangaReader({
             duration: totalPages,
             timeSpent,
             image,
+            provider,
+            malid,
           }),
         });
       } catch (err) {

@@ -12,6 +12,11 @@ import {
   Film,
   Plus,
   Folder,
+  Clock,
+  CheckSquare,
+  Tv,
+  BookOpen,
+  Play,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -33,6 +38,8 @@ export default function Catalog({ type, provider, onSelectMedia }) {
   const [localTags, setLocalTags] = useState([]);
   const [providerIconMap, setProviderIconMap] = useState({});
   const [linkingMalItem, setLinkingMalItem] = useState(null);
+  const [stats, setStats] = useState(null);
+  const [recentHistory, setRecentHistory] = useState([]);
 
   // Define supported filter maps matching index.js
   const siteFilterDefs = {
@@ -41,9 +48,6 @@ export default function Catalog({ type, provider, onSelectMedia }) {
 
   const getApiEndpoint = (currentTag = activeFilters.tag) => {
     if (provider === "local") {
-      if (currentTag === "MyAnimeList") {
-        return `/api/list/${type}/mal`;
-      }
       return `/api/list/${type}/local`;
     }
     if (provider === "mal") return `/api/list/${type}/mal`;
@@ -127,6 +131,12 @@ export default function Catalog({ type, provider, onSelectMedia }) {
       setErrorMsg(
         "Failed to load data. Please verify your settings or server connection.",
       );
+      setData({
+        results: [],
+        totalPages: 0,
+        currentPage: 1,
+        hasNextPage: false,
+      });
     } finally {
       if (lastRequestRef.current === currentRequestId) {
         setLoading(false);
@@ -144,16 +154,44 @@ export default function Catalog({ type, provider, onSelectMedia }) {
     setCurrentPage(1);
     setLinkingMalItem(null);
     setSearchQuery("");
-    fetchData(1, {}, "", null);
-    setActiveFilters({});
+
+    const defaultTag = provider === "local" ? (type === "Manga" ? "Reading" : "Watching") : "";
+    const initFilters = defaultTag ? { tag: defaultTag } : {};
+    setActiveFilters(initFilters);
+    fetchData(1, initFilters, "", null);
 
     if (provider === "local") {
-      fetch(`/api/local/tags/${type}`)
+      fetch(`/api/local/tags/view/${type}`)
         .then((res) => res.json())
         .then((tags) => setLocalTags(tags))
         .catch((err) => console.error(err));
+
+      // Fetch history stats
+      fetch("/api/history/stats")
+        .then((res) => res.json())
+        .then((sData) => setStats(sData))
+        .catch((err) => console.error("Failed to fetch history stats:", err));
+
+      // Fetch recent history
+      fetch("/api/history/list?limit=15")
+        .then((res) => res.json())
+        .then((hData) => {
+          const filtered = (hData || []).filter((item) => item.type === type);
+          const seen = new Set();
+          const unique = [];
+          for (const item of filtered) {
+            if (!seen.has(item.media_id)) {
+              seen.add(item.media_id);
+              unique.push(item);
+            }
+          }
+          setRecentHistory(unique);
+        })
+        .catch((err) => console.error("Failed to fetch history list:", err));
     } else {
       setLocalTags([]);
+      setStats(null);
+      setRecentHistory([]);
     }
 
     if (provider === "local" || provider === "mal") {
@@ -179,22 +217,28 @@ export default function Catalog({ type, provider, onSelectMedia }) {
       input: "text",
       inputPlaceholder: "Enter tag name...",
       showCancelButton: true,
+      confirmButtonText: "Create Tag",
+      cancelButtonText: "Cancel",
       background: "var(--bg-secondary)",
       color: "var(--text-main)",
       confirmButtonColor: "var(--accent)",
       cancelButtonColor: "var(--bg-tertiary)",
+      customClass: {
+        confirmButton: "swal-confirm-btn",
+        cancelButton: "swal-cancel-btn",
+        popup: "swal-custom-popup",
+      },
     });
     if (tagName && tagName.trim()) {
       const trimmed = tagName.trim();
-      const lower = trimmed.toLowerCase();
       const forbidden = [
         "watching",
         "plan to watch",
         "reading",
         "plan to read",
-        "myanimelist",
+        "downloads",
       ];
-      if (forbidden.includes(lower)) {
+      if (forbidden.includes(trimmed.toLowerCase())) {
         Swal.fire({
           title: "Reserved Tag Name",
           text: `"${trimmed}" is a reserved system tag and cannot be created manually.`,
@@ -246,15 +290,13 @@ export default function Catalog({ type, provider, onSelectMedia }) {
             },
           });
 
-          fetch("/api/local/add", {
+          fetch("/api/local/tags/add", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               type: type,
               id: item.id,
-              title: item.title,
-              ImageUrl: item.image,
-              provider: data.site || item.provider,
+              provider: item.provider !== "provider" && item.provider !== "local source" ? item.provider : undefined,
               MalID: linkingMalItem.MalID || linkingMalItem.id,
             }),
           })
@@ -286,9 +328,7 @@ export default function Catalog({ type, provider, onSelectMedia }) {
       return;
     }
 
-    const isMalActive =
-      provider === "mal" ||
-      (provider === "local" && activeFilters.tag === "MyAnimeList");
+    const isMalActive = provider === "mal";
 
     // Determine what back text to display
     let backText = "Back to Collection";
@@ -389,6 +429,123 @@ export default function Catalog({ type, provider, onSelectMedia }) {
         )}
       </header>
 
+      {/* Local Library Stats Dashboard */}
+      {provider === "local" && stats && !linkingMalItem && (
+        <div className="library-stats-container">
+          <div className="library-stat-card glass-panel">
+            <div className="stat-icon-wrapper purple-glow">
+              <Clock size={20} className="stat-icon" />
+            </div>
+            <div className="stat-content">
+              <span className="stat-label">Total Time Spent</span>
+              <span className="stat-value">
+                {type === "Anime" ? `${stats.watchHours || 0} hrs` : `${stats.readHours || 0} hrs`}
+              </span>
+            </div>
+          </div>
+
+          <div className="library-stat-card glass-panel">
+            <div className="stat-icon-wrapper green-glow">
+              <CheckSquare size={20} className="stat-icon" />
+            </div>
+            <div className="stat-content">
+              <span className="stat-label">
+                {type === "Anime" ? "Episodes Completed" : "Chapters Read"}
+              </span>
+              <span className="stat-value">
+                {type === "Anime" ? `${stats.completedEpisodes || 0} eps` : `${stats.completedChapters || 0} chs`}
+              </span>
+            </div>
+          </div>
+
+          <div className="library-stat-card glass-panel">
+            <div className="stat-icon-wrapper blue-glow">
+              {type === "Anime" ? (
+                <Tv size={20} className="stat-icon" />
+              ) : (
+                <BookOpen size={20} className="stat-icon" />
+              )}
+            </div>
+            <div className="stat-content">
+              <span className="stat-label">
+                {type === "Anime" ? "Total Anime" : "Total Manga"}
+              </span>
+              <span className="stat-value">
+                {type === "Anime" ? `${stats.distinctAnime || 0} titles` : `${stats.distinctManga || 0} titles`}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Continue Watching / Continue Reading Shelf */}
+      {provider === "local" && !linkingMalItem && (() => {
+        const displayable = (recentHistory || []).filter((item) => {
+          if (item.is_completed === 0) return true;
+          if (item.total_count === null || item.total_count === undefined || item.number < item.total_count) {
+            return true;
+          }
+          return false;
+        });
+
+        if (displayable.length === 0) return null;
+
+        return (
+          <div className="continue-shelf-container">
+            <h2 className="shelf-title">
+              {type === "Anime" ? "Continue Watching" : "Continue Reading"}
+            </h2>
+            <div className="continue-shelf-scroll">
+              {displayable.slice(0, 4).map((item) => {
+                const isItemCompleted = item.is_completed === 1;
+                const nextNum = isItemCompleted ? item.number + 1 : item.number;
+                const progress = isItemCompleted
+                  ? 0
+                  : item.duration > 0
+                    ? Math.min(100, Math.max(0, Math.round((item.current_time / item.duration) * 100)))
+                    : 0;
+
+                return (
+                  <div
+                    key={`${item.media_id}-${item.number}`}
+                    className="continue-card glass-panel"
+                    onClick={() => onSelectMedia(item.media_id, "local", "Back to Collection", true)}
+                  >
+                    <div className="continue-img-container">
+                      <img
+                        src={item.image || "/images/image-404.png"}
+                        alt={item.title}
+                        className="continue-img"
+                        onError={(e) => {
+                          e.target.src = "/images/image-404.png";
+                        }}
+                      />
+                      <div className="continue-play-overlay">
+                        <Play size={28} className="continue-play-icon" />
+                      </div>
+                      <div className="continue-progress-container">
+                        <div
+                          className="continue-progress-bar"
+                          style={{ width: `${progress}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="continue-info">
+                      <span className="continue-number">
+                        {type === "Anime" ? `Episode ${nextNum}` : `Chapter ${nextNum}`}
+                      </span>
+                      <h4 className="continue-title" title={item.title}>
+                        {item.title}
+                      </h4>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Filter panel */}
       {availableFilters && (
         <div className="filter-panel">
@@ -414,12 +571,6 @@ export default function Catalog({ type, provider, onSelectMedia }) {
       {/* Local Tag Filter panel */}
       {provider === "local" && !linkingMalItem && (
         <div className="tag-chips-container">
-          <button
-            onClick={() => handleFilterChange("tag", "")}
-            className={`tag-chip ${!activeFilters.tag || activeFilters.tag === "" ? "active" : ""}`}
-          >
-            All
-          </button>
           {localTags.map((tag) => (
             <button
               key={tag}
@@ -478,7 +629,7 @@ export default function Catalog({ type, provider, onSelectMedia }) {
               ? activeFilters.tag
                 ? `No items found tagged with "${activeFilters.tag}".`
                 : `Your local ${type.toLowerCase()} library is empty.`
-              : provider === "mal" || activeFilters.tag === "MyAnimeList"
+              : provider === "mal"
                 ? `No items found in your MyAnimeList ${type.toLowerCase()} library.`
                 : searchQuery.trim().length > 0
                   ? "Try checking your spelling or using different search terms."
@@ -496,7 +647,7 @@ export default function Catalog({ type, provider, onSelectMedia }) {
               >
                 <div className="img-container">
                   <img
-                    src={item.image}
+                    src={item.image || "/images/image-404.png"}
                     alt={item.title}
                     className="media-img"
                     onError={(e) => {
@@ -529,15 +680,7 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                     )}
                   </div>
 
-                  {/* Provider badge — bottom-right of card image */}
-                  {(provider === "local" || provider === "mal") &&
-                    item.provider &&
-                    item.provider !== "" && (
-                      <ProviderBadge
-                        providerName={item.provider}
-                        iconUrl={providerIconMap[item.provider]}
-                      />
-                    )}
+
                 </div>
 
                 <div className="card-info">

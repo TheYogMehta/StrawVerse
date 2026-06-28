@@ -40,6 +40,7 @@ async function settingupdate({
   mergeSubtitles = null,
   subtitleFormat = null,
   malDiscordProfile = null,
+  imageCacheSizeLimit = null,
 }) {
   const currentSettings = getKeyValue("Settings", "config");
 
@@ -98,6 +99,10 @@ async function settingupdate({
       currentSettings?.CustomDownloadLocation || getDownloadsFolder();
   }
 
+  if (imageCacheSizeLimit === null) {
+    imageCacheSizeLimit = currentSettings?.imageCacheSizeLimit ?? 5;
+  }
+
   config.quality = quality;
   config.mal_on_off = mal_on_off;
   config.status = status;
@@ -111,6 +116,7 @@ async function settingupdate({
   config.mergeSubtitles = mergeSubtitles;
   config.subtitleFormat = subtitleFormat;
   config.malDiscordProfile = malDiscordProfile;
+  config.imageCacheSizeLimit = imageCacheSizeLimit;
 
   if (config.enableDiscordRPC === "on") {
     try {
@@ -139,6 +145,7 @@ async function settingupdate({
     mergeSubtitles,
     subtitleFormat,
     malDiscordProfile,
+    imageCacheSizeLimit,
   };
 }
 
@@ -204,6 +211,11 @@ async function settingfetch() {
       changes = true;
     }
 
+    if (!config?.hasOwnProperty("imageCacheSizeLimit")) {
+      config.imageCacheSizeLimit = 5;
+      changes = true;
+    }
+
     if (changes) {
       await settingSave();
     }
@@ -237,7 +249,12 @@ async function SettingsLoad() {
             mergeSubtitles: "off",
             subtitleFormat: "vtt",
             malDiscordProfile: "off",
+            imageCacheSizeLimit: 5,
           };
+
+    if (config && !config.hasOwnProperty("imageCacheSizeLimit")) {
+      config.imageCacheSizeLimit = 5;
+    }
 
     const currentVersion = app.getVersion();
     if (!config.lastVersion || config.lastVersion !== currentVersion) {

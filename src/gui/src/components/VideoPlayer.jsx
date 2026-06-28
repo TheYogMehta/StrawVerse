@@ -29,6 +29,7 @@ export default function VideoPlayer({
   provider,
   image,
   onBack,
+  malid,
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -331,6 +332,8 @@ export default function VideoPlayer({
             duration,
             timeSpent,
             image,
+            provider,
+            malid,
           }),
         });
       } catch (err) {

@@ -84,10 +84,12 @@ export default function DownloadsTracker() {
           <button onClick={fetchDownloads} className="btn-refresh" title="Force Refresh">
             <RefreshCw size={16} />
           </button>
-          <button onClick={() => handleRemoveItem(null)} className="btn-clear-all">
-            <Trash2 size={16} />
-            <span>Clear Queue</span>
-          </button>
+          {queue.length > 0 && (
+            <button onClick={() => handleRemoveItem(null)} className="btn-clear-all">
+              <Trash2 size={16} />
+              <span>Clear Queue</span>
+            </button>
+          )}
         </div>
       </header>
 
@@ -115,7 +117,7 @@ export default function DownloadsTracker() {
           </div>
         </div>
       ) : (
-        <div className="idle-panel glass-panel">
+        <div className="idle-panel">
           <HardDrive size={36} color="var(--text-muted)" />
           <h3 style={{ fontSize: '15px', fontWeight: '600' }}>No active downloads</h3>
           <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Ready for tasks.</p>
@@ -123,36 +125,33 @@ export default function DownloadsTracker() {
       )}
 
       {/* Queue items list */}
-      <div className="queue-section">
-        <h2 className="queue-title">Upcoming Queue ({queue.length})</h2>
+      {(!loading && queue.length === 0) ? null : (
+        <div className="queue-section">
+          <h2 className="queue-title">Upcoming Queue ({queue.length})</h2>
 
-        {loading ? (
-          <div className="loading-center">
-            <Loader2 size={36} className="spin" color="var(--accent)" />
-          </div>
-        ) : queue.length === 0 ? (
-          <div className="empty-center glass-panel">
-            <CheckCircle size={32} color="var(--success)" />
-            <p style={{ color: 'var(--text-muted)', fontSize: '14px' }}>No items in upcoming queue.</p>
-          </div>
-        ) : (
-          <div className="queue-list">
-            {queue.map((item, idx) => (
-              <div key={item.epid || idx} className="queue-card glass-panel">
-                <div className="queue-item-info">
-                  <span className="queue-title-text">{item.Title}</span>
-                  <span className="queue-meta">
-                    {item.Type === 'Anime' ? `Episode ${item.EpNum}` : `Chapter ${item.EpNum}`} • {item.Type.toUpperCase()}
-                  </span>
+          {loading ? (
+            <div className="loading-center">
+              <Loader2 size={36} className="spin" color="var(--accent)" />
+            </div>
+          ) : (
+            <div className="queue-list">
+              {queue.map((item, idx) => (
+                <div key={item.epid || idx} className="queue-card glass-panel">
+                  <div className="queue-item-info">
+                    <span className="queue-title-text">{item.Title}</span>
+                    <span className="queue-meta">
+                      {item.Type === 'Anime' ? `Episode ${item.EpNum}` : `Chapter ${item.EpNum}`} • {item.Type.toUpperCase()}
+                    </span>
+                  </div>
+                  <button onClick={() => handleRemoveItem(item.epid)} className="btn-remove-item">
+                    <X size={16} />
+                  </button>
                 </div>
-                <button onClick={() => handleRemoveItem(item.epid)} className="btn-remove-item">
-                  <X size={16} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

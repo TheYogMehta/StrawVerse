@@ -27,8 +27,13 @@
 
 .settings-row {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  align-items: stretch;
   gap: 24px;
+}
+
+.settings-row .settings-panel {
+  height: 100%;
 }
 
 .settings-panel {
@@ -50,12 +55,25 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  max-width: 600px;
+  width: 100%;
+}
+
+.settings-panel-subtitle {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-muted);
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 8px;
+  margin-top: 16px;
+  margin-bottom: 12px;
 }
 
 .settings-label {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-muted);
+  text-align: left;
 }
 
 .settings-text-input {
@@ -102,6 +120,7 @@
   font-size: 13px;
   margin-top: 8px;
   transition: var(--transition);
+  max-width: max-content;
 }
 
 .settings-market-btn:hover {
@@ -123,6 +142,7 @@
   justify-content: center;
   gap: 8px;
   margin-top: 8px;
+  max-width: max-content;
 }
 
 .settings-connect-link {
@@ -137,6 +157,7 @@
   font-size: 13px;
   box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
   transition: var(--transition);
+  max-width: max-content;
 }
 
 .settings-connect-link:hover {
@@ -231,7 +252,7 @@
 
 .settings-stat-card-sub {
   font-size: 13px;
-  color: var(--text-muted);
+  color: #d1d5db;
   margin: 0;
 }
 
@@ -240,6 +261,7 @@
   flex-direction: column;
   gap: 12px;
   margin-top: 10px;
+  width: 100%;
 }
 
 .settings-history-item {
@@ -261,20 +283,21 @@
 }
 
 .settings-history-type-badge {
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 800;
   text-transform: uppercase;
-  background-color: rgba(59, 130, 246, 0.15);
+  letter-spacing: 0.05em;
+  background-color: rgba(59, 130, 246, 0.12);
   color: #60a5fa;
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  border: 1px solid rgba(59, 130, 246, 0.25);
 }
 
 .settings-history-type-badge.manga {
-  background-color: rgba(16, 185, 129, 0.15);
+  background-color: rgba(16, 185, 129, 0.12);
   color: #34d399;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  border: 1px solid rgba(16, 185, 129, 0.25);
 }
 
 .settings-history-item-title {
@@ -328,17 +351,17 @@
   font-size: 20px;
   font-weight: 800;
   color: white;
-  margin-bottom: 12px;
-  border-bottom: 2px solid var(--accent);
-  padding-bottom: 6px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(124, 58, 237, 0.2);
+  padding-bottom: 8px;
 }
 
 .changelog-h2 {
   font-size: 16px;
   font-weight: 700;
-  color: var(--accent);
-  margin-top: 18px;
-  margin-bottom: 8px;
+  color: var(--text-main);
+  margin-top: 20px;
+  margin-bottom: 10px;
 }
 
 .changelog-h3 {
@@ -370,4 +393,48 @@
 
 .changelog-link:hover {
   text-decoration: underline;
+}
+
+.settings-history-item.clickable {
+  cursor: pointer;
+}
+
+.settings-history-item.clickable:hover {
+  border-color: var(--accent);
+  background-color: var(--bg-secondary);
+}
+
+.changelog-shortcut-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.changelog-kbd {
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-main);
+  font-family: monospace;
+  font-size: 11px;
+  padding: 2px 6px;
+  margin: 0 2px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  display: inline-block;
+}
+
+.kbd-separator {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 0 4px;
+}
+
+.kbd-desc-separator {
+  color: var(--text-muted);
+  margin-right: 8px;
+}
+
+.changelog-desc {
+  color: var(--text-main);
 }

@@ -129,16 +129,16 @@
 }
 
 .idle-panel {
-  padding: 30px;
+  padding: 48px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  gap: 12px;
   margin-bottom: 30px;
   color: var(--text-muted);
-  border-style: dashed;
-  border-width: 2px;
+  background: transparent;
+  border: none;
 }
 
 .queue-section {
@@ -163,8 +163,10 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px;
+  padding: 48px;
   gap: 12px;
+  background: transparent;
+  border: none;
 }
 
 .queue-list {

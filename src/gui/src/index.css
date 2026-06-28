@@ -131,9 +131,9 @@ body {
 }
 
 .btn-reinstall {
-  background-color: var(--bg-tertiary);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
+  background-color: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #e5e7eb;
   padding: 8px 12px;
   border-radius: 6px;
   cursor: pointer;
@@ -145,6 +145,7 @@ body {
 }
 .btn-reinstall:hover {
   border-color: var(--accent);
+  background-color: rgba(124, 58, 237, 0.08);
   color: white;
 }
 
@@ -663,6 +664,179 @@ body {
 
 .whats-new-button:active {
   transform: translateY(0);
+}
+
+/* Toast Notifications Container */
+.toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  z-index: 9999;
+  pointer-events: none;
+}
+
+/* Toast Card */
+.toast-card {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 360px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: rgba(22, 24, 31, 0.85); /* glassmorphism secondary bg */
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+  animation: toastSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  transition: transform 0.3s, opacity 0.3s;
+}
+
+.toast-card.fade-out {
+  animation: toastSlideOut 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Toast Icon Wrapper */
+.toast-icon-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(124, 58, 237, 0.15); /* Purple accent theme tint */
+  border: 1px solid rgba(124, 58, 237, 0.25);
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.2);
+}
+
+.toast-icon-container.success {
+  background: rgba(16, 185, 129, 0.15); /* Green success theme tint */
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+  color: #10b981; /* Green check icon color */
+}
+
+.toast-check-svg {
+  flex-shrink: 0;
+}
+
+.toast-icon {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+/* Toast Content */
+.toast-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #ffffff;
+  margin-bottom: 4px;
+  letter-spacing: -0.01em;
+}
+
+.toast-body {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* Toast Close Button */
+.toast-close-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: var(--transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-start;
+  margin-top: -4px;
+  margin-right: -8px;
+}
+
+.toast-close-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #ffffff;
+}
+
+/* Toast Animations */
+@keyframes toastSlideIn {
+  from {
+    transform: translateX(120%) scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes toastSlideOut {
+  from {
+    transform: translateX(0) scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(120%) scale(0.95);
+    opacity: 0;
+  }
+}
+
+body:not(.swal2-toast-shown) .swal2-container.swal2-backdrop-show:not(.swal2-toast-container) {
+  backdrop-filter: blur(6px) !important;
+}
+
+.swal-confirm-btn {
+  padding: 10px 24px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.25) !important;
+  transition: var(--transition) !important;
+}
+.swal-confirm-btn:hover {
+  transform: translateY(-1px) !important;
+  box-shadow: 0 6px 18px rgba(124, 58, 237, 0.4) !important;
+}
+
+.swal-cancel-btn {
+  padding: 10px 24px !important;
+  font-size: 14px !important;
+  font-weight: 600 !important;
+  border-radius: 8px !important;
+  border: 1px solid var(--border) !important;
+  transition: var(--transition) !important;
+}
+.swal-cancel-btn:hover {
+  background-color: var(--bg-tertiary) !important;
+}
+
+.swal-custom-popup {
+  border-radius: 16px !important;
+  border: 1px solid var(--border) !important;
 }
 
 

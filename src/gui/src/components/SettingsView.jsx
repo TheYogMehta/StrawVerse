@@ -4,7 +4,7 @@ import { Loader2, LogOut, CheckCircle, Trash2, MessageSquare } from "lucide-reac
 import Swal from "sweetalert2";
 import "./css/SettingsView.css";
 
-export default function SettingsView({ onMarketplaceOpen }) {
+export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
   const [settings, setSettings] = useState(null);
   const [url, setUrl] = useState("");
   const [malLoggedIn, setMalLoggedIn] = useState(false);
@@ -24,6 +24,9 @@ export default function SettingsView({ onMarketplaceOpen }) {
   const [subtitleFormat, setSubtitleFormat] = useState("vtt");
   const [malDiscordProfile, setMalDiscordProfile] = useState("off");
   const [malUsername, setMalUsername] = useState(null);
+  const [imageCacheSizeLimit, setImageCacheSizeLimit] = useState(5);
+  const [cacheStats, setCacheStats] = useState(null);
+  const [clearingCache, setClearingCache] = useState(false);
 
   const [hasChanges, setHasChanges] = useState(false);
   const [activeTab, setActiveTab] = useState("general");
@@ -77,6 +80,16 @@ export default function SettingsView({ onMarketplaceOpen }) {
     }
   }, [activeTab, changelog]);
 
+  const fetchCacheStats = async () => {
+    try {
+      const response = await fetch("/api/cache/stats");
+      const data = await response.json();
+      setCacheStats(data);
+    } catch (err) {
+      console.error("Failed to fetch cache stats:", err);
+    }
+  };
+
   const fetchSettings = async () => {
     setLoading(true);
     try {
@@ -100,6 +113,7 @@ export default function SettingsView({ onMarketplaceOpen }) {
       setSubtitleFormat(s.subtitleFormat || "vtt");
       setMalDiscordProfile(s.malDiscordProfile || "off");
       setMalUsername(data.malUsername || null);
+      setImageCacheSizeLimit(s.imageCacheSizeLimit || 5);
 
       setHasChanges(false);
     } catch (err) {
@@ -111,6 +125,7 @@ export default function SettingsView({ onMarketplaceOpen }) {
 
   useEffect(() => {
     fetchSettings();
+    fetchCacheStats();
 
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       window.sharedStateAPI.on("mal", (data) => {
@@ -170,7 +185,62 @@ export default function SettingsView({ onMarketplaceOpen }) {
     }
   };
 
+  const handleClearHistory = async () => {
+    const confirmResult = await Swal.fire({
+      title: "Clear All History?",
+      text: "Are you sure you want to permanently clear all watch and read history? This cannot be undone.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, clear all",
+      cancelButtonText: "Cancel",
+      background: "var(--bg-secondary)",
+      color: "var(--text-main)",
+      confirmButtonColor: "var(--danger)",
+      cancelButtonColor: "var(--bg-tertiary)",
+    });
+    if (!confirmResult.isConfirmed) return;
+
+    try {
+      const response = await fetch("/api/history/clear", {
+        method: "POST",
+      });
+      const data = await response.json();
+      if (data.success) {
+        Swal.fire({
+          title: "Cleared!",
+          text: "All activity history has been cleared.",
+          icon: "success",
+          timer: 1500,
+          showConfirmButton: false,
+        });
+        setStats({
+          watchHours: 0,
+          readHours: 0,
+          completedEpisodes: 0,
+          completedChapters: 0,
+          distinctAnime: 0,
+          distinctManga: 0,
+        });
+        setHistoryList([]);
+      } else {
+        Swal.fire({
+          title: "Error",
+          text: data.error || "Failed to clear history.",
+          icon: "error",
+          background: "var(--bg-secondary)",
+          color: "var(--text-main)",
+          confirmButtonColor: "var(--accent)",
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const autoSaveSettings = async () => {
+    const finalLimit = parseInt(imageCacheSizeLimit, 10);
+    if (isNaN(finalLimit) || finalLimit < 5) return; // Don't auto-save invalid limits
+
     setSaving(true);
     try {
       const response = await fetch("/api/settings", {
@@ -188,6 +258,7 @@ export default function SettingsView({ onMarketplaceOpen }) {
           mergeSubtitles: mergeSubtitles,
           subtitleFormat: subtitleFormat,
           malDiscordProfile: malDiscordProfile,
+          imageCacheSizeLimit: finalLimit,
         }),
       });
       const data = await response.json();
@@ -206,6 +277,7 @@ export default function SettingsView({ onMarketplaceOpen }) {
           mergeSubtitles: mergeSubtitles,
           subtitleFormat: subtitleFormat,
           malDiscordProfile: malDiscordProfile,
+          imageCacheSizeLimit: finalLimit,
         });
       } else if (data.error) {
         Swal.fire({
@@ -230,6 +302,9 @@ export default function SettingsView({ onMarketplaceOpen }) {
   // Monitor changes and trigger debounced auto-save
   useEffect(() => {
     if (!settings) return;
+    const finalLimit = parseInt(imageCacheSizeLimit, 10);
+    const isValidLimit = !isNaN(finalLimit) && finalLimit >= 5;
+
     const changed =
       downloadLocation !== (settings.CustomDownloadLocation || "") ||
       discordRpc !== (settings.enableDiscordRPC || "off") ||
@@ -241,7 +316,8 @@ export default function SettingsView({ onMarketplaceOpen }) {
       malStatus !== (settings.status || "plan_to_watch") ||
       mergeSubtitles !== (settings.mergeSubtitles || "off") ||
       subtitleFormat !== (settings.subtitleFormat || "vtt") ||
-      malDiscordProfile !== (settings.malDiscordProfile || "off");
+      malDiscordProfile !== (settings.malDiscordProfile || "off") ||
+      (isValidLimit && finalLimit !== (settings.imageCacheSizeLimit || 5));
 
     setHasChanges(changed);
 
@@ -263,6 +339,7 @@ export default function SettingsView({ onMarketplaceOpen }) {
     mergeSubtitles,
     subtitleFormat,
     malDiscordProfile,
+    imageCacheSizeLimit,
     settings,
   ]);
 
@@ -295,6 +372,47 @@ export default function SettingsView({ onMarketplaceOpen }) {
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleClearCache = async () => {
+    const confirmResult = await Swal.fire({
+      title: "Clear Image Cache?",
+      text: "This will delete all cached cover and metadata images. They will be re-downloaded when needed.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonText: "Yes, clear cache",
+      cancelButtonText: "Cancel",
+      background: "var(--bg-secondary)",
+      color: "var(--text-main)",
+      confirmButtonColor: "var(--danger)",
+      cancelButtonColor: "var(--bg-tertiary)",
+    });
+    if (!confirmResult.isConfirmed) return;
+    setClearingCache(true);
+    try {
+      const res = await fetch("/api/cache/clear", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        Swal.fire({
+          title: "Cache Cleared",
+          text: "Image cache cleared successfully!",
+          icon: "success",
+          background: "var(--bg-secondary)",
+          color: "var(--text-main)",
+          confirmButtonColor: "var(--accent)",
+          timer: 1500,
+          showConfirmButton: false,
+        });
+        fetchCacheStats();
+      } else {
+        Swal.fire("Error", data.error || "Failed to clear cache.", "error");
+      }
+    } catch (err) {
+      console.error(err);
+      Swal.fire("Error", err.message || "An error occurred.", "error");
+    } finally {
+      setClearingCache(false);
     }
   };
 
@@ -349,24 +467,10 @@ export default function SettingsView({ onMarketplaceOpen }) {
         </button>
         <button
           type="button"
-          onClick={() => setActiveTab("anime")}
-          className={`settings-tab-btn ${activeTab === "anime" ? "active" : ""}`}
+          onClick={() => setActiveTab("anime_manga")}
+          className={`settings-tab-btn ${activeTab === "anime_manga" ? "active" : ""}`}
         >
-          Anime Settings
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("manga")}
-          className={`settings-tab-btn ${activeTab === "manga" ? "active" : ""}`}
-        >
-          Manga Settings
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab("mal")}
-          className={`settings-tab-btn ${activeTab === "mal" ? "active" : ""}`}
-        >
-          MyAnimeList
+          Anime & Manga Settings
         </button>
         <button
           type="button"
@@ -428,6 +532,54 @@ export default function SettingsView({ onMarketplaceOpen }) {
             </div>
 
             <div className="settings-panel glass-panel">
+              <h2 className="settings-panel-title">Storage & Cache</h2>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">Image Cache Size Limit</label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input
+                    type="number"
+                    min={5}
+                    value={imageCacheSizeLimit}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      setImageCacheSizeLimit(isNaN(val) ? "" : val);
+                    }}
+                    onBlur={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      if (isNaN(val) || val < 5) {
+                        setImageCacheSizeLimit(5);
+                      }
+                    }}
+                    className="settings-text-input"
+                    style={{ width: '100px', padding: '10px 14px' }}
+                  />
+                  <span style={{ fontSize: '14px', color: 'var(--text-main)', fontWeight: '600' }}>GB</span>
+                </div>
+                <span className="settings-hint">
+                  Minimum 5 GB. Automatically evicts oldest cached images if the cache folder exceeds this size.
+                </span>
+              </div>
+              <div className="settings-input-wrapper" style={{ marginTop: '12px' }}>
+                <label className="settings-label">Current Cache Usage</label>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
+                  <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                    {cacheStats ? `${(cacheStats.sizeInBytes / (1024 * 1024)).toFixed(1)} MB (${cacheStats.filesCount} files)` : 'Calculating...'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearCache}
+                    disabled={clearingCache}
+                    className="settings-logout-btn"
+                    style={{ margin: 0, padding: '6px 12px', backgroundColor: 'var(--danger)', color: 'white', display: 'flex', alignItems: 'center', gap: '6px' }}
+                  >
+                    {clearingCache ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+                    <span>Clear Image Cache</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-panel glass-panel">
               <h2 className="settings-panel-title">Community & Support</h2>
               <div className="settings-input-wrapper" style={{ gap: '10px' }}>
                 <span className="settings-hint" style={{ fontSize: '13px', lineHeight: '1.5' }}>
@@ -456,246 +608,238 @@ export default function SettingsView({ onMarketplaceOpen }) {
           </div>
         )}
 
-        {activeTab === "anime" && (
-          <div className="settings-panel glass-panel">
-            <h2 className="settings-panel-title">Anime Settings</h2>
-            <div className="settings-input-wrapper">
-              <label className="settings-label">Active Anime Provider</label>
-              <select
-                value={animeProvider}
-                onChange={(e) => setAnimeProvider(e.target.value)}
-                className="settings-select"
-              >
-                <option value="">None selected</option>
-                {settings?.providers?.Anime?.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
+        {activeTab === "anime_manga" && (
+          <div className="settings-row">
+            {/* Anime Settings Card */}
+            <div className="settings-panel glass-panel">
+              <h2 className="settings-panel-title">Anime Settings</h2>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">Active Anime Provider</label>
+                <select
+                  value={animeProvider}
+                  onChange={(e) => setAnimeProvider(e.target.value)}
+                  className="settings-select"
+                >
+                  <option value="">None selected</option>
+                  {settings?.providers?.Anime?.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">
+                  Preferred Streaming/Download Quality
+                </label>
+                <select
+                  value={quality}
+                  onChange={(e) => setQuality(e.target.value)}
+                  className="settings-select"
+                >
+                  <option value="1080p">1080p (Full HD)</option>
+                  <option value="720p">720p (HD)</option>
+                  <option value="360p">360p (SD)</option>
+                </select>
+              </div>
+
+              <h3 className="settings-panel-subtitle">
+                Subtitles Configuration
+              </h3>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">
+                  Merge Soft Subtitles into Video
+                </label>
+                <select
+                  value={mergeSubtitles}
+                  onChange={(e) => setMergeSubtitles(e.target.value)}
+                  className="settings-select"
+                >
+                  <option value="on">Yes (Merge subtitles inside MP4)</option>
+                  <option value="off">
+                    No (Download subtitles in subfolder)
                   </option>
-                ))}
-              </select>
-            </div>
-            <div className="settings-input-wrapper">
-              <label className="settings-label">
-                Preferred Streaming/Download Quality
-              </label>
-              <select
-                value={quality}
-                onChange={(e) => setQuality(e.target.value)}
-                className="settings-select"
+                </select>
+                <span className="settings-hint">
+                  Merges multi-lingual soft subs directly into the video stream
+                  via FFmpeg.
+                </span>
+              </div>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">
+                  Subtitle Format Conversion
+                </label>
+                <select
+                  value={subtitleFormat}
+                  onChange={(e) => setSubtitleFormat(e.target.value)}
+                  className="settings-select"
+                >
+                  <option value="srt">SubRip (.srt)</option>
+                  <option value="vtt">WebVTT (.vtt)</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onMarketplaceOpen("Anime")}
+                className="settings-market-btn"
+                style={{ marginTop: "20px" }}
               >
-                <option value="1080p">1080p (Full HD)</option>
-                <option value="720p">720p (HD)</option>
-                <option value="360p">360p (SD)</option>
-              </select>
+                Open Anime Marketplace
+              </button>
             </div>
 
-            <div
-              style={{
-                borderTop: "1px solid var(--border)",
-                margin: "20px 0",
-                paddingTop: "20px",
-              }}
-            />
-            <h3
-              className="settings-panel-title"
-              style={{ marginBottom: "14px" }}
-            >
-              Subtitles Configuration
-            </h3>
-            <div className="settings-input-wrapper">
-              <label className="settings-label">
-                Merge Soft Subtitles into Video
-              </label>
-              <select
-                value={mergeSubtitles}
-                onChange={(e) => setMergeSubtitles(e.target.value)}
-                className="settings-select"
+            {/* Manga Settings Card */}
+            <div className="settings-panel glass-panel">
+              <h2 className="settings-panel-title">Manga Settings</h2>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">Active Manga Provider</label>
+                <select
+                  value={mangaProvider}
+                  onChange={(e) => setMangaProvider(e.target.value)}
+                  className="settings-select"
+                >
+                  {settings?.providers?.Manga?.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">Auto Load Next Chapter</label>
+                <select
+                  value={autoLoadNextChapter}
+                  onChange={(e) => setAutoLoadNextChapter(e.target.value)}
+                  className="settings-select"
+                >
+                  <option value="on">Enabled</option>
+                  <option value="off">Disabled</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={() => onMarketplaceOpen("Manga")}
+                className="settings-market-btn"
+                style={{ marginTop: "20px" }}
               >
-                <option value="on">Yes (Merge subtitles inside MP4)</option>
-                <option value="off">
-                  No (Download subtitles in subfolder)
-                </option>
-              </select>
-              <span className="settings-hint">
-                Merges multi-lingual soft subs directly into the video stream
-                via FFmpeg.
-              </span>
-            </div>
-            <div className="settings-input-wrapper">
-              <label className="settings-label">
-                Subtitle Format Conversion
-              </label>
-              <select
-                value={subtitleFormat}
-                onChange={(e) => setSubtitleFormat(e.target.value)}
-                className="settings-select"
-              >
-                <option value="srt">SubRip (.srt)</option>
-                <option value="vtt">WebVTT (.vtt)</option>
-              </select>
+                Open Manga Marketplace
+              </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => onMarketplaceOpen("Anime")}
-              className="settings-market-btn"
-              style={{ marginTop: "20px" }}
-            >
-              Open Anime Marketplace
-            </button>
-          </div>
-        )}
-
-        {activeTab === "manga" && (
-          <div className="settings-panel glass-panel">
-            <h2 className="settings-panel-title">Manga Settings</h2>
-            <div className="settings-input-wrapper">
-              <label className="settings-label">Active Manga Provider</label>
-              <select
-                value={mangaProvider}
-                onChange={(e) => setMangaProvider(e.target.value)}
-                className="settings-select"
-              >
-                {settings?.providers?.Manga?.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="settings-input-wrapper">
-              <label className="settings-label">Auto Load Next Chapter</label>
-              <select
-                value={autoLoadNextChapter}
-                onChange={(e) => setAutoLoadNextChapter(e.target.value)}
-                className="settings-select"
-              >
-                <option value="on">Enabled</option>
-                <option value="off">Disabled</option>
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={() => onMarketplaceOpen("Manga")}
-              className="settings-market-btn"
-            >
-              Open Manga Marketplace
-            </button>
-          </div>
-        )}
-
-        {activeTab === "mal" && (
-          <div className="settings-panel glass-panel">
-            <h2 className="settings-panel-title">MyAnimeList Connection</h2>
-            {malLoggedIn ? (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "14px",
-                }}
-              >
+            {/* MyAnimeList Connection Card */}
+            <div className="settings-panel glass-panel">
+              <h2 className="settings-panel-title">MyAnimeList Connection</h2>
+              {malLoggedIn ? (
                 <div
                   style={{
                     display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    color: "var(--success)",
-                    fontWeight: "600",
+                    flexDirection: "column",
+                    gap: "14px",
                   }}
                 >
-                  <CheckCircle size={18} />
-                  <span>MyAnimeList account is connected!</span>
-                </div>
-                <div className="settings-input-wrapper">
-                  <label className="settings-label">
-                    Auto update anime status to:
-                  </label>
-                  <select
-                    value={malStatus}
-                    onChange={(e) => setMalStatus(e.target.value)}
-                    className="settings-select"
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                      color: "var(--success)",
+                      fontWeight: "600",
+                    }}
                   >
-                    <option value="plan_to_watch">Plan To Watch</option>
-                    <option value="watching">Watching</option>
-                    <option value="completed">Completed</option>
-                    <option value="on_hold">On Hold</option>
-                    <option value="dropped">Dropped</option>
-                  </select>
-                </div>
-                {discordRpc === "on" && (
+                    <CheckCircle size={18} />
+                    <span>MyAnimeList account is connected!</span>
+                  </div>
                   <div className="settings-input-wrapper">
                     <label className="settings-label">
-                      Show MAL Profile in Discord Activity
+                      Auto update anime status to:
                     </label>
                     <select
-                      value={malDiscordProfile}
-                      onChange={(e) => setMalDiscordProfile(e.target.value)}
+                      value={malStatus}
+                      onChange={(e) => setMalStatus(e.target.value)}
                       className="settings-select"
                     >
-                      <option value="off">No</option>
-                      <option value="on">Yes</option>
+                      <option value="plan_to_watch">Plan To Watch</option>
+                      <option value="watching">Watching</option>
+                      <option value="completed">Completed</option>
+                      <option value="on_hold">On Hold</option>
+                      <option value="dropped">Dropped</option>
                     </select>
-                    {malDiscordProfile === "on" && malUsername && (
-                      <span className="settings-hint">
-                        Profile button will link to: myanimelist.net/profile/
-                        {malUsername}
-                      </span>
-                    )}
-                    {malDiscordProfile === "on" && !malUsername && (
-                      <span
-                        className="settings-hint"
-                        style={{ color: "var(--danger)" }}
-                      >
-                        MAL username not found — re-authenticate to fix.
-                      </span>
-                    )}
                   </div>
-                )}
-                <button
-                  type="button"
-                  onClick={handleMalLogout}
-                  className="settings-logout-btn"
-                >
-                  <LogOut size={16} />
-                  <span>Disconnect Account</span>
-                </button>
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "12px",
-                }}
-              >
-                <p
+                  {discordRpc === "on" && (
+                    <div className="settings-input-wrapper">
+                      <label className="settings-label">
+                        Show MAL Profile in Discord Activity
+                      </label>
+                      <select
+                        value={malDiscordProfile}
+                        onChange={(e) => setMalDiscordProfile(e.target.value)}
+                        className="settings-select"
+                      >
+                        <option value="off">No</option>
+                        <option value="on">Yes</option>
+                      </select>
+                      {malDiscordProfile === "on" && malUsername && (
+                        <span className="settings-hint">
+                          Profile button will link to: myanimelist.net/profile/
+                          {malUsername}
+                        </span>
+                      )}
+                      {malDiscordProfile === "on" && !malUsername && (
+                        <span
+                          className="settings-hint"
+                          style={{ color: "var(--danger)" }}
+                        >
+                          MAL username not found — re-authenticate to fix.
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleMalLogout}
+                    className="settings-logout-btn"
+                  >
+                    <LogOut size={16} />
+                    <span>Disconnect Account</span>
+                  </button>
+                </div>
+              ) : (
+                <div
                   style={{
-                    fontSize: "13px",
-                    color: "var(--text-muted)",
-                    lineHeight: "1.5",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "12px",
                   }}
                 >
-                  Connecting your MyAnimeList account allows StrawVerse to sync
-                  your watch status, automatically update episodes in your
-                  plan-to-watch/watching lists.
-                </p>
-                {url ? (
-                  <a
-                    href={url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="settings-connect-link"
+                  <p
+                    style={{
+                      fontSize: "13px",
+                      color: "var(--text-muted)",
+                      lineHeight: "1.5",
+                    }}
                   >
-                    Authenticate MyAnimeList Account
-                  </a>
-                ) : (
-                  <p style={{ color: "var(--danger)", fontSize: "12px" }}>
-                    No OAuth URL generated by MAL backend.
+                    Connecting your MyAnimeList account allows StrawVerse to sync
+                    your watch status, automatically update episodes in your
+                    plan-to-watch/watching lists.
                   </p>
-                )}
-              </div>
-            )}
+                  {url ? (
+                    <a
+                      href={url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="settings-connect-link"
+                    >
+                      Authenticate MyAnimeList Account
+                    </a>
+                  ) : (
+                    <p style={{ color: "var(--danger)", fontSize: "12px" }}>
+                      No OAuth URL generated by MAL backend.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
         {activeTab === "history" && (
@@ -741,9 +885,31 @@ export default function SettingsView({ onMarketplaceOpen }) {
 
                 {/* History Timeline */}
                 <div className="settings-panel glass-panel">
-                  <h2 className="settings-panel-title">
-                    Recent Activity History
-                  </h2>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", borderBottom: "1px dashed var(--border)", paddingBottom: "10px" }}>
+                    <h2 className="settings-panel-title" style={{ margin: 0, borderBottom: "none", paddingBottom: 0 }}>
+                      Recent Activity History
+                    </h2>
+                    {historyList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleClearHistory}
+                        className="settings-clear-history-btn"
+                        style={{
+                          background: "rgba(239, 68, 68, 0.15)",
+                          border: "1.5px solid var(--danger)",
+                          color: "var(--danger)",
+                          borderRadius: "6px",
+                          padding: "6px 14px",
+                          fontSize: "12px",
+                          fontWeight: "600",
+                          cursor: "pointer",
+                          transition: "all 0.2s ease",
+                        }}
+                      >
+                        Clear History
+                      </button>
+                    )}
+                  </div>
                   {historyList.length === 0 ? (
                     <p
                       style={{
@@ -776,7 +942,20 @@ export default function SettingsView({ onMarketplaceOpen }) {
                         });
 
                         return (
-                          <div key={idx} className="settings-history-item">
+                          <div
+                            key={idx}
+                            className="settings-history-item clickable"
+                            onClick={() => {
+                              if (onSelectMedia && item.media_id) {
+                                onSelectMedia(
+                                  item.media_id,
+                                  item.type,
+                                  "local",
+                                  "Back to Settings"
+                                );
+                              }
+                            }}
+                          >
                             <div className="settings-history-item-left">
                               <span
                                 className={`settings-history-type-badge ${item.type === "Anime" ? "" : "manga"}`}
@@ -790,9 +969,16 @@ export default function SettingsView({ onMarketplaceOpen }) {
                                   gap: "4px",
                                 }}
                               >
-                                <strong className="settings-history-item-title">
-                                  {item.title}
-                                </strong>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                  <strong className="settings-history-item-title">
+                                    {item.title}
+                                  </strong>
+                                  {item.is_completed === 1 && (
+                                    <span className="settings-completed-badge" style={{ fontSize: "9px", padding: "2px 6px" }}>
+                                      Completed
+                                    </span>
+                                  )}
+                                </div>
                                 <span className="settings-history-item-meta">
                                   {item.type === "Anime"
                                     ? "Episode"
@@ -806,29 +992,24 @@ export default function SettingsView({ onMarketplaceOpen }) {
                                 display: "flex",
                                 alignItems: "center",
                                 gap: "16px",
+                                flexShrink: 0,
                               }}
                             >
-                              <div className="settings-history-item-right">
-                                <span className="settings-history-item-date">
-                                  {formattedDate}
-                                </span>
-                                {item.is_completed === 1 && (
-                                  <span className="settings-completed-badge">
-                                    Completed
-                                  </span>
-                                )}
-                              </div>
+                              <span className="settings-history-item-date">
+                                {formattedDate}
+                              </span>
                               <button
                                 type="button"
                                 className="history-delete-btn"
-                                onClick={() =>
+                                onClick={(e) => {
+                                  e.stopPropagation();
                                   handleDeleteHistory(
                                     item.type,
                                     item.id,
                                     item.title,
                                     item.number,
-                                  )
-                                }
+                                  );
+                                }}
                                 title="Delete history entry"
                               >
                                 <Trash2 size={16} />
@@ -898,7 +1079,7 @@ function ChangelogRenderer({ markdown }) {
         if (line.startsWith("- ")) {
           return (
             <li key={idx} className="changelog-li">
-              {parseMarkdownLinks(line.replace("- ", ""))}
+              {parseChangelogContent(line.replace("- ", ""))}
             </li>
           );
         }
@@ -907,12 +1088,55 @@ function ChangelogRenderer({ markdown }) {
         }
         return (
           <p key={idx} className="changelog-p">
-            {parseMarkdownLinks(line)}
+            {parseChangelogContent(line)}
           </p>
         );
       })}
     </div>
   );
+}
+
+function parseChangelogContent(text) {
+  // Check for keyboard shortcut pattern: "Key Name: Description"
+  const shortcutRegex = /^([^:]+):\s*(.*)$/;
+  const match = text.match(shortcutRegex);
+  if (match) {
+    const keysPart = match[1].trim();
+    const descPart = match[2].trim();
+
+    // Verify it is a shortcut (alphanumeric/arrow symbols, max 45 chars, no multiple spaces, not a standard word)
+    const isShortcut = /^[a-zA-Z0-9\s+/→←↑↓`&,|-]+$/.test(keysPart) && 
+                       keysPart.length < 45 && 
+                       !keysPart.includes("  ") &&
+                       !/^(http|https|fix|add|implement|split|update|remove|rebranded|re-added|select|choose|join|join\s+our)/i.test(keysPart);
+    
+    if (isShortcut) {
+      const tokens = keysPart.split(/(\s*\/\s*|\s+or\s+|\s*\+\s*|\s*,\s*)/g);
+      const renderedKeys = tokens.map((token, index) => {
+        const isSeparator = /^\s*(\/|or|\+|,)\s*$/.test(token);
+        if (isSeparator) {
+          return <span key={index} className="kbd-separator">{token}</span>;
+        }
+        const cleanKey = token.replace(/`/g, "").trim();
+        if (!cleanKey) return null;
+        return (
+          <kbd key={index} className="changelog-kbd">
+            {cleanKey}
+          </kbd>
+        );
+      });
+
+      return (
+        <span className="changelog-shortcut-row">
+          <span className="changelog-keys-wrapper">{renderedKeys}</span>
+          <span className="kbd-desc-separator">:</span>
+          <span className="changelog-desc">{parseMarkdownLinks(descPart)}</span>
+        </span>
+      );
+    }
+  }
+
+  return parseMarkdownLinks(text);
 }
 
 function parseMarkdownLinks(text) {

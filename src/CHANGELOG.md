@@ -1,5 +1,25 @@
 # Changelog
 
+## [7.2.0] - 2026-06-28
+
+### Image Caching & Optimization
+
+- Implement disk-based image caching for external posters and metadata images.
+- Add startup cleanup to automatically purge orphaned files and cache records older than 6 days.
+- Add configurable image cache size limits (default 5 GB) with LRU (least-recently-used) eviction.
+- Migrate legacy Base64-encoded images from SQLite database to disk cache and run `VACUUM` to significantly reduce database size.
+
+### Library Stats & History
+
+- Add a Library Stats Dashboard to the local Catalog showing total time spent, completed episodes, and chapters read.
+- Add settings to clear all watch/read history and manage image cache storage.
+- Automatically clean up history entries when their corresponding local metadata is deleted.
+
+### Subtitle Merging
+
+- Integrate subtitles directly into output MP4 files using FFmpeg copy/codec mappings during segment merge.
+- Support language and title metadata mapping for multiple subtitle tracks in MP4.
+
 ## [7.1.2] - 2026-06-16
 
 - fix playback/downloading issues regarding animepahe
