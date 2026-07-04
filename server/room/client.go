@@ -18,6 +18,7 @@ const (
 type Client struct {
 	ID       byte
 	Username string
+	Provider string
 	Hub      *Hub
 	Room     *Room
 	Conn     *websocket.Conn
@@ -124,12 +125,13 @@ func (c *Client) handleMessage(data []byte) {
 
 	switch opcode {
 	case protocol.OpJoinRoom:
-		code, username, err := protocol.DecodeJoinRoom(data)
+		code, username, provider, err := protocol.DecodeJoinRoom(data)
 		if err != nil {
 			c.Send <- protocol.EncodeError(0x01, "Invalid join packet")
 			return
 		}
 		c.Username = username
+		c.Provider = provider
 		room, err := c.Hub.JoinOrCreateRoom(code, c)
 		if err != nil {
 			c.Send <- protocol.EncodeError(0x02, err.Error())

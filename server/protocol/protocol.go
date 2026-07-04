@@ -33,30 +33,43 @@ var (
 	ErrStringTooLong  = errors.New("string length exceeds limit")
 )
 
-func EncodeJoinRoom(roomCode string, username string) []byte {
-	buf := make([]byte, 1+6+1+len(username))
+func EncodeJoinRoom(roomCode string, username string, provider string) []byte {
+	uLen := byte(len(username))
+	pLen := byte(len(provider))
+	buf := make([]byte, 1+6+1+int(uLen)+1+int(pLen))
 	buf[0] = OpJoinRoom
 	copy(buf[1:7], padOrTruncate(roomCode, 6))
-	buf[7] = byte(len(username))
-	copy(buf[8:], username)
+	buf[7] = uLen
+	copy(buf[8:8+int(uLen)], username)
+	buf[8+int(uLen)] = pLen
+	copy(buf[9+int(uLen):], provider)
 	return buf
 }
 
-func DecodeJoinRoom(data []byte) (roomCode string, username string, err error) {
+func DecodeJoinRoom(data []byte) (roomCode string, username string, provider string, err error) {
 	if len(data) < 8 {
-		return "", "", ErrPacketTooShort
+		return "", "", "", ErrPacketTooShort
 	}
 	code := string(data[1:7])
 	nameLen := int(data[7])
 	if len(data) < 8+nameLen {
-		return "", "", ErrPacketTooShort
+		return "", "", "", ErrPacketTooShort
 	}
 	name := string(data[8 : 8+nameLen])
-	return code, name, nil
+
+	prov := ""
+	if len(data) > 8+nameLen {
+		pLen := int(data[8+nameLen])
+		if len(data) >= 9+nameLen+pLen {
+			prov = string(data[9+nameLen : 9+nameLen+pLen])
+		}
+	}
+	return code, name, prov, nil
 }
 
-func EncodeRoomJoined(isHost bool, userID byte, roomCode string) []byte {
-	buf := make([]byte, 1+1+1+6)
+func EncodeRoomJoined(isHost bool, userID byte, roomCode string, hostProvider string) []byte {
+	pLen := byte(len(hostProvider))
+	buf := make([]byte, 1+1+1+6+1+int(pLen))
 	buf[0] = OpRoomJoined
 	if isHost {
 		buf[1] = 1
@@ -65,14 +78,26 @@ func EncodeRoomJoined(isHost bool, userID byte, roomCode string) []byte {
 	}
 	buf[2] = userID
 	copy(buf[3:9], padOrTruncate(roomCode, 6))
+	buf[9] = pLen
+	copy(buf[10:], hostProvider)
 	return buf
 }
 
-func DecodeRoomJoined(data []byte) (isHost bool, userID byte, roomCode string, err error) {
+func DecodeRoomJoined(data []byte) (isHost bool, userID byte, roomCode string, hostProvider string, err error) {
 	if len(data) < 9 {
-		return false, 0, "", ErrPacketTooShort
+		return false, 0, "", "", ErrPacketTooShort
 	}
-	return data[1] == 1, data[2], string(data[3:9]), nil
+	isHost = data[1] == 1
+	userID = data[2]
+	roomCode = string(data[3:9])
+	hostProvider = ""
+	if len(data) > 9 {
+		pLen := int(data[9])
+		if len(data) >= 10+pLen {
+			hostProvider = string(data[10 : 10+pLen])
+		}
+	}
+	return isHost, userID, roomCode, hostProvider, nil
 }
 
 func EncodeUserEvent(eventType byte, userID byte, username string) []byte {
