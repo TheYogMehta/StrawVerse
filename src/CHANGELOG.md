@@ -2,15 +2,17 @@
 
 ## [7.3.0] - 2026-07-04
 
-# Changelog - StrawVerse v1.x Update
-
-### Watch Together (v1)
+### Watch Together
 
 - **Real-Time Synced Watching:** Host or join rooms to watch anime synchronously with friends.
 - **Zero-Desync Episode Loading:** Automatic background buffering ensures all clients unpause simultaneously when switching episodes.
 - **Binary WebSockets Protocol:** Ultra-fast, minimal bandwidth synchronization.
 - **Live Ephemeral Chat & Shared Queue:** Chat in real-time and queue up episodes together.
 - **Floating Session Bar:** Quick-access room status bar while watching.
+- **Verified MyAnimeList Token Auth:** Secured room connections with direct server-side MyAnimeList token verification to prevent username spoofing.
+- **Host Controls:** Added quick-play buttons next to queue items and a native "Skip Episode" control in the player header for room hosts.
+- **Watch Together Settings Box:** Extracted and separated Watch Together options into a dedicated card tab under settings with proper input text styling.
+- **UI & Player Cleanups:** Removed duplicate episode title labels in the queue list and cards, and hid the navigation toolbar when in watch-together mode.
 
 ### Download Manager Improvements
 
