@@ -130,7 +130,14 @@ func (c *Client) handleMessage(data []byte) {
 			c.Send <- protocol.EncodeError(0x01, "Invalid join packet")
 			return
 		}
-		c.Username = username
+		if c.Username == "" {
+			c.Send <- protocol.EncodeError(0x03, "MyAnimeList authentication is required")
+			return
+		}
+		if username != c.Username {
+			c.Send <- protocol.EncodeError(0x04, "Username spoofing detected")
+			return
+		}
 		c.Provider = provider
 		room, err := c.Hub.JoinOrCreateRoom(code, c)
 		if err != nil {
