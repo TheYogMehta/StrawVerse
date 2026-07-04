@@ -6,10 +6,24 @@ const { getKeyValue, setKeyValue } = require("./db");
 
 const MalAppID = "d0b22d129a541dac4d28207f77b15b5f";
 let MalAcount = null;
-let pkce;
 global.MalLoggedIn = false;
 
-// Create A url
+function clearMalSession() {
+  global.MalLoggedIn = false;
+  global.malUsername = null;
+  MalAcount = null;
+  try {
+    const config = getKeyValue("Settings", "config") || {};
+    delete config.malToken;
+    delete config.malUsername;
+    delete config.malLastSync;
+    delete config.malMangaLastSync;
+    setKeyValue("Settings", "config", config);
+    logger.warn("⚠️ Cleared expired or invalid MAL session.");
+  } catch (_) {}
+}
+
+// Create Authorization URL
 async function MalCreateUrl() {
   try {
     const config = getKeyValue("Settings", "config") || {};
@@ -24,15 +38,15 @@ async function MalCreateUrl() {
 
     return `https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${MalAppID}&code_challenge_method=plain&code_challenge=${currentPkce}`;
   } catch (error) {
-    console.error("Failed to load pkce-challenge:", error);
+    logger.error(`Failed to load PKCE challenge: ${error.message}`);
     return null;
   }
 }
 
-// Mal Verify Token
+// Verify OAuth Code & Exchange Token
 async function MalVerifyToken(code) {
   try {
-    const config = settings.get("config") || {};
+    const config = getKeyValue("Settings", "config") || {};
     const storedPkce = config.malPkce;
 
     if (!storedPkce) {
@@ -56,39 +70,32 @@ async function MalVerifyToken(code) {
       },
     );
 
-    // Clear the used PKCE from settings
+    // Clear used PKCE
     delete config.malPkce;
+
+    const now = Date.now();
+    const tokenData = {
+      ...data,
+      created_at: now,
+      expires_at: now + data.expires_in * 1000,
+    };
+
+    MalAcount = tokenData;
+    let tokenStr = JSON.stringify(tokenData);
+    config.malToken = tokenStr;
     setKeyValue("Settings", "config", config);
 
-    MalAcount = data;
-
-    let token = JSON.stringify(data);
     global.MalLoggedIn = true;
 
     MalGetUsername(data.access_token).catch(() => {});
 
     return {
       mal_on_off: true,
-      malToken: token,
+      malToken: tokenStr,
     };
   } catch (err) {
-    logger.error(`Error getting MAL token:`);
-    logger.error(`Error message: ${err.message}`);
-    logger.error(`Stack trace: ${err.stack}`);
-
-    global.MalLoggedIn = false;
-
-    // Clear PKCE on failure as well so they can start fresh
-    try {
-      const { getKeyValue, setKeyValue } = require("./db");
-      const config = getKeyValue("Settings", "config") || {};
-      if (config.malPkce) {
-        delete config.malPkce;
-        setKeyValue("Settings", "config", config);
-      }
-    } catch (e) {
-      // Ignore
-    }
+    logger.error(`Error getting MAL token: ${err.message}`);
+    clearMalSession();
 
     return {
       mal_on_off: false,
@@ -97,19 +104,34 @@ async function MalVerifyToken(code) {
   }
 }
 
-// Mal Refresh Token
+// Refresh Token Generator
 async function MalRefreshTokenGen(json) {
   try {
-    let JsonToken = JSON.parse(json);
+    let JsonToken = typeof json === "string" ? JSON.parse(json) : json;
 
-    if (!JsonToken || !JsonToken.refresh_token || !JsonToken.expires_in) {
+    if (!JsonToken || !JsonToken.refresh_token) {
       throw new Error("Invalid token data!");
     }
 
-    let expires_at = Date.now() + JsonToken.expires_in * 1000;
+    const now = Date.now();
+    let isExpired = false;
 
-    if (Date.now() >= expires_at) {
-      logger.info("🔄 Token expired! Refreshing...");
+    if (JsonToken.expires_at) {
+      // Refresh if expired or within 5 minutes of expiring
+      if (now >= JsonToken.expires_at - 5 * 60 * 1000) {
+        isExpired = true;
+      }
+    } else if (JsonToken.created_at) {
+      if (now >= JsonToken.created_at + (JsonToken.expires_in || 2678400) * 1000 - 5 * 60 * 1000) {
+        isExpired = true;
+      }
+    } else {
+      // Missing timestamp metadata - force refresh
+      isExpired = true;
+    }
+
+    if (isExpired) {
+      logger.info("🔄 MAL Token expired or missing expiration timestamp. Refreshing...");
 
       const { data } = await axios.post(
         "https://myanimelist.net/v1/oauth2/token",
@@ -125,32 +147,44 @@ async function MalRefreshTokenGen(json) {
         },
       );
 
-      MalAcount = data;
-      let token = JSON.stringify(data);
+      const updatedToken = {
+        ...data,
+        created_at: now,
+        expires_at: now + data.expires_in * 1000,
+      };
+
+      MalAcount = updatedToken;
+      let tokenStr = JSON.stringify(updatedToken);
       global.MalLoggedIn = true;
+
+      try {
+        const config = getKeyValue("Settings", "config") || {};
+        config.malToken = tokenStr;
+        setKeyValue("Settings", "config", config);
+      } catch (_) {}
+
+      logger.info("✅ MAL Token refreshed successfully!");
+      MalFetchListAll();
+      MalGetUsername(updatedToken.access_token).catch(() => {});
 
       return {
         mal_on_off: true,
-        malToken: token,
+        malToken: tokenStr,
       };
     }
 
     MalAcount = JsonToken;
     global.MalLoggedIn = true;
     MalFetchListAll();
-
     MalGetUsername(JsonToken.access_token).catch(() => {});
 
     return {
       mal_on_off: true,
-      malToken: json,
+      malToken: typeof json === "string" ? json : JSON.stringify(json),
     };
   } catch (err) {
-    logger.error("Failed to refresh token");
-    logger.error(`Error message: ${err.message}`);
-    logger.error(`Stack trace: ${err.stack}`);
-
-    global.MalLoggedIn = false;
+    logger.error(`Failed to refresh MAL token: ${err.message}`);
+    clearMalSession();
 
     return {
       mal_on_off: false,
@@ -159,14 +193,41 @@ async function MalRefreshTokenGen(json) {
   }
 }
 
+// Helper to execute MAL API calls with automatic HTTP 401 retry & token refresh
+async function execMalApi(apiCallFn) {
+  try {
+    return await apiCallFn();
+  } catch (err) {
+    if (err.response?.status === 401) {
+      logger.info("🔑 MAL API returned HTTP 401. Attempting token refresh...");
+      const config = getKeyValue("Settings", "config") || {};
+      if (config.malToken) {
+        // Force token refresh by passing an expired flag
+        let tokenObj = JSON.parse(config.malToken);
+        tokenObj.expires_at = 0;
+        const refreshRes = await MalRefreshTokenGen(tokenObj);
+        if (refreshRes.mal_on_off && MalAcount?.access_token) {
+          logger.info("🔄 Retrying MAL API call with refreshed token...");
+          return await apiCallFn();
+        }
+      }
+      clearMalSession();
+      throw new Error("MAL session expired. Please reconnect your account.");
+    }
+    throw err;
+  }
+}
+
 // Fetch and store MAL username in settings
 async function MalGetUsername(accessToken) {
-  try {
+  return execMalApi(async () => {
     const token =
       accessToken ||
+      MalAcount?.access_token ||
       JSON.parse(getKeyValue("Settings", "config")?.malToken || "{}")
         ?.access_token;
     if (!token) return null;
+
     const { data } = await axios.get(
       "https://api.myanimelist.net/v2/users/@me",
       {
@@ -181,35 +242,38 @@ async function MalGetUsername(accessToken) {
       global.malUsername = username;
     }
     return username;
-  } catch (err) {
+  }).catch((err) => {
     logger.error(`Failed to fetch MAL username: ${err.message}`);
     return null;
-  }
+  });
 }
 
 // Add To List
 async function MalAddToList(type = "anime", malid, status, numVal = 0) {
   try {
-    if (!MalAcount?.access_token)
-      throw new Error("No access token please login");
+    if (!global.MalLoggedIn || !MalAcount?.access_token) {
+      throw new Error("Not logged into MyAnimeList");
+    }
 
     const isAnime = type === "anime";
     const endpoint = isAnime ? "anime" : "manga";
     const paramName = isAnime ? "num_watched_episodes" : "num_chapters_read";
 
-    await axios.put(
-      `https://api.myanimelist.net/v2/${endpoint}/${malid}/my_list_status`,
-      new URLSearchParams({
-        status: status,
-        [paramName]: numVal,
-      }).toString(),
-      {
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Authorization: `Bearer ${MalAcount.access_token}`,
+    await execMalApi(async () => {
+      await axios.put(
+        `https://api.myanimelist.net/v2/${endpoint}/${malid}/my_list_status`,
+        new URLSearchParams({
+          status: status,
+          [paramName]: numVal,
+        }).toString(),
+        {
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            Authorization: `Bearer ${MalAcount.access_token}`,
+          },
         },
-      },
-    );
+      );
+    });
 
     await MalSyncType(type, true);
 
@@ -218,15 +282,19 @@ async function MalAddToList(type = "anime", malid, status, numVal = 0) {
     return {
       title: "MyAnimeList Update Fail!",
       icon: "error",
-      text: `Error : ${err.message}`,
+      text: `Error: ${err.message}`,
     };
   }
 }
 
 // Sync A Specific Type (Anime or Manga)
 async function MalSyncType(type, force = false) {
-  const config = getKeyValue("Settings", "config") || {};
+  if (!global.MalLoggedIn || !MalAcount?.access_token) {
+    logger.info(`[MAL-${type.toUpperCase()}-LIST] SKIPPED FETCH (Not logged in)`);
+    return;
+  }
 
+  const config = getKeyValue("Settings", "config") || {};
   const syncKey = type === "anime" ? "malLastSync" : "malMangaLastSync";
   let MalMappingDate = config[syncKey];
 
@@ -253,7 +321,7 @@ async function MalSyncType(type, force = false) {
               latestLocal.updated_at === latestMal.updated_at
             ) {
               logger.info(
-                `[MAL-${type.toUpperCase()}-LIST] SKIPED FETCH (Nothing changed on MAL)`,
+                `[MAL-${type.toUpperCase()}-LIST] SKIPPED FETCH (Nothing changed on MAL)`,
               );
               config[syncKey] = new Date().toISOString();
               setKeyValue("Settings", "config", config);
@@ -284,18 +352,19 @@ async function MalSyncType(type, force = false) {
 
       if (!data?.hasNextPage) break;
       i++;
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // 2s wait
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     logger.info(`[MAL-${type.toUpperCase()}-LIST] Successfully Saved`);
     config[syncKey] = new Date().toISOString();
     setKeyValue("Settings", "config", config);
   } else {
-    logger.info(`[MAL-${type.toUpperCase()}-LIST] SKIPED FETCH!`);
+    logger.info(`[MAL-${type.toUpperCase()}-LIST] SKIPPED FETCH!`);
   }
 }
 
 // Fetch All Watching / Reading
 async function MalFetchListAll(force = false) {
+  if (!global.MalLoggedIn) return;
   await MalSyncType("anime", force);
   await MalSyncType("manga", force);
 }
@@ -303,8 +372,9 @@ async function MalFetchListAll(force = false) {
 // Fetch Anime / Manga List
 async function MalFetchList(type = "anime", page = 1, limit = 100) {
   try {
-    if (!MalAcount?.access_token)
-      throw new Error("No access token please login");
+    if (!global.MalLoggedIn || !MalAcount?.access_token) {
+      return { hasNextPage: false, results: [] };
+    }
 
     const offset = (page - 1) * limit;
     const isAnime = type === "anime";
@@ -313,13 +383,15 @@ async function MalFetchList(type = "anime", page = 1, limit = 100) {
       ? "list_status,num_episodes"
       : "list_status,num_chapters";
 
-    let { data } = await axios.get(
-      `https://api.myanimelist.net/v2/users/@me/${endpoint}?nsfw=true&limit=${limit}&offset=${offset}&sort=list_updated_at&fields=${fields}`,
-      {
-        headers: {
-          Authorization: `Bearer ${MalAcount.access_token}`,
+    const { data } = await execMalApi(() =>
+      axios.get(
+        `https://api.myanimelist.net/v2/users/@me/${endpoint}?nsfw=true&limit=${limit}&offset=${offset}&sort=list_updated_at&fields=${fields}`,
+        {
+          headers: {
+            Authorization: `Bearer ${MalAcount.access_token}`,
+          },
         },
-      },
+      ),
     );
 
     let list = data.data.map((items) => {
@@ -354,9 +426,7 @@ async function MalFetchList(type = "anime", page = 1, limit = 100) {
       results: list,
     };
   } catch (err) {
-    logger.error(`[MAL-LIST] Failed To Fetch ${type} Page : ${page}`);
-    logger.error(`Error message: ${err.message}`);
-    logger.error(`Stack trace: ${err.stack}`);
+    logger.error(`[MAL-LIST] Failed To Fetch ${type} Page : ${page} - ${err.message}`);
     return {
       hasNextPage: false,
       results: [],
@@ -533,20 +603,23 @@ async function autoTrackMAL(type, mediaId, number) {
 // Remove From List (Delete List Entry)
 async function MalRemoveFromList(type = "anime", malid) {
   try {
-    if (!MalAcount?.access_token)
-      throw new Error("No access token please login");
+    if (!global.MalLoggedIn || !MalAcount?.access_token) {
+      throw new Error("Not logged into MyAnimeList");
+    }
 
     const isAnime = type === "anime";
     const endpoint = isAnime ? "anime" : "manga";
 
-    await axios.delete(
-      `https://api.myanimelist.net/v2/${endpoint}/${malid}/my_list_status`,
-      {
-        headers: {
-          Authorization: `Bearer ${MalAcount.access_token}`,
+    await execMalApi(async () => {
+      await axios.delete(
+        `https://api.myanimelist.net/v2/${endpoint}/${malid}/my_list_status`,
+        {
+          headers: {
+            Authorization: `Bearer ${MalAcount.access_token}`,
+          },
         },
-      },
-    );
+      );
+    });
 
     const table = isAnime ? "MyAnimeList" : "MyMangaList";
     try {
@@ -560,7 +633,7 @@ async function MalRemoveFromList(type = "anime", malid) {
     return {
       title: "MyAnimeList Update Fail!",
       icon: "error",
-      text: `Error : ${err.message}`,
+      text: `Error: ${err.message}`,
     };
   }
 }
