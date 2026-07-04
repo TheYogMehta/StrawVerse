@@ -13,26 +13,53 @@ const { providerFetch } = require("./settings");
 
 let AnimeQueue = [];
 let isProcessorRunning = false;
+let isQueuePausedState = getKeyValue("Queue", "isPaused") || false;
+
+function isQueuePaused() {
+  return isQueuePausedState;
+}
+
+global.isQueuePaused = isQueuePaused;
+
+async function pauseQueue() {
+  isQueuePausedState = true;
+  setKeyValue("Queue", "isPaused", true);
+  return isQueuePausedState;
+}
+
+async function resumeQueue() {
+  isQueuePausedState = false;
+  setKeyValue("Queue", "isPaused", false);
+  try {
+    continuousExecution();
+  } catch (err) {}
+  return isQueuePausedState;
+}
 
 // Add to Queue
 async function addToQueue(item) {
   AnimeQueue.push(item);
   await saveQueue();
-  try {
-    continuousExecution();
-  } catch (err) {}
+  if (!isQueuePausedState) {
+    try {
+      continuousExecution();
+    } catch (err) {}
+  }
 }
 
 // load queue when the script start
 async function loadQueue() {
   AnimeQueue = getKeyValue("Queue", "queue") || [];
+  isQueuePausedState = getKeyValue("Queue", "isPaused") || false;
   AnimeQueue.forEach((entry) => {
     entry.progress = 0;
   });
   await saveQueue();
-  try {
-    continuousExecution();
-  } catch (err) {}
+  if (!isQueuePausedState) {
+    try {
+      continuousExecution();
+    } catch (err) {}
+  }
 }
 
 // remove anime from queue
@@ -74,6 +101,7 @@ async function updateQueue(
 
   const indexToUpdate = AnimeQueue.findIndex((item) => item.epid === epid);
   if (indexToUpdate !== -1) {
+    const completedItem = AnimeQueue[indexToUpdate];
     AnimeQueue[indexToUpdate].totalSegments = totalSegments;
     AnimeQueue[indexToUpdate].currentSegments = currentSegments;
 
@@ -91,6 +119,15 @@ async function updateQueue(
     }
 
     if (currentSegments >= totalSegments) {
+      if (global.win && !global.win.isDestroyed()) {
+        global.win.webContents.send("download-complete", {
+          Type: completedItem.Type,
+          id: completedItem.id,
+          EpNum: completedItem.EpNum,
+          SubDub: completedItem.SubDub,
+          epid: completedItem.epid,
+        });
+      }
       AnimeQueue.splice(indexToUpdate, 1);
       Tosave = true;
     }
@@ -134,15 +171,17 @@ async function addMultipleToQueue(items) {
   if (items && items.length > 0) {
     AnimeQueue.push(...items);
     await saveQueue();
-    try {
-      continuousExecution();
-    } catch (err) {}
+    if (!isQueuePausedState) {
+      try {
+        continuousExecution();
+      } catch (err) {}
+    }
   }
 }
 
 // queue start
 async function continuousExecution() {
-  if (isProcessorRunning) return;
+  if (isProcessorRunning || isQueuePausedState) return;
   isProcessorRunning = true;
 
   try {
@@ -155,6 +194,12 @@ async function continuousExecution() {
     logger.info("[queueWorker] Starting download processor...");
 
     while (AnimeQueue && AnimeQueue.length > 0) {
+      if (isQueuePausedState) {
+        logger.info(
+          "[queueWorker] Queue is paused. Stopping continuous execution.",
+        );
+        break;
+      }
       try {
         const currentTask = AnimeQueue[0];
         if (!currentTask) {
@@ -254,12 +299,7 @@ async function downloadEpisodeByQuality(
     let preferredQualities = ["1080p", "720p", "360p", "default", "backup"];
     const provider = await providerFetch("Anime", config.Animeprovider);
     let resolvedEpid = epid;
-    if (
-      subdub &&
-      !epid.endsWith("-sub") &&
-      !epid.endsWith("-dub") &&
-      !epid.endsWith("-both")
-    ) {
+    if (subdub && !epid.endsWith(`-${subdub}`) && !epid.endsWith("-both")) {
       resolvedEpid = `${epid}-${subdub}`;
     }
     const sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
@@ -307,8 +347,12 @@ async function downloadEpisodeByQuality(
         selectedSource.quality,
         Title,
         epid,
-        sourcesArray?.subtitles ?? [],
-        config?.mergeSubtitles === "on" ? true : false,
+        subdub === "hsub" ? [] : (sourcesArray?.subtitles ?? []),
+        subdub === "hsub"
+          ? false
+          : config?.mergeSubtitles === "on"
+            ? true
+            : false,
         (config?.subtitleFormat ?? "ttv") === "srt",
         selectedSource.headers ?? {},
       );
@@ -399,4 +443,7 @@ module.exports = {
   checkEpisodeDownload,
   SaveQueueData,
   continuousExecution,
+  isQueuePaused,
+  pauseQueue,
+  resumeQueue,
 };

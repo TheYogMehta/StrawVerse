@@ -404,17 +404,18 @@ async function autoTrackMAL(type, mediaId, number) {
     let localRecord = null;
 
     if (type === "Anime") {
-      const strippedId = mediaId.replace(/-(dub|sub|both)$/, "");
+      const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
       localRecord = global.db
         .prepare(
           `
         SELECT MalID FROM Anime 
-        WHERE id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
+        WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
       `,
         )
         .get(
           mediaId,
           `${strippedId}-sub`,
+          `${strippedId}-hsub`,
           `${strippedId}-dub`,
           `${strippedId}-both`,
           mediaId,
@@ -433,14 +434,16 @@ async function autoTrackMAL(type, mediaId, number) {
 
     if (!malid && global.mappingDb && type === "Anime") {
       try {
-        const strippedId = mediaId.replace(/-(dub|sub|both)$/, "");
+        const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
         const row = global.mappingDb
-          .prepare(`
+          .prepare(
+            `
             SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
             UNION
             SELECT malid FROM anikototv WHERE id = ?
             LIMIT 1
-          `)
+          `,
+          )
           .get(strippedId, strippedId, strippedId);
         if (row?.malid) {
           malid = parseInt(row.malid);

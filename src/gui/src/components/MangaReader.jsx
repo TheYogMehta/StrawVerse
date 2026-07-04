@@ -9,6 +9,8 @@ import {
   ChevronRight,
   HardDrive,
   Globe,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import "./css/MangaReader.css";
 
@@ -96,6 +98,14 @@ export default function MangaReader({
   const [isCurrentDownloaded, setIsCurrentDownloaded] = useState(isDownloaded);
   const [activeChapterInView, setActiveChapterInView] = useState(null);
   const [autoLoadNext, setAutoLoadNext] = useState(true);
+  const [readerSize, setReaderSize] = useState(
+    () => localStorage.getItem("manga_reader_size") || "standard"
+  );
+
+  const handleSizeChange = (newSize) => {
+    setReaderSize(newSize);
+    localStorage.setItem("manga_reader_size", newSize);
+  };
 
   const isTransitioningRef = useRef(false);
 
@@ -601,6 +611,25 @@ export default function MangaReader({
         )}
 
         <div className="header-right-section">
+          <div className="reader-size-controls">
+            <button
+              onClick={() => handleSizeChange(readerSize === "compact" ? "standard" : "compact")}
+              className={`btn-reader-size ${readerSize === "compact" ? "active" : ""}`}
+              title={readerSize === "compact" ? "Reset to Standard Size" : "Minimize / Compact Reader Width"}
+            >
+              <Minimize2 size={15} />
+              <span className="btn-size-label">Minimize</span>
+            </button>
+            <button
+              onClick={() => handleSizeChange(readerSize === "full" ? "standard" : "full")}
+              className={`btn-reader-size ${readerSize === "full" ? "active" : ""}`}
+              title={readerSize === "full" ? "Reset to Standard Size" : "Maximize / Full Reader Width"}
+            >
+              <Maximize2 size={15} />
+              <span className="btn-size-label">Maximize</span>
+            </button>
+          </div>
+
           <span className="chapter-title" title={mangaTitle || id}>
             {mangaTitle
               ? `${mangaTitle.slice(0, 20)}${mangaTitle.length > 20 ? "..." : ""}`
@@ -646,7 +675,7 @@ export default function MangaReader({
             </button>
           </div>
         ) : (
-          <div className="pages-container">
+          <div className={`pages-container size-${readerSize}`}>
             {items.map((item) => {
               if (item.type === "header") {
                 return (

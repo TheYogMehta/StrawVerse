@@ -1,5 +1,10 @@
 // imports
-const { animeinfo, MangaInfo, fetchEpisode, fetchChapters } = require("./utils/AnimeManga");
+const {
+  animeinfo,
+  MangaInfo,
+  fetchEpisode,
+  fetchChapters,
+} = require("./utils/AnimeManga");
 const { providerFetch, settingfetch } = require("./utils/settings");
 const {
   addToQueue,
@@ -46,7 +51,9 @@ async function downloadAnimeMulti(
       const allEps = await fetchAllEpisodes(Animeprovider, animeid);
       Episodes.forEach((ep) => {
         if (!ep.id) {
-          const matched = allEps.find((x) => Number(x.number) === Number(ep.number));
+          const matched = allEps.find(
+            (x) => Number(x.number) === Number(ep.number),
+          );
           if (matched) {
             ep.id = matched.id;
           }
@@ -117,7 +124,7 @@ async function downloadAnimeSingle(
       resolvedSubDub = animeid.endsWith("dub") ? "dub" : "sub";
     }
 
-    const strippedId = animeid.replace(/-(sub|dub|both)$/, "");
+    const strippedId = animeid.replace(/-(sub|dub|hsub|both)$/, "");
     const dbId = `${strippedId}-${resolvedSubDub}`;
 
     if (saveinfo) {
@@ -129,7 +136,7 @@ async function downloadAnimeSingle(
       if (animedata) {
         MetadataAdd("Anime", {
           id: dbId,
-          title: `${animedata?.title?.replace(/-(dub|sub|both)$/, ``)} ${
+          title: `${animedata?.title?.replace(/-(dub|sub|hsub|both)$/, ``)} ${
             resolvedSubDub
           }`,
           provider: Animeprovider.provider_name,
@@ -156,10 +163,16 @@ async function downloadAnimeSingle(
     }
 
     try {
-      let animeMapping = await FindMapping("Anime", dbId, null, config?.CustomDownloadLocation);
+      let animeMapping = await FindMapping(
+        "Anime",
+        dbId,
+        null,
+        config?.CustomDownloadLocation,
+      );
       if (animeMapping && animeMapping.DownloadedEpisodes) {
         const num = parseFloat(number);
-        const downloadedList = animeMapping.DownloadedEpisodes[resolvedSubDub] || [];
+        const downloadedList =
+          animeMapping.DownloadedEpisodes[resolvedSubDub] || [];
         if (downloadedList.map(Number).includes(num)) {
           return {
             error: true,
@@ -170,36 +183,36 @@ async function downloadAnimeSingle(
     } catch (e) {
       // ignore
     }
-      const queueItem = {
-        Type: "Anime",
-        EpNum: number,
-        id: dbId,
-        Title: Title,
-        SubDub: resolvedSubDub,
-        config: {
-          Animeprovider: Animeprovider?.provider_name,
-          quality: config?.quality,
-          mergeSubtitles: config?.mergeSubtitles,
-          subtitleFormat: config?.subtitleFormat,
-          CustomDownloadLocation: config?.CustomDownloadLocation,
-        },
-        epid: episodeid,
-        totalSegments: 0,
-        currentSegments: 0,
-      };
+    const queueItem = {
+      Type: "Anime",
+      EpNum: number,
+      id: dbId,
+      Title: Title,
+      SubDub: resolvedSubDub,
+      config: {
+        Animeprovider: Animeprovider?.provider_name,
+        quality: config?.quality,
+        mergeSubtitles: config?.mergeSubtitles,
+        subtitleFormat: config?.subtitleFormat,
+        CustomDownloadLocation: config?.CustomDownloadLocation,
+      },
+      epid: episodeid,
+      totalSegments: 0,
+      currentSegments: 0,
+    };
 
-      if (returnItemOnly) {
-        return {
-          error: false,
-          queueItem,
-        };
-      }
-
-      await addToQueue(queueItem);
+    if (returnItemOnly) {
       return {
         error: false,
-        message: "Added To Queue!",
+        queueItem,
       };
+    }
+
+    await addToQueue(queueItem);
+    return {
+      error: false,
+      message: "Added To Queue!",
+    };
   } catch (err) {
     return {
       error: true,
@@ -245,7 +258,9 @@ async function downloadMangaMulti(
       const allChs = await fetchAllChapters(Mangaprovider, mangaid);
       Chapters.forEach((ch) => {
         if (!ch.id) {
-          const matched = allChs.find((x) => Number(x.number) === Number(ch.number));
+          const matched = allChs.find(
+            (x) => Number(x.number) === Number(ch.number),
+          );
           if (matched) {
             ch.id = matched.id;
           }
@@ -335,7 +350,12 @@ async function downloadMangaSingle(
     }
 
     try {
-      let mangaMapping = await FindMapping("Manga", mangaid, null, config?.CustomDownloadLocation);
+      let mangaMapping = await FindMapping(
+        "Manga",
+        mangaid,
+        null,
+        config?.CustomDownloadLocation,
+      );
       if (mangaMapping && mangaMapping.DownloadedChapters) {
         const num = parseFloat(number);
         if (mangaMapping.DownloadedChapters.map(Number).includes(num)) {
@@ -348,33 +368,33 @@ async function downloadMangaSingle(
     } catch (e) {
       // ignore
     }
-      const queueItem = {
-        Type: "Manga",
-        EpNum: number,
-        id: mangaid,
-        Title: Title,
-        config: {
-          Mangaprovider: Mangaprovider.provider_name,
-          CustomDownloadLocation: config?.CustomDownloadLocation,
-        },
-        ChapterTitle: `Chapter ${number}`,
-        epid: chapterid,
-        totalSegments: 0,
-        currentSegments: 0,
-      };
+    const queueItem = {
+      Type: "Manga",
+      EpNum: number,
+      id: mangaid,
+      Title: Title,
+      config: {
+        Mangaprovider: Mangaprovider.provider_name,
+        CustomDownloadLocation: config?.CustomDownloadLocation,
+      },
+      ChapterTitle: `Chapter ${number}`,
+      epid: chapterid,
+      totalSegments: 0,
+      currentSegments: 0,
+    };
 
-      if (returnItemOnly) {
-        return {
-          error: false,
-          queueItem,
-        };
-      }
-
-      await addToQueue(queueItem);
+    if (returnItemOnly) {
       return {
         error: false,
-        message: "Added To Queue!",
+        queueItem,
       };
+    }
+
+    await addToQueue(queueItem);
+    return {
+      error: false,
+      message: "Added To Queue!",
+    };
   } catch (err) {
     return {
       error: true,

@@ -1,12 +1,13 @@
 /* eslint-disable react-hooks/exhaustive-deps, no-unused-vars */
 import { useState, useEffect } from 'react';
-import { Loader2, Trash2, X, CheckCircle, HardDrive, RefreshCw } from 'lucide-react';
+import { Loader2, Trash2, X, CheckCircle, HardDrive, RefreshCw, Pause, Play } from 'lucide-react';
 import './css/DownloadsTracker.css';
 
 export default function DownloadsTracker() {
   const [activeTask, setActiveTask] = useState(null);
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
 
   const fetchDownloads = async () => {
     try {
@@ -35,6 +36,9 @@ export default function DownloadsTracker() {
       setActiveTask(null);
     }
     setQueue(data.queue || []);
+    if (data.isPaused !== undefined) {
+      setIsPaused(!!data.isPaused);
+    }
   };
 
   useEffect(() => {
@@ -56,9 +60,26 @@ export default function DownloadsTracker() {
         if (data.queue) {
           setQueue(data.queue);
         }
+        if (data.isPaused !== undefined) {
+          setIsPaused(!!data.isPaused);
+        }
       });
     }
   }, []);
+
+  const handleTogglePause = async () => {
+    try {
+      const endpoint = isPaused ? '/api/download/resume' : '/api/download/pause';
+      const response = await fetch(endpoint, { method: 'POST' });
+      const data = await response.json();
+      if (data.isPaused !== undefined) {
+        setIsPaused(data.isPaused);
+      }
+      fetchDownloads();
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const handleRemoveItem = async (epid) => {
     try {
@@ -81,6 +102,15 @@ export default function DownloadsTracker() {
       <header className="tracker-header">
         <h1 className="tracker-title">Download Queue</h1>
         <div className="tracker-actions">
+          <button
+            onClick={handleTogglePause}
+            className={`btn-pause-queue ${isPaused ? 'paused' : ''}`}
+            title={isPaused ? "Start / Resume Queue" : "Pause Queue"}
+          >
+            {isPaused ? <Play size={16} /> : <Pause size={16} />}
+            <span>{isPaused ? "Start Queue" : "Pause Queue"}</span>
+          </button>
+
           <button onClick={fetchDownloads} className="btn-refresh" title="Force Refresh">
             <RefreshCw size={16} />
           </button>
@@ -93,20 +123,46 @@ export default function DownloadsTracker() {
         </div>
       </header>
 
+      {/* Paused Banner indicator */}
+      {isPaused && (
+        <div className="queue-paused-banner glass-panel">
+          <div className="paused-banner-left">
+            <Pause size={20} className="paused-icon" />
+            <div>
+              <h4 className="paused-banner-title">Download Queue is Paused</h4>
+              <p className="paused-banner-sub">Items will wait in queue until you click Start Queue.</p>
+            </div>
+          </div>
+          <button onClick={handleTogglePause} className="btn-resume-now">
+            <Play size={16} />
+            <span>Start Queue</span>
+          </button>
+        </div>
+      )}
+
       {/* Active Downloading Progress */}
       {activeTask ? (
         <div className="active-panel glass-panel">
           <div className="active-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <Loader2 size={20} className="spin" color="var(--accent)" />
-              <span className="active-caption">{activeTask.caption}</span>
+              {isPaused ? (
+                <Pause size={20} color="var(--warning, #f59e0b)" />
+              ) : (
+                <Loader2 size={20} className="spin" color="var(--accent)" />
+              )}
+              <span className="active-caption">
+                {isPaused ? `[PAUSED] ${activeTask.caption}` : activeTask.caption}
+              </span>
             </div>
             <span className="active-percentage">{calculateProgress()}%</span>
           </div>
 
           {/* Progress bar wrapper */}
           <div className="progress-bg">
-            <div className="progress-fill" style={{ width: `${calculateProgress()}%` }} />
+            <div
+              className={`progress-fill ${isPaused ? 'paused-fill' : ''}`}
+              style={{ width: `${calculateProgress()}%` }}
+            />
           </div>
 
           <div className="active-footer">
@@ -119,8 +175,12 @@ export default function DownloadsTracker() {
       ) : (
         <div className="idle-panel">
           <HardDrive size={36} color="var(--text-muted)" />
-          <h3 style={{ fontSize: '15px', fontWeight: '600' }}>No active downloads</h3>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Ready for tasks.</p>
+          <h3 style={{ fontSize: '15px', fontWeight: '600' }}>
+            {isPaused ? "Queue is paused" : "No active downloads"}
+          </h3>
+          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+            {isPaused ? "Click Start Queue to resume downloading." : "Ready for tasks."}
+          </p>
         </div>
       )}
 

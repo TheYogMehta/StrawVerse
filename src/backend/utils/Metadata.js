@@ -22,7 +22,7 @@ const VIDEO_EXTENSIONS = [
 function formatFallbackTitle(str) {
   if (!str) return "Untitled";
   return str
-    .replace(/-(sub|dub|both)$/i, "")
+    .replace(/-(sub|dub|hsub|both)$/i, "")
     .replace(/[^a-zA-Z0-9]/g, " ")
     .split(/\s+/)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -34,8 +34,8 @@ function cleanStringForMatching(s) {
   if (!s) return "";
   return s
     .toLowerCase()
-    .replace(/\s+(sub|dub|both|sub\/dub)$/i, "")
-    .replace(/-(sub|dub|both)$/i, "")
+    .replace(/\s+(sub|dub|hsub|both|sub\/dub)$/i, "")
+    .replace(/-(sub|dub|hsub|both)$/i, "")
     .replace(/-[a-z0-9]{5}$/i, "")
     .replace(/[^a-z0-9]/g, " ")
     .replace(/\s+/g, " ")
@@ -66,7 +66,7 @@ async function MetadataAdd(type, valuesToAdd) {
   }
 
   if (!valuesToAdd.MalID || valuesToAdd.MalID === "") {
-    const cleanId = valuesToAdd.id.replace(/-(dub|sub|both)$/, "");
+    const cleanId = valuesToAdd.id.replace(/-(dub|sub|hsub|both)$/, "");
     try {
       const customMappingRow = global.db
         .prepare("SELECT malid FROM unlinked_mal_ids WHERE id = ?")
@@ -969,18 +969,26 @@ async function getSourceById(type, baseDir, id, number, subdub) {
             file.endsWith(".vtt") ||
             file.endsWith(".ass");
           if (!isSub) return false;
-          const match = file.match(/^\d+(\.\d+)?/);
+          const match = file.match(/^(?:ep)?(\d+(?:\.\d+)?)/i);
           if (match) {
-            return parseFloat(match[0]) === parseFloat(number);
+            return parseFloat(match[1]) === parseFloat(number);
           }
           return false;
         })
         .map((subtitle) => {
+          const parts = subtitle.split(".");
+          let lang = "English";
+          if (parts.length >= 3) {
+            const rawLang = parts[parts.length - 2];
+            if (rawLang && rawLang.length <= 4) {
+              lang = rawLang;
+            }
+          }
           return {
             url: `/subtitles?file=${encodeURIComponent(
               path.join(subtitlesDir, subtitle),
             )}`,
-            lang: subtitle.split(".")[1],
+            lang: lang,
           };
         });
     }
@@ -1000,11 +1008,18 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
     // if logged in mal && Anime
     if (type === "Anime") {
-      let id = AnimeMangaid?.replace(/-(dub|sub|both)$/, "");
+      let id = AnimeMangaid?.replace(/-(dub|sub|hsub|both)$/, "");
 
       try {
         const searchTerms = Array.from(
-          new Set([`${id}-sub`, `${id}-dub`, `${id}-both`, AnimeMangaid, id]),
+          new Set([
+            `${id}-sub`,
+            `${id}-hsub`,
+            `${id}-dub`,
+            `${id}-both`,
+            AnimeMangaid,
+            id,
+          ]),
         ).filter(Boolean);
 
         const placeholders = searchTerms.map(() => "?").join(",");

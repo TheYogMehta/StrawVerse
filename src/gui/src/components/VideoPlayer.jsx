@@ -1,6 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
+import watchTogetherClient from "../utils/watchTogetherClient";
 
 if (
   typeof window !== "undefined" &&
@@ -118,6 +119,75 @@ export default function VideoPlayer({
   const indicatorTimeoutRef = useRef(null);
   const abortControllerRef = useRef(null);
   const settingsRef = useRef(null);
+  const timelineRef = useRef(null);
+  const timeDisplayRef = useRef(null);
+  const rafRef = useRef(null);
+  const currentTimeRef = useRef(0);
+  const bufferedRef = useRef(0);
+  const durationRef = useRef(0);
+  const isRemoteSync = useRef(false);
+
+  useEffect(() => {
+    const handleRemotePlayPause = ({ isPlaying: remotePlaying, timestamp }) => {
+      const video = videoRef.current;
+      if (!video) return;
+      isRemoteSync.current = true;
+
+      if (Math.abs(video.currentTime - timestamp) > 0.5) {
+        video.currentTime = timestamp;
+      }
+
+      if (remotePlaying && video.paused) {
+        video.play().catch(() => {});
+        setIsPlaying(true);
+      } else if (!remotePlaying && !video.paused) {
+        video.pause();
+        setIsPlaying(false);
+      }
+
+      setTimeout(() => {
+        isRemoteSync.current = false;
+      }, 100);
+    };
+
+    const handleRemoteTimeSync = ({ timestamp, speed }) => {
+      const video = videoRef.current;
+      if (!video) return;
+      isRemoteSync.current = true;
+
+      if (Math.abs(video.currentTime - timestamp) > 1.5) {
+        video.currentTime = timestamp;
+      }
+      if (speed && video.playbackRate !== speed) {
+        video.playbackRate = speed;
+      }
+
+      setTimeout(() => {
+        isRemoteSync.current = false;
+      }, 100);
+    };
+
+    const handleRemoteStartPlayback = () => {
+      const video = videoRef.current;
+      if (!video) return;
+      isRemoteSync.current = true;
+      video.play().catch(() => {});
+      setIsPlaying(true);
+      setTimeout(() => {
+        isRemoteSync.current = false;
+      }, 100);
+    };
+
+    watchTogetherClient.on("playPause", handleRemotePlayPause);
+    watchTogetherClient.on("timeSync", handleRemoteTimeSync);
+    watchTogetherClient.on("startPlayback", handleRemoteStartPlayback);
+
+    return () => {
+      watchTogetherClient.off("playPause", handleRemotePlayPause);
+      watchTogetherClient.off("timeSync", handleRemoteTimeSync);
+      watchTogetherClient.off("startPlayback", handleRemoteStartPlayback);
+    };
+  }, []);
 
   const [sources, setSources] = useState([]);
   const [subtitles, setSubtitles] = useState([]);
@@ -144,6 +214,30 @@ export default function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
   const [buffered, setBuffered] = useState(0);
+
+  const updateTimelineDOM = () => {
+    const ct = currentTimeRef.current;
+    const dur = durationRef.current || 1;
+    const buf = bufferedRef.current;
+    const progressPct = (ct / dur) * 100;
+    const bufferedPct = (buf / dur) * 100;
+
+    if (timelineRef.current) {
+      timelineRef.current.value = ct;
+      timelineRef.current.max = durationRef.current || 100;
+      timelineRef.current.style.setProperty(
+        "--progress-percent",
+        `${progressPct}%`,
+      );
+      timelineRef.current.style.setProperty(
+        "--buffered-percent",
+        `${bufferedPct}%`,
+      );
+    }
+    if (timeDisplayRef.current) {
+      timeDisplayRef.current.textContent = formatTime(ct);
+    }
+  };
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [useTranscodeFallback, setUseTranscodeFallback] = useState(false);
 
@@ -174,9 +268,15 @@ export default function VideoPlayer({
     if (video.paused) {
       showIndicator(Play, "Play");
       video.play().catch(() => {});
+      if (watchTogetherClient.roomCode && !isRemoteSync.current) {
+        watchTogetherClient.sendPlayPause(true, video.currentTime);
+      }
     } else {
       showIndicator(Pause, "Pause");
       video.pause();
+      if (watchTogetherClient.roomCode && !isRemoteSync.current) {
+        watchTogetherClient.sendPlayPause(false, video.currentTime);
+      }
     }
   };
 
@@ -203,20 +303,31 @@ export default function VideoPlayer({
 
   const handleTimelineChange = (e) => {
     const val = parseFloat(e.target.value);
+    currentTimeRef.current = val;
     setCurrentTime(val);
     if (videoRef.current) {
       videoRef.current.currentTime = val;
+    }
+    if (watchTogetherClient.roomCode && !isRemoteSync.current) {
+      watchTogetherClient.sendTimeSync(val, playbackSpeed);
     }
   };
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
-      setCurrentTime(videoRef.current.currentTime);
+      currentTimeRef.current = videoRef.current.currentTime;
+      if (!rafRef.current) {
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = null;
+          updateTimelineDOM();
+        });
+      }
     }
   };
 
   const handleDurationChange = () => {
     if (videoRef.current) {
+      durationRef.current = videoRef.current.duration;
       setDuration(videoRef.current.duration);
     }
   };
@@ -234,13 +345,16 @@ export default function VideoPlayer({
       const curr = videoRef.current.currentTime;
       for (let i = 0; i < buf.length; i++) {
         if (buf.start(i) <= curr && buf.end(i) >= curr) {
-          setBuffered(buf.end(i));
+          bufferedRef.current = buf.end(i);
+          updateTimelineDOM();
           return;
         }
       }
-      setBuffered(buf.end(buf.length - 1));
+      bufferedRef.current = buf.end(buf.length - 1);
+      updateTimelineDOM();
     } else {
-      setBuffered(0);
+      bufferedRef.current = 0;
+      updateTimelineDOM();
     }
   };
 
@@ -573,7 +687,7 @@ export default function VideoPlayer({
     const blobUrls = [];
     let cancelled = false;
     const processSubtitles = async () => {
-      if (!subtitles || subtitles.length === 0) {
+      if (!subtitles || subtitles.length === 0 || playerSubDub === "hsub") {
         setProcessedSubtitles([]);
         return;
       }
@@ -588,10 +702,13 @@ export default function VideoPlayer({
           const res = await fetch(sub.url);
           if (!res.ok) continue;
           let text = await res.text();
-          if (!text.trim().startsWith("WEBVTT")) {
-            text =
-              "WEBVTT\n\n" +
-              text.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, "$1.$2");
+          const trimmed = text.trim();
+          if (!trimmed.startsWith("WEBVTT")) {
+            const converted = text.replace(
+              /(\d{1,2}:\d{2}:\d{2}),(\d{2,3})/g,
+              (m, time, ms) => `${time.padStart(8, "0")}.${ms.padEnd(3, "0")}`,
+            );
+            text = "WEBVTT\n\n" + converted;
           }
           const blob = new Blob([text], { type: "text/vtt" });
           const blobUrl = URL.createObjectURL(blob);
@@ -623,6 +740,9 @@ export default function VideoPlayer({
     }
     video.src = "";
 
+    durationRef.current = 0;
+    currentTimeRef.current = 0;
+    bufferedRef.current = 0;
     setDuration(0);
 
     const url = sourceUrl;
@@ -975,6 +1095,7 @@ export default function VideoPlayer({
         case "j":
           e.preventDefault();
           video.currentTime = Math.max(0, video.currentTime - 10);
+          currentTimeRef.current = video.currentTime;
           showIndicator(ChevronLeft, "-10s");
           break;
 
@@ -985,6 +1106,7 @@ export default function VideoPlayer({
             video.duration || 0,
             video.currentTime + 10,
           );
+          currentTimeRef.current = video.currentTime;
           showIndicator(ChevronRight, "+10s");
           break;
 
@@ -1060,6 +1182,7 @@ export default function VideoPlayer({
       if (uiTimeoutRef.current) clearTimeout(uiTimeoutRef.current);
       if (indicatorTimeoutRef.current)
         clearTimeout(indicatorTimeoutRef.current);
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, []);
 
@@ -1170,10 +1293,11 @@ export default function VideoPlayer({
               {/* Timeline Progress Bar */}
               <div className="player-timeline-container">
                 <input
+                  ref={timelineRef}
                   type="range"
                   min="0"
                   max={duration || 100}
-                  value={currentTime}
+                  defaultValue={0}
                   onChange={handleTimelineChange}
                   className="player-timeline-slider"
                   style={{
@@ -1198,7 +1322,7 @@ export default function VideoPlayer({
                     )}
                   </button>
                   <div className="player-time-display">
-                    <span>{formatTime(currentTime)}</span>
+                    <span ref={timeDisplayRef}>{formatTime(currentTime)}</span>
                     <span className="player-time-divider">/</span>
                     <span className="player-duration">
                       {formatTime(duration)}
@@ -1389,34 +1513,67 @@ export default function VideoPlayer({
       {/* Control Navigation & Source Section */}
       <div className="player-controls-footer">
         <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-          {/* Language Selector if both are available */}
-          {!loading && currentEpisodeObj?.lang === "both" && (
-            <div className="player-quality-selector">
-              <span
-                style={{
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  color: "var(--text-muted)",
-                }}
-              >
-                Language:
-              </span>
-              <div className="player-qualities-wrapper">
-                <button
-                  onClick={() => setPlayerSubDub("sub")}
-                  className={`player-quality-btn ${playerSubDub === "sub" ? "active" : ""}`}
+          {/* Language Selector if multiple options are available */}
+          {(() => {
+            if (loading || !currentEpisodeObj) return null;
+            let availableLangs = [];
+            if (
+              currentEpisodeObj.langs &&
+              Array.isArray(currentEpisodeObj.langs)
+            ) {
+              availableLangs = currentEpisodeObj.langs;
+            } else {
+              if (currentEpisodeObj.lang === "both") {
+                availableLangs = ["sub", "dub"];
+              } else if (currentEpisodeObj.lang === "dub") {
+                availableLangs = ["dub"];
+              } else {
+                availableLangs = ["sub"];
+              }
+              if (
+                currentEpisodeObj.hasHsub &&
+                !availableLangs.includes("hsub")
+              ) {
+                availableLangs = ["sub", "hsub", "dub"].filter(
+                  (l) =>
+                    l === "hsub" ||
+                    (l === "sub" &&
+                      (currentEpisodeObj.lang === "sub" ||
+                        currentEpisodeObj.lang === "both")) ||
+                    (l === "dub" &&
+                      (currentEpisodeObj.lang === "dub" ||
+                        currentEpisodeObj.lang === "both")),
+                );
+              }
+            }
+
+            if (availableLangs.length <= 1) return null;
+
+            return (
+              <div className="player-quality-selector">
+                <span
+                  style={{
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    color: "var(--text-muted)",
+                  }}
                 >
-                  SUB
-                </button>
-                <button
-                  onClick={() => setPlayerSubDub("dub")}
-                  className={`player-quality-btn ${playerSubDub === "dub" ? "active" : ""}`}
-                >
-                  DUB
-                </button>
+                  Language:
+                </span>
+                <div className="player-qualities-wrapper">
+                  {availableLangs.map((langKey) => (
+                    <button
+                      key={langKey}
+                      onClick={() => setPlayerSubDub(langKey)}
+                      className={`player-quality-btn ${playerSubDub === langKey ? "active" : ""}`}
+                    >
+                      {langKey.toUpperCase()}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Quality Selector */}
           {!loading && sources.length > 0 && (

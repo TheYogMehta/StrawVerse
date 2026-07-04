@@ -216,3 +216,90 @@
   background-color: rgba(239, 68, 68, 0.1);
   color: var(--danger);
 }
+
+.btn-pause-queue {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.btn-pause-queue:hover {
+  background-color: var(--bg-tertiary);
+  border-color: var(--accent);
+}
+
+.btn-pause-queue.paused {
+  background-color: rgba(245, 158, 11, 0.15);
+  border-color: #f59e0b;
+  color: #f59e0b;
+}
+
+.btn-pause-queue.paused:hover {
+  background-color: rgba(245, 158, 11, 0.25);
+}
+
+.queue-paused-banner {
+  margin-bottom: 24px;
+  padding: 16px 20px;
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.paused-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.paused-icon {
+  color: #f59e0b;
+}
+
+.paused-banner-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f59e0b;
+}
+
+.paused-banner-sub {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.btn-resume-now {
+  background-color: #f59e0b;
+  color: #000;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: var(--transition);
+}
+
+.btn-resume-now:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.progress-fill.paused-fill {
+  background-color: #f59e0b;
+}

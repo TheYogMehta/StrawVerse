@@ -90,8 +90,55 @@
   flex-direction: column;
   align-items: center;
   width: 100%;
-  maxWidth: 800px;
+  max-width: 800px;
   gap: 8px;
+  transition: max-width 0.3s ease;
+}
+
+.pages-container.size-compact {
+  max-width: 550px;
+}
+
+.pages-container.size-standard {
+  max-width: 800px;
+}
+
+.pages-container.size-full {
+  max-width: 1150px;
+}
+
+.reader-size-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+}
+
+.btn-reader-size {
+  background-color: #1f222d;
+  color: #9ca3af;
+  border: 1px solid #262936;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.btn-reader-size:hover {
+  background-color: var(--bg-tertiary);
+  color: white;
+  border-color: var(--accent);
+}
+
+.btn-reader-size.active {
+  background-color: rgba(124, 58, 237, 0.2);
+  color: #c084fc;
+  border-color: var(--accent);
 }
 
 .page-wrapper {
@@ -104,7 +151,7 @@
   background-color: #000;
   border-radius: 4px;
   overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
 }
 
 .page-img {
@@ -135,7 +182,7 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   z-index: 100;
   transition: var(--transition);
 }
@@ -175,7 +222,7 @@
 }
 
 .btn-nav:disabled {
-  background-color: rgba(255,255,255,0.02);
+  background-color: rgba(255, 255, 255, 0.02);
   color: #4b5563;
   cursor: not-allowed;
   opacity: 0.4;
@@ -192,7 +239,7 @@
   border: 1px solid #262936;
   color: white;
   padding: 5px 10px;
-  borderRadius: 6px;
+  borderradius: 6px;
   font-size: 12px;
   font-weight: 600;
   outline: none;
@@ -259,7 +306,11 @@
   left: 0;
   right: 0;
   bottom: 0;
-  background-image: radial-gradient(circle at center, rgba(124, 58, 237, 0.08) 0%, transparent 70%);
+  background-image: radial-gradient(
+    circle at center,
+    rgba(124, 58, 237, 0.08) 0%,
+    transparent 70%
+  );
   pointer-events: none;
 }
 
@@ -289,8 +340,8 @@
   letter-spacing: 0.5px;
   margin-bottom: 16px;
   background: linear-gradient(to right, #ffffff, #a78bfa);
-  WebkitBackgroundClip: text;
-  WebkitTextFillColor: transparent;
+  webkitbackgroundclip: text;
+  webkittextfillcolor: transparent;
 }
 
 .splash-status-badge {
@@ -376,7 +427,7 @@
 }
 
 .btn-bottom-nav:disabled {
-  background-color: rgba(255,255,255,0.02);
+  background-color: rgba(255, 255, 255, 0.02);
   color: var(--text-muted);
   cursor: not-allowed;
   opacity: 0.4;

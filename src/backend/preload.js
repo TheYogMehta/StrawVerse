@@ -6,7 +6,11 @@ contextBridge.exposeInMainWorld("sharedStateAPI", {
   discordrpc: (AnimeName, Episode) =>
     ipcRenderer.invoke("update-discordrpc", AnimeName, Episode),
   on: (channel, callback) => {
-    ipcRenderer.on(channel, (_event, data) => callback(data));
+    const listener = (_event, data) => callback(data);
+    ipcRenderer.on(channel, listener);
+    return () => {
+      ipcRenderer.removeListener(channel, listener);
+    };
   },
   marketplace: (AnimeManga) => ipcRenderer.send("marketplace", AnimeManga),
   extensions: (TaskType, AnimeManga, ExtentionName) =>

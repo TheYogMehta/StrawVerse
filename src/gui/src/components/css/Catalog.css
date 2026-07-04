@@ -156,9 +156,14 @@
 }
 
 .media-card {
-  cursor: pointer;
+  cursor: grab;
+  user-select: none;
   overflow: hidden;
-  transition: transform 0.2s ease-out, box-shadow 0.2s ease-out, border-color 0.2s ease-out;
+  transition:
+    transform 0.2s ease-out,
+    box-shadow 0.2s ease-out,
+    border-color 0.2s ease-out,
+    opacity 0.2s ease-out;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -168,7 +173,25 @@
 .media-card:hover {
   transform: scale(1.03);
   border-color: var(--accent);
-  box-shadow: 0 10px 25px rgba(124, 58, 237, 0.25), 0 0 15px rgba(124, 58, 237, 0.15);
+  box-shadow:
+    0 10px 25px rgba(124, 58, 237, 0.25),
+    0 0 15px rgba(124, 58, 237, 0.15);
+}
+
+.media-card:active {
+  cursor: grabbing;
+}
+
+.media-card.is-dragging {
+  opacity: 0.35;
+  transform: scale(0.95);
+  border: 2px dashed var(--accent) !important;
+}
+
+.media-card.is-drag-over {
+  border: 2px solid var(--accent) !important;
+  box-shadow: 0 0 25px rgba(124, 58, 237, 0.6) !important;
+  transform: scale(1.05) translateY(-4px);
 }
 
 .img-container {
@@ -335,8 +358,8 @@
   padding: 6px 12px;
   border-radius: 6px;
   cursor: pointer;
-  fontWeight: 600;
-  fontSize: 12px;
+  fontweight: 600;
+  fontsize: 12px;
   transition: var(--transition);
 }
 

@@ -41,6 +41,98 @@ export default function Catalog({ type, provider, onSelectMedia }) {
   const [stats, setStats] = useState(null);
   const [recentHistory, setRecentHistory] = useState([]);
 
+  const [draggedIndex, setDraggedIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+
+  const getCustomOrderKey = (currentTag = activeFilters.tag) => {
+    return `${type}_${provider}_${currentTag || "all"}`;
+  };
+
+  const applyCustomOrder = (resultsList, currentFilters = activeFilters) => {
+    if (!resultsList || resultsList.length === 0) return resultsList;
+    const key = getCustomOrderKey(currentFilters.tag);
+    let savedOrder = null;
+    try {
+      const stored = localStorage.getItem(`custom_order_${key}`);
+      if (stored) savedOrder = JSON.parse(stored);
+    } catch (_) {}
+
+    if (savedOrder && Array.isArray(savedOrder) && savedOrder.length > 0) {
+      const orderMap = new Map();
+      savedOrder.forEach((id, idx) => orderMap.set(id, idx));
+
+      return [...resultsList].sort((a, b) => {
+        const indexA = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
+        const indexB = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
+        return indexA - indexB;
+      });
+    }
+    return resultsList;
+  };
+
+  const handleDragStart = (e, index) => {
+    setDraggedIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", index);
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDragLeave = (e, index) => {
+    if (dragOverIndex === index) {
+      setDragOverIndex(null);
+    }
+  };
+
+  const handleDrop = async (e, dropIndex) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === dropIndex || !data?.results) {
+      setDraggedIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    const updated = [...data.results];
+    const [movedItem] = updated.splice(draggedIndex, 1);
+    updated.splice(dropIndex, 0, movedItem);
+
+    setData((prev) => ({
+      ...prev,
+      results: updated,
+    }));
+
+    const orderIds = updated.map((item) => item.id);
+    const key = getCustomOrderKey();
+
+    try {
+      localStorage.setItem(`custom_order_${key}`, JSON.stringify(orderIds));
+    } catch (_) {}
+
+    try {
+      await fetch("/api/local/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key, order: orderIds }),
+      });
+    } catch (err) {
+      console.error("Failed to persist title reorder:", err);
+    }
+
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   // Define supported filter maps matching index.js
   const siteFilterDefs = {
     // legacy for now..
@@ -116,7 +208,14 @@ export default function Catalog({ type, provider, onSelectMedia }) {
           hasNextPage: false,
         });
       } else {
-        setData(resData);
+        const sortedResults = applyCustomOrder(
+          resData?.results || [],
+          currentFilters,
+        );
+        setData({
+          ...resData,
+          results: sortedResults,
+        });
         if (resData?.site && siteFilterDefs[resData.site]) {
           setAvailableFilters(siteFilterDefs[resData.site]);
         } else {
@@ -155,7 +254,8 @@ export default function Catalog({ type, provider, onSelectMedia }) {
     setLinkingMalItem(null);
     setSearchQuery("");
 
-    const defaultTag = provider === "local" ? (type === "Manga" ? "Reading" : "Watching") : "";
+    const defaultTag =
+      provider === "local" ? (type === "Manga" ? "Reading" : "Watching") : "";
     const initFilters = defaultTag ? { tag: defaultTag } : {};
     setActiveFilters(initFilters);
     fetchData(1, initFilters, "", null);
@@ -210,6 +310,50 @@ export default function Catalog({ type, provider, onSelectMedia }) {
         .catch(() => {});
     }
   }, [type, provider]);
+
+  useEffect(() => {
+    if (window.sharedStateAPI && window.sharedStateAPI.on) {
+      const handleDownloadComplete = (downloadData) => {
+        if (downloadData.Type !== type) return;
+
+        setData((prevData) => {
+          if (!prevData || !prevData.results) return prevData;
+          const updatedResults = prevData.results.map((item) => {
+            const itemBaseId = item.id.replace(/-(sub|dub|both)$/, "");
+            const dlBaseId = downloadData.id.replace(/-(sub|dub|both)$/, "");
+
+            if (itemBaseId === dlBaseId) {
+              const epNum = parseFloat(downloadData.EpNum);
+              if (isNaN(epNum)) return item;
+
+              const currentDownloaded = item.Downloaded || [];
+              if (!currentDownloaded.includes(epNum)) {
+                return {
+                  ...item,
+                  Downloaded: [...currentDownloaded, epNum].sort(
+                    (a, b) => a - b,
+                  ),
+                };
+              }
+            }
+            return item;
+          });
+          return {
+            ...prevData,
+            results: updatedResults,
+          };
+        });
+      };
+
+      const unsubscribe = window.sharedStateAPI.on(
+        "download-complete",
+        handleDownloadComplete,
+      );
+      return () => {
+        if (unsubscribe) unsubscribe();
+      };
+    }
+  }, [type]);
 
   const handleAddLocalTag = async () => {
     const { value: tagName } = await Swal.fire({
@@ -296,7 +440,10 @@ export default function Catalog({ type, provider, onSelectMedia }) {
             body: JSON.stringify({
               type: type,
               id: item.id,
-              provider: item.provider !== "provider" && item.provider !== "local source" ? item.provider : undefined,
+              provider:
+                item.provider !== "provider" && item.provider !== "local source"
+                  ? item.provider
+                  : undefined,
               MalID: linkingMalItem.MalID || linkingMalItem.id,
             }),
           })
@@ -439,7 +586,9 @@ export default function Catalog({ type, provider, onSelectMedia }) {
             <div className="stat-content">
               <span className="stat-label">Total Time Spent</span>
               <span className="stat-value">
-                {type === "Anime" ? `${stats.watchHours || 0} hrs` : `${stats.readHours || 0} hrs`}
+                {type === "Anime"
+                  ? `${stats.watchHours || 0} hrs`
+                  : `${stats.readHours || 0} hrs`}
               </span>
             </div>
           </div>
@@ -453,7 +602,9 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                 {type === "Anime" ? "Episodes Completed" : "Chapters Read"}
               </span>
               <span className="stat-value">
-                {type === "Anime" ? `${stats.completedEpisodes || 0} eps` : `${stats.completedChapters || 0} chs`}
+                {type === "Anime"
+                  ? `${stats.completedEpisodes || 0} eps`
+                  : `${stats.completedChapters || 0} chs`}
               </span>
             </div>
           </div>
@@ -471,7 +622,9 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                 {type === "Anime" ? "Total Anime" : "Total Manga"}
               </span>
               <span className="stat-value">
-                {type === "Anime" ? `${stats.distinctAnime || 0} titles` : `${stats.distinctManga || 0} titles`}
+                {type === "Anime"
+                  ? `${stats.distinctAnime || 0} titles`
+                  : `${stats.distinctManga || 0} titles`}
               </span>
             </div>
           </div>
@@ -479,72 +632,97 @@ export default function Catalog({ type, provider, onSelectMedia }) {
       )}
 
       {/* Continue Watching / Continue Reading Shelf */}
-      {provider === "local" && !linkingMalItem && (() => {
-        const displayable = (recentHistory || []).filter((item) => {
-          if (item.is_completed === 0) return true;
-          if (item.total_count === null || item.total_count === undefined || item.number < item.total_count) {
-            return true;
-          }
-          return false;
-        });
+      {provider === "local" &&
+        !linkingMalItem &&
+        (() => {
+          const displayable = (recentHistory || []).filter((item) => {
+            if (item.is_completed === 0) return true;
+            if (
+              item.total_count === null ||
+              item.total_count === undefined ||
+              item.number < item.total_count
+            ) {
+              return true;
+            }
+            return false;
+          });
 
-        if (displayable.length === 0) return null;
+          if (displayable.length === 0) return null;
 
-        return (
-          <div className="continue-shelf-container">
-            <h2 className="shelf-title">
-              {type === "Anime" ? "Continue Watching" : "Continue Reading"}
-            </h2>
-            <div className="continue-shelf-scroll">
-              {displayable.slice(0, 4).map((item) => {
-                const isItemCompleted = item.is_completed === 1;
-                const nextNum = isItemCompleted ? item.number + 1 : item.number;
-                const progress = isItemCompleted
-                  ? 0
-                  : item.duration > 0
-                    ? Math.min(100, Math.max(0, Math.round((item.current_time / item.duration) * 100)))
-                    : 0;
+          return (
+            <div className="continue-shelf-container">
+              <h2 className="shelf-title">
+                {type === "Anime" ? "Continue Watching" : "Continue Reading"}
+              </h2>
+              <div className="continue-shelf-scroll">
+                {displayable.slice(0, 4).map((item) => {
+                  const isItemCompleted = item.is_completed === 1;
+                  const nextNum = isItemCompleted
+                    ? item.number + 1
+                    : item.number;
+                  const progress = isItemCompleted
+                    ? 0
+                    : item.duration > 0
+                      ? Math.min(
+                          100,
+                          Math.max(
+                            0,
+                            Math.round(
+                              (item.current_time / item.duration) * 100,
+                            ),
+                          ),
+                        )
+                      : 0;
 
-                return (
-                  <div
-                    key={`${item.media_id}-${item.number}`}
-                    className="continue-card glass-panel"
-                    onClick={() => onSelectMedia(item.media_id, "local", "Back to Collection", true)}
-                  >
-                    <div className="continue-img-container">
-                      <img
-                        src={item.image || "/images/image-404.png"}
-                        alt={item.title}
-                        className="continue-img"
-                        onError={(e) => {
-                          e.target.src = "/images/image-404.png";
-                        }}
-                      />
-                      <div className="continue-play-overlay">
-                        <Play size={28} className="continue-play-icon" />
-                      </div>
-                      <div className="continue-progress-container">
-                        <div
-                          className="continue-progress-bar"
-                          style={{ width: `${progress}%` }}
+                  return (
+                    <div
+                      key={`${item.media_id}-${item.number}`}
+                      className="continue-card glass-panel"
+                      onClick={() =>
+                        onSelectMedia(
+                          item.media_id,
+                          "local",
+                          "Back to Collection",
+                          true,
+                        )
+                      }
+                    >
+                      <div className="continue-img-container">
+                        <img
+                          src={item.image || "/images/image-404.png"}
+                          alt={item.title}
+                          className="continue-img"
+                          onError={(e) => {
+                            e.target.src = "/images/image-404.png";
+                          }}
                         />
+                        <div className="continue-play-overlay">
+                          <Play size={28} className="continue-play-icon" />
+                        </div>
+                        <div className="continue-progress-container">
+                          <div
+                            className="continue-progress-bar"
+                            style={{ width: `${progress}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="continue-info">
+                        <span className="continue-number">
+                          {type === "Anime"
+                            ? `Episode ${nextNum}`
+                            : `Chapter ${nextNum}`}
+                        </span>
+                        <h4 className="continue-title" title={item.title}>
+                          {item.title}
+                        </h4>
                       </div>
                     </div>
-                    <div className="continue-info">
-                      <span className="continue-number">
-                        {type === "Anime" ? `Episode ${nextNum}` : `Chapter ${nextNum}`}
-                      </span>
-                      <h4 className="continue-title" title={item.title}>
-                        {item.title}
-                      </h4>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
 
       {/* Filter panel */}
       {availableFilters && (
@@ -639,11 +817,18 @@ export default function Catalog({ type, provider, onSelectMedia }) {
       ) : (
         <div className="content-container">
           <div className="content-grid">
-            {data.results.map((item) => (
+            {data.results.map((item, index) => (
               <div
                 key={item.id}
+                draggable
+                onDragStart={(e) => handleDragStart(e, index)}
+                onDragOver={(e) => handleDragOver(e, index)}
+                onDragLeave={(e) => handleDragLeave(e, index)}
+                onDrop={(e) => handleDrop(e, index)}
+                onDragEnd={handleDragEnd}
                 onClick={() => handleMediaClick(item)}
-                className="media-card glass-panel"
+                className={`media-card glass-panel ${draggedIndex === index ? "is-dragging" : ""} ${dragOverIndex === index ? "is-drag-over" : ""}`}
+                title="Hold & drag to reorder title"
               >
                 <div className="img-container">
                   <img
@@ -666,12 +851,16 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                     )}
 
                     {item.nextEpisodeIn ? (
-                      <div className="indicator-badge schedule-badge" title="Next release countdown">
+                      <div
+                        className="indicator-badge schedule-badge"
+                        title="Next release countdown"
+                      >
                         <Film size={12} style={{ marginRight: "4px" }} />
                         {item.nextEpisodeIn}
                       </div>
                     ) : (
-                      item.watched !== undefined && item.watched !== null && (
+                      item.watched !== undefined &&
+                      item.watched !== null && (
                         <div className="indicator-badge">
                           <Eye size={12} style={{ marginRight: "4px" }} />
                           {item.watched}/{item.totalEpisodes || "?"}
@@ -679,8 +868,6 @@ export default function Catalog({ type, provider, onSelectMedia }) {
                       )
                     )}
                   </div>
-
-
                 </div>
 
                 <div className="card-info">

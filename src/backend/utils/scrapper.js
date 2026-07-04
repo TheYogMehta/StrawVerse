@@ -1,4 +1,4 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, net, session } = require("electron");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
@@ -10,8 +10,8 @@ let activeBypasses = {};
 let bypassQueue = [];
 let bypassBusy = false;
 
-const CF_CLEARANCE_UPSERT = `INSERT OR REPLACE INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+const CF_CLEARANCE_UPSERT = `INSERT OR REPLACE INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate, local_saved_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 app.on("before-quit", () => {
   isQuitting = true;
@@ -124,6 +124,7 @@ function saveClearanceCookie(cookie) {
     "",
     "",
     expiry,
+    Date.now(),
   ]);
 }
 
@@ -365,16 +366,22 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
 
   try {
     const row = queryOne(
-      "SELECT expirationDate FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+      "SELECT expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
       [`${domain}-cf_clearance`, domain, domain],
     );
-    if (
-      row &&
-      row.expirationDate &&
-      row.expirationDate > Date.now() &&
-      !force
-    ) {
-      return;
+    if (row && !force) {
+      const exp = Number(row.expirationDate);
+      const savedAt = Number(row.local_saved_at);
+      const now = Date.now();
+      let isValid = false;
+      if (exp > now) {
+        isValid = true;
+      } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
+        isValid = true;
+      }
+      if (isValid) {
+        return;
+      }
     }
   } catch (e) {
     console.error("Failed to check cookie expiration in DB:", e);
@@ -505,8 +512,119 @@ async function ExitScrapperWindow() {
   }
 }
 
+async function electronNetAdapter(config) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const {
+        method = "get",
+        url,
+        headers,
+        data,
+        timeout,
+        responseType,
+      } = config;
+
+      const requestHeaders = {};
+      if (headers) {
+        if (typeof headers.toJSON === "function") {
+          Object.assign(requestHeaders, headers.toJSON());
+        } else {
+          Object.assign(requestHeaders, headers);
+        }
+      }
+
+      const options = {
+        method: method.toUpperCase(),
+        session: session.fromPartition("persist:scrapper"),
+        headers: requestHeaders,
+      };
+
+      if (data) {
+        options.body = typeof data === "object" ? JSON.stringify(data) : data;
+        const contentTypeKey = Object.keys(requestHeaders).find(
+          (k) => k.toLowerCase() === "content-type",
+        );
+        if (!contentTypeKey) {
+          options.headers["Content-Type"] = "application/json";
+        }
+      }
+
+      let signal;
+      let timeoutId;
+      if (timeout && timeout > 0) {
+        const controller = new AbortController();
+        signal = controller.signal;
+        options.signal = signal;
+        timeoutId = setTimeout(() => {
+          controller.abort();
+        }, timeout);
+      }
+
+      try {
+        const res = await net.fetch(url, options);
+        if (timeoutId) clearTimeout(timeoutId);
+
+        const responseHeaders = {};
+        res.headers.forEach((val, key) => {
+          responseHeaders[key.toLowerCase()] = val;
+        });
+
+        let responseData;
+        if (responseType === "arraybuffer") {
+          const buffer = await res.arrayBuffer();
+          responseData = Buffer.from(buffer);
+        } else {
+          const contentType = responseHeaders["content-type"] || "";
+          if (contentType.includes("application/json")) {
+            const text = await res.text();
+            try {
+              responseData = JSON.parse(text);
+            } catch (e) {
+              responseData = text;
+            }
+          } else {
+            responseData = await res.text();
+          }
+        }
+
+        const response = {
+          data: responseData,
+          status: res.status,
+          statusText: res.statusText,
+          headers: responseHeaders,
+          config,
+          request: null,
+        };
+
+        if (res.status >= 200 && res.status < 300) {
+          resolve(response);
+        } else {
+          const error = new Error(
+            `Request failed with status code ${res.status}`,
+          );
+          error.response = response;
+          error.config = config;
+          reject(error);
+        }
+      } catch (err) {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (err.name === "AbortError") {
+          const timeoutError = new Error(`timeout of ${timeout}ms exceeded`);
+          timeoutError.code = "ECONNABORTED";
+          timeoutError.config = config;
+          reject(timeoutError);
+        } else {
+          reject(err);
+        }
+      }
+    } catch (err) {
+      reject(err);
+    }
+  });
+}
+
 axios.defaults.proxy = false;
-global.axios = axios.create({ proxy: false });
+global.axios = axios.create({ proxy: false, adapter: electronNetAdapter });
 global.axios.interceptors.request.use(
   async (config) => {
     const headers = getHeaders(config.url);

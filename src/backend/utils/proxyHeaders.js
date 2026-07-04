@@ -174,19 +174,31 @@ function getHeaders(url) {
     } else {
       try {
         const row = queryOne(
-          "SELECT value, expirationDate FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))) AND CAST(expirationDate AS REAL) > ? ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-          [
-            `${cookieDomain}-cf_clearance`,
-            cookieDomain,
-            cookieDomain,
-            Date.now(),
-          ],
+          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          [`${cookieDomain}-cf_clearance`, cookieDomain, cookieDomain],
         );
+        let isValid = false;
+        let expiryTime = Date.now() + 10 * 60 * 1000;
+
         if (row && row.value) {
+          const exp = Number(row.expirationDate);
+          const savedAt = Number(row.local_saved_at);
+          const now = Date.now();
+
+          if (exp > now) {
+            isValid = true;
+            expiryTime = exp;
+          } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
+            isValid = true;
+            expiryTime = savedAt + 2 * 60 * 60 * 1000;
+          }
+        }
+
+        if (row && row.value && isValid) {
           headers.Cookie = `cf_clearance=${row.value};`;
           cookieCache[cookieDomain] = {
             value: row.value,
-            expiry: Number(row.expirationDate || Date.now() + 10 * 60 * 1000),
+            expiry: expiryTime,
           };
         } else {
           cookieCache[cookieDomain] = {

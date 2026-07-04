@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { Loader2, LogOut, CheckCircle, Trash2, MessageSquare } from "lucide-react";
 import Swal from "sweetalert2";
+import watchTogetherClient from "../utils/watchTogetherClient";
 import "./css/SettingsView.css";
 
 export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
@@ -641,6 +642,22 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
                   <option value="720p">720p (HD)</option>
                   <option value="360p">360p (SD)</option>
                 </select>
+              </div>
+
+              <h3 className="settings-panel-subtitle">
+                Watch Together Configuration
+              </h3>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">
+                  Watch Together WebSocket Server URL
+                </label>
+                <input
+                  type="text"
+                  className="settings-input"
+                  placeholder="https://watch-together.strawverse.theyogmehta.online/"
+                  defaultValue={watchTogetherClient.getServerUrl()}
+                  onChange={(e) => watchTogetherClient.setServerUrl(e.target.value)}
+                />
               </div>
 
               <h3 className="settings-panel-subtitle">

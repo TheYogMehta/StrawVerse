@@ -8,11 +8,14 @@ import DownloadsTracker from "./components/DownloadsTracker";
 import LogsView from "./components/LogsView";
 import SettingsView from "./components/SettingsView";
 import Marketplace from "./components/Marketplace";
+import WatchTogetherModal from "./components/WatchTogetherModal";
+import WatchTogetherBar from "./components/WatchTogetherBar";
 
 export default function App() {
   const [history, setHistory] = useState([{ view: "local-anime", params: {} }]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [malLoggedIn, setMalLoggedIn] = useState(false);
+  const [isWTModalOpen, setIsWTModalOpen] = useState(false);
   const [whatsNewData, setWhatsNewData] = useState(null);
   const [whatsNewVersion, setWhatsNewVersion] = useState("");
   const [whatsNewDate, setWhatsNewDate] = useState("");
@@ -23,7 +26,7 @@ export default function App() {
     setToasts((prev) => [...prev, { id, title, body, icon, fadeOut: false }]);
     setTimeout(() => {
       setToasts((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, fadeOut: true } : t))
+        prev.map((t) => (t.id === id ? { ...t, fadeOut: true } : t)),
       );
       setTimeout(() => {
         setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -33,7 +36,7 @@ export default function App() {
 
   const removeToast = (id) => {
     setToasts((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, fadeOut: true } : t))
+      prev.map((t) => (t.id === id ? { ...t, fadeOut: true } : t)),
     );
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -55,33 +58,46 @@ export default function App() {
     }
   };
 
-
-
   const handleCloseWhatsNew = () => {
     setWhatsNewData(null);
   };
 
   const parseInlineMarkdown = (text) => {
     if (!text) return "";
-    
+
     // Check for keyboard shortcut pattern: "Key Name: Description"
     const shortcutRegex = /^([^:]+):\s*(.*)$/;
     const shortcutMatch = text.match(shortcutRegex);
     if (shortcutMatch) {
       const keysPart = shortcutMatch[1].trim();
       const descPart = shortcutMatch[2].trim();
-      
-      const isShortcut = /^[a-zA-Z0-9\s+/→←↑↓`&,|-]+$/.test(keysPart) && 
-                         keysPart.length < 45 && 
-                         !keysPart.includes("  ") &&
-                         !/^(http|https|fix|add|implement|split|update|remove|rebranded|re-added|select|choose|join|join\s+our)/i.test(keysPart);
-      
+
+      const isShortcut =
+        /^[a-zA-Z0-9\s+/→←↑↓`&,|-]+$/.test(keysPart) &&
+        keysPart.length < 45 &&
+        !keysPart.includes("  ") &&
+        !/^(http|https|fix|add|implement|split|update|remove|rebranded|re-added|select|choose|join|join\s+our)/i.test(
+          keysPart,
+        );
+
       if (isShortcut) {
         const tokens = keysPart.split(/(\s*\/\s*|\s+or\s+|\s*\+\s*|\s*,\s*)/g);
         const renderedKeys = tokens.map((token, index) => {
           const isSeparator = /^\s*(\/|or|\+|,)\s*$/.test(token);
           if (isSeparator) {
-            return <span key={index} className="kbd-separator" style={{ color: "var(--text-muted)", fontSize: "12px", margin: "0 4px" }}>{token}</span>;
+            return (
+              <span
+                key={index}
+                className="kbd-separator"
+                style={{
+                  color: "var(--text-muted)",
+                  fontSize: "12px",
+                  margin: "0 4px",
+                }}
+              >
+                {token}
+              </span>
+            );
           }
           const cleanKey = token.replace(/`/g, "").trim();
           if (!cleanKey) return null;
@@ -109,10 +125,24 @@ export default function App() {
         });
 
         return (
-          <span className="changelog-shortcut-row" style={{ display: "inline-flex", alignItems: "center", flexWrap: "wrap" }}>
+          <span
+            className="changelog-shortcut-row"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              flexWrap: "wrap",
+            }}
+          >
             <span className="changelog-keys-wrapper">{renderedKeys}</span>
-            <span className="kbd-desc-separator" style={{ color: "var(--text-muted)", marginRight: "8px" }}>:</span>
-            <span className="changelog-desc">{parseInlineMarkdown(descPart)}</span>
+            <span
+              className="kbd-desc-separator"
+              style={{ color: "var(--text-muted)", marginRight: "8px" }}
+            >
+              :
+            </span>
+            <span className="changelog-desc">
+              {parseInlineMarkdown(descPart)}
+            </span>
           </span>
         );
       }
@@ -254,7 +284,8 @@ export default function App() {
 
   useEffect(() => {
     if (window.sharedStateAPI && window.sharedStateAPI.checkWhatsNew) {
-      window.sharedStateAPI.checkWhatsNew()
+      window.sharedStateAPI
+        .checkWhatsNew()
         .then((data) => {
           if (data && data.showWhatsNew) {
             setWhatsNewVersion(data.version || "");
@@ -523,10 +554,17 @@ export default function App() {
         isCollapsed={isSidebarCollapsed}
         toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         malLoggedIn={malLoggedIn}
+        onOpenWatchTogether={() => setIsWTModalOpen(true)}
       />
       <main style={{ flex: 1, height: "100%", overflow: "hidden" }}>
         {renderActiveView()}
       </main>
+
+      <WatchTogetherBar onOpenModal={() => setIsWTModalOpen(true)} />
+      <WatchTogetherModal
+        isOpen={isWTModalOpen}
+        onClose={() => setIsWTModalOpen(false)}
+      />
 
       {whatsNewData && (
         <div className="whats-new-overlay">

@@ -239,6 +239,26 @@ class downloader {
 
       // Resolve master playlist to media playlist if applicable
       if (Playlist.includes("#EXT-X-STREAM-INF")) {
+        if (!this.subtitles || this.subtitles.length === 0) {
+          try {
+            const mediaLines = Playlist.split("\n").filter((l) =>
+              l.includes("#EXT-X-MEDIA:TYPE=SUBTITLES"),
+            );
+            for (const mLine of mediaLines) {
+              const uriMatch =
+                mLine.match(/URI="([^"]+)"/i) || mLine.match(/URI=([^,\s]+)/i);
+              if (uriMatch) {
+                const subUri = resolveUrl(uriMatch[1], this.streamUrl);
+                const nameMatch =
+                  mLine.match(/NAME="([^"]+)"/i) ||
+                  mLine.match(/LANGUAGE="([^"]+)"/i);
+                const subLang = nameMatch ? nameMatch[1] : "English";
+                if (!this.subtitles) this.subtitles = [];
+                this.subtitles.push({ url: subUri, lang: subLang });
+              }
+            }
+          } catch (e) {}
+        }
         const lines = Playlist.split("\n").map((line) => line.trim());
         const streams = [];
         let currentInfo = null;
@@ -413,7 +433,11 @@ class downloader {
 
       await new Promise((resolve, reject) => {
         const startNext = async () => {
-          if (stopDownloading) return;
+          if (
+            stopDownloading ||
+            (global.isQueuePaused && global.isQueuePaused())
+          )
+            return;
 
           if (currentIndex >= this.Segments.length) {
             if (activeDownloads === 0) {
@@ -446,7 +470,11 @@ class downloader {
           }
 
           const downloadSegment = async (retryCount = 0) => {
-            if (stopDownloading) return;
+            if (
+              stopDownloading ||
+              (global.isQueuePaused && global.isQueuePaused())
+            )
+              return;
             try {
               let Segment = this.Segments[index];
               if (!Segment) throw new Error("[ STOPPING ] Segment Missing!");
@@ -583,6 +611,17 @@ class downloader {
 
       const downloadPromises = this.subtitles.map(async ({ url, lang }) => {
         try {
+          if (!url) return;
+          let targetUrl = url;
+          if (targetUrl.startsWith("//")) {
+            targetUrl = "https:" + targetUrl;
+          } else if (
+            !targetUrl.startsWith("http://") &&
+            !targetUrl.startsWith("https://")
+          ) {
+            targetUrl = resolveUrl(targetUrl, this.streamUrl);
+          }
+
           const normalizedLang =
             iso6391.getCode(lang) ||
             (() => {
@@ -593,10 +632,14 @@ class downloader {
               return cleaned ? cleaned?.slice(0, 3) : "und";
             })();
 
-          const ext =
-            path
-              .extname(path.basename(new URL(url).pathname))
-              .replace(".", "") || "srt";
+          let ext = "srt";
+          try {
+            const urlPath = new URL(targetUrl).pathname;
+            const parsedExt = path
+              .extname(path.basename(urlPath))
+              .replace(".", "");
+            if (parsedExt) ext = parsedExt;
+          } catch (e) {}
 
           const subtitlePath = path.join(
             SubTitleDir,
@@ -612,11 +655,26 @@ class downloader {
             return;
           }
 
-          let subtitleData = await got(url, {
-            headers: this.headers ?? {},
-          }).text();
+          const subHeaders = { ...(this.headers ?? {}) };
+          try {
+            const subHost = new URL(targetUrl).hostname;
+            const streamHost = this.streamUrl
+              ? new URL(this.streamUrl).hostname
+              : "";
+            if (subHost && streamHost && subHost !== streamHost) {
+              delete subHeaders["Referer"];
+              delete subHeaders["referer"];
+            }
+          } catch (e) {}
 
-          if (ext === "vtt") {
+          let subtitleData;
+          try {
+            subtitleData = await got(targetUrl, { headers: subHeaders }).text();
+          } catch (e) {
+            subtitleData = await got(targetUrl).text();
+          }
+
+          if (ext === "vtt" || subtitleData.trim().startsWith("WEBVTT")) {
             subtitleData = this.convertToSRT(subtitleData);
           }
 

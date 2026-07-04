@@ -84,6 +84,7 @@ const tables = {
     secure: "TEXT",
     httpOnly: "TEXT",
     expirationDate: "TEXT",
+    local_saved_at: "INTEGER",
   },
   WatchHistory: {
     id: "INTEGER PRIMARY KEY AUTOINCREMENT",

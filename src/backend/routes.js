@@ -44,6 +44,9 @@ const {
   updateQueue,
   removeQueue,
   removeMultipleFromQueue,
+  pauseQueue,
+  resumeQueue,
+  isQueuePaused,
 } = require("./utils/queue");
 const {
   MalCreateUrl,
@@ -483,6 +486,24 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
     }
 
     if (!data) throw new Error(`No ${AnimeManga} Found in ${provider}`);
+
+    if (data?.results && data.results.length > 0) {
+      try {
+        const { getKeyValue } = require("./utils/db");
+        const orderKey = `custom_order_${AnimeManga}_${provider}_${filters?.tag || "all"}`;
+        const savedOrder = getKeyValue("Settings", orderKey);
+        if (savedOrder && Array.isArray(savedOrder) && savedOrder.length > 0) {
+          const orderMap = new Map();
+          savedOrder.forEach((id, idx) => orderMap.set(id, idx));
+          data.results.sort((a, b) => {
+            const indexA = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
+            const indexB = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
+            return indexA - indexB;
+          });
+        }
+      } catch (_) {}
+    }
+
     return res.json(wrapImagesInObject(data));
   } catch (err) {
     logger.error(
@@ -527,22 +548,25 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
         null,
         setting.CustomDownloadLocation,
       );
-      if (AnimeLocalInfo) {
+      if (AnimeLocalInfo && AnimeLocalInfo.id) {
         Object.assign(data, AnimeLocalInfo);
         data.genres = AnimeLocalInfo?.genres
           ? AnimeLocalInfo.genres.split(",")
           : [];
         provider = AnimeLocalInfo?.provider;
+      } else {
+        throw new Error("Metadata not found locally");
       }
     } catch (err) {
       if (LocalMalProvider === "local") {
         let resolvedId = null;
         let resolvedProvider = null;
         let resolvedMalId = null;
-        let cleanId = id?.replace(/-(dub|sub|both)$/, "");
+        let cleanId = id?.replace(/-(dub|sub|hsub|both)$/, "");
         let suffix = "";
         if (id.endsWith("-sub")) suffix = "-sub";
         else if (id.endsWith("-dub")) suffix = "-dub";
+        else if (id.endsWith("-hsub")) suffix = "-hsub";
         else if (id.endsWith("-both")) suffix = "-both";
 
         if (AnimeManga === "Anime" && global.mappingDb && cleanId) {
@@ -566,7 +590,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
         }
 
         if (resolvedMalId) {
-          const currentAnimeProvider = (setting.AnimeProvider || "pahe")
+          const currentAnimeProvider = (setting.Animeprovider || "pahe")
             .toLowerCase()
             .includes("anikoto")
             ? "anikoto"
@@ -645,19 +669,18 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                   .prepare(`SELECT id, uuid FROM animepahe WHERE malid = ?`)
                   .get(Number(data.malid));
                 if (mappingRow) {
-                  const cleanOldId = id.replace(/-(dub|sub|both)$/, "");
+                  const cleanOldId = id.replace(/-(dub|sub|hsub|both)$/, "");
                   const newId = mappingRow.uuid || mappingRow.id;
                   if (newId && newId !== cleanOldId) {
+                    let suffix = "both";
+                    if (id.endsWith("dub")) suffix = "dub";
+                    else if (id.endsWith("sub")) suffix = "sub";
+                    else if (id.endsWith("hsub")) suffix = "hsub";
+
                     AnimeInfo = await animeinfo(
                       Animeprovider,
                       setting?.CustomDownloadLocation,
-                      `${newId}-${
-                        id.endsWith("dub")
-                          ? "dub"
-                          : id.endsWith("sub")
-                            ? "sub"
-                            : "both"
-                      }`,
+                      `${newId}-${suffix}`,
                       false,
                     );
 
@@ -843,7 +866,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
     // Resolve MAL ID and mapping details
     if (data && global.mappingDb) {
       try {
-        const cleanId = id.replace(/-(dub|sub|both)$/, "");
+        const cleanId = id.replace(/-(dub|sub|hsub|both)$/, "");
 
         // 1. Check if there is a custom mapping/unlink record
         const customMappingRow = global.db
@@ -958,7 +981,9 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               ? "-dub"
               : id.endsWith("-sub")
                 ? "-sub"
-                : "-both";
+                : id.endsWith("-hsub")
+                  ? "-hsub"
+                  : "-both";
 
             if (mappingRow.pahe_uuid && !linkedProvidersMap["pahe"]) {
               linkedProvidersMap["pahe"] = {
@@ -1127,6 +1152,7 @@ router.post("/downloads", async (req, res) => {
   let Response = {
     caption: "Nothing in progress",
     queue,
+    isPaused: isQueuePaused(),
   };
 
   let itemWithSegments = queue.find((item) => item.currentSegments > 0);
@@ -1152,6 +1178,56 @@ router.post("/downloads", async (req, res) => {
   }
 
   return res.json(Response);
+});
+
+// Pause queue
+router.post("/api/download/pause", async (req, res) => {
+  try {
+    const paused = await pauseQueue();
+    const queue = (await getQueue()) ?? [];
+    if (global.win && !global.win.isDestroyed()) {
+      global.win.webContents.send("download-logger", {
+        queue,
+        isPaused: true,
+        message: "Queue paused",
+      });
+    }
+    return res.json({ message: "Queue paused successfully", isPaused: true });
+  } catch (err) {
+    return res.status(500).json({ error: true, message: err.message });
+  }
+});
+
+// Resume queue
+router.post("/api/download/resume", async (req, res) => {
+  try {
+    const paused = await resumeQueue();
+    const queue = (await getQueue()) ?? [];
+    if (global.win && !global.win.isDestroyed()) {
+      global.win.webContents.send("download-logger", {
+        queue,
+        isPaused: false,
+        message: "Queue resumed",
+      });
+    }
+    return res.json({ message: "Queue resumed successfully", isPaused: false });
+  } catch (err) {
+    return res.status(500).json({ error: true, message: err.message });
+  }
+});
+
+// Save custom local card order
+router.post("/api/local/reorder", async (req, res) => {
+  try {
+    const { key, order } = req.body;
+    if (key && Array.isArray(order)) {
+      const { setKeyValue } = require("./utils/db");
+      setKeyValue("Settings", `custom_order_${key}`, order);
+    }
+    return res.json({ success: true });
+  } catch (err) {
+    return res.status(500).json({ error: true, message: err.message });
+  }
 });
 
 // remove from queue or remove all
@@ -1181,17 +1257,20 @@ router.get("/api/download/remove", async (req, res) => {
             currentSegments: itemWithSegments.currentSegments,
             epid: itemWithSegments.epid,
             queue,
+            isPaused: isQueuePaused(),
           });
         } else {
           global.win.webContents.send("download-logger", {
             queue,
             message: "Queue is empty",
+            isPaused: isQueuePaused(),
           });
         }
       } else {
         global.win.webContents.send("download-logger", {
           queue,
           message: "Queue is empty",
+          isPaused: isQueuePaused(),
         });
       }
 
@@ -1205,6 +1284,7 @@ router.get("/api/download/remove", async (req, res) => {
 
     global.win.webContents.send("download-logger", {
       queue: updatedQueue,
+      isPaused: isQueuePaused(),
     });
 
     res.json({ message: "All items removed" });
@@ -1544,7 +1624,7 @@ router.post("/api/mal/link", async (req, res) => {
     }
 
     MalID = MalID ? String(MalID) : null;
-    id = id.replace(/-(dub|sub|both)$/, "");
+    id = id.replace(/-(dub|sub|hsub|both)$/, "");
 
     try {
       const stmt = MalID
@@ -1564,9 +1644,9 @@ router.post("/api/mal/link", async (req, res) => {
     if (type === "Anime") {
       global.db
         .prepare(
-          `UPDATE Anime SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ? OR id = ? OR id = ? OR id = ?`,
+          `UPDATE Anime SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?`,
         )
-        .run(MalID, id, `${id}-sub`, `${id}-dub`, `${id}-both`);
+        .run(MalID, id, `${id}-sub`, `${id}-hsub`, `${id}-dub`, `${id}-both`);
     } else {
       global.db
         .prepare(
@@ -1641,7 +1721,7 @@ router.post("/api/local/tags/add", async (req, res) => {
       provider = null;
     }
 
-    id = id.replace(/-(dub|sub|both)$/, "");
+    id = id.replace(/-(dub|sub|hsub|both)$/, "");
     let resolvedMalID = MalID ? String(MalID) : null;
 
     // find mal id with provider anime id
@@ -1683,14 +1763,15 @@ router.post("/api/local/tags/add", async (req, res) => {
 
     let existing = null;
     if (type === "Anime") {
-      const strippedId = id.replace(/-(dub|sub|both)$/, "");
+      const strippedId = id.replace(/-(dub|sub|hsub|both)$/, "");
       existing = global.db
         .prepare(
-          `SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
+          `SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
         )
         .get(
           id,
           `${strippedId}-sub`,
+          `${strippedId}-hsub`,
           `${strippedId}-dub`,
           `${strippedId}-both`,
           id,
@@ -1761,10 +1842,14 @@ router.post("/api/local/tags/add", async (req, res) => {
               values = {
                 ...values,
                 title: animedata.title
-                  ? animedata.title.replace(/-(dub|sub|both)$/, "")
+                  ? animedata.title.replace(/-(dub|sub|hsub|both)$/, "")
                   : "",
                 provider: resolvedProvider.provider_name,
-                subOrDub: id.endsWith("dub") ? "dub" : "sub",
+                subOrDub: id.endsWith("dub")
+                  ? "dub"
+                  : id.endsWith("hsub")
+                    ? "hsub"
+                    : "sub",
                 type: animedata.type ?? null,
                 description: animedata.description ?? null,
                 status: animedata.status ?? null,
@@ -2086,10 +2171,18 @@ router.post("/api/local/delete-episode", async (req, res) => {
     let typeDir = path.join(baseDir, "Anime", id);
 
     if (!fs.existsSync(typeDir)) {
-      const idStripped = id.replace(/-(dub|sub|both)$/, "");
+      const idStripped = id.replace(/-(dub|sub|hsub|both)$/, "");
       const downloads = global.db
-        .prepare("SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ?")
-        .all(`${idStripped}-${subdub}`, id, idStripped);
+        .prepare(
+          "SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?",
+        )
+        .all(
+          `${idStripped}-${subdub}`,
+          id,
+          `${idStripped}-sub`,
+          `${idStripped}-hsub`,
+          idStripped,
+        );
       if (downloads && downloads.length > 0) {
         const folderName =
           downloads[0].folder_name ||
@@ -2159,10 +2252,18 @@ router.post("/api/local/delete-multiple", async (req, res) => {
 
     if (!fs.existsSync(typeDir)) {
       if (type === "Anime") {
-        const idStripped = id.replace(/-(dub|sub|both)$/, "");
+        const idStripped = id.replace(/-(dub|sub|hsub|both)$/, "");
         const downloads = global.db
-          .prepare("SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ?")
-          .all(subdub ? `${idStripped}-${subdub}` : id, id, idStripped);
+          .prepare(
+            "SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?",
+          )
+          .all(
+            subdub ? `${idStripped}-${subdub}` : id,
+            id,
+            `${idStripped}-sub`,
+            `${idStripped}-hsub`,
+            idStripped,
+          );
         if (downloads && downloads.length > 0) {
           const folderName =
             downloads[0].folder_name ||
@@ -2172,7 +2273,7 @@ router.post("/api/local/delete-multiple", async (req, res) => {
       } else {
         const downloads = global.db
           .prepare("SELECT * FROM Manga WHERE id = ? OR id = ?")
-          .all(id, id.replace(/-(dub|sub|both)$/, ""));
+          .all(id, id.replace(/-(dub|sub|hsub|both)$/, ""));
         if (downloads && downloads.length > 0) {
           const folderName =
             downloads[0].folder_name ||
@@ -2313,7 +2414,7 @@ router.post("/api/history/update", async (req, res) => {
 
       if (provider) {
         try {
-          const cleanId = mediaId.replace(/-(dub|sub|both)$/, "");
+          const cleanId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
           const exists = global.db
             .prepare("SELECT id FROM Anime WHERE id = ?")
             .get(cleanId);
@@ -2374,8 +2475,13 @@ router.post("/api/history/update", async (req, res) => {
       let queryIds = [];
       siblingIds.forEach((id) => {
         queryIds.push(id);
-        const stripped = id.replace(/-(dub|sub|both)$/, "");
-        queryIds.push(`${stripped}-sub`, `${stripped}-dub`, `${stripped}-both`);
+        const stripped = id.replace(/-(dub|sub|hsub|both)$/, "");
+        queryIds.push(
+          `${stripped}-sub`,
+          `${stripped}-hsub`,
+          `${stripped}-dub`,
+          `${stripped}-both`,
+        );
       });
       queryIds = Array.from(new Set(queryIds));
 
@@ -2729,9 +2835,10 @@ router.get("/api/history/progress", async (req, res) => {
 
     if (type === "Anime") {
       let queryIds = [mediaId];
-      const strippedId = mediaId.replace(/-(dub|sub|both)$/, "");
+      const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
       queryIds.push(
         `${strippedId}-sub`,
+        `${strippedId}-hsub`,
         `${strippedId}-dub`,
         `${strippedId}-both`,
       );

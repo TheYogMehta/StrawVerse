@@ -510,6 +510,52 @@ export default function InfoView({
     fetchDetails(true);
   }, [id, type, localMalProvider]);
 
+  useEffect(() => {
+    if (window.sharedStateAPI && window.sharedStateAPI.on) {
+      const handleDownloadComplete = (data) => {
+        if (data.Type !== type) return;
+
+        setDetails((prevDetails) => {
+          if (!prevDetails) return prevDetails;
+
+          if (data.id === id || data.id === prevDetails.id) {
+            const epNum = parseFloat(data.EpNum);
+            if (isNaN(epNum)) return prevDetails;
+
+            const updated = { ...prevDetails };
+            if (type === "Anime") {
+              const subdub = data.SubDub || "sub";
+              const currentList = updated.DownloadedEpisodes?.[subdub] || [];
+              if (!currentList.includes(epNum)) {
+                updated.DownloadedEpisodes = {
+                  ...updated.DownloadedEpisodes,
+                  [subdub]: [...currentList, epNum].sort((a, b) => a - b),
+                };
+              }
+            } else {
+              const currentList = updated.DownloadedChapters || [];
+              if (!currentList.includes(epNum)) {
+                updated.DownloadedChapters = [...currentList, epNum].sort(
+                  (a, b) => a - b,
+                );
+              }
+            }
+            return updated;
+          }
+          return prevDetails;
+        });
+      };
+
+      const unsubscribe = window.sharedStateAPI.on(
+        "download-complete",
+        handleDownloadComplete,
+      );
+      return () => {
+        if (unsubscribe) unsubscribe();
+      };
+    }
+  }, [id, type]);
+
   // Sync dubSelect automatically with details.subOrDub
   useEffect(() => {
     if (details && type === "Anime") {
@@ -2329,6 +2375,7 @@ export default function InfoView({
             const hasSubLang =
               item.lang === "sub" || item.lang === "both" || !item.lang;
             const hasDubLang = item.lang === "dub" || item.lang === "both";
+            const hasHsubLang = !!item.hasHsub;
             const showOnlineActions =
               details?.provider && details?.provider !== "local source";
 
@@ -2376,123 +2423,88 @@ export default function InfoView({
                   {/* Local download status & deletion buttons */}
                   {type === "Anime" ? (
                     <>
-                      {/* SUB stream / delete */}
-                      {hasSub ? (
-                        <div className="badge-and-action">
-                          <span className="badge-subdub sub">
-                            SUB Downloaded
-                          </span>
-                          <button
-                            onClick={() =>
-                              onWatch(
-                                id,
-                                item.number,
-                                true,
-                                "sub",
-                                episodesOrChapters,
-                                details?.DownloadedEpisodes,
-                                details?.title,
-                                details?.provider,
-                                details?.image,
-                              )
-                            }
-                            className="btn-play"
-                          >
-                            <Play size={18} />
-                          </button>
-                          {isLocal && (
-                            <button
-                              onClick={() =>
-                                handleDeleteEpisode(item.number, "sub")
-                              }
-                              className="btn-action-trash"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        showOnlineActions &&
-                        hasSubLang && (
-                          <button
-                            onClick={() =>
-                              onWatch(
-                                id,
-                                item.id,
-                                false,
-                                "sub",
-                                episodesOrChapters,
-                                details?.DownloadedEpisodes,
-                                details?.title,
-                                details?.provider,
-                                details?.image,
-                              )
-                            }
-                            className="btn-stream"
-                          >
-                            <span>Stream SUB</span>
-                          </button>
-                        )
-                      )}
+                      {(() => {
+                        let availableLangs = [];
+                        if (item.langs && Array.isArray(item.langs)) {
+                          availableLangs = item.langs;
+                        } else {
+                          if (item.lang === "both") {
+                            availableLangs = ["sub", "dub"];
+                          } else if (item.lang === "dub") {
+                            availableLangs = ["dub"];
+                          } else {
+                            availableLangs = ["sub"];
+                          }
+                        }
 
-                      {/* DUB stream / delete */}
-                      {hasDub ? (
-                        <div className="badge-and-action">
-                          <span className="badge-subdub dub">
-                            DUB Downloaded
-                          </span>
-                          <button
-                            onClick={() =>
-                              onWatch(
-                                id,
-                                item.number,
-                                true,
-                                "dub",
-                                episodesOrChapters,
-                                details?.DownloadedEpisodes,
-                                details?.title,
-                                details?.provider,
-                                details?.image,
+                        return availableLangs.map((langKey) => {
+                          const isLangDownloaded = isDownloaded(
+                            item.number,
+                            langKey,
+                          );
+                          if (isLangDownloaded) {
+                            return (
+                              <div className="badge-and-action" key={langKey}>
+                                <span className={`badge-subdub ${langKey}`}>
+                                  {langKey.toUpperCase()} Downloaded
+                                </span>
+                                <button
+                                  onClick={() =>
+                                    onWatch(
+                                      id,
+                                      item.number,
+                                      true,
+                                      langKey,
+                                      episodesOrChapters,
+                                      details?.DownloadedEpisodes,
+                                      details?.title,
+                                      details?.provider,
+                                      details?.image,
+                                    )
+                                  }
+                                  className="btn-play"
+                                >
+                                  <Play size={18} />
+                                </button>
+                                {isLocal && (
+                                  <button
+                                    onClick={() =>
+                                      handleDeleteEpisode(item.number, langKey)
+                                    }
+                                    className="btn-action-trash"
+                                  >
+                                    <Trash2 size={18} />
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          } else {
+                            return (
+                              showOnlineActions && (
+                                <button
+                                  key={langKey}
+                                  onClick={() =>
+                                    onWatch(
+                                      id,
+                                      item.id,
+                                      false,
+                                      langKey,
+                                      episodesOrChapters,
+                                      details?.DownloadedEpisodes,
+                                      details?.title,
+                                      details?.provider,
+                                      details?.image,
+                                    )
+                                  }
+                                  className="btn-stream"
+                                >
+                                  <span>Stream {langKey.toUpperCase()}</span>
+                                </button>
                               )
-                            }
-                            className="btn-play"
-                          >
-                            <Play size={18} />
-                          </button>
-                          {isLocal && (
-                            <button
-                              onClick={() =>
-                                handleDeleteEpisode(item.number, "dub")
-                              }
-                              className="btn-action-trash"
-                            >
-                              <Trash2 size={18} />
-                            </button>
-                          )}
-                        </div>
-                      ) : (
-                        showOnlineActions &&
-                        hasDubLang && (
-                          <button
-                            onClick={() =>
-                              onWatch(
-                                id,
-                                item.id,
-                                false,
-                                "dub",
-                                episodesOrChapters,
-                                details?.DownloadedEpisodes,
-                                details?.title,
-                                details?.provider,
-                                details?.image,
-                              )
-                            }
-                            className="btn-stream"
-                          >
-                            <span>Stream DUB</span>
-                          </button>
-                        )
-                      )}
+                            );
+                          }
+                        });
+                      })()}
                     </>
                   ) : (
                     /* Manga reader buttons */

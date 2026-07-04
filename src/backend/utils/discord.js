@@ -308,17 +308,18 @@ async function getMediaImage(mediaId, type) {
   try {
     let localRec = null;
     if (type === "Anime") {
-      const strippedId = mediaId.replace(/-(dub|sub|both)$/, "");
+      const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
       localRec = db
         .prepare(
           `
         SELECT MalID, image_url FROM Anime 
-        WHERE id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
+        WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
       `,
         )
         .get(
           mediaId,
           `${strippedId}-sub`,
+          `${strippedId}-hsub`,
           `${strippedId}-dub`,
           `${strippedId}-both`,
           mediaId,
@@ -413,14 +414,15 @@ async function resolveAndUploadToCatbox(imageUrl, mediaId, type) {
           const table = type === "Anime" ? "Anime" : "Manga";
           let localRec = null;
           if (type === "Anime") {
-            const strippedId = mediaId.replace(/-(dub|sub|both)$/, "");
+            const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
             localRec = db
               .prepare(
-                `SELECT id, image, image_url FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ?`,
+                `SELECT id, image, image_url FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?`,
               )
               .get(
                 mediaId,
                 `${strippedId}-sub`,
+                `${strippedId}-hsub`,
                 `${strippedId}-dub`,
                 `${strippedId}-both`,
               );
