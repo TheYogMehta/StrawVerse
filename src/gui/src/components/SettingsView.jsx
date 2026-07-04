@@ -654,7 +654,7 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
                 <input
                   type="text"
                   className="settings-input"
-                  placeholder="https://watch-together.strawverse.theyogmehta.online/"
+                  placeholder="https://strawverse-wt.theyogmehta.online/"
                   defaultValue={watchTogetherClient.getServerUrl()}
                   onChange={(e) => watchTogetherClient.setServerUrl(e.target.value)}
                 />

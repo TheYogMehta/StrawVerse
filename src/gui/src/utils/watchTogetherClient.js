@@ -26,7 +26,7 @@ class WatchTogetherClient {
     const stored = localStorage.getItem("strawverse_wt_server");
     this.serverUrl = stored
       ? this.formatUrl(stored)
-      : "wss://watch-together.strawverse.theyogmehta.online/ws";
+      : "wss://strawverse-wt.theyogmehta.online/ws";
     this.isConnected = false;
     this.roomCode = null;
     this.isHost = false;
@@ -42,7 +42,7 @@ class WatchTogetherClient {
   formatUrl(url) {
     let formatted = (url || "").trim();
     if (!formatted)
-      return "wss://watch-together.strawverse.theyogmehta.online/ws";
+      return "wss://strawverse-wt.theyogmehta.online/ws";
     if (formatted.startsWith("https://")) {
       formatted = formatted.replace("https://", "wss://");
     } else if (formatted.startsWith("http://")) {
