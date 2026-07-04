@@ -41,8 +41,7 @@ class WatchTogetherClient {
 
   formatUrl(url) {
     let formatted = (url || "").trim();
-    if (!formatted)
-      return "wss://strawverse-wt.theyogmehta.online/ws";
+    if (!formatted) return "wss://strawverse-wt.theyogmehta.online/ws";
     if (formatted.startsWith("https://")) {
       formatted = formatted.replace("https://", "wss://");
     } else if (formatted.startsWith("http://")) {
@@ -86,20 +85,32 @@ class WatchTogetherClient {
     }
   }
 
-  connect(username = "Guest") {
-    return new Promise((resolve, reject) => {
-      this.username = username;
-      if (
-        this.ws &&
-        (this.ws.readyState === WebSocket.OPEN ||
-          this.ws.readyState === WebSocket.CONNECTING)
-      ) {
-        resolve();
-        return;
-      }
+  async connect(username = "Guest") {
+    this.username = username;
+    if (
+      this.ws &&
+      (this.ws.readyState === WebSocket.OPEN ||
+        this.ws.readyState === WebSocket.CONNECTING)
+    ) {
+      return;
+    }
 
+    let accessToken = "";
+    try {
+      const tokenRes = await fetch("/api/mal/token");
+      const tokenData = await tokenRes.json();
+      accessToken = tokenData.access_token || "";
+    } catch (e) {
+      console.warn("Failed to get MAL token for WT connect:", e);
+    }
+
+    return new Promise((resolve, reject) => {
       try {
-        this.ws = new WebSocket(this.serverUrl);
+        const connectionUrl = accessToken
+          ? `${this.serverUrl}?token=${encodeURIComponent(accessToken)}`
+          : this.serverUrl;
+
+        this.ws = new WebSocket(connectionUrl);
         this.ws.binaryType = "arraybuffer";
 
         this.ws.onopen = () => {
@@ -162,11 +173,11 @@ class WatchTogetherClient {
     }, 10000);
   }
 
-  createRoom(username) {
-    return this.joinRoom("CREATE", username);
+  createRoom(username, provider = "") {
+    return this.joinRoom("CREATE", username, provider);
   }
 
-  async joinRoom(code, username) {
+  async joinRoom(code, username, provider = "") {
     if (!this.isConnected) {
       await this.connect(username);
     }
@@ -175,8 +186,11 @@ class WatchTogetherClient {
     const nameBytes = enc.encode(username || this.username);
     const codePadded = (code || "CREATE").padEnd(6, " ").slice(0, 6);
     const codeBytes = enc.encode(codePadded);
+    const provBytes = enc.encode(provider || "");
 
-    const buf = new ArrayBuffer(1 + 6 + 1 + nameBytes.length);
+    const buf = new ArrayBuffer(
+      1 + 6 + 1 + nameBytes.length + 1 + provBytes.length,
+    );
     const view = new DataView(buf);
     view.setUint8(0, OPCODES.JOIN_ROOM);
 
@@ -184,6 +198,8 @@ class WatchTogetherClient {
     u8.set(codeBytes, 1);
     u8.set([nameBytes.length], 7);
     u8.set(nameBytes, 8);
+    u8.set([provBytes.length], 8 + nameBytes.length);
+    u8.set(provBytes, 9 + nameBytes.length);
 
     this.ws.send(buf);
   }
@@ -275,6 +291,14 @@ class WatchTogetherClient {
         this.isHost = view.getUint8(1) === 1;
         this.userID = view.getUint8(2);
         this.roomCode = dec.decode(u8.subarray(3, 9)).trim();
+        let hostProvider = "";
+        if (u8.length > 9) {
+          const pLen = view.getUint8(9);
+          if (u8.length >= 10 + pLen) {
+            hostProvider = dec.decode(u8.subarray(10, 10 + pLen));
+          }
+        }
+        this.hostProvider = hostProvider;
         this.users = [
           { id: this.userID, username: this.username, isHost: this.isHost },
         ];
@@ -282,6 +306,7 @@ class WatchTogetherClient {
           roomCode: this.roomCode,
           isHost: this.isHost,
           userID: this.userID,
+          hostProvider: hostProvider,
         });
         break;
       }

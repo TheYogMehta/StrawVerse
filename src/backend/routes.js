@@ -456,15 +456,29 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
           filters?.tag,
         );
       } else if (provider === "provider") {
-        const provider = await providerFetch("Anime");
-        if (!provider?.provider) throw new Error("Missing Provider!");
-        data = await latestAnime(provider, filters);
+        const pObj = await providerFetch("Anime");
+        if (!pObj?.provider) throw new Error("Missing Provider!");
+        data = await latestAnime(pObj, filters);
         data = { ...data, site: config.Animeprovider };
       } else if (provider === "search") {
-        const provider = await providerFetch("Anime");
-        if (!provider?.provider) throw new Error("Missing Provider!");
-        data = await animesearch(provider, req?.query?.query, filters);
+        const pObj = await providerFetch("Anime");
+        if (!pObj?.provider) throw new Error("Missing Provider!");
+        data = await animesearch(
+          pObj,
+          req?.query?.query || req?.body?.keyword,
+          filters,
+        );
         data = { ...data, site: config.Animeprovider };
+      } else {
+        const pObj = await providerFetch("Anime", provider);
+        if (!pObj?.provider) throw new Error(`Provider ${provider} not found!`);
+        const searchKeyword = req?.body?.keyword || req?.query?.query || "";
+        if (searchKeyword) {
+          data = await animesearch(pObj, searchKeyword, filters);
+        } else {
+          data = await latestAnime(pObj, filters);
+        }
+        data = { ...data, site: provider };
       }
     } else if (AnimeManga === "Manga") {
       if (provider === "local") {
@@ -475,13 +489,26 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
           filters?.tag,
         );
       } else if (provider === "provider") {
-        const provider = await providerFetch("Manga");
-        if (!provider?.provider) throw new Error("Missing Provider!");
-        data = await latestMangas(provider, filters?.page);
+        const pObj = await providerFetch("Manga");
+        if (!pObj?.provider) throw new Error("Missing Provider!");
+        data = await latestMangas(pObj, filters?.page);
       } else if (provider === "search") {
-        const provider = await providerFetch("Manga");
-        if (!provider?.provider) throw new Error("Missing Provider!");
-        data = await MangaSearch(provider, req?.query?.query, filters?.page);
+        const pObj = await providerFetch("Manga");
+        if (!pObj?.provider) throw new Error("Missing Provider!");
+        data = await MangaSearch(
+          pObj,
+          req?.query?.query || req?.body?.keyword,
+          filters?.page,
+        );
+      } else {
+        const pObj = await providerFetch("Manga", provider);
+        if (!pObj?.provider) throw new Error(`Provider ${provider} not found!`);
+        const searchKeyword = req?.body?.keyword || req?.query?.query || "";
+        if (searchKeyword) {
+          data = await MangaSearch(pObj, searchKeyword, filters?.page);
+        } else {
+          data = await latestMangas(pObj, filters?.page);
+        }
       }
     }
 
@@ -1306,14 +1333,14 @@ router.post("/api/watch", async (req, res) => {
     if (!Downloaded) {
       if (!ep) throw new Error("Episode ID Not Found");
       const Animeprovider = await providerFetch("Anime", provider);
-      let resolvedEp = ep;
+      let resolvedEp = String(ep);
       if (
         subdub &&
-        !ep.endsWith("-sub") &&
-        !ep.endsWith("-dub") &&
-        !ep.endsWith("-both")
+        !resolvedEp.endsWith("-sub") &&
+        !resolvedEp.endsWith("-dub") &&
+        !resolvedEp.endsWith("-both")
       ) {
-        resolvedEp = `${ep}-${subdub}`;
+        resolvedEp = `${resolvedEp}-${subdub}`;
       }
       const sourcesArray = await fetchEpisodeSources(Animeprovider, resolvedEp);
       if (provider === "pahe" && sourcesArray) {
@@ -1599,6 +1626,22 @@ router.post("/api/mal/remove", async (req, res) => {
       icon: "error",
       text: `Error : ${err.message}`,
     });
+  }
+});
+
+// Get MyAnimeList access token for Watch Together authentication
+router.get("/api/mal/token", async (req, res) => {
+  try {
+    const config = await settingfetch();
+    if (config.malToken) {
+      const tokenObj = JSON.parse(config.malToken);
+      if (tokenObj && tokenObj.access_token) {
+        return res.json({ access_token: tokenObj.access_token });
+      }
+    }
+    res.status(401).json({ error: "Not logged into MyAnimeList" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

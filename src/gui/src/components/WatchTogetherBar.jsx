@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import watchTogetherClient from "../utils/watchTogetherClient";
-import { Users, Radio } from "lucide-react";
+import { Users, Radio, Copy, Check, LogOut } from "lucide-react";
 
 export default function WatchTogetherBar({ onOpenModal }) {
   const [roomCode, setRoomCode] = useState(watchTogetherClient.roomCode);
   const [userCount, setUserCount] = useState(watchTogetherClient.users.length);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const handleRoomJoined = (data) => {
@@ -31,6 +32,20 @@ export default function WatchTogetherBar({ onOpenModal }) {
     };
   }, []);
 
+  const handleCopy = (e) => {
+    e.stopPropagation();
+    if (roomCode) {
+      navigator.clipboard.writeText(roomCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  const handleLeave = (e) => {
+    e.stopPropagation();
+    watchTogetherClient.disconnect();
+  };
+
   if (!roomCode) return null;
 
   return (
@@ -40,8 +55,8 @@ export default function WatchTogetherBar({ onOpenModal }) {
         top: 12,
         right: 20,
         zIndex: 900,
-        background: "rgba(17, 17, 27, 0.85)",
-        backdropFilter: "blur(10px)",
+        background: "rgba(17, 17, 27, 0.92)",
+        backdropFilter: "blur(12px)",
         border: "1px solid rgba(139, 92, 246, 0.4)",
         borderRadius: 20,
         padding: "6px 14px",
@@ -50,7 +65,7 @@ export default function WatchTogetherBar({ onOpenModal }) {
         gap: 12,
         color: "#fff",
         fontSize: "0.82rem",
-        boxShadow: "0 4px 15px rgba(0, 0, 0, 0.4)",
+        boxShadow: "0 4px 18px rgba(0, 0, 0, 0.5)",
         cursor: "pointer",
       }}
       onClick={onOpenModal}
@@ -64,9 +79,36 @@ export default function WatchTogetherBar({ onOpenModal }) {
         }}
       >
         <Radio size={14} className="animate-pulse" />
-        <span style={{ fontWeight: 700, color: "#a78bfa" }}>{roomCode}</span>
+        <span
+          style={{ fontWeight: 700, color: "#a78bfa", letterSpacing: "1px" }}
+        >
+          {roomCode}
+        </span>
       </div>
 
+      {/* Copy Code Icon Button */}
+      <button
+        style={{
+          background: "rgba(255, 255, 255, 0.08)",
+          border: "none",
+          borderRadius: 12,
+          padding: "3px 8px",
+          color: "#d1d5db",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          fontSize: "0.72rem",
+          transition: "background 0.15s",
+        }}
+        onClick={handleCopy}
+        title="Copy Room Code"
+      >
+        {copied ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+        <span>{copied ? "Copied!" : "Copy"}</span>
+      </button>
+
+      {/* Users Count */}
       <div
         style={{
           display: "flex",
@@ -78,6 +120,28 @@ export default function WatchTogetherBar({ onOpenModal }) {
         <Users size={14} />
         <span>{userCount}</span>
       </div>
+
+      {/* Red Exit / Leave Button */}
+      <button
+        style={{
+          background: "rgba(239, 68, 68, 0.18)",
+          border: "1px solid rgba(239, 68, 68, 0.4)",
+          borderRadius: 12,
+          padding: "4px 8px",
+          color: "#f87171",
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: 4,
+          fontSize: "0.75rem",
+          fontWeight: 600,
+          transition: "all 0.15s",
+        }}
+        onClick={handleLeave}
+        title="Leave Room"
+      >
+        <LogOut size={13} color="#f87171" />
+      </button>
     </div>
   );
 }

@@ -406,12 +406,16 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
     try {
       global.LastScrapperResponseCode = 200;
       try {
+        const urlObj = new URL(targetUrl);
+        const navUrl = urlObj.pathname.startsWith("/api")
+          ? urlObj.origin
+          : targetUrl;
         if (referer) {
-          await global.ScrapperWindow.loadURL(targetUrl, {
+          await global.ScrapperWindow.loadURL(navUrl, {
             httpReferrer: referer,
           });
         } else {
-          await global.ScrapperWindow.loadURL(targetUrl);
+          await global.ScrapperWindow.loadURL(navUrl);
         }
       } catch (err) {}
 

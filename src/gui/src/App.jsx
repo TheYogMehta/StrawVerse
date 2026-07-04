@@ -8,14 +8,13 @@ import DownloadsTracker from "./components/DownloadsTracker";
 import LogsView from "./components/LogsView";
 import SettingsView from "./components/SettingsView";
 import Marketplace from "./components/Marketplace";
-import WatchTogetherModal from "./components/WatchTogetherModal";
+import WatchTogetherView from "./components/WatchTogetherView";
 import WatchTogetherBar from "./components/WatchTogetherBar";
 
 export default function App() {
   const [history, setHistory] = useState([{ view: "local-anime", params: {} }]);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [malLoggedIn, setMalLoggedIn] = useState(false);
-  const [isWTModalOpen, setIsWTModalOpen] = useState(false);
   const [whatsNewData, setWhatsNewData] = useState(null);
   const [whatsNewVersion, setWhatsNewVersion] = useState("");
   const [whatsNewDate, setWhatsNewDate] = useState("");
@@ -519,6 +518,8 @@ export default function App() {
             malid={current.params.malid}
           />
         );
+      case "watch-together":
+        return <WatchTogetherView onNavigate={navigateTo} />;
       case "downloads":
         return <DownloadsTracker />;
       case "logs":
@@ -526,6 +527,7 @@ export default function App() {
       case "settings":
         return (
           <SettingsView
+            initialTab={current.params?.tab || "general"}
             onMarketplaceOpen={(initialType) =>
               navigateTo("marketplace", { type: initialType })
             }
@@ -560,11 +562,9 @@ export default function App() {
         {renderActiveView()}
       </main>
 
-      <WatchTogetherBar onOpenModal={() => setIsWTModalOpen(true)} />
-      <WatchTogetherModal
-        isOpen={isWTModalOpen}
-        onClose={() => setIsWTModalOpen(false)}
-      />
+      {current.view !== "watch-together" && (
+        <WatchTogetherBar onOpenModal={() => navigateTo("watch-together")} />
+      )}
 
       {whatsNewData && (
         <div className="whats-new-overlay">

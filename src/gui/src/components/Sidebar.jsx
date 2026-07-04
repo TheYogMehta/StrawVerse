@@ -29,7 +29,6 @@ export default function Sidebar({
       id: "watch-together",
       label: "Watch Together",
       icon: Users,
-      action: "wt",
     },
     { id: "downloads", label: "Downloads", icon: Download },
     { id: "logs", label: "Logs", icon: Terminal },

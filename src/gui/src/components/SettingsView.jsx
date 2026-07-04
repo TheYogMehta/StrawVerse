@@ -1,11 +1,21 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useState, useEffect } from "react";
-import { Loader2, LogOut, CheckCircle, Trash2, MessageSquare } from "lucide-react";
+import {
+  Loader2,
+  LogOut,
+  CheckCircle,
+  Trash2,
+  MessageSquare,
+} from "lucide-react";
 import Swal from "sweetalert2";
 import watchTogetherClient from "../utils/watchTogetherClient";
 import "./css/SettingsView.css";
 
-export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
+export default function SettingsView({
+  initialTab = "general",
+  onMarketplaceOpen,
+  onSelectMedia,
+}) {
   const [settings, setSettings] = useState(null);
   const [url, setUrl] = useState("");
   const [malLoggedIn, setMalLoggedIn] = useState(false);
@@ -30,7 +40,11 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
   const [clearingCache, setClearingCache] = useState(false);
 
   const [hasChanges, setHasChanges] = useState(false);
-  const [activeTab, setActiveTab] = useState("general");
+  const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    setActiveTab(initialTab);
+  }, [initialTab]);
 
   const [stats, setStats] = useState(null);
   const [historyList, setHistoryList] = useState([]);
@@ -536,7 +550,9 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
               <h2 className="settings-panel-title">Storage & Cache</h2>
               <div className="settings-input-wrapper">
                 <label className="settings-label">Image Cache Size Limit</label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div
+                  style={{ display: "flex", alignItems: "center", gap: "8px" }}
+                >
                   <input
                     type="number"
                     min={5}
@@ -552,28 +568,63 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
                       }
                     }}
                     className="settings-text-input"
-                    style={{ width: '100px', padding: '10px 14px' }}
+                    style={{ width: "100px", padding: "10px 14px" }}
                   />
-                  <span style={{ fontSize: '14px', color: 'var(--text-main)', fontWeight: '600' }}>GB</span>
+                  <span
+                    style={{
+                      fontSize: "14px",
+                      color: "var(--text-main)",
+                      fontWeight: "600",
+                    }}
+                  >
+                    GB
+                  </span>
                 </div>
                 <span className="settings-hint">
-                  Minimum 5 GB. Automatically evicts oldest cached images if the cache folder exceeds this size.
+                  Minimum 5 GB. Automatically evicts oldest cached images if the
+                  cache folder exceeds this size.
                 </span>
               </div>
-              <div className="settings-input-wrapper" style={{ marginTop: '12px' }}>
+              <div
+                className="settings-input-wrapper"
+                style={{ marginTop: "12px" }}
+              >
                 <label className="settings-label">Current Cache Usage</label>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '4px' }}>
-                  <span style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                    {cacheStats ? `${(cacheStats.sizeInBytes / (1024 * 1024)).toFixed(1)} MB (${cacheStats.filesCount} files)` : 'Calculating...'}
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    marginTop: "4px",
+                  }}
+                >
+                  <span
+                    style={{ fontSize: "13px", color: "var(--text-muted)" }}
+                  >
+                    {cacheStats
+                      ? `${(cacheStats.sizeInBytes / (1024 * 1024)).toFixed(1)} MB (${cacheStats.filesCount} files)`
+                      : "Calculating..."}
                   </span>
                   <button
                     type="button"
                     onClick={handleClearCache}
                     disabled={clearingCache}
                     className="settings-logout-btn"
-                    style={{ margin: 0, padding: '6px 12px', backgroundColor: 'var(--danger)', color: 'white', display: 'flex', alignItems: 'center', gap: '6px' }}
+                    style={{
+                      margin: 0,
+                      padding: "6px 12px",
+                      backgroundColor: "var(--danger)",
+                      color: "white",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                    }}
                   >
-                    {clearingCache ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+                    {clearingCache ? (
+                      <Loader2 size={14} className="spin" />
+                    ) : (
+                      <Trash2 size={14} />
+                    )}
                     <span>Clear Image Cache</span>
                   </button>
                 </div>
@@ -582,9 +633,13 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
 
             <div className="settings-panel glass-panel">
               <h2 className="settings-panel-title">Community & Support</h2>
-              <div className="settings-input-wrapper" style={{ gap: '10px' }}>
-                <span className="settings-hint" style={{ fontSize: '13px', lineHeight: '1.5' }}>
-                  Join our Discord community to chat with other members, request features, report issues, and stay updated!
+              <div className="settings-input-wrapper" style={{ gap: "10px" }}>
+                <span
+                  className="settings-hint"
+                  style={{ fontSize: "13px", lineHeight: "1.5" }}
+                >
+                  Join our Discord community to chat with other members, request
+                  features, report issues, and stay updated!
                 </span>
                 <a
                   href="https://discord.gg/PzfUBgQ2gt"
@@ -592,13 +647,13 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
                   rel="noreferrer"
                   className="settings-connect-link"
                   style={{
-                    backgroundColor: '#5865F2',
-                    boxShadow: '0 4px 12px rgba(88, 101, 242, 0.25)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    marginTop: '8px'
+                    backgroundColor: "#5865F2",
+                    boxShadow: "0 4px 12px rgba(88, 101, 242, 0.25)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "8px",
+                    marginTop: "8px",
                   }}
                 >
                   <MessageSquare size={16} />
@@ -644,21 +699,7 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
                 </select>
               </div>
 
-              <h3 className="settings-panel-subtitle">
-                Watch Together Configuration
-              </h3>
-              <div className="settings-input-wrapper">
-                <label className="settings-label">
-                  Watch Together WebSocket Server URL
-                </label>
-                <input
-                  type="text"
-                  className="settings-input"
-                  placeholder="https://strawverse-wt.theyogmehta.online/"
-                  defaultValue={watchTogetherClient.getServerUrl()}
-                  onChange={(e) => watchTogetherClient.setServerUrl(e.target.value)}
-                />
-              </div>
+
 
               <h3 className="settings-panel-subtitle">
                 Subtitles Configuration
@@ -742,6 +783,25 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
               >
                 Open Manga Marketplace
               </button>
+            </div>
+
+            {/* Watch Together Settings Card */}
+            <div className="settings-panel glass-panel">
+              <h2 className="settings-panel-title">Watch Together Settings</h2>
+              <div className="settings-input-wrapper">
+                <label className="settings-label">
+                  Watch Together WebSocket Server URL
+                </label>
+                <input
+                  type="text"
+                  className="settings-text-input"
+                  placeholder="https://strawverse-wt.theyogmehta.online/"
+                  defaultValue={watchTogetherClient.getServerUrl()}
+                  onChange={(e) =>
+                    watchTogetherClient.setServerUrl(e.target.value)
+                  }
+                />
+              </div>
             </div>
 
             {/* MyAnimeList Connection Card */}
@@ -836,9 +896,9 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
                       lineHeight: "1.5",
                     }}
                   >
-                    Connecting your MyAnimeList account allows StrawVerse to sync
-                    your watch status, automatically update episodes in your
-                    plan-to-watch/watching lists.
+                    Connecting your MyAnimeList account allows StrawVerse to
+                    sync your watch status, automatically update episodes in
+                    your plan-to-watch/watching lists.
                   </p>
                   {url ? (
                     <a
@@ -902,8 +962,24 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
 
                 {/* History Timeline */}
                 <div className="settings-panel glass-panel">
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px", borderBottom: "1px dashed var(--border)", paddingBottom: "10px" }}>
-                    <h2 className="settings-panel-title" style={{ margin: 0, borderBottom: "none", paddingBottom: 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginBottom: "20px",
+                      borderBottom: "1px dashed var(--border)",
+                      paddingBottom: "10px",
+                    }}
+                  >
+                    <h2
+                      className="settings-panel-title"
+                      style={{
+                        margin: 0,
+                        borderBottom: "none",
+                        paddingBottom: 0,
+                      }}
+                    >
                       Recent Activity History
                     </h2>
                     {historyList.length > 0 && (
@@ -968,7 +1044,7 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
                                   item.media_id,
                                   item.type,
                                   "local",
-                                  "Back to Settings"
+                                  "Back to Settings",
                                 );
                               }
                             }}
@@ -986,12 +1062,25 @@ export default function SettingsView({ onMarketplaceOpen, onSelectMedia }) {
                                   gap: "4px",
                                 }}
                               >
-                                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "8px",
+                                    flexWrap: "wrap",
+                                  }}
+                                >
                                   <strong className="settings-history-item-title">
                                     {item.title}
                                   </strong>
                                   {item.is_completed === 1 && (
-                                    <span className="settings-completed-badge" style={{ fontSize: "9px", padding: "2px 6px" }}>
+                                    <span
+                                      className="settings-completed-badge"
+                                      style={{
+                                        fontSize: "9px",
+                                        padding: "2px 6px",
+                                      }}
+                                    >
                                       Completed
                                     </span>
                                   )}
@@ -1122,17 +1211,24 @@ function parseChangelogContent(text) {
     const descPart = match[2].trim();
 
     // Verify it is a shortcut (alphanumeric/arrow symbols, max 45 chars, no multiple spaces, not a standard word)
-    const isShortcut = /^[a-zA-Z0-9\s+/→←↑↓`&,|-]+$/.test(keysPart) && 
-                       keysPart.length < 45 && 
-                       !keysPart.includes("  ") &&
-                       !/^(http|https|fix|add|implement|split|update|remove|rebranded|re-added|select|choose|join|join\s+our)/i.test(keysPart);
-    
+    const isShortcut =
+      /^[a-zA-Z0-9\s+/→←↑↓`&,|-]+$/.test(keysPart) &&
+      keysPart.length < 45 &&
+      !keysPart.includes("  ") &&
+      !/^(http|https|fix|add|implement|split|update|remove|rebranded|re-added|select|choose|join|join\s+our)/i.test(
+        keysPart,
+      );
+
     if (isShortcut) {
       const tokens = keysPart.split(/(\s*\/\s*|\s+or\s+|\s*\+\s*|\s*,\s*)/g);
       const renderedKeys = tokens.map((token, index) => {
         const isSeparator = /^\s*(\/|or|\+|,)\s*$/.test(token);
         if (isSeparator) {
-          return <span key={index} className="kbd-separator">{token}</span>;
+          return (
+            <span key={index} className="kbd-separator">
+              {token}
+            </span>
+          );
         }
         const cleanKey = token.replace(/`/g, "").trim();
         if (!cleanKey) return null;

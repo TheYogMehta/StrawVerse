@@ -111,6 +111,9 @@ export default function VideoPlayer({
   image,
   onBack,
   malid,
+  hideExit = false,
+  isHost = false,
+  onSkip = null,
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -1194,15 +1197,17 @@ export default function VideoPlayer({
     >
       {/* Header controls */}
       <div className="player-controls-header">
-        <button onClick={onBack} className="player-back-btn">
-          <ArrowLeft size={18} />
-          <span>Exit Player</span>
-        </button>
+        {!hideExit && (
+          <button onClick={onBack} className="player-back-btn">
+            <ArrowLeft size={18} />
+            <span>Exit Player</span>
+          </button>
+        )}
         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
           <span className="player-episode-title">
             Playing Episode{" "}
             {currentEpisodeObj ? currentEpisodeObj.number : "Stream"} (
-            {subdub.toUpperCase()})
+            {(subdub || "sub").toUpperCase()})
           </span>
           <span
             className={`player-header-badge ${isCurrentDownloaded ? "local" : "online"}`}
@@ -1214,6 +1219,20 @@ export default function VideoPlayer({
             )}
             <span>{isCurrentDownloaded ? "Local" : "Online"}</span>
           </span>
+          {isHost && onSkip && (
+            <button
+              onClick={onSkip}
+              className="player-back-btn"
+              style={{
+                marginLeft: "8px",
+                border: "1px solid rgba(139, 92, 246, 0.3)",
+                padding: "4px 8px",
+                height: "auto",
+              }}
+            >
+              <span>Skip Episode</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1567,7 +1586,7 @@ export default function VideoPlayer({
                       onClick={() => setPlayerSubDub(langKey)}
                       className={`player-quality-btn ${playerSubDub === langKey ? "active" : ""}`}
                     >
-                      {langKey.toUpperCase()}
+                      {(langKey || "sub").toUpperCase()}
                     </button>
                   ))}
                 </div>
@@ -1603,7 +1622,7 @@ export default function VideoPlayer({
         </div>
 
         {/* Next/Prev Navigation */}
-        {sortedEpisodes.length > 0 && (
+        {!hideExit && sortedEpisodes.length > 0 && (
           <div className="player-navigation">
             <button
               onClick={handlePrevEpisode}
