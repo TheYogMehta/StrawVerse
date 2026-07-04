@@ -1,5 +1,32 @@
 # Changelog
 
+## [7.3.0] - 2026-07-04
+
+# Changelog - StrawVerse v1.x Update
+
+### Watch Together (v1)
+
+- **Real-Time Synced Watching:** Host or join rooms to watch anime synchronously with friends.
+- **Zero-Desync Episode Loading:** Automatic background buffering ensures all clients unpause simultaneously when switching episodes.
+- **Binary WebSockets Protocol:** Ultra-fast, minimal bandwidth synchronization.
+- **Live Ephemeral Chat & Shared Queue:** Chat in real-time and queue up episodes together.
+- **Floating Session Bar:** Quick-access room status bar while watching.
+
+### Download Manager Improvements
+
+- **Pause & Resume Queue:** Pause all active downloads and resume them whenever you're ready.
+- **Queue Status Indicator:** Added visual pause banners and updated task indicators.
+
+### Manga Reader Sizing Controls
+
+- **Compact & Full Width Modes:** Minimize or Maximize reader width to suit your screen size.
+- **Preference Persistence:** Automatically saves your favorite reader size setting.
+
+### Backend & Scraping Refinements
+
+- Improved anime stream resolution fallback and proxy header handling.
+- Enhanced metadata fetching and download queue reliability.
+
 ## [7.2.2] - 2026-06-29
 
 ### Bulk Selection & Keybinds
