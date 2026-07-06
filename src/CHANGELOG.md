@@ -1,5 +1,17 @@
 # Changelog
 
+# [7.4.1] - 2026-07-06
+
+### Centralized Mapping Synchronization
+
+- **Forward Custom MAL Mappings**: Custom MyAnimeList mapping link and unlink updates are now automatically forwarded to a central mapping server (`https://mapper.theyogmehta.online/mapping`) to keep community mappings up to date.
+- **Payload Simplification**: Streamlined the central mapping API payload to send the media ID directly.
+
+### Scraper & Network Patches
+
+- **Case-Insensitive Request Headers**: Scraper utilities and Axios request interceptors now handle headers case-insensitively to prevent duplicates (`Referer`, `Origin`, `User-Agent`, `Cookie`), fixing request errors with AnimePahe.
+
+
 # [7.4.0] - 2026-07-06
 
 ### Redesigned Settings & Layout
