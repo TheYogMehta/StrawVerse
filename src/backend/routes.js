@@ -1671,6 +1671,128 @@ router.post("/api/mal/link", async (req, res) => {
     MalID = MalID ? String(MalID) : null;
     id = id.replace(/-(dub|sub|hsub|both)$/, "");
 
+    let targetMalID = MalID ? parseInt(MalID, 10) : null;
+    let resolvedProvider = null;
+    if (provider) {
+      const p = provider.toLowerCase();
+      if (p.includes("pahe")) resolvedProvider = "animepahe";
+      else if (p.includes("anikoto")) resolvedProvider = "anikototv";
+      else if (p.includes("anineko")) resolvedProvider = "anineko";
+    }
+
+    if (resolvedProvider) {
+      const cleanId = id.replace(/-(dub|sub|hsub|both)$/, "");
+
+      if (!targetMalID) {
+        let dbRow = null;
+        try {
+          if (type === "Anime") {
+            dbRow = global.db
+              .prepare(
+                "SELECT MalID FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?",
+              )
+              .get(
+                cleanId,
+                `${cleanId}-sub`,
+                `${cleanId}-hsub`,
+                `${cleanId}-dub`,
+                `${cleanId}-both`,
+              );
+          } else {
+            dbRow = global.db
+              .prepare("SELECT MalID FROM Manga WHERE id = ?")
+              .get(cleanId);
+          }
+        } catch (e) {}
+        if (dbRow && dbRow.MalID) {
+          targetMalID = parseInt(dbRow.MalID, 10);
+        }
+      }
+
+      if (!targetMalID && type === "Anime" && global.mappingDb) {
+        try {
+          const rule = [
+            {
+              key: "pahe",
+              query: "SELECT malid FROM animepahe WHERE id = ? OR uuid = ?",
+              params: [cleanId, cleanId],
+            },
+            {
+              key: "anikoto",
+              query: "SELECT malid FROM anikototv WHERE id = ?",
+              params: [cleanId],
+            },
+            {
+              key: "anineko",
+              query: "SELECT malid FROM anineko WHERE id = ?",
+              params: [cleanId],
+            },
+          ].find((r) => resolvedProvider.includes(r.key));
+          if (rule) {
+            const row = global.mappingDb
+              .prepare(rule.query)
+              .get(...rule.params);
+            if (row && row.malid) {
+              targetMalID = parseInt(row.malid, 10);
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (targetMalID) {
+        if (MalID) {
+          let sendId = cleanId;
+          let sendUuid = null;
+          if (resolvedProvider === "animepahe" && cleanId.includes("-")) {
+            sendUuid = cleanId;
+            try {
+              const row = global.mappingDb
+                .prepare("SELECT id FROM animepahe WHERE uuid = ?")
+                .get(cleanId);
+              if (row && row.id) {
+                sendId = String(row.id);
+              }
+            } catch (e) {}
+          }
+          axios
+            .post("https://mapper.theyogmehta.online/mapping", {
+              malid: targetMalID,
+              provider: resolvedProvider,
+              id: sendId,
+              uuid: sendUuid,
+            })
+            .then(() =>
+              logger.info(
+                `[Mapper] Successfully reported custom mapping link for MAL ID ${targetMalID}`,
+              ),
+            )
+            .catch((err) =>
+              logger.error(
+                `[Mapper] Failed to report custom mapping link: ${err.message}`,
+              ),
+            );
+        } else {
+          axios
+            .delete("https://mapper.theyogmehta.online/mapping", {
+              data: {
+                malid: targetMalID,
+                provider: resolvedProvider,
+              },
+            })
+            .then(() =>
+              logger.info(
+                `[Mapper] Successfully reported custom mapping unlink for MAL ID ${targetMalID}`,
+              ),
+            )
+            .catch((err) =>
+              logger.error(
+                `[Mapper] Failed to report custom mapping unlink: ${err.message}`,
+              ),
+            );
+        }
+      }
+    }
+
     try {
       const stmt = MalID
         ? global.db.prepare(
