@@ -1741,25 +1741,11 @@ router.post("/api/mal/link", async (req, res) => {
 
       if (targetMalID) {
         if (MalID) {
-          let sendId = cleanId;
-          let sendUuid = null;
-          if (resolvedProvider === "animepahe" && cleanId.includes("-")) {
-            sendUuid = cleanId;
-            try {
-              const row = global.mappingDb
-                .prepare("SELECT id FROM animepahe WHERE uuid = ?")
-                .get(cleanId);
-              if (row && row.id) {
-                sendId = String(row.id);
-              }
-            } catch (e) {}
-          }
           axios
             .post("https://mapper.theyogmehta.online/mapping", {
               malid: targetMalID,
               provider: resolvedProvider,
-              id: sendId,
-              uuid: sendUuid,
+              id: cleanId,
             })
             .then(() =>
               logger.info(
