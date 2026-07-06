@@ -17,7 +17,6 @@ import {
   Tv,
   BookOpen,
   Play,
-  Infinity,
 } from "lucide-react";
 import Swal from "sweetalert2";
 
@@ -49,9 +48,7 @@ export default function Catalog({
   const [linkingMalItem, setLinkingMalItem] = useState(null);
   const [stats, setStats] = useState(null);
   const [recentHistory, setRecentHistory] = useState([]);
-  const [infiniteScroll, setInfiniteScroll] = useState(
-    () => localStorage.getItem("catalog_infinite_scroll") === "true",
-  );
+  const [infiniteScroll, setInfiniteScroll] = useState(true);
   const [infiniteLoading, setInfiniteLoading] = useState(false);
 
   const [draggedIndex, setDraggedIndex] = useState(null);
@@ -377,6 +374,22 @@ export default function Catalog({
   }, [type, provider]);
 
   useEffect(() => {
+    const loadPaginationSettings = async () => {
+      try {
+        const response = await fetch("/api/settings");
+        const resData = await response.json();
+        if (resData && resData.settings) {
+          const isInfinite = resData.settings.Pagination === "off";
+          setInfiniteScroll(isInfinite);
+        }
+      } catch (err) {
+        console.error("Failed to load settings:", err);
+      }
+    };
+    loadPaginationSettings();
+  }, []);
+
+  useEffect(() => {
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       const handleDownloadComplete = (downloadData) => {
         if (downloadData.Type !== type) return;
@@ -613,13 +626,6 @@ export default function Catalog({
     fetchData(page);
   };
 
-  const toggleInfiniteScroll = () => {
-    const next = !infiniteScroll;
-    setInfiniteScroll(next);
-    localStorage.setItem("catalog_infinite_scroll", String(next));
-    setCurrentPage(1);
-    fetchData(1, activeFilters, searchQuery);
-  };
 
   useEffect(() => {
     if (infiniteObserverRef.current) {
@@ -720,22 +726,6 @@ export default function Catalog({
             className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
           >
             Manga
-          </button>
-          <button
-            type="button"
-            onClick={toggleInfiniteScroll}
-            className={`market-tab-btn infinite-toggle-btn ${infiniteScroll ? "active" : ""}`}
-            title={
-              infiniteScroll
-                ? "Switch to Paginated"
-                : "Switch to Infinite Scroll"
-            }
-          >
-            <Infinity
-              size={14}
-              style={{ marginRight: "5px", verticalAlign: "middle" }}
-            />
-            Infinite
           </button>
         </div>
       </header>
