@@ -209,7 +209,12 @@ async function continuousExecution() {
         if (currentTask?.Type === "Anime") {
           let { config, Title, EpNum, epid, SubDub } = currentTask;
           if (config && Title && EpNum && epid && SubDub) {
-            await downloadep(config, `${Title} ${SubDub}`, EpNum, epid, SubDub);
+            const lowerTitle = (Title || "").toLowerCase().trim();
+            const lowerSubDub = (SubDub || "").toLowerCase().trim();
+            const displayTitle = lowerTitle.endsWith(lowerSubDub)
+              ? Title
+              : `${Title} ${SubDub}`;
+            await downloadep(config, displayTitle, EpNum, epid, SubDub);
           } else {
             logger.error(
               `Error message: Some Anime Data missing [ removing from queue ]`,

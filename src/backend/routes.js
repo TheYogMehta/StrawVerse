@@ -1231,6 +1231,7 @@ router.post("/downloads", async (req, res) => {
     Response.totalSegments = itemWithSegments.totalSegments;
     Response.currentSegments = itemWithSegments.currentSegments;
     Response.epid = itemWithSegments.epid;
+    Response.id = itemWithSegments.id;
     Response.queue = queue.filter(
       (item) => item?.epid !== itemWithSegments?.epid,
     );

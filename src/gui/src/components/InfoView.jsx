@@ -183,6 +183,12 @@ export default function InfoView({
   const [malWatched, setMalWatched] = useState(0);
   const [customTags, setCustomTags] = useState([]);
   const [currentTags, setCurrentTags] = useState([]);
+  const [pulseDropdown, setPulseDropdown] = useState(false);
+
+  const triggerPulse = () => {
+    setPulseDropdown(true);
+    setTimeout(() => setPulseDropdown(false), 1500);
+  };
 
   const getMalStatusLabel = (status) => {
     const labels = {
@@ -283,6 +289,40 @@ export default function InfoView({
         }
       }
       setCurrentTags(parsedTags);
+
+      let hasDownloadsOnDisk = false;
+      if (type === "Anime") {
+        const subList = data?.DownloadedEpisodes?.sub || [];
+        const dubList = data?.DownloadedEpisodes?.dub || [];
+        hasDownloadsOnDisk = subList.length > 0 || dubList.length > 0;
+      } else {
+        const chList = data?.DownloadedChapters || [];
+        hasDownloadsOnDisk = chList.length > 0;
+      }
+
+      const isDownloadsTag = parsedTags[0] === "Downloads";
+      if (isDownloadsTag && !hasDownloadsOnDisk) {
+        try {
+          const dlRes = await fetch("/downloads", { method: "POST" });
+          const dlData = await dlRes.json();
+          const activeId = dlData?.id;
+          const isQueued = (dlData?.queue || []).some(
+            (item) =>
+              String(item.id) === String(id) ||
+              String(item.id) === String(data?.id),
+          );
+          const isActive =
+            String(activeId) === String(id) ||
+            String(activeId) === String(data?.id);
+
+          if (!isQueued && !isActive) {
+            await saveTags("");
+            triggerPulse();
+          }
+        } catch (dlErr) {
+          console.error("Failed to check active downloads", dlErr);
+        }
+      }
 
       // Fetch custom tags
       const tagsRes = await fetch(`/api/local/tags/view/${type}`);
@@ -954,23 +994,34 @@ export default function InfoView({
               selectedItems.has(Number(item.number)),
             );
 
-        const hasSub =
-          targetEpisodes.some(
-            (ep) => ep.lang === "sub" || ep.lang === "both" || !ep.lang,
-          ) ||
-          details?.subOrDub === "both" ||
-          details?.subOrDub === "sub";
+        let hasSub = false;
+        let hasDub = false;
+        let hasHsub = false;
 
-        const hasDub =
-          targetEpisodes.some(
-            (ep) => ep.lang === "dub" || ep.lang === "both",
-          ) ||
-          details?.subOrDub === "both" ||
-          details?.subOrDub === "dub";
+        targetEpisodes.forEach((ep) => {
+          let langs = [];
+          if (ep.langs && Array.isArray(ep.langs)) {
+            langs = ep.langs;
+          } else if (ep.lang) {
+            if (ep.lang === "both") {
+              langs = ["sub", "dub"];
+            } else {
+              langs = [ep.lang];
+            }
+          } else {
+            if (details?.subOrDub === "both") {
+              langs = ["sub", "dub"];
+            } else if (details?.subOrDub) {
+              langs = [details.subOrDub];
+            } else {
+              langs = ["sub"];
+            }
+          }
 
-        const hasHsub =
-          targetEpisodes.some((ep) => ep.hasHsub) ||
-          details?.subOrDub === "hsub";
+          if (langs.includes("sub")) hasSub = true;
+          if (langs.includes("dub")) hasDub = true;
+          if (langs.includes("hsub") || ep.hasHsub) hasHsub = true;
+        });
 
         const availableLangs = [];
         if (hasSub) availableLangs.push("sub");
@@ -985,16 +1036,124 @@ export default function InfoView({
 
           const result = await Swal.fire({
             title: "Select Version",
-            text: singleItem
-              ? `Choose the language version to download for Episode ${singleItem.number}:`
-              : `Choose the language version to download for the ${targetEpisodes.length} selected episodes:`,
-            input: "select",
-            inputOptions: inputOptions,
-            inputPlaceholder: "Select version",
+            html: `
+              <style>
+                .swal2-html-container {
+                  overflow: visible !important;
+                  z-index: 20 !important;
+                  position: relative !important;
+                }
+                .swal2-popup {
+                  overflow: visible !important;
+                }
+                .swal2-actions {
+                  z-index: 10 !important;
+                  position: relative !important;
+                }
+                #swal-version-menu {
+                  border: 1px solid var(--border);
+                  border-radius: 8px;
+                  background: var(--bg-secondary);
+                  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+                }
+              </style>
+              <div style="margin-bottom: 16px; font-size: 14px; color: var(--text-muted); line-height: 1.5; text-align: center;">
+                ${
+                  singleItem
+                    ? `Choose the language version to download for Episode <strong>${singleItem.number}</strong>:`
+                    : `Choose the language version to download for the <strong>${targetEpisodes.length}</strong> selected episodes:`
+                }
+              </div>
+              <div class="input-group" style="position: relative; width: 100%; text-align: left; box-sizing: border-box;">
+                <div class="custom-dropdown-trigger" id="swal-version-trigger" style="display: flex; align-items: center; justify-content: space-between; min-height: 38px;">
+                  <span class="custom-dropdown-trigger-text" id="swal-version-text" style="color: var(--text-muted);">Select version</span>
+                  <svg class="custom-dropdown-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </div>
+                <div class="custom-dropdown-menu" id="swal-version-menu" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; width: 100%; box-sizing: border-box; z-index: 9999;">
+                  ${Object.entries(inputOptions)
+                    .map(
+                      ([key, label]) => `
+                    <div class="custom-dropdown-item" data-value="${key}" style="display: flex; align-items: center; padding: 8px 12px; cursor: pointer;">
+                      ${label}
+                    </div>
+                  `,
+                    )
+                    .join("")}
+                </div>
+              </div>
+            `,
             showCancelButton: true,
+            confirmButtonText: "Confirm",
+            cancelButtonText: "Cancel",
             background: "var(--bg-secondary)",
             color: "var(--text-main)",
             confirmButtonColor: "var(--accent)",
+            cancelButtonColor: "var(--bg-tertiary)",
+            didOpen: () => {
+              const trigger = Swal.getHtmlContainer().querySelector(
+                "#swal-version-trigger",
+              );
+              const menu =
+                Swal.getHtmlContainer().querySelector("#swal-version-menu");
+              const items = Swal.getHtmlContainer().querySelectorAll(
+                ".custom-dropdown-item",
+              );
+              const textSpan =
+                Swal.getHtmlContainer().querySelector("#swal-version-text");
+
+              let selectedVal = "";
+
+              const handleOutsideClick = (e) => {
+                if (!trigger.contains(e.target) && !menu.contains(e.target)) {
+                  trigger.classList.remove("open");
+                  menu.style.display = "none";
+                }
+              };
+
+              trigger.addEventListener("click", (e) => {
+                e.stopPropagation();
+                const isOpen = trigger.classList.contains("open");
+                if (isOpen) {
+                  trigger.classList.remove("open");
+                  menu.style.display = "none";
+                  document.removeEventListener("click", handleOutsideClick);
+                } else {
+                  trigger.classList.add("open");
+                  menu.style.display = "block";
+                  document.addEventListener("click", handleOutsideClick);
+                }
+              });
+
+              items.forEach((item) => {
+                item.addEventListener("click", (e) => {
+                  e.stopPropagation();
+                  selectedVal = item.getAttribute("data-value");
+                  textSpan.textContent = item.textContent.trim();
+                  textSpan.style.color = "white";
+
+                  items.forEach((i) => i.classList.remove("selected"));
+                  item.classList.add("selected");
+
+                  trigger.classList.remove("open");
+                  menu.style.display = "none";
+                  document.removeEventListener("click", handleOutsideClick);
+
+                  trigger.setAttribute("data-selected-value", selectedVal);
+                  Swal.resetValidationMessage();
+                });
+              });
+            },
+            preConfirm: () => {
+              const trigger = Swal.getHtmlContainer().querySelector(
+                "#swal-version-trigger",
+              );
+              const selectedValue = trigger.getAttribute("data-selected-value");
+              if (!selectedValue) {
+                Swal.showValidationMessage("Please select a version");
+                return false;
+              }
+              return selectedValue;
+            },
           });
 
           if (!result.value) {
@@ -1055,6 +1214,15 @@ export default function InfoView({
         body: JSON.stringify(bodyData),
       });
       const data = await response.json();
+
+      if (!data.error) {
+        const isNotInLibrary =
+          !currentTags || currentTags.length === 0 || !currentTags[0];
+        if (isNotInLibrary) {
+          await saveTags("Downloads");
+          triggerPulse();
+        }
+      }
 
       Swal.fire({
         title: "Queue Updated",
@@ -1842,7 +2010,7 @@ export default function InfoView({
               >
                 <label className="input-label">Library Tags</label>
                 <div
-                  className={`custom-dropdown-trigger ${isDropdownOpen ? "open" : ""}`}
+                  className={`custom-dropdown-trigger ${isDropdownOpen ? "open" : ""} ${pulseDropdown ? "pulse-highlight" : ""}`}
                   onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 >
                   <span className="custom-dropdown-trigger-text">

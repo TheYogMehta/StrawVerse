@@ -1011,3 +1011,23 @@
   background-color: rgba(124, 58, 237, 0.1);
   color: white;
 }
+
+@keyframes dropdownPulseHighlight {
+  0% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.2);
+  }
+  50% {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 8px rgba(124, 58, 237, 0.4);
+    background-color: rgba(124, 58, 237, 0.15);
+  }
+  100% {
+    border-color: var(--border);
+    box-shadow: none;
+  }
+}
+
+.pulse-highlight {
+  animation: dropdownPulseHighlight 1.5s ease-out;
+}
