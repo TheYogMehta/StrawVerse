@@ -1769,6 +1769,41 @@ router.post("/api/mal/link", async (req, res) => {
         } catch (e) {}
       }
 
+      let providerTitle = null;
+      try {
+        if (type === "Anime") {
+          const row = global.db
+            .prepare(
+              "SELECT title, MalID FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? LIMIT 1",
+            )
+            .get(
+              cleanId,
+              `${cleanId}-sub`,
+              `${cleanId}-hsub`,
+              `${cleanId}-dub`,
+              `${cleanId}-both`,
+            );
+          if (row) {
+            providerTitle = row.title;
+            if (!targetMalID && row.MalID) {
+              targetMalID = parseInt(row.MalID, 10);
+            }
+          }
+        } else {
+          const row = global.db
+            .prepare("SELECT title, MalID FROM Manga WHERE id = ? LIMIT 1")
+            .get(cleanId);
+          if (row) {
+            providerTitle = row.title;
+            if (!targetMalID && row.MalID) {
+              targetMalID = parseInt(row.MalID, 10);
+            }
+          }
+        }
+      } catch (e) {
+        logger.error(`Error querying title from local DB: ${e.message}`);
+      }
+
       if (targetMalID) {
         if (MalID) {
           axios
@@ -1776,6 +1811,7 @@ router.post("/api/mal/link", async (req, res) => {
               malid: targetMalID,
               provider: resolvedProvider,
               id: cleanId,
+              title: providerTitle,
             })
             .then(() =>
               logger.info(
@@ -1793,6 +1829,7 @@ router.post("/api/mal/link", async (req, res) => {
               data: {
                 malid: targetMalID,
                 provider: resolvedProvider,
+                title: providerTitle,
               },
             })
             .then(() =>

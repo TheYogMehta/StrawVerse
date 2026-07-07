@@ -679,22 +679,20 @@ class downloader {
           }
 
           const subHeaders = { ...(this.headers ?? {}) };
-          try {
-            const subHost = new URL(targetUrl).hostname;
-            const streamHost = this.streamUrl
-              ? new URL(this.streamUrl).hostname
-              : "";
-            if (subHost && streamHost && subHost !== streamHost) {
-              delete subHeaders["Referer"];
-              delete subHeaders["referer"];
-            }
-          } catch (e) {}
-
           let subtitleData;
           try {
             subtitleData = await got(targetUrl, { headers: subHeaders }).text();
           } catch (e) {
-            subtitleData = await got(targetUrl).text();
+            try {
+              const cleanHeaders = { ...subHeaders };
+              delete cleanHeaders["Referer"];
+              delete cleanHeaders["referer"];
+              subtitleData = await got(targetUrl, {
+                headers: cleanHeaders,
+              }).text();
+            } catch (err) {
+              subtitleData = await got(targetUrl).text();
+            }
           }
 
           const isVtt =
