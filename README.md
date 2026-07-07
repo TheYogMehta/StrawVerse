@@ -9,17 +9,8 @@
   </a>
 </p>
 
-## 💖 First Supporter
-
-Special thanks to the first person who supported the development of this project:
-
-| Name/Handle | Contribution | Link                                              |
-| ----------- | ------------ | ------------------------------------------------- |
-| maighe      | $5           | [YouTube](https://www.youtube.com/@maighe_tv2848) |
-
-Your contribution helps me improve, maintain, and update this project. Thank you!
-
-Want to support? [Buy me a coffee](https://buymeacoffee.com/kowareta).
+> [!IMPORTANT]
+> **Legal Disclaimer:** StrawVerse is an open-source local media manager and indexing application designed for developers and researchers. The developers of this application do not host, store, stream, or distribute any copyrighted media (video, audio, or images). The application functions solely as a client-side parser and downloader wrapper utilizing publicly available web resource links. We do not condone, promote, or encourage copyright infringement. By using this software, you acknowledge and agree that all download and media-access activities are conducted at your own risk and responsibility, and that you are solely responsible for ensuring compliance with all local, national, and international copyright laws and terms of service.
 
 ## Table of Contents 📖
 
