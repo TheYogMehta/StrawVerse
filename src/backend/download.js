@@ -128,10 +128,14 @@ async function downloadAnimeSingle(
     const dbId = `${strippedId}-${resolvedSubDub}`;
 
     if (saveinfo) {
+      const lookupId =
+        Animeprovider.provider_name === "pahe"
+          ? animeid
+          : animeid.replace(/-(dub|sub|hsub|both)$/, "");
       const animedata = await animeinfo(
         Animeprovider,
         config?.CustomDownloadLocation,
-        animeid,
+        lookupId,
       );
       if (animedata) {
         MetadataAdd("Anime", {

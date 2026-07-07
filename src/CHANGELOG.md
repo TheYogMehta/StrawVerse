@@ -1,5 +1,16 @@
 # Changelog
 
+# [7.4.4] - 2026-07-07
+
+### Stream Downloader & Subtitles
+
+- **AniNeko Subtitle Fixed**: Resolved a crash/ReferenceError (`subtitleData is not defined`) in the subtitle download fallback.
+
+### Library Catalog & Folder Operations
+
+- **Delete All Refactoring**: Refactored the "Delete All Downloads" button handler to dynamically collect all downloaded numbers and call the robust `/api/local/delete-multiple` endpoint.
+- **Robust Folder & Suffix Resolvers**: Patched `delete-episode` and `delete-multiple` routes to check for suffix-appended folder variations (e.g. `_sub`, `_dub`, `_hsub`), resolving folder-not-found failures.
+
 # [7.4.3] - 2026-07-07
 
 ### Features & Synchronization

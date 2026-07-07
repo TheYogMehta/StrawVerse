@@ -695,10 +695,14 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               ? LocalMalProvider
               : provider) ?? null,
           );
+          const lookupId =
+            Animeprovider.provider_name === "pahe"
+              ? id
+              : id.replace(/-(dub|sub|hsub|both)$/, "");
           let AnimeInfo = await animeinfo(
             Animeprovider,
             setting?.CustomDownloadLocation,
-            id,
+            lookupId,
             data?.provider ? false : true,
           );
 
@@ -2056,10 +2060,14 @@ router.post("/api/local/tags/add", async (req, res) => {
         const config = await settingfetch();
         if (resolvedProvider && resolvedProvider.provider) {
           if (type === "Anime") {
+            const lookupId =
+              resolvedProvider.provider_name === "pahe"
+                ? id
+                : id.replace(/-(dub|sub|hsub|both)$/, "");
             const animedata = await animeinfo(
               resolvedProvider,
               config?.CustomDownloadLocation,
-              id,
+              lookupId,
             );
             if (animedata) {
               if (animedata.malid && !resolvedMalID) {
@@ -2410,10 +2418,45 @@ router.post("/api/local/delete-episode", async (req, res) => {
           idStripped,
         );
       if (downloads && downloads.length > 0) {
-        const folderName =
-          downloads[0].folder_name ||
-          downloads[0].title?.replace(/[^a-zA-Z0-9]/g, "_");
-        typeDir = path.join(baseDir, "Anime", folderName);
+        const candidateFolders = new Set();
+        for (const d of downloads) {
+          const fn = d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
+          if (fn) {
+            candidateFolders.add(fn);
+            if (subdub) candidateFolders.add(`${fn}_${subdub}`);
+            for (const s of ["sub", "dub", "hsub"]) {
+              candidateFolders.add(`${fn}_${s}`);
+            }
+          }
+        }
+        const refTitle = downloads[0].title;
+        if (refTitle) {
+          const titleFallback = global.db
+            .prepare("SELECT * FROM Anime WHERE title = ? OR title = ?")
+            .all(refTitle, subdub ? `${refTitle} ${subdub}` : refTitle);
+          for (const d of titleFallback || []) {
+            const fn = d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
+            if (fn) {
+              candidateFolders.add(fn);
+              if (subdub) candidateFolders.add(`${fn}_${subdub}`);
+            }
+          }
+        }
+        let foundFolder = null;
+        for (const candidate of candidateFolders) {
+          if (fs.existsSync(path.join(baseDir, "Anime", candidate))) {
+            foundFolder = candidate;
+            break;
+          }
+        }
+        if (foundFolder) {
+          typeDir = path.join(baseDir, "Anime", foundFolder);
+        } else {
+          const folderName =
+            downloads[0].folder_name ||
+            downloads[0].title?.replace(/[^a-zA-Z0-9]/g, "_");
+          typeDir = path.join(baseDir, "Anime", folderName);
+        }
       }
     }
 
@@ -2491,19 +2534,66 @@ router.post("/api/local/delete-multiple", async (req, res) => {
             idStripped,
           );
         if (downloads && downloads.length > 0) {
-          const folderName =
-            downloads[0].folder_name ||
-            downloads[0].title?.replace(/[^a-zA-Z0-9]/g, "_");
-          typeDir = path.join(baseDir, "Anime", folderName);
+          const candidateFolders = new Set();
+          for (const d of downloads) {
+            const fn = d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
+            if (fn) {
+              candidateFolders.add(fn);
+              if (subdub) candidateFolders.add(`${fn}_${subdub}`);
+              for (const s of ["sub", "dub", "hsub"]) {
+                candidateFolders.add(`${fn}_${s}`);
+              }
+            }
+          }
+          const refTitle = downloads[0].title;
+          if (refTitle) {
+            const titleFallback = global.db
+              .prepare("SELECT * FROM Anime WHERE title = ? OR title = ?")
+              .all(refTitle, subdub ? `${refTitle} ${subdub}` : refTitle);
+            for (const d of titleFallback || []) {
+              const fn =
+                d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
+              if (fn) {
+                candidateFolders.add(fn);
+                if (subdub) candidateFolders.add(`${fn}_${subdub}`);
+              }
+            }
+          }
+          let foundFolder = null;
+          for (const candidate of candidateFolders) {
+            if (fs.existsSync(path.join(baseDir, "Anime", candidate))) {
+              foundFolder = candidate;
+              break;
+            }
+          }
+          if (foundFolder) {
+            typeDir = path.join(baseDir, "Anime", foundFolder);
+          } else {
+            const folderName =
+              downloads[0].folder_name ||
+              downloads[0].title?.replace(/[^a-zA-Z0-9]/g, "_");
+            typeDir = path.join(baseDir, "Anime", folderName);
+          }
         }
       } else {
         const downloads = global.db
           .prepare("SELECT * FROM Manga WHERE id = ? OR id = ?")
           .all(id, id.replace(/-(dub|sub|hsub|both)$/, ""));
         if (downloads && downloads.length > 0) {
+          const existingDownload = downloads.find((d) => {
+            const folderName =
+              d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
+            return (
+              folderName &&
+              fs.existsSync(path.join(baseDir, "Manga", folderName))
+            );
+          });
           const folderName =
-            downloads[0].folder_name ||
-            downloads[0].title?.replace(/[^a-zA-Z0-9]/g, "_");
+            (existingDownload || downloads[0]).folder_name ||
+            (existingDownload || downloads[0]).title?.replace(
+              /[^a-zA-Z0-9]/g,
+              "_",
+            );
           typeDir = path.join(baseDir, "Manga", folderName);
         }
       }

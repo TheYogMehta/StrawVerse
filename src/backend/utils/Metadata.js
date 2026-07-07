@@ -161,24 +161,7 @@ async function MetadataAdd(type, valuesToAdd) {
 
     if (valuesToAdd?.title) {
       const baseFolderName = valuesToAdd.title.replace(/[^a-zA-Z0-9]/g, "_");
-      let existingByFolder = null;
-      try {
-        existingByFolder = global.db
-          .prepare(`SELECT provider FROM ${type} WHERE folder_name = ?`)
-          .get(baseFolderName);
-      } catch (_) {}
-      if (
-        existingByFolder &&
-        existingByFolder.provider !== (valuesToAdd.provider || "")
-      ) {
-        const pSuffix = (valuesToAdd.provider || "unknown").replace(
-          /[^a-zA-Z0-9]/g,
-          "_",
-        );
-        valuesToAdd.folder_name = `${baseFolderName}_${pSuffix}`;
-      } else {
-        valuesToAdd.folder_name = baseFolderName;
-      }
+      valuesToAdd.folder_name = baseFolderName;
     }
 
     if (!valuesToAdd.hasOwnProperty("CustomTag")) {
@@ -742,15 +725,70 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
     const updatedMetadata = await Promise.all(
       paginatedMetadata.map(async (metadata) => {
-        const folderPath = path.join(baseDir, type, metadata.folder_name || "");
+        let resolvedFolder = metadata.folder_name || "";
         let folderExists = false;
 
-        try {
-          if (metadata.folder_name) {
-            await fs.promises.access(folderPath);
+        if (resolvedFolder) {
+          try {
+            await fs.promises.access(path.join(baseDir, type, resolvedFolder));
             folderExists = true;
+          } catch (_) {
+            const suffixes = ["_sub", "_dub", "_hsub"];
+            for (const suffix of suffixes) {
+              try {
+                const checkFolder = `${resolvedFolder}${suffix}`;
+                await fs.promises.access(path.join(baseDir, type, checkFolder));
+                resolvedFolder = checkFolder;
+                folderExists = true;
+                break;
+              } catch (_) {}
+            }
           }
-        } catch (_) {}
+        }
+
+        if (!folderExists && metadata.title) {
+          const baseName = metadata.title.replace(/[^a-zA-Z0-9]/g, "_");
+          const nameCandidates = [
+            baseName,
+            `${baseName}_sub`,
+            `${baseName}_dub`,
+            `${baseName}_hsub`,
+          ];
+          for (const cand of nameCandidates) {
+            try {
+              await fs.promises.access(path.join(baseDir, type, cand));
+              resolvedFolder = cand;
+              folderExists = true;
+              break;
+            } catch (_) {}
+          }
+        }
+
+        if (!folderExists && metadata.linkedProviders) {
+          for (const lp of metadata.linkedProviders) {
+            const lpName =
+              lp.folder_name || lp.title?.replace(/[^a-zA-Z0-9]/g, "_");
+            if (lpName) {
+              const lpCandidates = [
+                lpName,
+                `${lpName}_sub`,
+                `${lpName}_dub`,
+                `${lpName}_hsub`,
+              ];
+              for (const cand of lpCandidates) {
+                try {
+                  await fs.promises.access(path.join(baseDir, type, cand));
+                  resolvedFolder = cand;
+                  folderExists = true;
+                  break;
+                } catch (_) {}
+              }
+            }
+            if (folderExists) break;
+          }
+        }
+
+        const folderPath = path.join(baseDir, type, resolvedFolder);
 
         if (
           !folderExists &&
@@ -806,6 +844,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
         return {
           ...metadata,
+          folder_name: resolvedFolder,
           Downloaded: content,
           totalEpisodes: totalEpisodes,
           watched: watchedEpisodes,
@@ -865,47 +904,55 @@ async function extractSubtitlesFromVideo(videoPath, epNum) {
     const subsDir = path.join(parentDir, "subs");
 
     return new Promise((resolve) => {
-      child_process.exec(`"${ffmpegPath}" -i "${videoPath}"`, (err, stdout, stderr) => {
-        const output = stderr || stdout || "";
-        const streamLines = output.split("\n").filter(line => line.includes("Subtitle:"));
-        if (streamLines.length === 0) {
-          return resolve([]);
-        }
-
-        if (!fs.existsSync(subsDir)) {
-          fs.mkdirSync(subsDir, { recursive: true });
-        }
-
-        const promises = streamLines.map((line) => {
-          const matchStream = line.match(/Stream #0:(\d+)/);
-          if (!matchStream) return Promise.resolve(null);
-          const streamIdx = matchStream[1];
-
-          let lang = "en";
-          const matchLang = line.match(/Stream #0:\d+\(([^)]+)\)/);
-          if (matchLang) {
-            lang = matchLang[1].slice(0, 3).toLowerCase();
+      child_process.exec(
+        `"${ffmpegPath}" -i "${videoPath}"`,
+        (err, stdout, stderr) => {
+          const output = stderr || stdout || "";
+          const streamLines = output
+            .split("\n")
+            .filter((line) => line.includes("Subtitle:"));
+          if (streamLines.length === 0) {
+            return resolve([]);
           }
 
-          const outFile = path.join(subsDir, `${epNum}Ep.${lang}.vtt`);
-          return new Promise((res) => {
-            child_process.exec(`"${ffmpegPath}" -y -i "${videoPath}" -map 0:${streamIdx} "${outFile}"`, (errOut) => {
-              if (errOut) {
-                res(null);
-              } else {
-                res({
-                  url: `/subtitles?file=${encodeURIComponent(outFile)}`,
-                  lang: lang,
-                });
-              }
+          if (!fs.existsSync(subsDir)) {
+            fs.mkdirSync(subsDir, { recursive: true });
+          }
+
+          const promises = streamLines.map((line) => {
+            const matchStream = line.match(/Stream #0:(\d+)/);
+            if (!matchStream) return Promise.resolve(null);
+            const streamIdx = matchStream[1];
+
+            let lang = "en";
+            const matchLang = line.match(/Stream #0:\d+\(([^)]+)\)/);
+            if (matchLang) {
+              lang = matchLang[1].slice(0, 3).toLowerCase();
+            }
+
+            const outFile = path.join(subsDir, `${epNum}Ep.${lang}.vtt`);
+            return new Promise((res) => {
+              child_process.exec(
+                `"${ffmpegPath}" -y -i "${videoPath}" -map 0:${streamIdx} "${outFile}"`,
+                (errOut) => {
+                  if (errOut) {
+                    res(null);
+                  } else {
+                    res({
+                      url: `/subtitles?file=${encodeURIComponent(outFile)}`,
+                      lang: lang,
+                    });
+                  }
+                },
+              );
             });
           });
-        });
 
-        Promise.all(promises).then((results) => {
-          resolve(results.filter(Boolean));
-        });
-      });
+          Promise.all(promises).then((results) => {
+            resolve(results.filter(Boolean));
+          });
+        },
+      );
     });
   } catch (e) {
     logger.error(`Error in extractSubtitlesFromVideo: ${e.message}`);
@@ -1056,7 +1103,11 @@ async function getSourceById(type, baseDir, id, number, subdub) {
         });
     }
 
-    if (subtitleFiles.length === 0 && type === "Anime" && fs.existsSync(finalPath)) {
+    if (
+      subtitleFiles.length === 0 &&
+      type === "Anime" &&
+      fs.existsSync(finalPath)
+    ) {
       subtitleFiles = await extractSubtitlesFromVideo(finalPath, number);
     }
 
@@ -1077,19 +1128,18 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
     // if logged in mal && Anime
     if (type === "Anime") {
       let id = AnimeMangaid?.replace(/-(dub|sub|hsub|both)$/, "");
+      const searchTerms = Array.from(
+        new Set([
+          `${id}-sub`,
+          `${id}-hsub`,
+          `${id}-dub`,
+          `${id}-both`,
+          AnimeMangaid,
+          id,
+        ]),
+      ).filter(Boolean);
 
       try {
-        const searchTerms = Array.from(
-          new Set([
-            `${id}-sub`,
-            `${id}-hsub`,
-            `${id}-dub`,
-            `${id}-both`,
-            AnimeMangaid,
-            id,
-          ]),
-        ).filter(Boolean);
-
         const placeholders = searchTerms.map(() => "?").join(",");
         const FoundRow = queryOne(
           `SELECT MalID, CustomTag FROM Anime WHERE id IN (${placeholders}) OR folder_name IN (${placeholders}) LIMIT 1`,
@@ -1136,10 +1186,6 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           ]);
         }
         if (Downloads.length === 0) {
-          const searchTerms = Array.from(
-            new Set([`${id}-sub`, `${id}-dub`, `${id}-both`, AnimeMangaid, id]),
-          ).filter(Boolean);
-
           const placeholders = searchTerms.map(() => "?").join(",");
           Downloads = queryAll(
             `SELECT * FROM Anime WHERE id IN (${placeholders}) OR folder_name IN (${placeholders})`,
@@ -1148,19 +1194,26 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         }
 
         if (Downloads?.length > 0) {
-          Downloads[0].dataId = Downloads[0]?.EpisodesDataId;
-          delete Downloads[0].EpisodesDataId;
+          const mainDownload =
+            Downloads.find(
+              (d) =>
+                searchTerms.includes(d.id) ||
+                (d.folder_name && searchTerms.includes(d.folder_name)),
+            ) || Downloads[0];
 
-          const baseImage = Downloads[0].image_url || null;
+          mainDownload.dataId = mainDownload?.EpisodesDataId;
+          delete mainDownload.EpisodesDataId;
+
+          const baseImage = mainDownload.image_url || null;
           const baseTitle =
-            Downloads[0].title && Downloads[0].title.trim() !== ""
-              ? Downloads[0].title
+            mainDownload.title && mainDownload.title.trim() !== ""
+              ? mainDownload.title
               : formatFallbackTitle(
-                  Downloads[0].folder_name || Downloads[0].id,
+                  mainDownload.folder_name || mainDownload.id,
                 );
 
           data = {
-            ...Downloads[0],
+            ...mainDownload,
             title: baseTitle,
             image: baseImage,
             DownloadedEpisodes: {
@@ -1171,14 +1224,29 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           };
 
           for (const SubDub of Downloads) {
-            const folderPath = path.join(
-              dir,
-              "Anime",
+            const baseFolder =
               SubDub.folder_name ||
-                `${SubDub.title?.replace(/[^a-zA-Z0-9]/g, "_")}`,
+              `${SubDub.title?.replace(/[^a-zA-Z0-9]/g, "_")}`;
+            let folderName = baseFolder;
+            let folderExists = fs.existsSync(
+              path.join(dir, "Anime", folderName),
             );
 
-            if (fs.existsSync(folderPath)) {
+            if (!folderExists) {
+              const suffixes = ["_sub", "_dub", "_hsub"];
+              for (const suffix of suffixes) {
+                const checkFolder = `${baseFolder}${suffix}`;
+                if (fs.existsSync(path.join(dir, "Anime", checkFolder))) {
+                  folderName = checkFolder;
+                  folderExists = true;
+                  break;
+                }
+              }
+            }
+
+            const folderPath = path.join(dir, "Anime", folderName);
+
+            if (folderExists) {
               const filesAndFolders = await fs.promises.readdir(folderPath, {
                 withFileTypes: true,
               });
@@ -1252,7 +1320,10 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         }
 
         if (downloadsList.length > 0) {
-          const firstRecord = downloadsList[0];
+          const firstRecord =
+            downloadsList.find(
+              (d) => d.id === AnimeMangaid || d.folder_name === AnimeMangaid,
+            ) || downloadsList[0];
           const baseImage = firstRecord.image_url || null;
           const baseTitle =
             firstRecord.title && firstRecord.title.trim() !== ""

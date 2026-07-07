@@ -225,6 +225,82 @@ class downloader {
     this.downloadedPaths = [];
   }
 
+  async getRequestHeaders(url) {
+    const reqHeaders = { ...(this.headers ?? {}) };
+    const resolvedHeaders = getHeaders(url);
+    if (resolvedHeaders.Referer && !reqHeaders.Referer && !reqHeaders.referer) {
+      reqHeaders["Referer"] = resolvedHeaders.Referer;
+    }
+    if (resolvedHeaders.Origin && !reqHeaders.Origin && !reqHeaders.origin) {
+      reqHeaders["Origin"] = resolvedHeaders.Origin;
+    }
+    if (
+      resolvedHeaders["User-Agent"] &&
+      !reqHeaders["User-Agent"] &&
+      !reqHeaders["user-agent"]
+    ) {
+      reqHeaders["User-Agent"] = resolvedHeaders["User-Agent"];
+    }
+    if (resolvedHeaders.Cookie && !reqHeaders.Cookie && !reqHeaders.cookie) {
+      reqHeaders["Cookie"] = resolvedHeaders.Cookie;
+    }
+
+    const finalReferer = reqHeaders["Referer"] || reqHeaders["referer"];
+    if (finalReferer && !reqHeaders["Origin"] && !reqHeaders["origin"]) {
+      try {
+        const refUrl = new URL(finalReferer);
+        if (refUrl.protocol === "http:" || refUrl.protocol === "https:") {
+          reqHeaders["Origin"] = refUrl.origin;
+        }
+      } catch (e) {}
+    }
+
+    try {
+      const { session } = require("electron");
+      if (session && session.defaultSession) {
+        const cookies = await session.defaultSession.cookies.get({ url });
+        if (cookies && cookies.length > 0) {
+          const cookieParts = cookies.map((c) => `${c.name}=${c.value}`);
+          let existingCookie =
+            reqHeaders["Cookie"] || reqHeaders["cookie"] || "";
+          if (existingCookie) {
+            const existingParts = existingCookie
+              .split(";")
+              .map((p) => p.trim())
+              .filter(Boolean);
+            for (const part of cookieParts) {
+              const [name] = part.split("=");
+              if (!existingParts.some((ep) => ep.startsWith(`${name}=`))) {
+                existingParts.push(part);
+              }
+            }
+            reqHeaders["Cookie"] = existingParts.join("; ");
+          } else {
+            reqHeaders["Cookie"] = cookieParts.join("; ");
+          }
+        }
+      }
+    } catch (e) {}
+
+    reqHeaders["accept"] = "*/*";
+    reqHeaders["accept-language"] = "en-US,en;q=0.9";
+    reqHeaders["cache-control"] = "no-cache";
+    reqHeaders["pragma"] = "no-cache";
+    reqHeaders["sec-ch-ua"] = '"Not/A)Brand";v="99", "Chromium";v="148"';
+    reqHeaders["sec-ch-ua-mobile"] = "?0";
+    reqHeaders["sec-ch-ua-platform"] = '"Linux"';
+    reqHeaders["sec-fetch-dest"] = "empty";
+    reqHeaders["sec-fetch-mode"] = "cors";
+    reqHeaders["sec-fetch-site"] = "cross-site";
+
+    const finalHeaders = {};
+    for (const key of Object.keys(reqHeaders)) {
+      finalHeaders[key.toLowerCase()] = reqHeaders[key];
+    }
+
+    return finalHeaders;
+  }
+
   // Additional Checks
   async DownloadsChecking() {
     if (
@@ -249,7 +325,8 @@ class downloader {
       throw new Error("No Stream Url Provided");
     } else {
       let Playlist = await got(this.streamUrl, {
-        headers: this.headers ?? {},
+        headers: await this.getRequestHeaders(this.streamUrl),
+        http2: true,
       }).text();
 
       if (!Playlist) throw new Error("No Stream Found!");
@@ -325,7 +402,8 @@ class downloader {
 
           this.streamUrl = selectedStream.url;
           Playlist = await got(this.streamUrl, {
-            headers: this.headers ?? {},
+            headers: await this.getRequestHeaders(this.streamUrl),
+            http2: true,
           }).text();
 
           if (!Playlist)
@@ -522,8 +600,9 @@ class downloader {
                 if (!this._keyCache) this._keyCache = {};
                 if (!this._keyCache[Segment.keyUrl]) {
                   const keyRes = await got(Segment.keyUrl, {
-                    headers: this.headers ?? {},
+                    headers: await this.getRequestHeaders(Segment.keyUrl),
                     responseType: "buffer",
+                    http2: true,
                   });
                   this._keyCache[Segment.keyUrl] = keyRes.body;
                 }
@@ -538,8 +617,9 @@ class downloader {
                   iv.writeUInt32BE(parseInt(Segment.iv, 10), 12);
                 }
                 const encRes = await got(segUrl, {
-                  headers: this.headers ?? {},
+                  headers: await this.getRequestHeaders(segUrl),
                   responseType: "buffer",
+                  http2: true,
                 });
                 const cipherText = stripPngHeader(encRes.body);
                 const decipher = crypto.createDecipheriv(
@@ -553,8 +633,9 @@ class downloader {
                 ]);
               } else {
                 const response = await got(segUrl, {
-                  headers: this.headers ?? {},
+                  headers: await this.getRequestHeaders(segUrl),
                   responseType: "buffer",
+                  http2: true,
                 });
                 body = stripPngHeader(response.body);
               }
@@ -695,20 +776,28 @@ class downloader {
             return;
           }
 
-          const subHeaders = { ...(this.headers ?? {}) };
+          const subHeaders = await this.getRequestHeaders(targetUrl);
+          delete subHeaders["origin"];
+          delete subHeaders["Origin"];
           let subtitleData;
           try {
-            subtitleData = await got(targetUrl, { headers: subHeaders }).text();
+            subtitleData = await got(targetUrl, {
+              headers: subHeaders,
+              http2: true,
+            }).text();
           } catch (e) {
             try {
               const cleanHeaders = { ...subHeaders };
               delete cleanHeaders["Referer"];
               delete cleanHeaders["referer"];
+              delete cleanHeaders["Origin"];
+              delete cleanHeaders["origin"];
               subtitleData = await got(targetUrl, {
                 headers: cleanHeaders,
+                http2: true,
               }).text();
             } catch (err) {
-              subtitleData = await got(targetUrl).text();
+              subtitleData = await got(targetUrl, { http2: true }).text();
             }
           }
 

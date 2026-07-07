@@ -1596,6 +1596,21 @@ export default function InfoView({
 
   // Delete local catalog entry
   const handleDeleteLocal = async () => {
+    const isAnime = type === "Anime";
+    const allDownloaded = [];
+    if (isAnime) {
+      const subs = details?.DownloadedEpisodes?.sub || [];
+      const dubs = details?.DownloadedEpisodes?.dub || [];
+      const hsubs = details?.DownloadedEpisodes?.hsub || [];
+      const uniqueNums = new Set([...subs, ...dubs, ...hsubs].map(Number));
+      allDownloaded.push(...uniqueNums);
+    } else {
+      const chapters = details?.DownloadedChapters || [];
+      allDownloaded.push(...chapters.map(Number));
+    }
+
+    if (allDownloaded.length === 0) return;
+
     const confirmResult = await Swal.fire({
       title: "Are you sure?",
       text: `Are you sure you want to delete all downloaded files for ${details?.title}?`,
@@ -1610,10 +1625,10 @@ export default function InfoView({
     });
     if (!confirmResult.isConfirmed) return;
     try {
-      const response = await fetch("/api/local/tags/remove", {
+      const response = await fetch("/api/local/delete-multiple", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, type }),
+        body: JSON.stringify({ id, type, numbers: allDownloaded }),
       });
       const data = await response.json();
       if (!data.error) {
@@ -1640,7 +1655,6 @@ export default function InfoView({
       console.error(err);
     }
   };
-
   // Delete single local episode file
   const handleDeleteEpisode = async (epNum, subdub) => {
     const confirmResult = await Swal.fire({
