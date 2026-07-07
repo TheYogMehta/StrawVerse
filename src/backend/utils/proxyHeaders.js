@@ -215,6 +215,21 @@ function getHeaders(url) {
   return headers;
 }
 
+global.clearCookieCache = (domain) => {
+  if (!domain) return;
+  const normalized = domain.replace(/^www\./, "").toLowerCase();
+  for (const key of Object.keys(cookieCache)) {
+    const normKey = key.replace(/^www\./, "").toLowerCase();
+    if (
+      normKey === normalized ||
+      normKey.endsWith("." + normalized) ||
+      normalized.endsWith("." + normKey)
+    ) {
+      delete cookieCache[key];
+    }
+  }
+};
+
 module.exports = {
   getHeaders,
 };

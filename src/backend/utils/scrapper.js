@@ -143,6 +143,9 @@ async function saveClearanceCookiesForDomain(domain) {
     ) {
       try {
         saveClearanceCookie(cookie);
+        if (global.clearCookieCache) {
+          global.clearCookieCache(domain);
+        }
       } catch (dbErr) {
         console.error("Failed to save cf_clearance to database:", dbErr);
       }
@@ -155,6 +158,9 @@ async function clearCookiesForDomain(domain) {
     "DELETE FROM cookie WHERE id = ? OR (? = domain OR ? LIKE '%.' || domain OR domain LIKE '%.' || ?)",
     [`${domain}-cf_clearance`, domain, domain, domain],
   );
+  if (global.clearCookieCache) {
+    global.clearCookieCache(domain);
+  }
 
   const sessionCookies =
     await global.ScrapperWindow.webContents.session.cookies.get({});
@@ -419,10 +425,7 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
     try {
       global.LastScrapperResponseCode = 200;
       try {
-        const urlObj = new URL(targetUrl);
-        const navUrl = urlObj.pathname.startsWith("/api")
-          ? urlObj.origin
-          : targetUrl;
+        const navUrl = targetUrl;
         if (referer) {
           await global.ScrapperWindow.loadURL(navUrl, {
             httpReferrer: referer,
@@ -454,13 +457,29 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
           );
         } catch (e) {}
 
+        let readyState = "loading";
+        try {
+          readyState =
+            await global.ScrapperWindow.webContents.executeJavaScript(
+              "document.readyState",
+            );
+        } catch (e) {}
+
+        const isWindowLoading =
+          global.ScrapperWindow.webContents.isLoading() ||
+          readyState === "loading";
+
         if (pageLooksLikeChallenge(title, html)) {
           if (!global.ScrapperWindow.isVisible()) {
             global.ScrapperWindow.show();
           }
         } else {
           if (html && !pageLooksLikeError(title, html)) {
-            if (!force || hasClearanceForDomain || i > 5) {
+            if (
+              !force ||
+              hasClearanceForDomain ||
+              (i > 25 && !isWindowLoading)
+            ) {
               break;
             }
           }
@@ -653,7 +672,10 @@ global.axios.interceptors.request.use(
         takeHeaderCaseInsensitive(config.headers, "referer");
       }
       if (headers["Cookie"]) {
-        const existingCookie = takeHeaderCaseInsensitive(config.headers, "cookie");
+        const existingCookie = takeHeaderCaseInsensitive(
+          config.headers,
+          "cookie",
+        );
         if (existingCookie) {
           mergeCookie(headers, existingCookie);
         }
