@@ -1,5 +1,18 @@
 # Changelog
 
+# [7.4.3] - 2026-07-07
+
+### Features & Synchronization
+
+- **Delta Updates**: Implemented incremental sync for mapping updates. The app now pings the server with its current version tag and downloads only database changes (inserts, updates, deletes) in a small JSON payload rather than redownloading the entire database.
+- **Server Update Source**: Moved the update checks and downloads from GitHub Releases to the self-hosted mapper server endpoints.
+
+### Safety & Compliance
+
+- **Legal Disclaimers**: Added a prominent legal disclaimer block at the top of the repository `README.md` and extensions `README.md`.
+- **About & Disclaimer Panel**: Integrated a dedicated "About & Legal Disclaimer" tab inside the Settings panel to declare the software as an indexing tool.
+- **Monetization Removal**: Removed the donation links.
+
 # [7.4.2] - 2026-07-07
 
 ### Bug Fixes

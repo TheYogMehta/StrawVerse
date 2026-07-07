@@ -621,6 +621,13 @@ export default function SettingsView({
           >
             Release Notes
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("about")}
+            className={`settings-tab-btn ${activeTab === "about" ? "active" : ""}`}
+          >
+            About & Disclaimer
+          </button>
         </div>
 
         <form onSubmit={(e) => e.preventDefault()} className="settings-form">
@@ -1484,6 +1491,48 @@ export default function SettingsView({
                   Failed to load release notes.
                 </p>
               )}
+            </div>
+          )}
+
+          {activeTab === "about" && (
+            <div className="settings-panel glass-panel">
+              <h3 className="settings-section-title">
+                About & Legal Disclaimer
+              </h3>
+              <div
+                className="disclaimer-text"
+                style={{
+                  fontSize: "13px",
+                  lineHeight: "1.6",
+                  color: "var(--text-color)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px",
+                }}
+              >
+                <p>
+                  <strong>StrawVerse</strong> is an open-source local media
+                  manager and indexing application designed for developers and
+                  researchers.
+                </p>
+                <p>
+                  <strong>Disclaimer:</strong> The developers of this
+                  application do not host, store, stream, or distribute any
+                  copyrighted video, audio, or image files. The application
+                  functions solely as a client-side parser and downloader
+                  wrapper utilizing publicly available web resource links. We do
+                  not condone, promote, or encourage copyright infringement of
+                  any kind.
+                </p>
+                <p>
+                  By using this software, you agree that you are solely
+                  responsible for ensuring that your access, downloading, and
+                  usage of any media files complies with all applicable local,
+                  national, and international copyright laws, copyrights, and
+                  terms of service. The developers assume no liability for
+                  misuse, copyright violations, or data download charges.
+                </p>
+              </div>
             </div>
           )}
         </form>

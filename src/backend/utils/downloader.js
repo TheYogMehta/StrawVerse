@@ -182,6 +182,13 @@ class downloader {
         this.headers["Referer"] = resolvedHeaders.Referer;
       }
       if (
+        resolvedHeaders.Origin &&
+        !this.headers.Origin &&
+        !this.headers.origin
+      ) {
+        this.headers["Origin"] = resolvedHeaders.Origin;
+      }
+      if (
         resolvedHeaders["User-Agent"] &&
         !this.headers["User-Agent"] &&
         !this.headers["user-agent"]
@@ -195,6 +202,16 @@ class downloader {
       ) {
         this.headers["Cookie"] = resolvedHeaders.Cookie;
       }
+    }
+
+    const finalReferer = this.headers["Referer"] || this.headers["referer"];
+    if (finalReferer && !this.headers["Origin"] && !this.headers["origin"]) {
+      try {
+        const refUrl = new URL(finalReferer);
+        if (refUrl.protocol === "http:" || refUrl.protocol === "https:") {
+          this.headers["Origin"] = refUrl.origin;
+        }
+      } catch (e) {}
     }
     this.Epnum = parseInt(Epnum);
     this.caption = caption;

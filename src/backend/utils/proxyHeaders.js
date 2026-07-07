@@ -212,6 +212,15 @@ function getHeaders(url) {
     }
   }
 
+  if (headers.Referer) {
+    try {
+      const refUrl = new URL(headers.Referer);
+      if (refUrl.protocol === "http:" || refUrl.protocol === "https:") {
+        headers.Origin = refUrl.origin;
+      }
+    } catch (e) {}
+  }
+
   return headers;
 }
 
