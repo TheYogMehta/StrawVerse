@@ -921,6 +921,34 @@ class downloader {
 
     if (ExtraMessage) caption += ExtraMessage;
 
+    const now = Date.now();
+    const isFinalUpdate = this.currentSegments >= this.totalSegments;
+    const captionChanged = this._lastCaption !== caption;
+    const timeSinceLast = now - (this._lastLogTime || 0);
+
+    if (
+      !isFinalUpdate &&
+      !captionChanged &&
+      !ExtraMessage &&
+      timeSinceLast < 500
+    ) {
+      if (!this._pendingLogTimer) {
+        this._pendingLogTimer = setTimeout(() => {
+          this._pendingLogTimer = null;
+          this.logProgress();
+        }, 500 - timeSinceLast);
+      }
+      return;
+    }
+
+    if (this._pendingLogTimer) {
+      clearTimeout(this._pendingLogTimer);
+      this._pendingLogTimer = null;
+    }
+
+    this._lastLogTime = now;
+    this._lastCaption = caption;
+
     await fetch(`http://localhost:${global.PORT}/api/logger`, {
       method: "POST",
       headers: {
