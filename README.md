@@ -1,4 +1,4 @@
-<h6 align="right">💻 Support Windows & Linux</h6>
+<h6 align="right">Support Windows & Linux</h6>
 <h1 align="center">
   <img src="https://capsule-render.vercel.app/api?type=soft&fontColor=703ee5&text=StrawVerse&height=150&fontSize=40&desc=Ridiculously%20efficient,%20fast%20and%20light-weight.&descAlignY=75&descAlign=50&color=00000000&animation=twinkling">
 </h1>
@@ -12,19 +12,17 @@
 > [!IMPORTANT]
 > **Legal Disclaimer:** StrawVerse is an open-source local media manager and indexing application designed for developers and researchers. The developers of this application do not host, store, stream, or distribute any copyrighted media (video, audio, or images). The application functions solely as a client-side parser and downloader wrapper utilizing publicly available web resource links. We do not condone, promote, or encourage copyright infringement. By using this software, you acknowledge and agree that all download and media-access activities are conducted at your own risk and responsibility, and that you are solely responsible for ensuring compliance with all local, national, and international copyright laws and terms of service.
 
-## Table of Contents 📖
+## Table of Contents
 
 - [Overview](#overview)
-- [Features](#features)
+- [Key Features](#key-features)
 - [System Requirements](#system-requirements)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Videos](#videos)
-  - [Download Guide](#how-to-download-animedownloaderexe)
-  - [Anime Download Guide](#how-to-download-anime-from-animedownloaderexe)
 - [Configuration](#configuration)
 - [Uninstalling the Application](#uninstalling-the-application)
-- [Build the Application](#Build-the-Application)
+- [Build the Application](#build-the-application)
   - [Prerequisites](#prerequisites)
   - [Steps to Build](#steps-to-build)
 
@@ -32,15 +30,21 @@
 
 ## Overview
 
-This is a Node.js-based anime & manga downloader that allows you to download anime episodes in bulk, quickly, and from the multiple sources. Additionally, it has the functionality to automatically add the downloaded anime to your MyAnimeList plan-to-watch list. The downloader supports both dubbed (dub) and subtitled (sub) versions for anime. For manga, it downloads chapters from Mangasee123 and saves them in cbz format.
+**StrawVerse** is a desktop application built with Electron, React, and Vite that allows you to stream, read, download, and track your anime and manga collections. It uses a local SQLite database to manage your library and watch history.
 
-### Features
+Beyond standard downloading, StrawVerse includes real-time playback synchronization with friends (Watch Together), automatic MyAnimeList synchronization, a built-in media player, and a manga reader.
 
-- **Bulk Downloading:** Download multiple anime episodes and manga chapters in one go.
-- **Fast and Efficient:** Enjoy a ridiculously efficient, fast, and light-weight downloader.
-- **Dub and Sub Options:** Download either dubbed or subtitled versions based on your preference for anime.
-- **MyAnimeList Integration:** Automatically add downloaded anime to your MyAnimeList plan-to-watch list.
-- **Manga Downloading:** Download manga chapters from Mangasee123 in cbz format.
+---
+
+## Key Features
+
+- **Watch Together:** Host or join rooms to watch anime synchronously with friends (includes shared queue and text chat).
+- **In-App Player & Reader:** Stream anime directly or read manga chapters in the app. Remembers your playback position and layout preferences.
+- **Bulk Downloading:** Download entire seasons of anime or manga volumes at once, with support for merging subtitles directly into video files.
+- **Library Tracker:** Tracks your progress (time watched, chapters read) and automatically updates your MyAnimeList account.
+- **Discord Status:** Shows your current show or manga on your Discord profile.
+
+---
 
 ## System Requirements
 
@@ -48,29 +52,29 @@ This is a Node.js-based anime & manga downloader that allows you to download ani
 
 ## Installation
 
-### 💻 For Windows:
+### For Windows
 
 1. Go to [StrawVerse Releases](https://github.com/TheYogMehta/StrawVerse/releases).
 2. Download the setup file `StrawVerse.Setup.<version>.exe`.
 3. Run the installer to install the application, and enjoy!
 
-### 🐧 For Linux:
+### For Linux
 
 1. Go to [StrawVerse Releases](https://github.com/TheYogMehta/StrawVerse/releases).
 2. Download the AppImage `StrawVerse-<version>.AppImage` or the snap package.
 3. For AppImage: Make it executable using `chmod +x StrawVerse-<version>.AppImage` and run it.
 
-### 🍎 For Other OS (macOS, etc.):
+### For Other OS (macOS, etc.)
 
 - Pre-built binaries are not currently provided. You can run the application by cloning the repository, installing the dependencies, and running it locally. See the **[Build the Application](#build-the-application)** section below for step-by-step instructions.
 
 ## Usage
 
 1. Run the application (`StrawVerse.exe` on Windows, or `StrawVerse.AppImage` / Snap on Linux).
-2. Search through the anime or manga list and download what you like.
-3. See progress in the downloads tab.
-4. Anime episodes will be downloaded in the folder where you have stored/run the executable (or in your configured download directory).
-5. Manga chapters will be saved as `.cbz` files in your designated folder.
+2. **Search and Discover:** Use the unified Discover page to search across anime or manga, switching search modes with the header toggle slider.
+3. **Stream or Read:** Select a title to watch instantly in the custom HTML5 video player, or read chapters in the built-in manga reader.
+4. **Synchronized Playback:** Jump to the **Watch Together** tab to host or join a synced watch room with friends.
+5. **Bulk Download:** Select episodes/chapters from the detail view, choose your format (Sub/Dub/HSUB), and track queues in the Downloads tab.
 
 ## Videos
 
@@ -84,16 +88,17 @@ This is a Node.js-based anime & manga downloader that allows you to download ani
 
 ## Configuration
 
-1. Connect your MyAnimeList account via authorization.
-2. Select what you want to do with new anime or manga (e.g., add to plan-to-watch or plan-to-read).
-3. Select custom quality.
-4. Provider Options: Hianime & AnimePahe
+Navigate to the settings tab to configure your StrawVerse application:
 
-- Hianime Subtitle Downloads: Hianime supports subtitle downloads, and users can select to download subtitles in a folder or merge them with video.
+1. **MyAnimeList Integration:** Authenticate your MAL account via OAuth to enable plan-to-watch/plan-to-read automatic list tracking.
+2. **Player Settings:** Configure subtitle styling and downloading preferences. Hianime provider streams support subtitle track extraction—choose to save subtitle tracks as raw external files or merge them directly into the output MP4 container.
+3. **Quality Preferences:** Customize preferred resolution fallbacks for scrapers.
+4. **Server & Mapping URL:** Reset or configure the address of the central mapping server. Verify connection endpoints with the integrated health test control.
+5. **Storage & Cache:** Set size limits for poster image disk caching (default 5GB). The app implements LRU cache eviction and automatically purges cached assets older than 6 days.
 
 ## Uninstalling the Application
 
-### 💻 For Windows:
+### For Windows
 
 To delete the application, navigate to the following directory:
 
@@ -103,7 +108,7 @@ C:\Users\USERNAME\AppData\Local\Programs\StrawVerse
 
 Then, run `Uninstall StrawVerse.exe`.
 
-### 🐧 For Linux:
+### For Linux
 
 - **AppImage:** Simply delete the downloaded `.AppImage` file. If you want to clean up application configurations, delete the `~/.config/strawverse` directory.
 - **Snap:** Run the following command in your terminal:
