@@ -14,6 +14,7 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
+  MessageSquare,
 } from "lucide-react";
 
 export default function WatchTogetherView({ onNavigate }) {
@@ -37,6 +38,16 @@ export default function WatchTogetherView({ onNavigate }) {
   const [isChatExpanded, setIsChatExpanded] = useState(true);
   const [expandedSearchItem, setExpandedSearchItem] = useState(null);
   const [searchDropdownVisible, setSearchDropdownVisible] = useState(false);
+
+  const [lastReadCount, setLastReadCount] = useState(0);
+
+  useEffect(() => {
+    if (isChatExpanded) {
+      setLastReadCount(chatList.length);
+    }
+  }, [chatList.length, isChatExpanded]);
+
+  const unreadCount = isChatExpanded ? 0 : chatList.length - lastReadCount;
 
 
   const [providers, setProviders] = useState([]);
@@ -280,6 +291,7 @@ export default function WatchTogetherView({ onNavigate }) {
     setSelectedAnimeDetails(null);
     setLoadingEpisodes(true);
     setAnimeEpisodes([]);
+    setSearchDropdownVisible(false);
     try {
       const resInfo = await fetch(
         `/api/info/Anime/${encodeURIComponent(selectedProvider)}`,
@@ -307,7 +319,32 @@ export default function WatchTogetherView({ onNavigate }) {
         }),
       });
       const epData = await resEp.json();
-      setAnimeEpisodes(epData?.episodes || infoData?.episodes || []);
+      const episodesList = epData?.episodes || infoData?.episodes || [];
+      setAnimeEpisodes(episodesList);
+
+      if (episodesList.length > 0) {
+        const sorted = [...episodesList].sort((a, b) => {
+          const aNum = typeof a.number === "number" ? a.number : parseFloat(a.number) || 0;
+          const bNum = typeof b.number === "number" ? b.number : parseFloat(b.number) || 0;
+          return aNum - bNum;
+        });
+        const firstEp = sorted[0];
+        if (firstEp) {
+          const epNum = typeof firstEp.number === "number" ? firstEp.number : parseFloat(firstEp.number) || 1;
+          const mediaObj = {
+            id: item.id,
+            ep: firstEp.id || firstEp.number || 1,
+            animeTitle: item.title,
+            provider: selectedProvider,
+            image: item.image,
+            episodesList: episodesList,
+          };
+          setActiveMedia(mediaObj);
+          if (watchTogetherClient.roomCode) {
+            watchTogetherClient.sendLoadMedia(1, 100, epNum);
+          }
+        }
+      }
     } catch (err) {
       console.error("Failed to fetch info or episodes:", err);
     } finally {
@@ -707,8 +744,15 @@ export default function WatchTogetherView({ onNavigate }) {
       {/* TOP BAR */}
       <div className="wt-top-bar">
         <div className="wt-top-left">
-          <Radio size={16} className="animate-pulse" color="#10b981" />
-          <span className="wt-room-code">{roomCode}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#10b981", fontSize: "0.85rem", fontWeight: "600" }} title={`${users.length} watcher(s) online`}>
+            <Users size={16} />
+            <span>{users.length}</span>
+          </div>
+          <span className="wt-room-code" style={{ marginLeft: 4 }}>{roomCode}</span>
+          <button className="wt-btn-copy-sm" onClick={handleCopyCode} title="Copy Room Code" style={{ padding: "4px 8px", fontSize: "0.75rem" }}>
+            {copied ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
+            <span>{copied ? "Copied!" : "Copy"}</span>
+          </button>
         </div>
 
         <div className="wt-top-search-wrapper">
@@ -742,49 +786,14 @@ export default function WatchTogetherView({ onNavigate }) {
               </div>
               <div className="wt-search-dropdown-list">
                 {searchResults.map((item, idx) => (
-                  <div key={idx} className={`wt-search-dropdown-item ${expandedSearchItem?.id === item.id ? 'expanded' : ''}`}>
+                  <div
+                    key={idx}
+                    className="wt-search-dropdown-item"
+                    onClick={() => handleSelectAnime(item)}
+                  >
                     <img src={item.image} alt={item.title} className="wt-sd-image" />
                     <div className="wt-sd-info">
                        <span className="wt-sd-title">{item.title}</span>
-                       <div className="wt-sd-actions">
-                         {expandedSearchItem?.id === item.id ? (
-                           loadingEpisodes ? (
-                             <span style={{fontSize: "0.75rem", color: "#9ca3af"}}>Loading episodes...</span>
-                           ) : (
-                             <div className="wt-sd-episode-select-row">
-                               <select className="wt-sd-ep-select" id={`ep-select-${item.id}`}>
-                                 {animeEpisodes.map(ep => (
-                                   <option key={ep.id} value={JSON.stringify(ep)}>
-                                     Ep {ep.number || ep.id}
-                                   </option>
-                                 ))}
-                               </select>
-                               <button className="wt-btn-play-sm" onClick={() => {
-                                 const select = document.getElementById(`ep-select-${item.id}`);
-                                 if(!select || !select.value) return;
-                                 const ep = JSON.parse(select.value);
-                                 handlePlayFromDropdown(item, ep);
-                                 setSearchDropdownVisible(false);
-                               }}>Play</button>
-                               <button className="wt-btn-queue-sm" onClick={() => {
-                                 const select = document.getElementById(`ep-select-${item.id}`);
-                                 if(!select || !select.value) return;
-                                 const ep = JSON.parse(select.value);
-                                 handleAddToQueueFromDropdown(item, ep);
-                                 setSearchDropdownVisible(false);
-                               }}>Queue</button>
-                             </div>
-                           )
-                         ) : (
-                           <button className="wt-sd-expand-btn" onClick={(e) => {
-                             e.stopPropagation();
-                             setExpandedSearchItem(item);
-                             handleSelectAnime(item);
-                           }}>
-                             Select Episode
-                           </button>
-                         )}
-                       </div>
                     </div>
                   </div>
                 ))}
@@ -794,10 +803,6 @@ export default function WatchTogetherView({ onNavigate }) {
         </div>
 
         <div className="wt-top-right">
-          <button className="wt-btn-copy-sm" onClick={handleCopyCode} title="Copy Room Code">
-            {copied ? <Check size={14} color="#10b981" /> : <Copy size={14} />}
-            <span>{copied ? "Copied!" : "Copy"}</span>
-          </button>
           <button className="wt-btn-exit-sm" onClick={() => watchTogetherClient.disconnect()} title="Leave Room">
             <LogOut size={14} color="#f87171" /> Leave Room
           </button>
@@ -812,8 +817,7 @@ export default function WatchTogetherView({ onNavigate }) {
       )}
 
       <div className="wt-main-body">
-        {/* LEFT CONTENT */}
-        <div className="wt-left-content">
+        <div className="wt-left-content" style={{ marginRight: isChatExpanded ? "340px" : "50px", transition: "margin-right 0.3s ease" }}>
           <div className="wt-player-area">
             {activeMedia ? (
               <VideoPlayer
@@ -896,6 +900,112 @@ export default function WatchTogetherView({ onNavigate }) {
                 </div>
               </div>
             )}
+
+            {/* Anime episodes section */}
+            {loadingEpisodes && (
+              <div style={{ padding: "20px 0", color: "#a78bfa", fontSize: "0.9rem", fontWeight: "600" }}>
+                Loading episodes list...
+              </div>
+            )}
+
+            {selectedAnime && !loadingEpisodes && animeEpisodes.length > 0 && (
+              <div className="wt-episodes-section" style={{ marginTop: 20, marginBottom: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 12 }}>
+                  <h4 style={{ margin: 0, color: "#fff", fontSize: "0.95rem" }}>Episodes</h4>
+                  
+                  {/* Episode Selection Controls */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {/* Search Input */}
+                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                      <input
+                        type="text"
+                        placeholder="Search ep..."
+                        value={episodeSearchQuery}
+                        onChange={(e) => setEpisodeSearchQuery(e.target.value)}
+                        style={{
+                          background: "rgba(0, 0, 0, 0.4)",
+                          border: "1px solid rgba(255, 255, 255, 0.1)",
+                          borderRadius: 6,
+                          padding: "6px 28px 6px 10px",
+                          color: "#fff",
+                          fontSize: "0.75rem",
+                          width: "120px",
+                          outline: "none"
+                        }}
+                      />
+                      {episodeSearchQuery && (
+                        <button
+                          onClick={() => setEpisodeSearchQuery("")}
+                          style={{
+                            position: "absolute",
+                            right: 8,
+                            background: "none",
+                            border: "none",
+                            color: "#9ca3af",
+                            cursor: "pointer",
+                            padding: 0,
+                            display: "flex",
+                            alignItems: "center"
+                          }}
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Sub/Dub Dropdown */}
+                    <select
+                      className="wt-btn-provider-dropdown"
+                      value={dubSelect}
+                      onChange={(e) => setDubSelect(e.target.value)}
+                      style={{ padding: "4px 8px", fontSize: "0.75rem" }}
+                    >
+                      <option value="sub">SUB</option>
+                      <option value="dub">DUB</option>
+                      <option value="all">ALL</option>
+                    </select>
+
+                    {/* Sort Dropdown */}
+                    <select
+                      className="wt-btn-provider-dropdown"
+                      value={sortOrder}
+                      onChange={(e) => setSortOrder(e.target.value)}
+                      style={{ padding: "4px 8px", fontSize: "0.75rem" }}
+                    >
+                      <option value="asc">ASC</option>
+                      <option value="desc">DESC</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Episodes List */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "350px", overflowY: "auto", paddingRight: 8 }}>
+                  {filteredEpisodes.length === 0 ? (
+                    <div style={{ color: "#6b7280", fontSize: "0.85rem", padding: "10px 0" }}>No matching episodes found.</div>
+                  ) : (
+                    filteredEpisodes.map((ep, idx) => (
+                      <div key={idx} className="wt-queue-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span className="wt-queue-idx">#{ep.number || ep.id}</span>
+                        <span className="wt-queue-item-title" style={{ flex: 1, marginLeft: 12 }}>
+                          {ep.title || `Episode ${ep.number || ep.id}`}
+                        </span>
+                        {hasPrivileges && (
+                          <div className="wt-queue-actions">
+                            <button className="wt-btn-play-sm" onClick={() => handlePlayEpisode(ep)}>
+                              <Play size={10} /> Play
+                            </button>
+                            <button className="wt-btn-queue-sm" onClick={() => handleAddToQueue(ep)}>
+                              Queue
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+
 
             <div className="wt-queue-header">
                <h4>Watch Queue</h4>
@@ -982,16 +1092,19 @@ export default function WatchTogetherView({ onNavigate }) {
           ) : (
             /* Collapsed state: slim vertical bar with expand arrow */
             <div className="wt-chat-collapsed-bar">
-              {chatList.length > 0 && (
-                <span className="wt-chat-badge-vert">{chatList.length > 9 ? "9+" : chatList.length}</span>
-              )}
               <button
                 onClick={() => setIsChatExpanded(true)}
-                className="wt-chat-collapse-btn"
+                className="wt-chat-collapsed-icon"
                 title="Expand chat"
               >
-                <ChevronLeft size={16} />
+                <MessageSquare size={16} />
               </button>
+
+              {unreadCount > 0 && (
+                <div className="wt-chat-unread-circle" title={`${unreadCount} new message(s)`}>
+                  {unreadCount}
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -205,15 +205,20 @@
   z-index: 50;
 }
 
-.wt-top-left, .wt-top-right {
+.wt-top-left {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 250px;
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .wt-top-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 .wt-room-code {
@@ -420,12 +425,15 @@
 }
 
 .wt-player-area {
-  flex: 6; /* 6/8 of the view vertically ideally, or just relative proportion */
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  max-height: 65vh;
   background: #000;
   display: flex;
   align-items: center;
   justify-content: center;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 /* Bottom Info Section */
@@ -532,8 +540,6 @@
 
 /* Queue Scroll Area */
 .wt-queue-scroll {
-  flex: 2;
-  overflow-y: auto;
   padding: 10px 24px;
   background: radial-gradient(circle at top left, rgba(124, 58, 237, 0.05) 0%, transparent 60%);
 }
@@ -592,8 +598,14 @@
   background: rgba(17, 17, 27, 0.95);
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
+  flex-direction: column;
   transition: width 0.3s ease;
   overflow: hidden;
+  position: fixed;
+  top: 54px;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
 }
 
 .wt-right-chat.expanded {
@@ -617,9 +629,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 12px;
-  background: rgba(124, 58, 237, 0.1);
-  border-bottom: 1px solid rgba(139, 92, 246, 0.2);
+  flex: 1;
+  min-width: 0;
 }
 
 .wt-chat-users-text {
@@ -949,15 +960,56 @@
   flex-direction: column;
   align-items: center;
   padding-top: 16px;
+  padding-bottom: 16px;
   gap: 12px;
   width: 100%;
+  height: 100%;
 }
 
-.wt-chat-badge-vert {
+.wt-chat-collapsed-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: #a78bfa;
+  transition: all 0.2s ease;
+}
+
+.wt-chat-collapsed-icon:hover {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: rgba(167, 139, 250, 0.55);
+  color: #fff;
+  transform: scale(1.05);
+}
+
+.wt-chat-unread-circle {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
   background: #ef4444;
   color: #fff;
-  font-size: 0.65rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.72rem;
   font-weight: 700;
-  padding: 2px 6px;
-  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.4);
+  animation: wtPulse 2s infinite;
+}
+
+@keyframes wtPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
 }

@@ -445,10 +445,23 @@ export default function VideoPlayer({
     }
   };
 
-  // Local navigation states
   const [currentEpisode, setCurrentEpisode] = useState(episodeNumOrId);
   const [isCurrentDownloaded, setIsCurrentDownloaded] = useState(isDownloaded);
   const [playerSubDub, setPlayerSubDub] = useState(subdub || "sub");
+
+  useEffect(() => {
+    setCurrentEpisode(episodeNumOrId);
+  }, [episodeNumOrId]);
+
+  useEffect(() => {
+    setIsCurrentDownloaded(isDownloaded);
+  }, [isDownloaded]);
+
+  useEffect(() => {
+    if (subdub) {
+      setPlayerSubDub(subdub);
+    }
+  }, [subdub]);
 
   // Helper to determine if an episode number is downloaded
   const isEpDownloaded = (num, currentLang = playerSubDub) => {
@@ -470,7 +483,7 @@ export default function VideoPlayer({
     if (isCurrentDownloaded) {
       return Number(item.number) === Number(currentEpisode);
     } else {
-      return item.id === currentEpisode;
+      return item.id === currentEpisode || Number(item.number) === Number(currentEpisode);
     }
   });
 
@@ -653,6 +666,8 @@ export default function VideoPlayer({
     setSelectedSource(null);
 
     try {
+      const targetEp = currentEpisodeObj ? currentEpisodeObj.id : currentEpisode;
+      const targetEpNum = currentEpisodeObj ? currentEpisodeObj.number : currentEpisode;
       const response = await fetch("/api/watch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -660,12 +675,12 @@ export default function VideoPlayer({
           isCurrentDownloaded
             ? {
                 ep: id,
-                epNum: currentEpisode,
+                epNum: targetEpNum,
                 Downloaded: true,
                 subdub: playerSubDub,
               }
             : {
-                ep: currentEpisode,
+                ep: targetEp,
                 Downloaded: false,
                 subdub: playerSubDub,
                 provider: provider,
