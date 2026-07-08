@@ -513,25 +513,43 @@ async function autoTrackMAL(type, mediaId, number) {
       malid = parseInt(localRecord.MalID);
     }
 
-    if (!malid && global.mappingDb && type === "Anime") {
-      try {
-        const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
-        const row = global.mappingDb
-          .prepare(
-            `
-            SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
-            UNION
-            SELECT malid FROM anikototv WHERE id = ?
-            UNION
-            SELECT malid FROM anineko WHERE id = ?
-            LIMIT 1
-          `,
-          )
-          .get(strippedId, strippedId, strippedId, strippedId);
-        if (row?.malid) {
-          malid = parseInt(row.malid);
-        }
-      } catch (err) {}
+    if (!malid && global.mappingDb) {
+      if (type === "Anime") {
+        try {
+          const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
+          const row = global.mappingDb
+            .prepare(
+              `
+              SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
+              UNION
+              SELECT malid FROM anikototv WHERE id = ?
+              UNION
+              SELECT malid FROM anineko WHERE id = ?
+              LIMIT 1
+            `,
+            )
+            .get(strippedId, strippedId, strippedId, strippedId);
+          if (row?.malid) {
+            malid = parseInt(row.malid);
+          }
+        } catch (err) {}
+      } else if (type === "Manga") {
+        try {
+          const row = global.mappingDb
+            .prepare(
+              `
+              SELECT malid FROM weebcentral WHERE id = ?
+              UNION
+              SELECT malid FROM allmanga WHERE id = ?
+              LIMIT 1
+            `,
+            )
+            .get(mediaId, mediaId);
+          if (row?.malid) {
+            malid = parseInt(row.malid);
+          }
+        } catch (err) {}
+      }
     }
 
     if (malid) {

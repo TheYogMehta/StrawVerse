@@ -78,23 +78,35 @@ async function MetadataAdd(type, valuesToAdd) {
         valuesToAdd.MalID = customMappingRow.malid
           ? String(customMappingRow.malid)
           : null;
-      } else if (type === "Anime" && global.mappingDb && cleanId) {
+      } else if (global.mappingDb && cleanId) {
         const providerName = (valuesToAdd.provider || "").toLowerCase();
         let match = null;
-        if (providerName.includes("pahe")) {
-          match = global.mappingDb
-            .prepare(
-              "SELECT malid FROM animepahe WHERE id = ? OR uuid = ? LIMIT 1",
-            )
-            .get(cleanId, cleanId);
-        } else if (providerName.includes("anikoto")) {
-          match = global.mappingDb
-            .prepare("SELECT malid FROM anikototv WHERE id = ? LIMIT 1")
-            .get(cleanId);
-        } else if (providerName.includes("anineko")) {
-          match = global.mappingDb
-            .prepare("SELECT malid FROM anineko WHERE id = ? LIMIT 1")
-            .get(cleanId);
+        if (type === "Anime") {
+          if (providerName.includes("pahe")) {
+            match = global.mappingDb
+              .prepare(
+                "SELECT malid FROM animepahe WHERE id = ? OR uuid = ? LIMIT 1",
+              )
+              .get(cleanId, cleanId);
+          } else if (providerName.includes("anikoto")) {
+            match = global.mappingDb
+              .prepare("SELECT malid FROM anikototv WHERE id = ? LIMIT 1")
+              .get(cleanId);
+          } else if (providerName.includes("anineko")) {
+            match = global.mappingDb
+              .prepare("SELECT malid FROM anineko WHERE id = ? LIMIT 1")
+              .get(cleanId);
+          }
+        } else if (type === "Manga") {
+          if (providerName.includes("weebcentral")) {
+            match = global.mappingDb
+              .prepare("SELECT malid FROM weebcentral WHERE id = ? LIMIT 1")
+              .get(cleanId);
+          } else if (providerName.includes("allmanga")) {
+            match = global.mappingDb
+              .prepare("SELECT malid FROM allmanga WHERE id = ? LIMIT 1")
+              .get(cleanId);
+          }
         }
         if (match?.malid) {
           valuesToAdd.MalID = String(match.malid);

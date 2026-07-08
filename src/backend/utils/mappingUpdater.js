@@ -31,6 +31,9 @@ function deserializeDelta(buffer) {
     2: "animepahe",
     3: "anikototv",
     4: "anineko",
+    5: "manga",
+    6: "weebcentral",
+    7: "allmanga",
   };
   const actRevMap = { 1: "INSERT", 2: "UPDATE", 3: "DELETE" };
 
@@ -150,7 +153,10 @@ async function checkForMappingUpdates() {
     !tableExists("anime") ||
     !tableExists("animepahe") ||
     !tableExists("anikototv") ||
-    !tableExists("anineko");
+    !tableExists("anineko") ||
+    !tableExists("manga") ||
+    !tableExists("weebcentral") ||
+    !tableExists("allmanga");
 
   let action = "full_sync";
   let latestVersion = null;
@@ -268,6 +274,9 @@ async function checkForMappingUpdates() {
         const stmtInsertAnime = global.mappingDb.prepare(
           "INSERT OR REPLACE INTO anime (malid, livechart_id) VALUES (?, ?)",
         );
+        const stmtInsertManga = global.mappingDb.prepare(
+          "INSERT OR REPLACE INTO manga (malid) VALUES (?)",
+        );
         const stmtInsertAnimepahe = global.mappingDb.prepare(
           "INSERT OR REPLACE INTO animepahe (id, uuid, malid) VALUES (?, ?, ?)",
         );
@@ -276,6 +285,12 @@ async function checkForMappingUpdates() {
         );
         const stmtInsertAnineko = global.mappingDb.prepare(
           "INSERT OR REPLACE INTO anineko (id, malid) VALUES (?, ?)",
+        );
+        const stmtInsertWeebcentral = global.mappingDb.prepare(
+          "INSERT OR REPLACE INTO weebcentral (id, malid) VALUES (?, ?)",
+        );
+        const stmtInsertAllmanga = global.mappingDb.prepare(
+          "INSERT OR REPLACE INTO allmanga (id, malid) VALUES (?, ?)",
         );
         const stmtInsertChangelog = global.mappingDb.prepare(
           "INSERT OR REPLACE INTO mapping_changelog (id, version, action, tbl, row_id, data) VALUES (?, ?, ?, ?, ?, ?)",
@@ -288,6 +303,8 @@ async function checkForMappingUpdates() {
             const parsedData = JSON.parse(data);
             if (tbl === "anime") {
               stmtInsertAnime.run(parsedData.malid, parsedData.livechart_id);
+            } else if (tbl === "manga") {
+              stmtInsertManga.run(parsedData.malid);
             } else if (tbl === "animepahe") {
               stmtInsertAnimepahe.run(
                 parsedData.id,
@@ -298,11 +315,15 @@ async function checkForMappingUpdates() {
               stmtInsertAnikototv.run(parsedData.id, parsedData.malid);
             } else if (tbl === "anineko") {
               stmtInsertAnineko.run(parsedData.id, parsedData.malid);
+            } else if (tbl === "weebcentral") {
+              stmtInsertWeebcentral.run(parsedData.id, parsedData.malid);
+            } else if (tbl === "allmanga") {
+              stmtInsertAllmanga.run(parsedData.id, parsedData.malid);
             }
           } else if (act === "DELETE") {
-            if (tbl === "anime") {
+            if (tbl === "anime" || tbl === "manga") {
               global.mappingDb
-                .prepare("DELETE FROM anime WHERE malid = ?")
+                .prepare(`DELETE FROM ${tbl} WHERE malid = ?`)
                 .run(row_id);
             } else {
               global.mappingDb
