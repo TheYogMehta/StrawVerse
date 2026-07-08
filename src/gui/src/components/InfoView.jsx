@@ -35,7 +35,8 @@ export default function InfoView({
   const [details, setDetails] = useState(null);
 
   const onWatch = async (...args) => {
-    const isNotInLibrary = !currentTags || currentTags.length === 0 || !currentTags[0];
+    const isNotInLibrary =
+      !currentTags || currentTags.length === 0 || !currentTags[0];
     if (isNotInLibrary) {
       await saveTags("Watching");
       triggerPulse();
@@ -49,7 +50,8 @@ export default function InfoView({
   };
 
   const onRead = async (...args) => {
-    const isNotInLibrary = !currentTags || currentTags.length === 0 || !currentTags[0];
+    const isNotInLibrary =
+      !currentTags || currentTags.length === 0 || !currentTags[0];
     if (isNotInLibrary) {
       await saveTags("Reading");
       triggerPulse();
@@ -79,10 +81,10 @@ export default function InfoView({
   const [lastClickedId, setLastClickedId] = useState(null);
   const [isRangeInputInvalid, setIsRangeInputInvalid] = useState(false);
   const [sortOrder, setSortOrder] = useState(
-    () => localStorage.getItem("info_sort_order") || "asc"
+    () => localStorage.getItem("info_sort_order") || "asc",
   );
   const [sortDirection, setSortDirection] = useState(
-    () => localStorage.getItem("info_sort_direction") || "asc"
+    () => localStorage.getItem("info_sort_direction") || "asc",
   );
 
   const formatTime = (seconds) => {
@@ -1552,6 +1554,7 @@ export default function InfoView({
           id: details.id,
           provider: details.provider,
           MalID: selectedMalId,
+          title: details.title,
         }),
       });
       const linkData = await linkRes.json();
@@ -1607,6 +1610,7 @@ export default function InfoView({
           id: details.id,
           provider: details.provider,
           MalID: "",
+          title: details.title,
         }),
       });
       const data = await response.json();
@@ -2657,7 +2661,10 @@ export default function InfoView({
                       }}
                     />
                   )}
-                  <span className="item-num" style={{ fontWeight: "600", fontSize: "14px" }}>
+                  <span
+                    className="item-num"
+                    style={{ fontWeight: "600", fontSize: "14px" }}
+                  >
                     {type === "Anime"
                       ? `Episode ${item.number}`
                       : `Chapter ${item.number}`}
@@ -2676,43 +2683,59 @@ export default function InfoView({
                     overflow: "hidden",
                   }}
                 >
-                  {type === "Anime" && item.title && item.title !== `Episode ${item.number}` && (
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "var(--text-muted)",
-                        fontWeight: "500",
-                        textOverflow: "ellipsis",
-                        overflow: "hidden",
-                        whiteSpace: "nowrap",
-                        maxWidth: "280px",
-                      }}
-                      title={item.title}
-                    >
-                      {item.title}
-                    </span>
-                  )}
-                  {type === "Manga" && item.title && item.title !== `Chapter ${item.number}` && (
-                    <span
-                      style={{
-                        fontSize: "13px",
-                        color: "var(--text-muted)",
-                        fontWeight: "500",
-                        textOverflow: "ellipsis",
-                        overflow: "hidden",
-                        whiteSpace: "nowrap",
-                        maxWidth: "280px",
-                      }}
-                      title={item.title}
-                    >
-                      {item.title}
-                    </span>
-                  )}
+                  {type === "Anime" &&
+                    item.title &&
+                    item.title !== `Episode ${item.number}` && (
+                      <span
+                        style={{
+                          fontSize: "13px",
+                          color: "var(--text-muted)",
+                          fontWeight: "500",
+                          textOverflow: "ellipsis",
+                          overflow: "hidden",
+                          whiteSpace: "nowrap",
+                          maxWidth: "280px",
+                        }}
+                        title={item.title}
+                      >
+                        {item.title}
+                      </span>
+                    )}
+                  {type === "Manga" &&
+                    item.title &&
+                    item.title !== `Chapter ${item.number}` && (
+                      <span
+                        style={{
+                          fontSize: "13px",
+                          color: "var(--text-muted)",
+                          fontWeight: "500",
+                          textOverflow: "ellipsis",
+                          overflow: "hidden",
+                          whiteSpace: "nowrap",
+                          maxWidth: "280px",
+                        }}
+                        title={item.title}
+                      >
+                        {item.title}
+                      </span>
+                    )}
                   {(() => {
                     if (!epStatus) return null;
-                    const curVal = type === "Anime" ? epStatus.currentTime : epStatus.currentPage;
-                    const totVal = type === "Anime" ? epStatus.duration : epStatus.totalPages;
-                    if (curVal === undefined || curVal === null || totVal === undefined || totVal === null) return null;
+                    const curVal =
+                      type === "Anime"
+                        ? epStatus.currentTime
+                        : epStatus.currentPage;
+                    const totVal =
+                      type === "Anime"
+                        ? epStatus.duration
+                        : epStatus.totalPages;
+                    if (
+                      curVal === undefined ||
+                      curVal === null ||
+                      totVal === undefined ||
+                      totVal === null
+                    )
+                      return null;
 
                     return (
                       <div
@@ -2739,7 +2762,9 @@ export default function InfoView({
                             style={{
                               width: `${Math.min(100, Math.max(0, (curVal / (totVal || 1)) * 100))}%`,
                               height: "100%",
-                              backgroundColor: epStatus.isCompleted ? "#34d399" : "var(--accent)",
+                              backgroundColor: epStatus.isCompleted
+                                ? "#34d399"
+                                : "var(--accent)",
                               borderRadius: "2px",
                             }}
                           />
