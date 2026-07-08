@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import watchTogetherClient from "../utils/watchTogetherClient";
 import VideoPlayer from "./VideoPlayer";
+import Swal from "sweetalert2";
 import "./css/WatchTogetherView.css";
 import {
   Users,
@@ -15,6 +16,9 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageSquare,
+  Plus,
+  ArrowUpDown,
+  ListVideo,
 } from "lucide-react";
 
 export default function WatchTogetherView({ onNavigate }) {
@@ -59,6 +63,7 @@ export default function WatchTogetherView({ onNavigate }) {
   const [activeMedia, setActiveMedia] = useState(null);
   const [selectedAnime, setSelectedAnime] = useState(null);
   const [selectedAnimeDetails, setSelectedAnimeDetails] = useState(null);
+  const [isSynopsisCollapsed, setIsSynopsisCollapsed] = useState(false);
   const [animeEpisodes, setAnimeEpisodes] = useState([]);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
 
@@ -322,7 +327,7 @@ export default function WatchTogetherView({ onNavigate }) {
       const episodesList = epData?.episodes || infoData?.episodes || [];
       setAnimeEpisodes(episodesList);
 
-      if (episodesList.length > 0) {
+      if (episodesList.length > 0 && !activeMedia && queue.length === 0) {
         const sorted = [...episodesList].sort((a, b) => {
           const aNum = typeof a.number === "number" ? a.number : parseFloat(a.number) || 0;
           const bNum = typeof b.number === "number" ? b.number : parseFloat(b.number) || 0;
@@ -465,9 +470,14 @@ export default function WatchTogetherView({ onNavigate }) {
         start = 1;
         end = parseInt(singleMatch[1]);
       } else {
-        alert(
-          "Invalid range format. Please use e.g. '1-50', '1 to 50', or '50'.",
-        );
+        Swal.fire({
+          title: "Invalid Range",
+          text: "Invalid range format. Please use e.g. '1-50', '1 to 50', or '50'.",
+          icon: "error",
+          background: "var(--bg-secondary)",
+          color: "var(--text-main)",
+          confirmButtonColor: "var(--accent)",
+        });
         return;
       }
     }
@@ -668,22 +678,19 @@ export default function WatchTogetherView({ onNavigate }) {
           <div className="wt-landing-grid">
             {/* Create Room Card */}
             <div className="wt-landing-box">
-              <Radio size={36} color="#a78bfa" />
-              <h3>Create Watch Room</h3>
-              <p>
-                Host a new synchronized room and share your code with friends.
-              </p>
+              <div className="wt-landing-box-top">
+                <div className="wt-landing-icon-wrapper">
+                  <Radio size={28} color="#c084fc" />
+                </div>
+                <h3>Create Watch Room</h3>
+              </div>
+              
+              <div className="wt-landing-box-middle">
+                <p>Host a new watch room and share code with friends.</p>
+              </div>
 
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                  width: "100%",
-                  marginTop: 20,
-                }}
-              >
-                <button className="wt-btn-primary" onClick={handleCreateRoom}>
+              <div className="wt-landing-box-bottom">
+                <button className="wt-btn-primary wt-btn-landing" onClick={handleCreateRoom}>
                   Create Watch Room
                 </button>
               </div>
@@ -691,46 +698,33 @@ export default function WatchTogetherView({ onNavigate }) {
 
             {/* Join Room Card */}
             <div className="wt-landing-box">
-              <Users size={36} color="#a78bfa" />
-              <h3>Join Watch Room</h3>
-              <p>Enter the 6-character room code provided by the host.</p>
-
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 12,
-                  width: "100%",
-                  marginTop: 16,
-                }}
-              >
-                <div style={{ textAlign: "left" }}>
-                  <label
-                    style={{
-                      fontSize: "0.8rem",
-                      color: "#a78bfa",
-                      fontWeight: 600,
-                    }}
-                  >
-                    Enter Room Code:
-                  </label>
-                  <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-                    <input
-                      type="text"
-                      className="wt-input"
-                      placeholder="ROOM CODE"
-                      value={joinInput}
-                      onChange={(e) => setJoinInput(e.target.value)}
-                    />
-                    <button
-                      className="wt-btn-primary"
-                      style={{ width: "auto" }}
-                      onClick={handleJoinRoom}
-                    >
-                      Join
-                    </button>
-                  </div>
+              <div className="wt-landing-box-top">
+                <div className="wt-landing-icon-wrapper">
+                  <Users size={28} color="#c084fc" />
                 </div>
+                <h3>Join Watch Room</h3>
+              </div>
+              
+              <div className="wt-landing-box-middle">
+                <p>Enter the room code to connect instantly.</p>
+              </div>
+
+              <div className="wt-landing-box-bottom">
+                <input
+                  type="text"
+                  className="wt-join-input"
+                  placeholder="Enter 6-digit code..."
+                  value={joinInput}
+                  onChange={(e) => setJoinInput(e.target.value)}
+                  maxLength={6}
+                />
+                <button
+                  className={joinInput.trim().length === 6 ? "wt-btn-primary wt-btn-landing" : "wt-btn-secondary wt-btn-landing"}
+                  onClick={handleJoinRoom}
+                  disabled={joinInput.trim().length !== 6}
+                >
+                  Join Room
+                </button>
               </div>
             </div>
           </div>
@@ -744,12 +738,8 @@ export default function WatchTogetherView({ onNavigate }) {
       {/* TOP BAR */}
       <div className="wt-top-bar">
         <div className="wt-top-left">
-          <div style={{ display: "flex", alignItems: "center", gap: 4, color: "#10b981", fontSize: "0.85rem", fontWeight: "600" }} title={`${users.length} watcher(s) online`}>
-            <Users size={16} />
-            <span>{users.length}</span>
-          </div>
-          <span className="wt-room-code" style={{ marginLeft: 4 }}>{roomCode}</span>
-          <button className="wt-btn-copy-sm" onClick={handleCopyCode} title="Copy Room Code" style={{ padding: "4px 8px", fontSize: "0.75rem" }}>
+          <span className="wt-room-code">{roomCode}</span>
+          <button className="wt-btn-copy-sm" onClick={handleCopyCode} title="Copy Room Code">
             {copied ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
             <span>{copied ? "Copied!" : "Copy"}</span>
           </button>
@@ -772,7 +762,7 @@ export default function WatchTogetherView({ onNavigate }) {
                 }}
               />
             </div>
-            <button type="submit" className="wt-btn-primary" disabled={isSearching} style={{ padding: "6px 12px", fontSize: "0.75rem", width: "auto" }}>
+            <button type="submit" className="wt-btn-primary" disabled={isSearching}>
               {isSearching ? "..." : "Search"}
             </button>
           </form>
@@ -873,8 +863,6 @@ export default function WatchTogetherView({ onNavigate }) {
               )}
             </div>
             
-            <div className="wt-info-separator" />
-            
             <div className="wt-next-info">
               <span className="wt-next-label">Next in Queue</span>
               {queue.length > 0 ? (
@@ -888,17 +876,81 @@ export default function WatchTogetherView({ onNavigate }) {
           <div className="wt-queue-scroll">
             {/* Anime description section */}
             {selectedAnime && selectedAnimeDetails?.description && (
-              <div className="wt-scroll-description">
-                <img
-                  src={selectedAnimeDetails?.image || selectedAnime.image}
-                  alt={selectedAnime.title}
-                  className="wt-scroll-poster"
-                />
-                <div className="wt-scroll-desc-body">
-                  <span className="wt-scroll-anime-title">{selectedAnimeDetails?.title || selectedAnime.title}</span>
-                  <p className="wt-scroll-desc-text">{selectedAnimeDetails.description}</p>
+              isSynopsisCollapsed && activeMedia ? (
+                <div className="wt-collapsed-synopsis-bar" style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "10px 16px",
+                  background: "rgba(255, 255, 255, 0.02)",
+                  border: "1px solid rgba(255, 255, 255, 0.06)",
+                  borderRadius: "8px",
+                  marginBottom: "12px"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <img
+                      src={selectedAnimeDetails?.image || selectedAnime.image}
+                      alt={selectedAnime.title}
+                      style={{ width: "32px", height: "45px", objectFit: "cover", borderRadius: "4px" }}
+                    />
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontSize: "0.85rem", fontWeight: "700", color: "#fff" }}>
+                        {selectedAnimeDetails?.title || selectedAnime.title}
+                      </span>
+                      <span style={{ fontSize: "0.72rem", color: "#cbd5e1" }}>Synopsis & poster collapsed</span>
+                    </div>
+                  </div>
+                  <button
+                    className="wt-btn-toggle-synopsis"
+                    onClick={() => setIsSynopsisCollapsed(false)}
+                    style={{
+                      background: "rgba(124, 58, 237, 0.15)",
+                      border: "1px solid rgba(124, 58, 237, 0.3)",
+                      borderRadius: "6px",
+                      color: "#c4b5fd",
+                      padding: "4px 10px",
+                      fontSize: "0.75rem",
+                      cursor: "pointer",
+                      fontWeight: "600"
+                    }}
+                  >
+                    Show Info
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <div className="wt-scroll-description">
+                  <img
+                    src={selectedAnimeDetails?.image || selectedAnime.image}
+                    alt={selectedAnime.title}
+                    className="wt-scroll-poster"
+                  />
+                  <div className="wt-scroll-desc-body">
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
+                      <span className="wt-scroll-anime-title">{selectedAnimeDetails?.title || selectedAnime.title}</span>
+                      {activeMedia && (
+                        <button
+                          className="wt-btn-toggle-synopsis"
+                          onClick={() => setIsSynopsisCollapsed(true)}
+                          style={{
+                            background: "rgba(255, 255, 255, 0.05)",
+                            border: "1px solid rgba(255, 255, 255, 0.1)",
+                            borderRadius: "6px",
+                            color: "#c4b5fd",
+                            padding: "4px 10px",
+                            fontSize: "0.75rem",
+                            cursor: "pointer",
+                            fontWeight: "600",
+                            transition: "background 0.2s"
+                          }}
+                        >
+                          Hide Info
+                        </button>
+                      )}
+                    </div>
+                    <p className="wt-scroll-desc-text">{selectedAnimeDetails.description}</p>
+                  </div>
+                </div>
+              )
             )}
 
             {/* Anime episodes section */}
@@ -910,201 +962,491 @@ export default function WatchTogetherView({ onNavigate }) {
 
             {selectedAnime && !loadingEpisodes && animeEpisodes.length > 0 && (
               <div className="wt-episodes-section" style={{ marginTop: 20, marginBottom: 20 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 12 }}>
-                  <h4 style={{ margin: 0, color: "#fff", fontSize: "0.95rem" }}>Episodes</h4>
-                  
-                  {/* Episode Selection Controls */}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    {/* Search Input */}
-                    <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <div className="wt-ep-toolbar">
+                  <h4
+                    style={{
+                      margin: 0,
+                      color: "#fff",
+                      fontSize: "0.92rem",
+                    }}
+                  >
+                    Episodes ({filteredEpisodes.length})
+                  </h4>
+
+                  <div className="wt-ep-toolbar-controls">
+                    {/* Episode Filter Box */}
+                    <div className="wt-ep-search-wrapper">
+                      <Search size={12} className="wt-ep-search-icon" />
                       <input
                         type="text"
-                        placeholder="Search ep..."
+                        className="wt-ep-search-input"
+                        placeholder="Filter episode..."
                         value={episodeSearchQuery}
-                        onChange={(e) => setEpisodeSearchQuery(e.target.value)}
-                        style={{
-                          background: "rgba(0, 0, 0, 0.4)",
-                          border: "1px solid rgba(255, 255, 255, 0.1)",
-                          borderRadius: 6,
-                          padding: "6px 28px 6px 10px",
-                          color: "#fff",
-                          fontSize: "0.75rem",
-                          width: "120px",
-                          outline: "none"
-                        }}
+                        onChange={(e) =>
+                          setEpisodeSearchQuery(e.target.value)
+                        }
                       />
                       {episodeSearchQuery && (
                         <button
+                          className="wt-ep-search-clear"
                           onClick={() => setEpisodeSearchQuery("")}
-                          style={{
-                            position: "absolute",
-                            right: 8,
-                            background: "none",
-                            border: "none",
-                            color: "#9ca3af",
-                            cursor: "pointer",
-                            padding: 0,
-                            display: "flex",
-                            alignItems: "center"
-                          }}
                         >
                           <X size={12} />
                         </button>
                       )}
                     </div>
 
-                    {/* Sub/Dub Dropdown */}
+                    {/* Sub / Dub Selector */}
                     <select
-                      className="wt-btn-provider-dropdown"
+                      className="wt-ep-select-sm"
                       value={dubSelect}
                       onChange={(e) => setDubSelect(e.target.value)}
-                      style={{ padding: "4px 8px", fontSize: "0.75rem" }}
                     >
                       <option value="sub">SUB</option>
                       <option value="dub">DUB</option>
                       <option value="all">ALL</option>
                     </select>
 
-                    {/* Sort Dropdown */}
-                    <select
-                      className="wt-btn-provider-dropdown"
-                      value={sortOrder}
-                      onChange={(e) => setSortOrder(e.target.value)}
-                      style={{ padding: "4px 8px", fontSize: "0.75rem" }}
+                    {/* Sort Order Toggle */}
+                    <button
+                      className="wt-btn-sort-sm"
+                      onClick={() =>
+                        setSortOrder(sortOrder === "asc" ? "desc" : "asc")
+                      }
+                      title="Toggle Sort Order"
                     >
-                      <option value="asc">ASC</option>
-                      <option value="desc">DESC</option>
-                    </select>
+                      <ArrowUpDown size={12} /> {sortOrder.toUpperCase()}
+                    </button>
+
+                    {hasPrivileges && filteredEpisodes.length > 0 && (
+                      <div
+                        style={{
+                          display: "inline-flex",
+                          gap: "6px",
+                          alignItems: "center",
+                        }}
+                      >
+                        <input
+                          type="text"
+                          className="wt-ep-range-input"
+                          placeholder="e.g. 1-50 or 50"
+                          value={rangeValue}
+                          onChange={(e) => setRangeValue(e.target.value)}
+                        />
+                        <button
+                          className="wt-btn-range-queue"
+                          onClick={() => handleQueueRange(rangeValue)}
+                          title="Queue custom range"
+                        >
+                          Queue Range
+                        </button>
+                        <button
+                          className="wt-btn-range-queue"
+                          onClick={() => handleQueueRange("all")}
+                          title="Queue all episodes"
+                        >
+                          Queue All
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
 
-                {/* Episodes List */}
-                <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: "350px", overflowY: "auto", paddingRight: 8 }}>
-                  {filteredEpisodes.length === 0 ? (
-                    <div style={{ color: "#6b7280", fontSize: "0.85rem", padding: "10px 0" }}>No matching episodes found.</div>
-                  ) : (
-                    filteredEpisodes.map((ep, idx) => (
-                      <div key={idx} className="wt-queue-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span className="wt-queue-idx">#{ep.number || ep.id}</span>
-                        <span className="wt-queue-item-title" style={{ flex: 1, marginLeft: 12 }}>
-                          {ep.title || `Episode ${ep.number || ep.id}`}
-                        </span>
+                {filteredEpisodes.length === 0 ? (
+                  <div
+                    style={{
+                      color: "#9ca3af",
+                      fontSize: "0.85rem",
+                      padding: "12px 0",
+                    }}
+                  >
+                    No episodes match your filter.
+                  </div>
+                ) : (
+                  <div className="wt-episodes-grid">
+                    {filteredEpisodes.map((ep, idx) => (
+                      <div key={idx} className="wt-ep-card">
+                        <div className="wt-ep-header">
+                          <span className="wt-ep-number">
+                            Episode {ep.number || ep.id || idx + 1}
+                          </span>
+                          <span className="wt-ep-badge">
+                            {dubSelect.toUpperCase()}
+                          </span>
+                        </div>
+                        {ep.title &&
+                          ep.title.toLowerCase() !==
+                            `episode ${ep.number || idx + 1}`.toLowerCase() &&
+                          ep.title.toLowerCase() !==
+                            `ep ${ep.number || idx + 1}`.toLowerCase() &&
+                          ep.title.toLowerCase() !==
+                            `${ep.number || idx + 1}`.toLowerCase() && (
+                            <div className="wt-ep-title" title={ep.title}>
+                              {ep.title}
+                            </div>
+                          )}
                         {hasPrivileges && (
-                          <div className="wt-queue-actions">
-                            <button className="wt-btn-play-sm" onClick={() => handlePlayEpisode(ep)}>
-                              <Play size={10} /> Play
+                          <div className="wt-ep-actions">
+                            <button
+                              className="wt-btn-play-sm"
+                              onClick={() => handlePlayEpisode(ep)}
+                              title="Play episode together"
+                            >
+                              <Play size={11} /> Play
                             </button>
-                            <button className="wt-btn-queue-sm" onClick={() => handleAddToQueue(ep)}>
-                              Queue
+                            <button
+                              className="wt-btn-queue-sm"
+                              onClick={() => handleAddToQueue(ep)}
+                              title="Add to watch queue"
+                            >
+                              <Plus size={11} /> Queue
                             </button>
                           </div>
                         )}
                       </div>
-                    ))
-                  )}
-                </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
 
-            <div className="wt-queue-header">
-               <h4>Watch Queue</h4>
-               {hasPrivileges && queue.length > 0 && (
-                  <button onClick={handleClearQueue} className="wt-btn-clear-queue">Clear All</button>
-               )}
-            </div>
-            {queue.length === 0 ? (
-               <div style={{ color: "#6b7280", fontSize: "0.85rem", padding: "10px 0" }}>Queue is empty.</div>
-            ) : (
-              queue.map((item, idx) => (
-                  <div key={idx} className="wt-queue-row">
-                    <span className="wt-queue-idx">#{idx + 1}</span>
-                    <span className="wt-queue-item-title">
-                      {item.title || `Anime #${item.animeID} - Ep ${item.episode}`}
-                    </span>
-                    {hasPrivileges && (
-                      <div className="wt-queue-actions">
-                        <button className="wt-btn-play-sm" onClick={() => handlePlayFromQueue(item)}><Play size={10} /> Play</button>
-                        <button className="wt-btn-delete-sm" onClick={() => watchTogetherClient.sendRemoveQueue(idx)}>Delete</button>
-                      </div>
-                    )}
-                  </div>
-              ))
-            )}
           </div>
         </div>
 
-        {/* RIGHT CONTENT (CHAT) */}
+        {/* RIGHT CONTENT (SIDEBAR WITH TABS) */}
         <div className={`wt-right-chat ${isChatExpanded ? "expanded" : "collapsed"}`}>
           {isChatExpanded ? (
             <div className="wt-chat-inner">
-              {/* Chat header: title left, collapse arrow right */}
-              <div className="wt-chat-header">
-                <div className="wt-chat-participants">
-                  <span style={{ fontWeight: 700, color: "#fff", marginRight: 8 }}>Chat</span>
-                  <Users size={14} color="#a78bfa" />
-                  {users.length > 5 ? (
-                    <span className="wt-chat-users-text">
-                      {users.find(u => u.isHost)?.username || "Host"} + {users.length - 1} watchers
-                    </span>
-                  ) : (
-                    <span className="wt-chat-users-text">
-                      {users.map(u => u.username).join(", ")}
-                    </span>
-                  )}
-                </div>
+              {/* 3 Icon-Only Toggle Switch Bar (Chat | Queue | Users) */}
+              <div className="wt-sidebar-tabs">
+                <button
+                  className={`wt-sidebar-tab-btn ${activeTab === "chat" ? "active" : ""}`}
+                  onClick={() => setActiveTab("chat")}
+                  title="Chat"
+                >
+                  <MessageSquare size={16} />
+                  <span className="wt-badge-count">
+                    {chatList.length > 99 ? "99+" : chatList.length}
+                  </span>
+                </button>
+                <button
+                  className={`wt-sidebar-tab-btn ${activeTab === "queue" ? "active" : ""}`}
+                  onClick={() => setActiveTab("queue")}
+                  title="Queue"
+                >
+                  <ListVideo size={16} />
+                  <span className="wt-badge-count">
+                    {queue.length > 99 ? "99+" : queue.length}
+                  </span>
+                </button>
+                <button
+                  className={`wt-sidebar-tab-btn ${activeTab === "users" ? "active" : ""}`}
+                  onClick={() => setActiveTab("users")}
+                  title="Connected Users"
+                >
+                  <Users size={16} />
+                  <span className="wt-badge-count">
+                    {users.length > 99 ? "99+" : users.length}
+                  </span>
+                </button>
                 <button
                   onClick={() => setIsChatExpanded(false)}
                   className="wt-chat-collapse-btn"
-                  title="Collapse chat"
+                  title="Collapse sidebar"
+                  style={{ marginLeft: "auto" }}
                 >
                   <ChevronRight size={16} />
                 </button>
               </div>
 
-              <div className="wt-chat-messages">
-                {chatList.length === 0 ? (
-                  <div style={{ color: "#6b7280", fontSize: "0.85rem", textAlign: "center", marginTop: 40 }}>
-                    No messages yet. Say hi!
+              {/* Tab Content Area */}
+              <div className="wt-tab-content-area" style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", padding: "14px" }}>
+                {activeTab === "chat" ? (
+                  <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+                    <div className="wt-chat-messages">
+                      {chatList.length === 0 ? (
+                        <div style={{ color: "#6b7280", fontSize: "0.85rem", textAlign: "center", marginTop: 40 }}>
+                          No messages yet. Say hi!
+                        </div>
+                      ) : (
+                        chatList.map((m, idx) => (
+                          <div key={idx} className="wt-chat-msg">
+                            <span className="wt-chat-sender">{m.sender}:</span>
+                            <span>{m.message}</span>
+                          </div>
+                        ))
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    <form className="wt-chat-input-row" onSubmit={handleSendChat}>
+                      <input
+                        type="text"
+                        className="wt-chat-input-lg"
+                        placeholder="Type a message..."
+                        value={chatMessage}
+                        onChange={(e) => setChatMessage(e.target.value)}
+                      />
+                      <button type="submit" className="wt-btn-send-lg">Send</button>
+                    </form>
+                  </div>
+                ) : activeTab === "queue" ? (
+                  /* Queue View */
+                  <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                      <h4 style={{ margin: 0, color: "#fff", fontSize: "0.9rem" }}>Shared Watch Queue</h4>
+                      {hasPrivileges && queue.length > 0 && (
+                        <button
+                          onClick={handleClearQueue}
+                          style={{
+                            padding: "4px 8px",
+                            fontSize: "0.72rem",
+                            background: "rgba(239, 68, 68, 0.2)",
+                            border: "1px solid rgba(239, 68, 68, 0.4)",
+                            color: "#f87171",
+                            borderRadius: "4px",
+                            cursor: "pointer",
+                            height: "auto",
+                          }}
+                        >
+                          Clear All
+                        </button>
+                      )}
+                    </div>
+                    <div style={{ flex: 1, overflowY: "auto" }}>
+                      {queue.length === 0 ? (
+                        <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>Watch queue is empty.</div>
+                      ) : (
+                        queue.map((item, idx) => (
+                          <div
+                            key={idx}
+                            className="wt-user-row"
+                            style={{
+                              marginBottom: 6,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                            }}
+                          >
+                            <span style={{ fontWeight: 700, color: "#a78bfa" }}>#{idx + 1}</span>
+                            <span
+                              style={{
+                                flex: 1,
+                                fontSize: "0.8rem",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}
+                              title={item.title || `Anime #${item.animeID} - Ep ${item.episode}`}
+                            >
+                              {item.title || `Anime #${item.animeID} - Ep ${item.episode}`}
+                            </span>
+                            {hasPrivileges && (
+                              <div style={{ display: "inline-flex", gap: "6px" }}>
+                                <button
+                                  className="wt-btn-play-sm"
+                                  onClick={() => handlePlayFromQueue(item)}
+                                  style={{
+                                    padding: "4px 8px",
+                                    fontSize: "0.72rem",
+                                    height: "auto",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: "4px",
+                                    borderRadius: "4px",
+                                  }}
+                                >
+                                  <Play size={10} />
+                                </button>
+                                <button
+                                  className="wt-btn-delete-sm"
+                                  onClick={() => watchTogetherClient.sendRemoveQueue(idx)}
+                                  style={{
+                                    padding: "4px 8px",
+                                    fontSize: "0.72rem",
+                                    height: "auto",
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: "4px",
+                                    borderRadius: "4px",
+                                    background: "rgba(239, 68, 68, 0.2)",
+                                    border: "1px solid rgba(239, 68, 68, 0.4)",
+                                    color: "#f87171",
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
                   </div>
                 ) : (
-                  chatList.map((m, idx) => (
-                    <div key={idx} className="wt-chat-msg">
-                      <span className="wt-chat-sender">{m.sender}:</span>
-                      <span>{m.message}</span>
+                  /* Users View */
+                  <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column" }}>
+                    <h4 style={{ margin: "0 0 12px 0", color: "#fff", fontSize: "0.9rem" }}>Connected Users ({users.length})</h4>
+                    <div className="wt-users-list" style={{ flex: 1, overflowY: "auto" }}>
+                      {users.map((u, idx) => (
+                        <div key={idx} className="wt-user-row">
+                          <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#10b981", flexShrink: 0 }} />
+                          <span style={{ fontWeight: 600, color: "#e5e7eb", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {u.username}
+                          </span>
+                          {u.isHost && <span className="wt-user-badge-host">HOST</span>}
+                          {u.isCoHost && (
+                            <span
+                              className="wt-user-badge-cohost"
+                              style={{
+                                marginLeft: 6,
+                                background: "rgba(59, 130, 246, 0.2)",
+                                border: "1px solid rgba(59, 130, 246, 0.4)",
+                                color: "#60a5fa",
+                                padding: "1px 4px",
+                                borderRadius: "4px",
+                                fontSize: "0.68rem",
+                                fontWeight: "700",
+                              }}
+                            >
+                              CO-HOST
+                            </span>
+                          )}
+                          {isHost && u.id !== watchTogetherClient.userID && (
+                            <button
+                              className="wt-btn-cohost-sm"
+                              onClick={() => watchTogetherClient.sendCoHostChange(u.id, !u.isCoHost)}
+                              style={{
+                                marginLeft: "auto",
+                                padding: "2px 6px",
+                                fontSize: "0.68rem",
+                                background: u.isCoHost ? "rgba(239, 68, 68, 0.2)" : "rgba(16, 185, 129, 0.2)",
+                                border: u.isCoHost ? "1px solid rgba(239, 68, 68, 0.4)" : "1px solid rgba(16, 185, 129, 0.4)",
+                                color: u.isCoHost ? "#f87171" : "#34d399",
+                                borderRadius: "4px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              {u.isCoHost ? "Demote" : "Co-Host"}
+                            </button>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  ))
+                  </div>
                 )}
-                <div ref={chatEndRef} />
               </div>
-
-              <form className="wt-chat-input-row" onSubmit={handleSendChat}>
-                <input
-                  type="text"
-                  className="wt-chat-input-lg"
-                  placeholder="Type a message..."
-                  value={chatMessage}
-                  onChange={(e) => setChatMessage(e.target.value)}
-                />
-                <button type="submit" className="wt-btn-send-lg">Send</button>
-              </form>
             </div>
           ) : (
-            /* Collapsed state: slim vertical bar with expand arrow */
+            /* Collapsed state: slim vertical bar with 3 fast-access tab buttons */
             <div className="wt-chat-collapsed-bar">
               <button
                 onClick={() => setIsChatExpanded(true)}
-                className="wt-chat-collapsed-icon"
-                title="Expand chat"
+                className="wt-chat-expand-chevron-btn"
+                title="Expand sidebar"
               >
-                <MessageSquare size={16} />
+                <ChevronLeft size={16} />
               </button>
 
-              {unreadCount > 0 && (
-                <div className="wt-chat-unread-circle" title={`${unreadCount} new message(s)`}>
-                  {unreadCount}
-                </div>
-              )}
+              <button
+                onClick={() => {
+                  setActiveTab("chat");
+                  setIsChatExpanded(true);
+                }}
+                className={`wt-chat-collapsed-icon ${activeTab === "chat" ? "active" : ""}`}
+                title="Chat"
+                style={{ position: "relative" }}
+              >
+                <MessageSquare size={16} />
+                {unreadCount > 0 && (
+                  <div className="wt-chat-unread-circle-mini" title={`${unreadCount} new message(s)`} style={{
+                    position: "absolute",
+                    top: "-4px",
+                    right: "-4px",
+                    width: "16px",
+                    height: "16px",
+                    borderRadius: "50%",
+                    background: "#ef4444",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "0.6rem",
+                    fontWeight: 700,
+                    boxShadow: "0 0 6px rgba(239, 68, 68, 0.4)"
+                  }}>
+                    {unreadCount}
+                  </div>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab("queue");
+                  setIsChatExpanded(true);
+                }}
+                className={`wt-chat-collapsed-icon ${activeTab === "queue" ? "active" : ""}`}
+                title="Watch Queue"
+                style={{ position: "relative" }}
+              >
+                <ListVideo size={16} />
+                {queue.length > 0 && (
+                  <div className="wt-chat-unread-circle-mini" title={`${queue.length} items in queue`} style={{
+                    position: "absolute",
+                    top: "-4px",
+                    right: "-4px",
+                    width: "16px",
+                    height: "16px",
+                    borderRadius: "50%",
+                    background: "#7c3aed",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "0.6rem",
+                    fontWeight: 700,
+                    boxShadow: "0 0 6px rgba(124, 58, 237, 0.4)"
+                  }}>
+                    {queue.length}
+                  </div>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveTab("users");
+                  setIsChatExpanded(true);
+                }}
+                className={`wt-chat-collapsed-icon ${activeTab === "users" ? "active" : ""}`}
+                title="Connected Users"
+                style={{ position: "relative" }}
+              >
+                <Users size={16} />
+                {users.length > 0 && (
+                  <div className="wt-chat-unread-circle-mini" title={`${users.length} connected users`} style={{
+                    position: "absolute",
+                    top: "-4px",
+                    right: "-4px",
+                    width: "16px",
+                    height: "16px",
+                    borderRadius: "50%",
+                    background: "#10b981",
+                    color: "#fff",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "0.6rem",
+                    fontWeight: 700,
+                    boxShadow: "0 0 6px rgba(16, 185, 129, 0.4)"
+                  }}>
+                    {users.length}
+                  </div>
+                )}
+              </button>
             </div>
           )}
         </div>
