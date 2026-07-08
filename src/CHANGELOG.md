@@ -2,6 +2,16 @@
 
 # [7.4.5] - 2026-07-08
 
+### Watch Together
+
+- **UI Overhaul (by artiriart)**: Redesigned the collapsed right sidebar into a clean utility rail with vertical active indicator highlights.
+- Implemented a 24px safety padding wrapper around the player content so it never touches the sidebar panel.
+- Overhauled the room setup Create and Join cards to be perfectly symmetric, wrapped header icons in gradient-glow boxes, and styled the Join button as a secondary outline until a 6-digit room code is typed.
+- Normalized vertical heights (32px) and text size (0.78rem) for all episode controls in shelf row.
+- Replaced the native browser alert for range queue validations with a dark-themed SweetAlert2 dialog.
+- Removed the redundant users counter from the top left of the action bar.
+- Prevented search selections from auto-playing if media is active or a queue exists.
+
 ### Player & Sidebar
 
 - The sidebar will now hide automatically when a video is playing so you can watch in full screen, and you can bring it back just by moving your mouse to the left side.
@@ -20,7 +30,7 @@
 
 - Added a switch next to your history list to filter by all, only anime, or only manga.
 
-### Library & Bug Fixes
+### Library
 
 - Starting a video or reading a chapter now automatically adds the series to your library under "Watching" or "Reading".
 - Custom MyAnimeList manga mapping link and unlink updates are now automatically sent to the mapping server.
