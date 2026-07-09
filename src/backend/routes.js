@@ -282,6 +282,7 @@ router.post("/api/settings", async (req, res) => {
     autoSkipIntro,
     mangaReaderLayout,
     mangaReaderWidth,
+    infoSortOrder,
   } = req.body;
   try {
     if (
@@ -321,6 +322,7 @@ router.post("/api/settings", async (req, res) => {
       autoSkipIntro: autoSkipIntro,
       mangaReaderLayout: mangaReaderLayout,
       mangaReaderWidth: mangaReaderWidth,
+      infoSortOrder: infoSortOrder,
     });
 
     res.status(200).json({ message: "Settings saved successfully." });

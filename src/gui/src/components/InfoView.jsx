@@ -25,6 +25,8 @@ export default function InfoView({
   localMalProvider: propLocalMalProvider,
   backText,
   autoPlay,
+  sortOrder,
+  setSortOrder,
   onBack,
   onWatch: propOnWatch,
   onRead: propOnRead,
@@ -80,12 +82,7 @@ export default function InfoView({
   const [rangeInput, setRangeInput] = useState("");
   const [lastClickedId, setLastClickedId] = useState(null);
   const [isRangeInputInvalid, setIsRangeInputInvalid] = useState(false);
-  const [sortOrder, setSortOrder] = useState(
-    () => localStorage.getItem("info_sort_order") || "asc",
-  );
-  const [sortDirection, setSortDirection] = useState(
-    () => localStorage.getItem("info_sort_direction") || "asc",
-  );
+
 
   const formatTime = (seconds) => {
     if (isNaN(seconds) || seconds === null) return "";
@@ -145,9 +142,7 @@ export default function InfoView({
               new Set((details?.DownloadedChapters || []).map(Number)),
             ).sort((a, b) => a - b);
 
-      allDownloadedNums.sort((a, b) =>
-        sortDirection === "asc" ? a - b : b - a,
-      );
+      allDownloadedNums.sort((a, b) => a - b);
 
       return allDownloadedNums.map((num) => {
         const existingItem = episodesOrChapters.find(
@@ -189,7 +184,6 @@ export default function InfoView({
   }, [
     episodesOrChapters,
     sortOrder,
-    sortDirection,
     details?.DownloadedEpisodes,
     details?.DownloadedChapters,
     dubSelect,
@@ -286,8 +280,6 @@ export default function InfoView({
         const savedSort = localStorage.getItem("info_sort_order");
         if (savedSort) {
           setSortOrder(savedSort);
-          const savedDir = localStorage.getItem("info_sort_direction");
-          if (savedDir) setSortDirection(savedDir);
         } else {
           const isAnimePahe =
             data?.provider?.toLowerCase() === "animepahe" ||
@@ -1210,7 +1202,7 @@ export default function InfoView({
           Title: details?.title,
           number: singleItem.number,
           provider: details?.provider,
-          malid: details?.malid,
+          malid: details?.malid || details?.MalID,
           ...(isAnime ? { subdub: chosenLang } : {}),
         };
       } else {
@@ -1238,7 +1230,7 @@ export default function InfoView({
           [isAnime ? "Episodes" : "Chapters"]: itemsToDownload,
           Title: details?.title,
           provider: details?.provider,
-          malid: details?.malid,
+          malid: details?.malid || details?.MalID,
           ...(isAnime ? { SubDub: chosenLang } : {}),
         };
       }
@@ -2367,7 +2359,7 @@ export default function InfoView({
                 <span className="custom-dropdown-trigger-text">
                   Sort:{" "}
                   {sortOrder === "downloaded"
-                    ? `DOWNLOADED (${sortDirection.toUpperCase()})`
+                    ? "DOWNLOADED"
                     : sortOrder.toUpperCase()}
                 </span>
                 <ChevronDown className="custom-dropdown-chevron" size={16} />
@@ -2379,10 +2371,15 @@ export default function InfoView({
                     className={`custom-dropdown-item ${sortOrder === "asc" ? "selected" : ""}`}
                     onClick={() => {
                       setSortOrder("asc");
-                      setSortDirection("asc");
                       localStorage.setItem("info_sort_order", "asc");
-                      localStorage.setItem("info_sort_direction", "asc");
                       setIsSortDropdownOpen(false);
+                      fetch("/api/settings", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          infoSortOrder: "asc",
+                        }),
+                      }).catch((e) => console.error(e));
                       const isAnimePahe =
                         details?.provider?.toLowerCase() === "animepahe" ||
                         details?.provider?.toLowerCase() === "pahe";
@@ -2397,10 +2394,15 @@ export default function InfoView({
                     className={`custom-dropdown-item ${sortOrder === "desc" ? "selected" : ""}`}
                     onClick={() => {
                       setSortOrder("desc");
-                      setSortDirection("desc");
                       localStorage.setItem("info_sort_order", "desc");
-                      localStorage.setItem("info_sort_direction", "desc");
                       setIsSortDropdownOpen(false);
+                      fetch("/api/settings", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          infoSortOrder: "desc",
+                        }),
+                      }).catch((e) => console.error(e));
                       const isAnimePahe =
                         details?.provider?.toLowerCase() === "animepahe" ||
                         details?.provider?.toLowerCase() === "pahe";
@@ -2416,7 +2418,6 @@ export default function InfoView({
                       className={`custom-dropdown-item ${sortOrder === "downloaded" ? "selected" : ""}`}
                       onClick={() => {
                         setSortOrder("downloaded");
-                        localStorage.setItem("info_sort_order", "downloaded");
                         setIsSortDropdownOpen(false);
                       }}
                     >

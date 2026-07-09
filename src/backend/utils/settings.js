@@ -45,6 +45,7 @@ async function settingupdate({
   autoSkipIntro = null,
   mangaReaderLayout = null,
   mangaReaderWidth = null,
+  infoSortOrder = null,
 }) {
   const currentSettings = getKeyValue("Settings", "config");
 
@@ -123,6 +124,10 @@ async function settingupdate({
     mangaReaderWidth = currentSettings?.mangaReaderWidth || 800;
   }
 
+  if (infoSortOrder === null) {
+    infoSortOrder = currentSettings?.infoSortOrder || "asc";
+  }
+
   config.quality = quality;
   config.mal_on_off = mal_on_off;
   config.status = status;
@@ -141,6 +146,7 @@ async function settingupdate({
   config.autoSkipIntro = autoSkipIntro;
   config.mangaReaderLayout = mangaReaderLayout;
   config.mangaReaderWidth = mangaReaderWidth;
+  config.infoSortOrder = infoSortOrder;
 
   if (config.enableDiscordRPC === "on") {
     try {
@@ -280,6 +286,7 @@ async function SettingsLoad() {
             malDiscordProfile: "off",
             imageCacheSizeLimit: 5,
             developerMode: "off",
+            infoSortOrder: "asc",
           };
 
     if (config && !config.hasOwnProperty("imageCacheSizeLimit")) {

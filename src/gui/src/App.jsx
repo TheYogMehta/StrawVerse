@@ -21,6 +21,7 @@ export default function App() {
   const [whatsNewVersion, setWhatsNewVersion] = useState("");
   const [whatsNewDate, setWhatsNewDate] = useState("");
   const [toasts, setToasts] = useState([]);
+  const [infoSortOrder, setInfoSortOrder] = useState("asc");
 
   const showToast = (title, body, icon) => {
     const id = Date.now();
@@ -279,6 +280,7 @@ export default function App() {
       const settingsData = await settingsRes.json();
       setMalLoggedIn(settingsData.MalLoggedIn || false);
       setDeveloperMode(settingsData.settings?.developerMode || "off");
+      setInfoSortOrder(settingsData.settings?.infoSortOrder || "asc");
     } catch (err) {
       console.error("Failed to sync app info:", err);
     }
@@ -304,10 +306,6 @@ export default function App() {
         });
     }
 
-    const settingsTimer = setTimeout(() => {
-      syncSettings();
-    }, 2000);
-
     // Listen to MAL connection events from main thread
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       window.sharedStateAPI.on("mal", (data) => {
@@ -317,10 +315,6 @@ export default function App() {
         showToast(data.title, data.body, data.icon);
       });
     }
-
-    return () => {
-      clearTimeout(settingsTimer);
-    };
   }, []);
 
   useEffect(() => {
@@ -383,6 +377,8 @@ export default function App() {
             localMalProvider={current.params.provider}
             backText={current.params.backText}
             autoPlay={current.params.autoPlay}
+            sortOrder={infoSortOrder}
+            setSortOrder={setInfoSortOrder}
             onBack={navigateBack}
             onWatch={(
               animeId,
