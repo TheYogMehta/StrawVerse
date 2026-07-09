@@ -133,33 +133,38 @@ async function downloadAnimeSingle(
     const dbId = `${strippedId}-${resolvedSubDub}`;
 
     if (saveinfo) {
-      const lookupId =
-        Animeprovider.provider_name === "pahe"
-          ? animeid
-          : animeid.replace(/-(dub|sub|hsub|both)$/, "");
-      const animedata = await animeinfo(
-        Animeprovider,
-        config?.CustomDownloadLocation,
-        lookupId,
-      );
-      if (animedata) {
-        MetadataAdd("Anime", {
-          id: dbId,
-          title: `${animedata?.title?.replace(/-(dub|sub|hsub|both)$/, ``)} ${
-            resolvedSubDub
-          }`,
-          provider: Animeprovider.provider_name,
-          subOrDub: resolvedSubDub,
-          type: animedata.type ?? null,
-          description: animedata.description ?? null,
-          status: animedata.status ?? null,
-          genres:
-            animedata?.genres?.length > 0 ? animedata?.genres?.join(",") : "",
-          aired: animedata?.aired ?? null,
-          ImageUrl: animedata?.image,
-          EpisodesDataId: animedata?.dataId,
-          MalID: malid ? String(malid) : null,
-        });
+      const existing = global.db
+        .prepare("SELECT id FROM Anime WHERE id = ?")
+        .get(dbId);
+      if (!existing) {
+        const lookupId =
+          Animeprovider.provider_name === "pahe"
+            ? animeid
+            : animeid.replace(/-(dub|sub|hsub|both)$/, "");
+        const animedata = await animeinfo(
+          Animeprovider,
+          config?.CustomDownloadLocation,
+          lookupId,
+        );
+        if (animedata) {
+          MetadataAdd("Anime", {
+            id: dbId,
+            title: `${animedata?.title?.replace(/-(dub|sub|hsub|both)$/, ``)} ${
+              resolvedSubDub
+            }`,
+            provider: Animeprovider.provider_name,
+            subOrDub: resolvedSubDub,
+            type: animedata.type ?? null,
+            description: animedata.description ?? null,
+            status: animedata.status ?? null,
+            genres:
+              animedata?.genres?.length > 0 ? animedata?.genres?.join(",") : "",
+            aired: animedata?.aired ?? null,
+            ImageUrl: animedata?.image,
+            EpisodesDataId: animedata?.dataId,
+            MalID: malid ? String(malid) : null,
+          });
+        }
       }
     }
 
@@ -346,20 +351,25 @@ async function downloadMangaSingle(
       preFetchedProvider || (await providerFetch("Manga", provider));
 
     if (saveinfo) {
-      let mangainfo = await MangaInfo(Mangaprovider, mangaid);
-      if (mangainfo) {
-        MetadataAdd("Manga", {
-          id: mangaid,
-          title: Title,
-          provider: Mangaprovider.provider_name,
-          description: mangainfo.description ?? null,
-          genres: mangainfo?.genres?.join(",") ?? null,
-          type: mangainfo.type ?? null,
-          author: mangainfo?.author ?? null,
-          released: mangainfo?.released ?? null,
-          ImageUrl: mangainfo?.image,
-          MalID: malid ? String(malid) : null,
-        });
+      const existing = global.db
+        .prepare("SELECT id FROM Manga WHERE id = ?")
+        .get(mangaid);
+      if (!existing) {
+        let mangainfo = await MangaInfo(Mangaprovider, mangaid);
+        if (mangainfo) {
+          MetadataAdd("Manga", {
+            id: mangaid,
+            title: Title,
+            provider: Mangaprovider.provider_name,
+            description: mangainfo.description ?? null,
+            genres: mangainfo?.genres?.join(",") ?? null,
+            type: mangainfo.type ?? null,
+            author: mangainfo?.author ?? null,
+            released: mangainfo?.released ?? null,
+            ImageUrl: mangainfo?.image,
+            MalID: malid ? String(malid) : null,
+          });
+        }
       }
     }
 

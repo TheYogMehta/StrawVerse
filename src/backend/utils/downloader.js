@@ -530,9 +530,17 @@ class downloader {
         const startNext = async () => {
           if (
             stopDownloading ||
-            (global.isQueuePaused && global.isQueuePaused())
+            (global.isQueuePaused && global.isQueuePaused()) ||
+            (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
           ) {
             if (
+              global.isEpisodeInQueue &&
+              !global.isEpisodeInQueue(this.EpID) &&
+              !stopDownloading
+            ) {
+              stopDownloading = true;
+              reject(new Error("Episode Cancelled"));
+            } else if (
               global.isQueuePaused &&
               global.isQueuePaused() &&
               !stopDownloading
@@ -576,9 +584,17 @@ class downloader {
           const downloadSegment = async (retryCount = 0) => {
             if (
               stopDownloading ||
-              (global.isQueuePaused && global.isQueuePaused())
+              (global.isQueuePaused && global.isQueuePaused()) ||
+              (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
             ) {
               if (
+                global.isEpisodeInQueue &&
+                !global.isEpisodeInQueue(this.EpID) &&
+                !stopDownloading
+              ) {
+                stopDownloading = true;
+                reject(new Error("Episode Cancelled"));
+              } else if (
                 global.isQueuePaused &&
                 global.isQueuePaused() &&
                 !stopDownloading
@@ -711,6 +727,12 @@ class downloader {
       }
       await fs.promises.rmdir(tempDir).catch(() => {});
     } catch (err) {
+      if (
+        err.message === "Queue Paused" ||
+        err.message === "Episode Cancelled"
+      ) {
+        throw err;
+      }
       throw new Error(err);
     }
   }
@@ -1020,6 +1042,13 @@ class downloader {
   }
 
   async logProgress(ExtraMessage) {
+    if (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID)) {
+      if (this._pendingLogTimer) {
+        clearTimeout(this._pendingLogTimer);
+        this._pendingLogTimer = null;
+      }
+      return;
+    }
     let caption = this.caption;
     if (this.currentSegments >= this.totalSegments - 3) {
       caption = caption.replace("Downloading", "Merging");
@@ -1130,7 +1159,10 @@ async function download(args) {
     if (err.message === "Queue Paused") {
       throw err;
     }
-    await obj.CleanEverything();
+    await obj.CleanEverything(true);
+    if (err.message === "Episode Cancelled") {
+      throw err;
+    }
     console.log(err);
     logger.error(err);
     throw new Error(err);

@@ -299,6 +299,12 @@ router.post("/api/settings", async (req, res) => {
 router.post("/api/logger", async (req, res) => {
   const { caption, totalSegments, currentSegments, epid } = req.body;
   try {
+    const currentQueue = (await getQueue()) ?? [];
+    const exists = currentQueue.some((item) => item.epid === epid);
+    if (!exists) {
+      return res.status(200).json({ message: "Task no longer in queue" });
+    }
+
     let queue =
       (await updateQueue(epid, totalSegments, currentSegments, caption)) ?? [];
 
@@ -1514,9 +1520,9 @@ router.post("/api/local/reorder", async (req, res) => {
 });
 
 // remove from queue or remove all
-router.get("/api/download/remove", async (req, res) => {
+router.post("/api/download/remove", async (req, res) => {
   try {
-    const { AnimeEpId } = req.query;
+    const { AnimeEpId } = req.body;
 
     if (AnimeEpId) {
       let queue = await removeQueue(AnimeEpId);
@@ -1572,11 +1578,11 @@ router.get("/api/download/remove", async (req, res) => {
 
     res.json({ message: "All items removed" });
   } catch (err) {
-    logger.error(`Error Removing ${req?.query?.AnimeEpId ? "Ep" : "Ep(s)"} `);
+    logger.error(`Error Removing ${req?.body?.AnimeEpId ? "Ep" : "Ep(s)"} `);
     logger.error(`Error message: ${err.message}`);
     logger.error(`Stack trace: ${err.stack}`);
     res.status(500).json({
-      message: `Error Removing ${req?.query?.AnimeEpId ? "Ep" : "Ep(s)"}`,
+      message: `Error Removing ${req?.body?.AnimeEpId ? "Ep" : "Ep(s)"}`,
       err,
     });
   }
@@ -3056,6 +3062,7 @@ router.get("/api/history/list", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 // ===================== SPA routes =====================
 const SPA_ROUTES = [
   "/",

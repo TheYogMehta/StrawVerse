@@ -20,7 +20,6 @@ const {
   session,
 } = require("electron");
 const { autoUpdater } = require("electron-updater");
-const bodyParser = require("body-parser");
 const { exec } = require("child_process");
 const express = require("express");
 const path = require("node:path");
@@ -106,8 +105,8 @@ const { checkForMappingUpdates } = require("./backend/utils/mappingUpdater");
 // Express Server
 const routes = require("./backend/routes");
 const appExpress = express();
-appExpress.use(bodyParser.urlencoded({ extended: true }));
-appExpress.use(bodyParser.json());
+appExpress.use(express.urlencoded({ extended: true }));
+appExpress.use(express.json());
 appExpress.use(express.static(path.join(__dirname, "gui", "dist")));
 appExpress.set("views", path.join(__dirname, "gui", "dist"));
 appExpress.use((req, res, next) => {

@@ -21,6 +21,8 @@ function isQueuePaused() {
 }
 
 global.isQueuePaused = isQueuePaused;
+global.isEpisodeInQueue = (epid) =>
+  AnimeQueue.some((item) => item.epid === epid);
 
 async function pauseQueue() {
   isQueuePausedState = true;
@@ -43,7 +45,9 @@ async function addToQueue(item) {
   await saveQueue();
   if (!isQueuePausedState) {
     try {
-      continuousExecution();
+      setTimeout(() => {
+        continuousExecution().catch(() => {});
+      }, 1000);
     } catch (err) {}
   }
 }
@@ -115,8 +119,13 @@ async function updateQueue(
       (currentSegments / totalSegments) * 100,
     );
 
-    if (progressPercentage % 10 === 0 || progressPercentage >= 98) {
+    const lastPct = AnimeQueue[indexToUpdate].lastSavedPct;
+    if (
+      progressPercentage !== lastPct &&
+      (progressPercentage % 10 === 0 || progressPercentage >= 98)
+    ) {
       Tosave = true;
+      AnimeQueue[indexToUpdate].lastSavedPct = progressPercentage;
     }
 
     if (currentSegments >= totalSegments) {
@@ -201,8 +210,9 @@ async function continuousExecution() {
         );
         break;
       }
+      let currentTask = null;
       try {
-        const currentTask = AnimeQueue[0];
+        currentTask = AnimeQueue[0];
         if (!currentTask) {
           break;
         }
@@ -273,10 +283,26 @@ async function continuousExecution() {
           logger.info("[queueWorker] Download paused. Keeping item in queue.");
           break;
         }
+        if (err.message && err.message.includes("Episode Cancelled")) {
+          logger.info("[queueWorker] Download cancelled by user.");
+          if (
+            AnimeQueue.length > 0 &&
+            AnimeQueue[0]?.epid === currentTask?.epid
+          ) {
+            AnimeQueue.splice(0, 1);
+            await SaveQueueData(AnimeQueue);
+          }
+          continue;
+        }
         logger.error(`Error message: ${err.message}`);
         logger.error(`Stack trace: ${err.stack}`);
-        AnimeQueue.splice(0, 1);
-        await SaveQueueData(AnimeQueue);
+        if (
+          AnimeQueue.length > 0 &&
+          AnimeQueue[0]?.epid === currentTask?.epid
+        ) {
+          AnimeQueue.splice(0, 1);
+          await SaveQueueData(AnimeQueue);
+        }
       }
 
       AnimeQueue = await getQueue();
@@ -484,7 +510,7 @@ async function downloadVideo(
       headers: headers,
     });
   } catch (err) {
-    if (err.message === "Queue Paused") {
+    if (err.message === "Queue Paused" || err.message === "Episode Cancelled") {
       throw err;
     }
     throw new Error(`Failed To Download \n${err}`);

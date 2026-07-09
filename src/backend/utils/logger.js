@@ -10,8 +10,16 @@ class HLSLogger {
     this.currentSegments = 0;
     this.caption = caption;
     this.epid = epid;
+    this.lastLogTime = 0;
   }
   logProgress() {
+    const now = Date.now();
+    const isFinal = this.currentSegments >= this.totalSegments || this.totalSegments === 0;
+    if (!isFinal && this.currentSegments > 1 && now - this.lastLogTime < 800) {
+      return;
+    }
+    this.lastLogTime = now;
+
     fetch(`http://localhost:${global.PORT}/api/logger`, {
       method: "POST",
       headers: {

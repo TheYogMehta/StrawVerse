@@ -1237,7 +1237,7 @@ export default function InfoView({
         const isNotInLibrary =
           !currentTags || currentTags.length === 0 || !currentTags[0];
         if (isNotInLibrary) {
-          await saveTags("Downloads");
+          await saveTags("Downloads", false);
           triggerPulse();
         }
       }
@@ -1339,7 +1339,7 @@ export default function InfoView({
     }
   };
 
-  const saveTags = async (updatedTag) => {
+  const saveTags = async (updatedTag, showSwal = true) => {
     try {
       const activeProvider =
         details?.provider &&
@@ -1371,19 +1371,21 @@ export default function InfoView({
           .then((tags) => setCustomTags(tags))
           .catch((err) => console.error(err));
 
-        Swal.fire({
-          title: "Library Updated",
-          text: updatedTag
-            ? `Status set to "${updatedTag}"`
-            : "Removed from Library",
-          icon: "success",
-          toast: true,
-          position: "top-end",
-          showConfirmButton: false,
-          timer: 2000,
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-        });
+        if (showSwal) {
+          Swal.fire({
+            title: "Library Updated",
+            text: updatedTag
+              ? `Status set to "${updatedTag}"`
+              : "Removed from Library",
+            icon: "success",
+            toast: true,
+            position: "top-end",
+            showConfirmButton: false,
+            timer: 2000,
+            background: "var(--bg-secondary)",
+            color: "var(--text-main)",
+          });
+        }
       }
     } catch (err) {
       console.error(err);

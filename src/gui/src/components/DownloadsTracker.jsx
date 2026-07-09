@@ -1,7 +1,17 @@
 /* eslint-disable react-hooks/exhaustive-deps, no-unused-vars */
-import { useState, useEffect } from 'react';
-import { Loader2, Trash2, X, CheckCircle, HardDrive, RefreshCw, Pause, Play } from 'lucide-react';
-import './css/DownloadsTracker.css';
+import { useState, useEffect } from "react";
+import {
+  Loader2,
+  Trash2,
+  X,
+  CheckCircle,
+  HardDrive,
+  RefreshCw,
+  Pause,
+  Play,
+} from "lucide-react";
+import { apiPost } from "../utils/common";
+import "./css/DownloadsTracker.css";
 
 export default function DownloadsTracker() {
   const [activeTask, setActiveTask] = useState(null);
@@ -11,11 +21,7 @@ export default function DownloadsTracker() {
 
   const fetchDownloads = async () => {
     try {
-      const response = await fetch('/downloads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await response.json();
+      const data = await apiPost("/downloads");
       updateStates(data);
     } catch (err) {
       console.error(err);
@@ -30,7 +36,7 @@ export default function DownloadsTracker() {
         caption: data.caption,
         totalSegments: data.totalSegments,
         currentSegments: data.currentSegments,
-        epid: data.epid
+        epid: data.epid,
       });
     } else {
       setActiveTask(null);
@@ -46,13 +52,13 @@ export default function DownloadsTracker() {
 
     // Listen to real-time Electron IPC download events
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
-      window.sharedStateAPI.on('download-logger', (data) => {
+      window.sharedStateAPI.on("download-logger", (data) => {
         if (data.totalSegments && data.totalSegments > 0) {
           setActiveTask({
             caption: data.caption,
             totalSegments: data.totalSegments,
             currentSegments: data.currentSegments,
-            epid: data.epid
+            epid: data.epid,
           });
         } else {
           setActiveTask(null);
@@ -69,9 +75,10 @@ export default function DownloadsTracker() {
 
   const handleTogglePause = async () => {
     try {
-      const endpoint = isPaused ? '/api/download/resume' : '/api/download/pause';
-      const response = await fetch(endpoint, { method: 'POST' });
-      const data = await response.json();
+      const endpoint = isPaused
+        ? "/api/download/resume"
+        : "/api/download/pause";
+      const data = await apiPost(endpoint);
       if (data.isPaused !== undefined) {
         setIsPaused(data.isPaused);
       }
@@ -83,9 +90,7 @@ export default function DownloadsTracker() {
 
   const handleRemoveItem = async (epid) => {
     try {
-      const endpoint = epid ? `/api/download/remove?AnimeEpId=${epid}` : '/api/download/remove';
-      const response = await fetch(endpoint);
-      const data = await response.json();
+      await apiPost("/api/download/remove", { AnimeEpId: epid });
       fetchDownloads();
     } catch (err) {
       console.error(err);
@@ -94,7 +99,9 @@ export default function DownloadsTracker() {
 
   const calculateProgress = () => {
     if (!activeTask || !activeTask.totalSegments) return 0;
-    return Math.floor((activeTask.currentSegments / activeTask.totalSegments) * 100);
+    return Math.floor(
+      (activeTask.currentSegments / activeTask.totalSegments) * 100,
+    );
   };
 
   return (
@@ -104,26 +111,31 @@ export default function DownloadsTracker() {
         <div className="tracker-actions">
           <button
             onClick={handleTogglePause}
-            className={`btn-pause-queue ${isPaused ? 'paused' : ''}`}
+            className={`btn-pause-queue ${isPaused ? "paused" : ""}`}
             title={isPaused ? "Start / Resume Queue" : "Pause Queue"}
           >
             {isPaused ? <Play size={16} /> : <Pause size={16} />}
             <span>{isPaused ? "Start Queue" : "Pause Queue"}</span>
           </button>
 
-          <button onClick={fetchDownloads} className="btn-refresh" title="Force Refresh">
+          <button
+            onClick={fetchDownloads}
+            className="btn-refresh"
+            title="Force Refresh"
+          >
             <RefreshCw size={16} />
           </button>
           {queue.length > 0 && (
-            <button onClick={() => handleRemoveItem(null)} className="btn-clear-all">
+            <button
+              onClick={() => handleRemoveItem(null)}
+              className="btn-clear-all"
+            >
               <Trash2 size={16} />
               <span>Clear Queue</span>
             </button>
           )}
         </div>
       </header>
-
-
 
       {/* Active Downloading Progress */}
       {activeTask ? (
@@ -136,7 +148,9 @@ export default function DownloadsTracker() {
                 <Loader2 size={20} className="spin" color="var(--accent)" />
               )}
               <span className="active-caption">
-                {isPaused ? `[PAUSED] ${activeTask.caption}` : activeTask.caption}
+                {isPaused
+                  ? `[PAUSED] ${activeTask.caption}`
+                  : activeTask.caption}
               </span>
             </div>
             <span className="active-percentage">{calculateProgress()}%</span>
@@ -145,14 +159,20 @@ export default function DownloadsTracker() {
           {/* Progress bar wrapper */}
           <div className="progress-bg">
             <div
-              className={`progress-fill ${isPaused ? 'paused-fill' : ''}`}
+              className={`progress-fill ${isPaused ? "paused-fill" : ""}`}
               style={{ width: `${calculateProgress()}%` }}
             />
           </div>
 
           <div className="active-footer">
-            <span>Downloaded {activeTask.currentSegments} of {activeTask.totalSegments} segments</span>
-            <button onClick={() => handleRemoveItem(activeTask.epid)} className="btn-cancel-dl">
+            <span>
+              Downloaded {activeTask.currentSegments} of{" "}
+              {activeTask.totalSegments} segments
+            </span>
+            <button
+              onClick={() => handleRemoveItem(activeTask.epid)}
+              className="btn-cancel-dl"
+            >
               Cancel Download
             </button>
           </div>
@@ -164,13 +184,15 @@ export default function DownloadsTracker() {
             {isPaused ? "Queue is paused" : "No active downloads"}
           </h3>
           <p className="u-style-29">
-            {isPaused ? "Click Start Queue to resume downloading." : "Ready for tasks."}
+            {isPaused
+              ? "Click Start Queue to resume downloading."
+              : "Ready for tasks."}
           </p>
         </div>
       )}
 
       {/* Queue items list */}
-      {(!loading && queue.length === 0) ? null : (
+      {!loading && queue.length === 0 ? null : (
         <div className="queue-section">
           <h2 className="queue-title">Upcoming Queue ({queue.length})</h2>
 
@@ -185,10 +207,16 @@ export default function DownloadsTracker() {
                   <div className="queue-item-info">
                     <span className="queue-title-text">{item.Title}</span>
                     <span className="queue-meta">
-                      {item.Type === 'Anime' ? `Episode ${item.EpNum}` : `Chapter ${item.EpNum}`} • {item.Type.toUpperCase()}
+                      {item.Type === "Anime"
+                        ? `Episode ${item.EpNum}`
+                        : `Chapter ${item.EpNum}`}{" "}
+                      • {item.Type.toUpperCase()}
                     </span>
                   </div>
-                  <button onClick={() => handleRemoveItem(item.epid)} className="btn-remove-item">
+                  <button
+                    onClick={() => handleRemoveItem(item.epid)}
+                    className="btn-remove-item"
+                  >
                     <X size={16} />
                   </button>
                 </div>

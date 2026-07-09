@@ -116,11 +116,7 @@ async function checkForMappingUpdates() {
           "SELECT name FROM sqlite_master WHERE type='table' AND name = ?",
         )
         .get(tableName);
-      if (!row) return false;
-      const countRow = global.mappingDb
-        .prepare(`SELECT count(*) as count FROM ${tableName}`)
-        .get();
-      return countRow && countRow.count > 0;
+      return !!row;
     } catch (e) {
       return false;
     }
