@@ -2,6 +2,13 @@
 
 # [8.0.0]
 
+### Downloader & Performance
+
+- **Instant Pause & Cancel**: Fixed downloads not stopping immediately when you click cancel or pause. It now cleans up unfinished temp files from your disk and stops right away.
+- **Fixed Lag and Freeze**: Fixed the app freezing and lagging when a download starts or is running in the background.
+- **Fast Download Starts**: Made downloads start instantly by avoiding loading details from the web if they are already saved in your library.
+- **Fixed Cancelled Items Reappearing**: Fixed a bug where cancelled downloads would sometimes reappear in the list as "retrying".
+
 ### Airing Calendar
 
 - **Weekly Airing Calendar**: Introduced a brand new airing calendar feed showing scheduled anime releases.
