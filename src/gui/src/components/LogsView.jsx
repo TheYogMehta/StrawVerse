@@ -99,7 +99,7 @@ export default function LogsView() {
 
       {loading ? (
         <div className="loading-center-logs">
-          <img src="/images/loading.gif" alt="loading" style={{ width: '64px', height: '64px' }} />
+          <img src="/images/loading.gif" alt="loading" className="u-style-17" />
         </div>
       ) : (
         <div className="terminal-container glass-panel">

@@ -144,7 +144,7 @@ export default function DownloadsTracker() {
       {activeTask ? (
         <div className="active-panel glass-panel">
           <div className="active-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div className="u-style-27">
               {isPaused ? (
                 <Pause size={20} color="var(--warning, #f59e0b)" />
               ) : (
@@ -175,10 +175,10 @@ export default function DownloadsTracker() {
       ) : (
         <div className="idle-panel">
           <HardDrive size={36} color="var(--text-muted)" />
-          <h3 style={{ fontSize: '15px', fontWeight: '600' }}>
+          <h3 className="u-style-28">
             {isPaused ? "Queue is paused" : "No active downloads"}
           </h3>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+          <p className="u-style-29">
             {isPaused ? "Click Start Queue to resume downloading." : "Ready for tasks."}
           </p>
         </div>

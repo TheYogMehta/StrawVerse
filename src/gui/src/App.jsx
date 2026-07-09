@@ -88,15 +88,7 @@ export default function App() {
           const isSeparator = /^\s*(\/|or|\+|,)\s*$/.test(token);
           if (isSeparator) {
             return (
-              <span
-                key={index}
-                className="kbd-separator"
-                style={{
-                  color: "var(--text-muted)",
-                  fontSize: "12px",
-                  margin: "0 4px",
-                }}
-              >
+              <span key={index} className="kbd-separator u-style-1">
                 {token}
               </span>
             );
@@ -104,42 +96,16 @@ export default function App() {
           const cleanKey = token.replace(/`/g, "").trim();
           if (!cleanKey) return null;
           return (
-            <kbd
-              key={index}
-              className="changelog-kbd"
-              style={{
-                backgroundColor: "var(--bg-primary)",
-                border: "1px solid var(--border)",
-                borderBottom: "2px solid var(--border)",
-                borderRadius: "4px",
-                color: "var(--text-main)",
-                fontFamily: "monospace",
-                fontSize: "11px",
-                padding: "2px 6px",
-                margin: "0 2px",
-                boxShadow: "0 1px 0 rgba(0,0,0,0.2)",
-                display: "inline-block",
-              }}
-            >
+            <kbd key={index} className="changelog-kbd u-style-2">
               {cleanKey}
             </kbd>
           );
         });
 
         return (
-          <span
-            className="changelog-shortcut-row"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              flexWrap: "wrap",
-            }}
-          >
+          <span className="changelog-shortcut-row u-style-3">
             <span className="changelog-keys-wrapper">{renderedKeys}</span>
-            <span
-              className="kbd-desc-separator"
-              style={{ color: "var(--text-muted)", marginRight: "8px" }}
-            >
+            <span className="kbd-desc-separator u-style-4">
               :
             </span>
             <span className="changelog-desc">
@@ -167,42 +133,19 @@ export default function App() {
 
       if (match[1] && match[2]) {
         parts.push(
-          <a
-            key={`link-${matchIndex}`}
-            href={match[2]}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{
-              color: "var(--accent-hover)",
-              textDecoration: "underline",
-            }}
-          >
+          <a key={`link-${matchIndex}`} href={match[2]} target="_blank" rel="noopener noreferrer" className="u-style-5">
             {match[1]}
           </a>,
         );
       } else if (match[3]) {
         parts.push(
-          <strong
-            key={`bold-${matchIndex}`}
-            style={{ color: "#fff", fontWeight: "600" }}
-          >
+          <strong key={`bold-${matchIndex}`} className="u-style-6">
             {match[3]}
           </strong>,
         );
       } else if (match[4]) {
         parts.push(
-          <code
-            key={`code-${matchIndex}`}
-            style={{
-              background: "rgba(255, 255, 255, 0.06)",
-              padding: "2px 6px",
-              borderRadius: "4px",
-              fontFamily: "monospace",
-              fontSize: "0.9em",
-              color: "var(--accent-hover)",
-              border: "1px solid rgba(255, 255, 255, 0.04)",
-            }}
-          >
+          <code key={`code-${matchIndex}`} className="u-style-7">
             {match[4]}
           </code>,
         );
@@ -536,7 +479,7 @@ export default function App() {
         developerMode={developerMode}
         onOpenWatchTogether={() => setIsWTModalOpen(true)}
       />
-      <main style={{ flex: 1, height: "100%", overflow: "hidden" }}>
+      <main className="u-style-8">
         {renderActiveView()}
       </main>
 

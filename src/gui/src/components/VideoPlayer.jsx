@@ -1419,17 +1419,8 @@ export default function VideoPlayer({
       onMouseMove={resetUITimeout}
     >
       {/* Header Overlay */}
-      <div
-        className="player-controls-header"
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          width: "100%",
-          boxSizing: "border-box",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+      <div className="player-controls-header u-style-96">
+        <div className="u-style-97">
           {!hideExit && (
             <button onClick={onBack} className="player-back-btn">
               <ArrowLeft size={18} />
@@ -1453,7 +1444,7 @@ export default function VideoPlayer({
           </span>
         </div>
 
-        <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <div className="u-style-27">
           {(() => {
             if (loading || !currentEpisodeObj) return null;
             let availableLangs = [];
@@ -1491,13 +1482,7 @@ export default function VideoPlayer({
 
             return (
               <div className="player-quality-selector">
-                <span
-                  style={{
-                    fontSize: "12px",
-                    fontWeight: "600",
-                    color: "var(--text-muted)",
-                  }}
-                >
+                <span className="u-style-98">
                   Language:
                 </span>
                 <div className="player-qualities-wrapper">
@@ -1517,13 +1502,7 @@ export default function VideoPlayer({
 
           {!loading && sources.length > 0 && (
             <div className="player-quality-selector">
-              <span
-                style={{
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  color: "var(--text-muted)",
-                }}
-              >
+              <span className="u-style-98">
                 Source:
               </span>
               <div className="player-qualities-wrapper">
@@ -1698,17 +1677,6 @@ export default function VideoPlayer({
               {/* Controls Controls Row */}
               <div className="player-controls-row">
                 <div className="player-controls-left">
-                  <button
-                    onClick={togglePlay}
-                    className="player-control-btn"
-                    aria-label="Toggle Play"
-                  >
-                    {isPlaying ? (
-                      <Pause size={16} fill="#fff" color="#fff" />
-                    ) : (
-                      <Play size={16} fill="#fff" color="#fff" />
-                    )}
-                  </button>
                   <div className="player-time-display">
                     <span ref={timeDisplayRef}>{formatTime(currentTime)}</span>
                     <span className="player-time-divider">/</span>

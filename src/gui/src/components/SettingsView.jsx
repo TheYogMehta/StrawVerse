@@ -600,15 +600,7 @@ export default function SettingsView({
       <div className="settings-container-inner">
         <header className="settings-header">
           <h1 className="settings-title">App Settings</h1>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              fontSize: "13px",
-              color: "var(--text-muted)",
-            }}
-          >
+          <div className="u-style-66">
             {saving ? (
               <>
                 <Loader2 size={14} className="spin" />
@@ -618,7 +610,7 @@ export default function SettingsView({
               <span>Unsaved changes...</span>
             ) : (
               <>
-                <span style={{ color: "var(--success)", fontWeight: "bold" }}>
+                <span className="u-style-67">
                   ✓
                 </span>
                 <span>All changes saved</span>
@@ -769,14 +761,7 @@ export default function SettingsView({
                       rooms with friends.
                     </div>
                   </div>
-                  <div
-                    className="settings-row-control"
-                    style={{
-                      flexDirection: "column",
-                      gap: "8px",
-                      alignItems: "flex-end",
-                    }}
-                  >
+                  <div className="settings-row-control u-style-68">
                     <input
                       type="text"
                       className="settings-text-input"
@@ -787,35 +772,11 @@ export default function SettingsView({
                         watchTogetherClient.setServerUrl(e.target.value);
                       }}
                     />
-                    <div
-                      style={{ display: "flex", gap: "8px", marginTop: "4px" }}
-                    >
-                      <button
-                        type="button"
-                        onClick={handleVerifyWtServer}
-                        disabled={verifyingWt}
-                        className="settings-market-btn"
-                        style={{
-                          margin: 0,
-                          padding: "6px 12px",
-                          fontSize: "12px",
-                        }}
-                      >
+                    <div className="u-style-69">
+                      <button type="button" onClick={handleVerifyWtServer} disabled={verifyingWt} className="settings-market-btn u-style-70">
                         {verifyingWt ? "Verifying..." : "Verify Connection"}
                       </button>
-                      <button
-                        type="button"
-                        onClick={handleResetWtServer}
-                        className="settings-logout-btn"
-                        style={{
-                          margin: 0,
-                          padding: "6px 12px",
-                          fontSize: "12px",
-                          backgroundColor: "rgba(255, 255, 255, 0.05)",
-                          border: "1px solid var(--border)",
-                          color: "var(--text-muted)",
-                        }}
-                      >
+                      <button type="button" onClick={handleResetWtServer} className="settings-logout-btn u-style-71">
                         Reset to Default
                       </button>
                     </div>
@@ -837,10 +798,7 @@ export default function SettingsView({
                       (Minimum 5 GB)
                     </div>
                   </div>
-                  <div
-                    className="settings-row-control"
-                    style={{ gap: "8px", alignItems: "center" }}
-                  >
+                  <div className="settings-row-control u-style-72">
                     <input
                       type="number"
                       min={5}
@@ -851,20 +809,8 @@ export default function SettingsView({
                       }}
                       onBlur={(e) => {
                         const val = parseInt(e.target.value, 10);
-                        if (isNaN(val) || val < 5) {
-                          setImageCacheSizeLimit(5);
-                        }
-                      }}
-                      className="settings-text-input"
-                      style={{ width: "90px", textAlign: "center" }}
-                    />
-                    <span
-                      style={{
-                        fontSize: "14px",
-                        fontWeight: "600",
-                        color: "var(--text-main)",
-                      }}
-                    >
+                        if (isNaN(val) || val < 5) { setImageCacheSizeLimit(5); } }} className="settings-text-input settings-number-input u-style-73" />
+                    <span className="u-style-74">
                       GB
                     </span>
                   </div>
@@ -882,18 +828,7 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <button
-                      type="button"
-                      onClick={handleClearCache}
-                      disabled={clearingCache}
-                      className="settings-logout-btn"
-                      style={{
-                        margin: 0,
-                        backgroundColor: "var(--danger)",
-                        color: "white",
-                        border: "none",
-                      }}
-                    >
+                    <button type="button" onClick={handleClearCache} disabled={clearingCache} className="settings-logout-btn u-style-75">
                       {clearingCache ? (
                         <Loader2 size={14} className="spin" />
                       ) : (
@@ -919,20 +854,7 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <a
-                      href="https://discord.gg/PzfUBgQ2gt"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="settings-connect-link"
-                      style={{
-                        backgroundColor: "#5865F2",
-                        boxShadow: "0 4px 12px rgba(88, 101, 242, 0.25)",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        margin: 0,
-                      }}
-                    >
+                    <a href="https://discord.gg/PzfUBgQ2gt" target="_blank" rel="noreferrer" className="settings-connect-link u-style-76">
                       <MessageSquare size={16} />
                       <span>Join Discord</span>
                     </a>
@@ -1069,12 +991,7 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <button
-                      type="button"
-                      onClick={() => onMarketplaceOpen("Anime")}
-                      className="settings-market-btn"
-                      style={{ margin: 0 }}
-                    >
+                    <button type="button" onClick={() => onMarketplaceOpen("Anime")} className="settings-market-btn u-style-11">
                       Open Anime Extensions
                     </button>
                   </div>
@@ -1143,29 +1060,8 @@ export default function SettingsView({
                       reader.
                     </div>
                   </div>
-                  <div
-                    className="settings-row-control"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                    }}
-                  >
-                    <input
-                      type="range"
-                      min="400"
-                      max="1600"
-                      step="20"
-                      value={mangaReaderWidth}
-                      onChange={(e) =>
-                        setMangaReaderWidth(parseInt(e.target.value, 10))
-                      }
-                      className="settings-range-slider"
-                      style={{
-                        accentColor: "var(--accent)",
-                        cursor: "pointer",
-                      }}
-                    />
+                  <div className="settings-row-control u-style-27">
+                    <input type="range" min="400" max="1600" step="20" value={mangaReaderWidth} onChange={(e) => setMangaReaderWidth(parseInt(e.target.value, 10)) } className="settings-range-slider u-style-77" />
                   </div>
                 </div>
 
@@ -1199,12 +1095,7 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <button
-                      type="button"
-                      onClick={() => onMarketplaceOpen("Manga")}
-                      className="settings-market-btn"
-                      style={{ margin: 0 }}
-                    >
+                    <button type="button" onClick={() => onMarketplaceOpen("Manga")} className="settings-market-btn u-style-11">
                       Open Manga Extensions
                     </button>
                   </div>
@@ -1230,16 +1121,7 @@ export default function SettingsView({
                         </div>
                       </div>
                       <div className="settings-row-control">
-                        <div
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            color: "var(--success)",
-                            fontWeight: "600",
-                            fontSize: "14px",
-                          }}
-                        >
+                        <div className="u-style-78">
                           <CheckCircle size={18} />
                           <span>Connected</span>
                         </div>
@@ -1284,14 +1166,7 @@ export default function SettingsView({
                               ` (Profile: myanimelist.net/profile/${malUsername})`}
                           </div>
                         </div>
-                        <div
-                          className="settings-row-control"
-                          style={{
-                            flexDirection: "column",
-                            alignItems: "flex-end",
-                            gap: "4px",
-                          }}
-                        >
+                        <div className="settings-row-control u-style-79">
                           <select
                             value={malDiscordProfile}
                             onChange={(e) =>
@@ -1303,10 +1178,7 @@ export default function SettingsView({
                             <option value="on">Yes</option>
                           </select>
                           {!malUsername && (
-                            <span
-                              className="settings-hint"
-                              style={{ color: "var(--danger)" }}
-                            >
+                            <span className="settings-hint u-style-80">
                               MAL username not found — re-authenticate.
                             </span>
                           )}
@@ -1325,12 +1197,7 @@ export default function SettingsView({
                         </div>
                       </div>
                       <div className="settings-row-control">
-                        <button
-                          type="button"
-                          onClick={handleMalLogout}
-                          className="settings-logout-btn"
-                          style={{ margin: 0 }}
-                        >
+                        <button type="button" onClick={handleMalLogout} className="settings-logout-btn u-style-11">
                           <LogOut size={16} />
                           <span>Disconnect Account</span>
                         </button>
@@ -1350,29 +1217,12 @@ export default function SettingsView({
                     </div>
                     <div className="settings-row-control">
                       {url ? (
-                        <a
-                          href={url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="settings-connect-link"
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            margin: 0,
-                          }}
-                        >
+                        <a href={url} target="_blank" rel="noreferrer" className="settings-connect-link u-style-81">
                           <LinkIcon size={16} />
                           <span>Authenticate Account</span>
                         </a>
                       ) : (
-                        <span
-                          style={{
-                            color: "var(--danger)",
-                            fontSize: "12px",
-                            fontWeight: "600",
-                          }}
-                        >
+                        <span className="u-style-82">
                           OAuth URL Error
                         </span>
                       )}
@@ -1383,9 +1233,7 @@ export default function SettingsView({
             </div>
           )}
           {activeTab === "history" && (
-            <div
-              style={{ display: "flex", flexDirection: "column", gap: "24px" }}
-            >
+            <div className="u-style-83">
               {statsLoading ? (
                 <div className="settings-loading-center">
                   <Loader2 size={32} className="spin" />
@@ -1425,69 +1273,20 @@ export default function SettingsView({
 
                   {/* History Timeline */}
                   <div className="settings-panel glass-panel">
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        marginBottom: "20px",
-                        borderBottom: "1px dashed var(--border)",
-                        paddingBottom: "12px",
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "20px",
-                        }}
-                      >
-                        <h2
-                          className="settings-panel-title"
-                          style={{
-                            margin: 0,
-                            borderBottom: "none",
-                            paddingBottom: 0,
-                          }}
-                        >
+                    <div className="u-style-84">
+                      <div className="u-style-85">
+                        <h2 className="settings-panel-title u-style-86">
                           Recent Activity History
                         </h2>
 
                         {/* Segmented Toggle Control */}
-                        <div
-                          className="market-tabs-wrapper"
-                          style={{
-                            display: "flex",
-                            backgroundColor: "var(--bg-secondary)",
-                            padding: "3px",
-                            borderRadius: "20px",
-                            border: "1px solid var(--border)",
-                            alignItems: "center",
-                          }}
-                        >
+                        <div className="segmented-toggle-wrapper">
                           {["All", "Anime", "Manga"].map((t) => (
                             <button
                               key={t}
                               type="button"
                               onClick={() => setHistoryFilter(t)}
-                              className={`market-tab-btn ${historyFilter === t ? "active" : ""}`}
-                              style={{
-                                backgroundColor:
-                                  historyFilter === t
-                                    ? "var(--accent)"
-                                    : "transparent",
-                                border: "none",
-                                color:
-                                  historyFilter === t
-                                    ? "white"
-                                    : "var(--text-muted)",
-                                padding: "4px 12px",
-                                borderRadius: "16px",
-                                fontSize: "12px",
-                                fontWeight: "600",
-                                cursor: "pointer",
-                                transition: "var(--transition)",
-                              }}
+                              className={`segmented-toggle-btn ${historyFilter === t ? "active" : ""}`}
                             >
                               {t}
                             </button>
@@ -1496,26 +1295,7 @@ export default function SettingsView({
                       </div>
 
                       {historyList.length > 0 && (
-                        <button
-                          type="button"
-                          onClick={handleClearHistory}
-                          className="settings-clear-history-btn"
-                          style={{
-                            background: "rgba(239, 68, 68, 0.15)",
-                            border: "1.5px solid var(--danger)",
-                            color: "var(--danger)",
-                            borderRadius: "6px",
-                            padding: "6px 14px",
-                            fontSize: "12px",
-                            fontWeight: "600",
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            height: "32px",
-                            transition: "all 0.2s ease",
-                          }}
-                        >
+                        <button type="button" onClick={handleClearHistory} className="settings-clear-history-btn u-style-88">
                           Clear History
                         </button>
                       )}
@@ -1528,14 +1308,7 @@ export default function SettingsView({
 
                       if (filteredHistory.length === 0) {
                         return (
-                          <p
-                            style={{
-                              color: "var(--text-muted)",
-                              fontSize: "13px",
-                              fontStyle: "italic",
-                              padding: "10px 0",
-                            }}
-                          >
+                          <p className="u-style-89">
                             {historyFilter === "All"
                               ? "No history records found yet. Go watch some anime or read some manga!"
                               : `No ${historyFilter.toLowerCase()} history records found.`}
@@ -1583,32 +1356,13 @@ export default function SettingsView({
                                   >
                                     {item.type}
                                   </span>
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      flexDirection: "column",
-                                      gap: "4px",
-                                    }}
-                                  >
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        alignItems: "center",
-                                        gap: "8px",
-                                        flexWrap: "wrap",
-                                      }}
-                                    >
+                                  <div className="u-style-90">
+                                    <div className="u-style-91">
                                       <strong className="settings-history-item-title">
                                         {item.title}
                                       </strong>
                                       {item.is_completed === 1 && (
-                                        <span
-                                          className="settings-completed-badge"
-                                          style={{
-                                            fontSize: "9px",
-                                            padding: "2px 6px",
-                                          }}
-                                        >
+                                        <span className="settings-completed-badge u-style-92">
                                           Completed
                                         </span>
                                       )}
@@ -1621,14 +1375,7 @@ export default function SettingsView({
                                     </span>
                                   </div>
                                 </div>
-                                <div
-                                  style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "16px",
-                                    flexShrink: 0,
-                                  }}
-                                >
+                                <div className="u-style-93">
                                   <span className="settings-history-item-date">
                                     {formattedDate}
                                   </span>
@@ -1671,7 +1418,7 @@ export default function SettingsView({
               ) : changelog ? (
                 <ChangelogRenderer markdown={changelog} />
               ) : (
-                <p style={{ color: "var(--text-muted)", fontSize: "13px" }}>
+                <p className="u-style-29">
                   Failed to load release notes.
                 </p>
               )}
@@ -1683,17 +1430,7 @@ export default function SettingsView({
               <h3 className="settings-section-title">
                 About & Legal Disclaimer
               </h3>
-              <div
-                className="disclaimer-text"
-                style={{
-                  fontSize: "13px",
-                  lineHeight: "1.6",
-                  color: "var(--text-color)",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "12px",
-                }}
-              >
+              <div className="disclaimer-text u-style-94">
                 <p>
                   <strong>StrawVerse</strong> is an open-source local media
                   manager and indexing application designed for developers and
@@ -1765,7 +1502,7 @@ function ChangelogRenderer({ markdown }) {
           );
         }
         if (line.trim() === "") {
-          return <div key={idx} style={{ height: "8px" }} />;
+          return <div key={idx} className="u-style-95" />;
         }
         return (
           <p key={idx} className="changelog-p">

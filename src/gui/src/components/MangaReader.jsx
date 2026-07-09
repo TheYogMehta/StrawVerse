@@ -431,12 +431,7 @@ export default function MangaReader({
 
     if (currentItem.type === "header") {
       return (
-        <div
-          key={currentItem.id}
-          data-chapter={currentItem.chapterId}
-          className="splash-card"
-          style={{ marginBottom: 0 }}
-        >
+        <div key={currentItem.id} data-chapter={currentItem.chapterId} className="splash-card u-style-58">
           <div className="splash-card-overlay" />
           <div className="splash-card-content">
             <span className="splash-manga-title">
@@ -464,12 +459,9 @@ export default function MangaReader({
               </span>
             </div>
 
-            <div
-              className="splash-chevron splash-scroll-hint"
-              style={{ flexDirection: "column", gap: "6px" }}
-            >
+            <div className="splash-chevron splash-scroll-hint u-style-59">
               <span>PRESS RIGHT ARROW OR CLICK RIGHT SIDE TO READ</span>
-              <span style={{ fontSize: "11px", opacity: 0.6 }}>
+              <span className="u-style-60">
                 PRESS LEFT ARROW OR CLICK LEFT SIDE TO GO BACK
               </span>
             </div>
@@ -491,7 +483,7 @@ export default function MangaReader({
             alt={`Page ${currentItem.page}`}
             shouldLoad={true}
           />
-          <div className="page-num" style={{ color: "#9ca3af" }}>
+          <div className="page-num u-style-61">
             Page {currentItem.page}
           </div>
         </div>
@@ -524,7 +516,7 @@ export default function MangaReader({
             alt={`Page ${page1.page}`}
             shouldLoad={true}
           />
-          <div className="page-num" style={{ color: "#9ca3af" }}>
+          <div className="page-num u-style-61">
             Page {page1.page}
           </div>
         </div>
@@ -541,7 +533,7 @@ export default function MangaReader({
               alt={`Page ${page2.page}`}
               shouldLoad={true}
             />
-            <div className="page-num" style={{ color: "#9ca3af" }}>
+            <div className="page-num u-style-61">
               Page {page2.page}
             </div>
           </div>
@@ -973,44 +965,11 @@ export default function MangaReader({
         )}
 
         <div className="header-right-section">
-          <div
-            className="reader-size-controls"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              marginRight: "12px",
-            }}
-          >
-            <span
-              style={{
-                fontSize: "12px",
-                color: "var(--text-muted)",
-                fontWeight: "600",
-                whiteSpace: "nowrap",
-              }}
-            >
+          <div className="reader-size-controls u-style-62">
+            <span className="u-style-63">
               Width: {readerWidth}px
             </span>
-            <input
-              type="range"
-              min="400"
-              max="1600"
-              step="20"
-              value={readerWidth}
-              onChange={(e) => {
-                const val = parseInt(e.target.value, 10);
-                setReaderWidth(val);
-                localStorage.setItem("manga_reader_width", val);
-                saveReaderWidthToSettings(val);
-              }}
-              style={{
-                width: "90px",
-                accentColor: "var(--accent)",
-                cursor: "pointer",
-                height: "6px",
-              }}
-            />
+            <input type="range" min="400" max="1600" step="20" value={readerWidth} onChange={(e) => { const val = parseInt(e.target.value, 10); setReaderWidth(val); localStorage.setItem("manga_reader_width", val); saveReaderWidthToSettings(val); }} className="u-style-64" />
           </div>
 
           <span className="chapter-title" title={mangaTitle || id}>
@@ -1033,11 +992,7 @@ export default function MangaReader({
       </div>
 
       {/* Main Pages viewport */}
-      <div
-        className="reader-viewport"
-        style={{ position: "relative" }}
-        onClick={handleViewportClick}
-      >
+      <div className="reader-viewport u-style-65" onClick={handleViewportClick}>
         {loading ? (
           <div className="status-overlay">
             <img

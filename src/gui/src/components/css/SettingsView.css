@@ -565,3 +565,10 @@
     min-width: unset;
   }
 }
+
+.settings-row-control .settings-number-input {
+  width: 90px;
+  min-width: unset;
+  max-width: unset;
+  text-align: center;
+}

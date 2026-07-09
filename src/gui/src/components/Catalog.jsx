@@ -748,18 +748,9 @@ export default function Catalog({
 
   return (
     <div className="catalog-wrapper">
-      <header
-        className="catalog-header"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          width: "100%",
-          gap: "16px",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center" }}>
-          <h1 className="catalog-title" style={{ margin: 0 }}>
+      <header className="catalog-header u-style-9">
+        <div className="u-style-10">
+          <h1 className="catalog-title u-style-11">
             {provider === "local"
               ? "Home"
               : provider === "mal"
@@ -767,10 +758,7 @@ export default function Catalog({
                 : "Discover"}
           </h1>
           {provider === "provider" && type === "Anime" && (
-            <div
-              className="discover-sub-tabs"
-              style={{ display: "flex", gap: "8px", marginLeft: "20px" }}
-            >
+            <div className="discover-sub-tabs u-style-12">
               <button
                 onClick={() => {
                   setDiscoverTab("latest");
@@ -793,16 +781,12 @@ export default function Catalog({
           )}
         </div>
 
-        <div
-          className="search-middle-container"
-          style={{ flex: 1, display: "flex", justifyContent: "center" }}
-        >
+        <div className="search-middle-container u-style-13">
           {((provider !== "local" && provider !== "mal") || linkingMalItem) &&
             discoverTab !== "calendar" && (
               <form
                 onSubmit={handleSearchSubmit}
-                className="search-form"
-                style={{ width: "100%", maxWidth: "450px" }}
+                className="search-form u-style-14"
               >
                 <input
                   type="text"
@@ -818,7 +802,7 @@ export default function Catalog({
             )}
         </div>
 
-        <div className="market-tabs-wrapper" style={{ flexShrink: 0 }}>
+        <div className="market-tabs-wrapper u-style-15">
           <button
             type="button"
             onClick={() => onTypeChange && onTypeChange("Anime")}
@@ -1023,7 +1007,7 @@ export default function Catalog({
             className="tag-chip btn-add-tag"
             title="Create Custom Tag"
           >
-            <Plus size={14} style={{ marginRight: "4px" }} />
+            <Plus size={14} className="u-style-16" />
             Add Tag
           </button>
         </div>
@@ -1050,11 +1034,9 @@ export default function Catalog({
             <img
               src="/images/loading.gif"
               alt="loading"
-              style={{ width: "64px", height: "64px" }}
+              className="u-style-17"
             />
-            <p style={{ marginTop: "16px", color: "var(--text-muted)" }}>
-              Loading calendar & airing schedule...
-            </p>
+            <p className="u-style-18">Loading calendar & airing schedule...</p>
           </div>
         ) : (
           <div className="calendar-view-container">
@@ -1062,42 +1044,12 @@ export default function Catalog({
             <div className="calendar-section">
               <h2 className="calendar-section-title">Weekly Airing Schedule</h2>
               {scheduleUpdating && (
-                <div
-                  className="schedule-updating-banner"
-                  style={{
-                    marginBottom: "20px",
-                    padding: "12px 16px",
-                    backgroundColor: "rgba(168, 85, 247, 0.15)",
-                    border: "1px solid rgba(168, 85, 247, 0.3)",
-                    borderRadius: "8px",
-                    color: "#d8b4fe",
-                    fontSize: "14px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                  }}
-                >
-                  <div
-                    className="pulse-dot"
-                    style={{
-                      width: "8px",
-                      height: "8px",
-                      borderRadius: "50%",
-                      backgroundColor: "#a855f7",
-                      boxShadow: "0 0 8px #a855f7",
-                      animation: "pulse 1.5s infinite",
-                    }}
-                  />
-                  <span style={{ fontWeight: 500 }}>
+                <div className="schedule-updating-banner u-style-19">
+                  <div className="pulse-dot u-style-20" />
+                  <span className="u-style-21">
                     Refreshing airing schedule from LiveChart...
                   </span>
-                  <span
-                    style={{
-                      fontSize: "12px",
-                      color: "var(--text-muted)",
-                      marginLeft: "auto",
-                    }}
-                  >
+                  <span className="u-style-22">
                     Fresh episodes will display automatically
                   </span>
                 </div>
@@ -1207,7 +1159,7 @@ export default function Catalog({
                     return (
                       <div className="schedule-empty-state glass-panel">
                         <div className="empty-state-icon">
-                          <Tv size={36} style={{ color: "var(--accent)" }} />
+                          <Tv size={36} className="u-style-23" />
                         </div>
                         <h3>
                           No episodes airing{" "}
@@ -1290,10 +1242,7 @@ export default function Catalog({
                                 </div>
                                 <div className="schedule-row-right">
                                   <span className="schedule-row-time">
-                                    <Clock
-                                      size={12}
-                                      style={{ marginRight: "4px" }}
-                                    />
+                                    <Clock size={12} className="u-style-16" />
                                     {airTime}
                                   </span>
                                   <span
@@ -1329,22 +1278,16 @@ export default function Catalog({
       ) : /* Content grid */
       loading ? (
         <div className="loading-center-panel">
-          <img
-            src="/images/loading.gif"
-            alt="loading"
-            style={{ width: "64px", height: "64px" }}
-          />
-          <p style={{ marginTop: "16px", color: "var(--text-muted)" }}>
-            Fetching collection...
-          </p>
+          <img src="/images/loading.gif" alt="loading" className="u-style-17" />
+          <p className="u-style-18">Fetching collection...</p>
         </div>
       ) : data?.results?.length === 0 ? (
         <div className="empty-center-panel">
-          <span style={{ fontSize: "48px" }}>🍉</span>
+          <span className="u-style-24">🍉</span>
           <h3>
             {provider === "local" ? "Empty Collection" : "No results found"}
           </h3>
-          <p style={{ color: "var(--text-muted)" }}>
+          <p className="u-style-25">
             {provider === "local"
               ? activeFilters.tag
                 ? `No items found tagged with "${activeFilters.tag}".`
@@ -1386,7 +1329,7 @@ export default function Catalog({
                   <div className="card-badges-container">
                     {item.Downloaded && item.Downloaded.length > 0 && (
                       <div className="indicator-badge">
-                        <Download size={12} style={{ marginRight: "4px" }} />
+                        <Download size={12} className="u-style-16" />
                         {item.Downloaded.length}{" "}
                         {type === "Anime" ? "Eps" : "Chs"}
                       </div>
@@ -1397,14 +1340,14 @@ export default function Catalog({
                         className="indicator-badge schedule-badge"
                         title="Next release countdown"
                       >
-                        <Film size={12} style={{ marginRight: "4px" }} />
+                        <Film size={12} className="u-style-16" />
                         {item.nextEpisodeIn}
                       </div>
                     ) : (
                       item.watched !== undefined &&
                       item.watched !== null && (
                         <div className="indicator-badge">
-                          <Eye size={12} style={{ marginRight: "4px" }} />
+                          <Eye size={12} className="u-style-16" />
                           {item.watched}/{item.totalEpisodes || "?"}
                         </div>
                       )
@@ -1519,7 +1462,7 @@ function ProviderBadge({ providerName, iconUrl }) {
           onError={() => setImgFailed(true)}
         />
       ) : providerName === "local source" ? (
-        <Folder size={14} style={{ color: "#fff", flexShrink: 0 }} />
+        <Folder size={14} className="u-style-26" />
       ) : (
         <span
           className="provider-badge-text-icon"

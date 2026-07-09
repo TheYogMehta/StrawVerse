@@ -141,15 +141,7 @@ export default function WatchTogetherModal({
         </div>
 
         {errorMsg && (
-          <div
-            style={{
-              background: "rgba(239, 68, 68, 0.2)",
-              color: "#f87171",
-              padding: "10px 20px",
-              fontSize: "0.85rem",
-              borderBottom: "1px solid rgba(239, 68, 68, 0.3)",
-            }}
-          >
+          <div className="u-style-105">
             {errorMsg}
           </div>
         )}
@@ -181,11 +173,7 @@ export default function WatchTogetherModal({
                   value={joinCodeInput}
                   onChange={(e) => setJoinCodeInput(e.target.value)}
                 />
-                <button
-                  className="wt-btn-primary"
-                  style={{ width: "auto" }}
-                  onClick={handleJoinRoom}
-                >
+                <button className="wt-btn-primary u-style-106" onClick={handleJoinRoom}>
                   Join
                 </button>
               </div>
@@ -227,7 +215,7 @@ export default function WatchTogetherModal({
               </div>
 
               <button className="wt-leave-btn" onClick={handleLeaveRoom}>
-                <LogOut size={14} style={{ marginRight: 6 }} /> Leave Room
+                <LogOut size={14} className="u-style-107" /> Leave Room
               </button>
             </div>
 
@@ -252,14 +240,7 @@ export default function WatchTogetherModal({
                 <div className="wt-chat-container">
                   <div className="wt-chat-messages">
                     {chatList.length === 0 ? (
-                      <div
-                        style={{
-                          color: "#6b7280",
-                          fontSize: "0.85rem",
-                          textAlign: "center",
-                          marginTop: 40,
-                        }}
-                      >
+                      <div className="u-style-108">
                         No messages yet. Say hi to everyone!
                       </div>
                     ) : (
@@ -288,22 +269,18 @@ export default function WatchTogetherModal({
                 </div>
               ) : (
                 /* Queue Tab */
-                <div style={{ padding: 20, flex: 1, overflowY: "auto" }}>
-                  <h4 style={{ margin: "0 0 12px 0", color: "#fff" }}>
+                <div className="u-style-109">
+                  <h4 className="u-style-110">
                     Shared Watch Playlist
                   </h4>
                   {queue.length === 0 ? (
-                    <div style={{ color: "#6b7280", fontSize: "0.85rem" }}>
+                    <div className="u-style-111">
                       The watch queue is currently empty.
                     </div>
                   ) : (
                     queue.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="wt-user-item"
-                        style={{ marginBottom: 8 }}
-                      >
-                        <span style={{ fontWeight: 700, color: "#a78bfa" }}>
+                      <div key={idx} className="wt-user-item u-style-112">
+                        <span className="u-style-113">
                           #{idx + 1}
                         </span>
                         <span className="wt-user-name">

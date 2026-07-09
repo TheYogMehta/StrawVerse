@@ -1859,12 +1859,8 @@ export default function InfoView({
   if (loading) {
     return (
       <div className="loading-center-spinner">
-        <img
-          src="/images/loading.gif"
-          alt="loading"
-          style={{ width: "64px", height: "64px" }}
-        />
-        <p style={{ marginTop: "16px", color: "var(--text-muted)" }}>
+        <img src="/images/loading.gif" alt="loading" className="u-style-17" />
+        <p className="u-style-18">
           Loading details...
         </p>
       </div>
@@ -1880,32 +1876,16 @@ export default function InfoView({
             <span>{backText || "Back to Collection"}</span>
           </button>
         </div>
-        <div
-          className="glass-panel"
-          style={{ padding: "40px", textAlign: "center", marginTop: "20px" }}
-        >
-          <img
-            src="/images/image-404.png"
-            alt="404 Not Found"
-            style={{
-              width: "180px",
-              height: "auto",
-              marginBottom: "24px",
-              opacity: 0.85,
-            }}
-          />
-          <h2 style={{ color: "var(--text-main)", marginBottom: "10px" }}>
+        <div className="glass-panel u-style-30">
+          <img src="/images/image-404.png" alt="404 Not Found" className="u-style-31" />
+          <h2 className="u-style-32">
             {type === "Anime" ? "Anime" : "Manga"} Data Not Found
           </h2>
-          <p style={{ color: "var(--text-muted)", marginBottom: "20px" }}>
+          <p className="u-style-33">
             {details?.message ||
               `The requested ${type.toLowerCase()} could not be found or failed to load.`}
           </p>
-          <button
-            onClick={onBack}
-            className="btn-back"
-            style={{ display: "inline-flex", padding: "10px 20px" }}
-          >
+          <button onClick={onBack} className="btn-back u-style-34">
             <span>Go Back</span>
           </button>
         </div>
@@ -1984,7 +1964,7 @@ export default function InfoView({
                 className="info-tag-schedule"
                 title="Next release countdown"
               >
-                <Film size={12} style={{ marginRight: "4px" }} />
+                <Film size={12} className="u-style-16" />
                 {details.nextEpisodeIn}
               </span>
             )}
@@ -2013,7 +1993,7 @@ export default function InfoView({
                 onClick={handleContinueWatchRead}
                 className="btn-action-base btn-continue"
               >
-                <Play size={16} style={{ marginRight: "6px" }} />
+                <Play size={16} className="u-style-35" />
                 {isFinished
                   ? type === "Anime"
                     ? "Rewatch from Episode 1"
@@ -2028,17 +2008,8 @@ export default function InfoView({
               </button>
 
               {hasAnyDownloads && (
-                <button
-                  onClick={handleDeleteLocal}
-                  className="btn-action-base"
-                  style={{
-                    background: "rgba(239, 68, 68, 0.15)",
-                    border: "1.5px solid var(--danger)",
-                    color: "var(--danger)",
-                    marginLeft: "8px",
-                  }}
-                >
-                  <Trash2 size={16} style={{ marginRight: "6px" }} />
+                <button onClick={handleDeleteLocal} className="btn-action-base u-style-36">
+                  <Trash2 size={16} className="u-style-35" />
                   <span>Delete All Downloads</span>
                 </button>
               )}
@@ -2046,11 +2017,7 @@ export default function InfoView({
 
             {/* Library Tags & Source Provider Selection */}
             <div className="tracking-group">
-              <div
-                className="input-group"
-                style={{ minWidth: "240px", position: "relative" }}
-                ref={dropdownRef}
-              >
+              <div className="input-group u-style-37" ref={dropdownRef}>
                 <label className="input-label">Library Tags</label>
                 <div
                   className={`custom-dropdown-trigger ${isDropdownOpen ? "open" : ""} ${pulseDropdown ? "pulse-highlight" : ""}`}
@@ -2093,7 +2060,7 @@ export default function InfoView({
                         setIsDropdownOpen(false);
                       }}
                     >
-                      <Plus size={14} style={{ marginRight: "6px" }} />
+                      <Plus size={14} className="u-style-35" />
                       Create Custom Tag...
                     </div>
                   </div>
@@ -2102,11 +2069,7 @@ export default function InfoView({
 
               {/* Source Provider selector */}
               {details?.provider && (
-                <div
-                  className="input-group"
-                  style={{ minWidth: "180px", position: "relative" }}
-                  ref={providerDropdownRef}
-                >
+                <div className="input-group u-style-38" ref={providerDropdownRef}>
                   <label className="input-label">Source Provider</label>
                   {details.linkedProviders &&
                   details.linkedProviders.length > 1 ? (
@@ -2176,31 +2139,12 @@ export default function InfoView({
           {/* Consolidated MyAnimeList Integration Box */}
           {details?.MalLoggedIn && (
             <div className="mal-box glass-panel">
-              <div
-                className="mal-box-header"
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: "12px",
-                  borderBottom: "1px solid var(--border)",
-                  paddingBottom: "12px",
-                  marginBottom: "14px",
-                }}
-              >
-                <h3 className="mal-title" style={{ margin: 0 }}>
+              <div className="mal-box-header u-style-39">
+                <h3 className="mal-title u-style-11">
                   MyAnimeList Integration
                 </h3>
                 {details.malid ? (
-                  <div
-                    className="mal-link-status"
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "10px",
-                    }}
-                  >
+                  <div className="mal-link-status u-style-27">
                     <span className="mal-link-badge">
                       Linked (ID: {details.malid})
                     </span>
@@ -2230,11 +2174,7 @@ export default function InfoView({
                       className="input-val"
                     />
                   </div>
-                  <div
-                    className="input-group"
-                    style={{ minWidth: "160px", position: "relative" }}
-                    ref={malStatusDropdownRef}
-                  >
+                  <div className="input-group u-style-40" ref={malStatusDropdownRef}>
                     <label className="input-label">Status</label>
                     <div
                       className={`custom-dropdown-trigger ${isMalStatusDropdownOpen ? "open" : ""}`}
@@ -2280,16 +2220,7 @@ export default function InfoView({
                     )}
                   </button>
                   {malStatus !== "not_in_list" && (
-                    <button
-                      onClick={handleMalRemove}
-                      disabled={malSyncing}
-                      className="btn-unlink"
-                      style={{
-                        background: "rgba(239, 68, 68, 0.15)",
-                        borderColor: "var(--danger)",
-                        color: "var(--danger)",
-                      }}
-                    >
+                    <button onClick={handleMalRemove} disabled={malSyncing} className="btn-unlink u-style-41">
                       {malSyncing ? (
                         <Loader2 size={16} className="spin" />
                       ) : (
@@ -2299,15 +2230,7 @@ export default function InfoView({
                   )}
                 </div>
               ) : (
-                <p
-                  className="mal-unlinked-placeholder"
-                  style={{
-                    fontSize: "13px",
-                    color: "var(--text-muted)",
-                    margin: 0,
-                    fontStyle: "italic",
-                  }}
-                >
+                <p className="mal-unlinked-placeholder u-style-42">
                   This title is not linked to a MyAnimeList entry. Link it to
                   synchronize your status and watch history automatically.
                 </p>
@@ -2346,16 +2269,8 @@ export default function InfoView({
               )}
             </div>
             {/* Sort Selector */}
-            <div
-              className="input-group"
-              style={{ minWidth: "120px", position: "relative" }}
-              ref={sortDropdownRef}
-            >
-              <div
-                className={`custom-dropdown-trigger ${isSortDropdownOpen ? "open" : ""}`}
-                onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}
-                style={{ minHeight: "38px" }}
-              >
+            <div className="input-group u-style-43" ref={sortDropdownRef}>
+              <div className={`${`custom-dropdown-trigger ${isSortDropdownOpen ? "open" : ""} u-style-44`}`} onClick={() => setIsSortDropdownOpen(!isSortDropdownOpen)}>
                 <span className="custom-dropdown-trigger-text">
                   Sort:{" "}
                   {sortOrder === "downloaded"
@@ -2366,7 +2281,7 @@ export default function InfoView({
               </div>
 
               {isSortDropdownOpen && (
-                <div className="custom-dropdown-menu" style={{ width: "100%" }}>
+                <div className="custom-dropdown-menu u-style-45">
                   <div
                     className={`custom-dropdown-item ${sortOrder === "asc" ? "selected" : ""}`}
                     onClick={() => {
@@ -2437,16 +2352,8 @@ export default function InfoView({
                   ) ||
                     (details?.DownloadedEpisodes?.dub &&
                       details.DownloadedEpisodes.dub.length > 0)) && (
-                    <div
-                      className="input-group"
-                      style={{ minWidth: "80px", position: "relative" }}
-                      ref={dubDropdownRef}
-                    >
-                      <div
-                        className={`custom-dropdown-trigger ${isDubDropdownOpen ? "open" : ""}`}
-                        onClick={() => setIsDubDropdownOpen(!isDubDropdownOpen)}
-                        style={{ minHeight: "38px" }}
-                      >
+                    <div className="input-group u-style-46" ref={dubDropdownRef}>
+                      <div className={`${`custom-dropdown-trigger ${isDubDropdownOpen ? "open" : ""} u-style-44`}`} onClick={() => setIsDubDropdownOpen(!isDubDropdownOpen)}>
                         <span className="custom-dropdown-trigger-text">
                           {dubSelect.toUpperCase()}
                         </span>
@@ -2457,10 +2364,7 @@ export default function InfoView({
                       </div>
 
                       {isDubDropdownOpen && (
-                        <div
-                          className="custom-dropdown-menu"
-                          style={{ width: "100%" }}
-                        >
+                        <div className="custom-dropdown-menu u-style-45">
                           <div
                             className={`custom-dropdown-item ${dubSelect === "sub" ? "selected" : ""}`}
                             onClick={() => {
@@ -2496,15 +2400,7 @@ export default function InfoView({
                   {allSelectableSelected ? "Deselect All" : "Select All"}
                 </button>
                 {selectedItems.size > 0 && (
-                  <button
-                    onClick={() => setSelectedItems(new Set())}
-                    className="btn-bulk"
-                    style={{
-                      backgroundColor: "rgba(239, 68, 68, 0.15)",
-                      color: "var(--danger)",
-                      border: "1px solid rgba(239, 68, 68, 0.3)",
-                    }}
-                  >
+                  <button onClick={() => setSelectedItems(new Set())} className="btn-bulk u-style-47">
                     Clear Selected
                   </button>
                 )}
@@ -2528,47 +2424,8 @@ export default function InfoView({
                     transition: "border-color 0.2s ease, box-shadow 0.2s ease",
                   }}
                 >
-                  <input
-                    type="text"
-                    placeholder="Range 1-10 / 5"
-                    value={rangeInput}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setRangeInput(val);
-                      setIsRangeInputInvalid(!validateRangeInput(val));
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleSelectRange(rangeInput, true);
-                      }
-                    }}
-                    className="input-val"
-                    style={{
-                      width: "120px",
-                      padding: "0",
-                      fontSize: "13px",
-                      border: "none",
-                      background: "transparent",
-                      color: "white",
-                      outline: "none",
-                    }}
-                  />
-                  <button
-                    onClick={() => handleSelectRange(rangeInput, true)}
-                    className="btn-bulk"
-                    style={{
-                      padding: "5px 10px",
-                      fontSize: "13px",
-                      border: "none",
-                      backgroundColor: "rgba(124, 58, 237, 0.15)",
-                      color: "#a78bfa",
-                      borderRadius: "4px",
-                      cursor: "pointer",
-                      fontWeight: "600",
-                    }}
-                    title="Select range of episodes"
-                  >
+                  <input type="text" placeholder="Range 1-10 / 5" value={rangeInput} onChange={(e) => { const val = e.target.value; setRangeInput(val); setIsRangeInputInvalid(!validateRangeInput(val)); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSelectRange(rangeInput, true); } }} className="input-val u-style-48" />
+                  <button onClick={() => handleSelectRange(rangeInput, true)} className="btn-bulk u-style-49" title="Select range of episodes">
                     Select
                   </button>
                 </div>
@@ -2637,15 +2494,7 @@ export default function InfoView({
                 className={`item-card glass-panel ${customBorderClass} ${isSelected ? "selected" : ""}`}
                 onClick={(e) => handleItemClick(e, item)}
               >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "14px",
-                    width: "220px",
-                    flexShrink: 0,
-                  }}
-                >
+                <div className="u-style-50">
                   {showOnlineActions && (
                     <input
                       type="checkbox"
@@ -2662,61 +2511,25 @@ export default function InfoView({
                       }}
                     />
                   )}
-                  <span
-                    className="item-num"
-                    style={{ fontWeight: "600", fontSize: "14px" }}
-                  >
+                  <span className="item-num u-style-51">
                     {type === "Anime"
                       ? `Episode ${item.number}`
                       : `Chapter ${item.number}`}
                   </span>
                 </div>
 
-                <div
-                  className="item-middle-progress"
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: "24px",
-                    padding: "0 16px",
-                    overflow: "hidden",
-                  }}
-                >
+                <div className="item-middle-progress u-style-52">
                   {type === "Anime" &&
                     item.title &&
                     item.title !== `Episode ${item.number}` && (
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          color: "var(--text-muted)",
-                          fontWeight: "500",
-                          textOverflow: "ellipsis",
-                          overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          maxWidth: "280px",
-                        }}
-                        title={item.title}
-                      >
+                      <span title={item.title} className="u-style-53">
                         {item.title}
                       </span>
                     )}
                   {type === "Manga" &&
                     item.title &&
                     item.title !== `Chapter ${item.number}` && (
-                      <span
-                        style={{
-                          fontSize: "13px",
-                          color: "var(--text-muted)",
-                          fontWeight: "500",
-                          textOverflow: "ellipsis",
-                          overflow: "hidden",
-                          whiteSpace: "nowrap",
-                          maxWidth: "280px",
-                        }}
-                        title={item.title}
-                      >
+                      <span title={item.title} className="u-style-53">
                         {item.title}
                       </span>
                     )}
@@ -2739,26 +2552,8 @@ export default function InfoView({
                       return null;
 
                     return (
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "12px",
-                          flex: 1,
-                          minWidth: "160px",
-                          maxWidth: "300px",
-                        }}
-                      >
-                        <div
-                          style={{
-                            width: "70px",
-                            height: "4px",
-                            backgroundColor: "rgba(255, 255, 255, 0.08)",
-                            borderRadius: "2px",
-                            overflow: "hidden",
-                            flexShrink: 0,
-                          }}
-                        >
+                      <div className="u-style-54">
+                        <div className="u-style-55">
                           <div
                             style={{
                               width: `${Math.min(100, Math.max(0, (curVal / (totVal || 1)) * 100))}%`,
@@ -2770,14 +2565,7 @@ export default function InfoView({
                             }}
                           />
                         </div>
-                        <span
-                          style={{
-                            fontSize: "11px",
-                            color: "var(--text-muted)",
-                            fontWeight: "500",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
+                        <span className="u-style-56">
                           {type === "Anime"
                             ? `${formatTime(curVal)} / ${formatTime(totVal)}`
                             : `Page ${curVal}/${totVal}`}
@@ -2787,9 +2575,7 @@ export default function InfoView({
                   })()}
                 </div>
 
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "12px" }}
-                >
+                <div className="u-style-57">
                   {/* Local download status & deletion buttons */}
                   {type === "Anime" ? (
                     <>

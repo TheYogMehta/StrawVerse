@@ -49,97 +49,28 @@ export default function WatchTogetherBar({ onOpenModal }) {
   if (!roomCode) return null;
 
   return (
-    <div
-      style={{
-        position: "fixed",
-        top: 12,
-        right: 20,
-        zIndex: 900,
-        background: "rgba(17, 17, 27, 0.92)",
-        backdropFilter: "blur(12px)",
-        border: "1px solid rgba(139, 92, 246, 0.4)",
-        borderRadius: 20,
-        padding: "6px 14px",
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        color: "#fff",
-        fontSize: "0.82rem",
-        boxShadow: "0 4px 18px rgba(0, 0, 0, 0.5)",
-        cursor: "pointer",
-      }}
-      onClick={onOpenModal}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          color: "#10b981",
-        }}
-      >
+    <div onClick={onOpenModal} className="u-style-99">
+      <div className="u-style-100">
         <Radio size={14} className="animate-pulse" />
-        <span
-          style={{ fontWeight: 700, color: "#a78bfa", letterSpacing: "1px" }}
-        >
+        <span className="u-style-101">
           {roomCode}
         </span>
       </div>
 
       {/* Copy Code Icon Button */}
-      <button
-        style={{
-          background: "rgba(255, 255, 255, 0.08)",
-          border: "none",
-          borderRadius: 12,
-          padding: "3px 8px",
-          color: "#d1d5db",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          fontSize: "0.72rem",
-          transition: "background 0.15s",
-        }}
-        onClick={handleCopy}
-        title="Copy Room Code"
-      >
+      <button onClick={handleCopy} title="Copy Room Code" className="u-style-102">
         {copied ? <Check size={12} color="#10b981" /> : <Copy size={12} />}
         <span>{copied ? "Copied!" : "Copy"}</span>
       </button>
 
       {/* Users Count */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          color: "#9ca3af",
-        }}
-      >
+      <div className="u-style-103">
         <Users size={14} />
         <span>{userCount}</span>
       </div>
 
       {/* Red Exit / Leave Button */}
-      <button
-        style={{
-          background: "rgba(239, 68, 68, 0.18)",
-          border: "1px solid rgba(239, 68, 68, 0.4)",
-          borderRadius: 12,
-          padding: "4px 8px",
-          color: "#f87171",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          gap: 4,
-          fontSize: "0.75rem",
-          fontWeight: 600,
-          transition: "all 0.15s",
-        }}
-        onClick={handleLeave}
-        title="Leave Room"
-      >
+      <button onClick={handleLeave} title="Leave Room" className="u-style-104">
         <LogOut size={13} color="#f87171" />
       </button>
     </div>
