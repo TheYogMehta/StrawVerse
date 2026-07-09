@@ -4,3 +4,4 @@ node_modules/
 TODO.TODO
 Api/
 src/scratch/
+src/release.sh
