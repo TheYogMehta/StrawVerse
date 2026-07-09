@@ -9,6 +9,8 @@ import {
   Link as LinkIcon,
 } from "lucide-react";
 import Swal from "sweetalert2";
+import { swalSuccess, swalError, swalConfirm } from "../../utils/swal";
+import { apiPost } from "../../utils/common";
 import watchTogetherClient from "../../utils/watchTogetherClient";
 import SettingsRow from "./SettingsRow";
 import "../css/SettingsView.css";
@@ -284,15 +286,11 @@ export default function SettingsView({
   }, []);
 
   const handleDeleteHistory = async (type, id, title, number) => {
-    const result = await Swal.fire({
-      title: "Delete History Entry?",
-      text: `Are you sure you want to delete the tracking entry for "${title}" (${type === "Anime" ? "Episode" : "Chapter"} ${number})? This will update your watch/read statistics.`,
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonColor: "#d33",
-      cancelButtonColor: "#3085d6",
-      confirmButtonText: "Yes, delete it!",
-    });
+    const result = await swalConfirm(
+      "Delete History Entry?",
+      `Are you sure you want to delete the tracking entry for "${title}" (${type === "Anime" ? "Episode" : "Chapter"} ${number})? This will update your watch/read statistics.`,
+      "Yes, delete it!",
+    );
 
     if (result.isConfirmed) {
       try {
@@ -301,13 +299,7 @@ export default function SettingsView({
         });
         const data = await res.json();
         if (data.success) {
-          Swal.fire({
-            title: "Deleted!",
-            text: "Your tracking entry has been deleted.",
-            icon: "success",
-            timer: 1500,
-            showConfirmButton: false,
-          });
+          swalSuccess("Deleted!", "Your tracking entry has been deleted.");
           // Refresh statistics and history
           const statsRes = await fetch("/api/history/stats");
           const statsData = await statsRes.json();
@@ -317,50 +309,26 @@ export default function SettingsView({
           const listData = await listRes.json();
           setHistoryList(listData);
         } else {
-          Swal.fire(
-            "Error",
-            data.error || "Failed to delete tracking entry.",
-            "error",
-          );
+          swalError("Error", data.error || "Failed to delete tracking entry.");
         }
       } catch (err) {
-        Swal.fire(
-          "Error",
-          err.message || "An error occurred while deleting.",
-          "error",
-        );
+        swalError("Error", err.message || "An error occurred while deleting.");
       }
     }
   };
 
   const handleClearHistory = async () => {
-    const confirmResult = await Swal.fire({
-      title: "Clear All History?",
-      text: "Are you sure you want to permanently clear all watch and read history? This cannot be undone.",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Yes, clear all",
-      cancelButtonText: "Cancel",
-      background: "var(--bg-secondary)",
-      color: "var(--text-main)",
-      confirmButtonColor: "var(--danger)",
-      cancelButtonColor: "var(--bg-tertiary)",
-    });
+    const confirmResult = await swalConfirm(
+      "Clear All History?",
+      "Are you sure you want to permanently clear all watch and read history? This cannot be undone.",
+      "Yes, clear all",
+    );
     if (!confirmResult.isConfirmed) return;
 
     try {
-      const response = await fetch("/api/history/clear", {
-        method: "POST",
-      });
-      const data = await response.json();
+      const data = await apiPost("/api/history/clear");
       if (data.success) {
-        Swal.fire({
-          title: "Cleared!",
-          text: "All activity history has been cleared.",
-          icon: "success",
-          timer: 1500,
-          showConfirmButton: false,
-        });
+        swalSuccess("Cleared!", "All activity history has been cleared.");
         setStats({
           watchHours: 0,
           readHours: 0,
@@ -371,14 +339,7 @@ export default function SettingsView({
         });
         setHistoryList([]);
       } else {
-        Swal.fire({
-          title: "Error",
-          text: data.error || "Failed to clear history.",
-          icon: "error",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-          confirmButtonColor: "var(--accent)",
-        });
+        swalError("Error", data.error || "Failed to clear history.");
       }
     } catch (err) {
       console.error(err);
@@ -515,30 +476,16 @@ export default function SettingsView({
   ]);
 
   const handleMalLogout = async () => {
-    const confirmResult = await Swal.fire({
-      title: "Are you sure?",
-      text: "Are you sure you want to logout from MyAnimeList?",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Yes, logout",
-      cancelButtonText: "Cancel",
-      background: "var(--bg-secondary)",
-      color: "var(--text-main)",
-      confirmButtonColor: "var(--danger)",
-      cancelButtonColor: "var(--bg-tertiary)",
-    });
+    const confirmResult = await swalConfirm(
+      "Are you sure?",
+      "Are you sure you want to logout from MyAnimeList?",
+      "Yes, logout"
+    );
     if (!confirmResult.isConfirmed) return;
     try {
       const res = await fetch("/mal/logout");
       if (res.ok) {
-        Swal.fire({
-          title: "Logged Out",
-          text: "Logged out from MAL successfully!",
-          icon: "success",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-          confirmButtonColor: "var(--accent)",
-        });
+        swalSuccess("Logged Out", "Logged out from MAL successfully!");
         fetchSettings();
       }
     } catch (err) {
@@ -547,41 +494,24 @@ export default function SettingsView({
   };
 
   const handleClearCache = async () => {
-    const confirmResult = await Swal.fire({
-      title: "Clear Image Cache?",
-      text: "This will delete all cached cover and metadata images. They will be re-downloaded when needed.",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonText: "Yes, clear cache",
-      cancelButtonText: "Cancel",
-      background: "var(--bg-secondary)",
-      color: "var(--text-main)",
-      confirmButtonColor: "var(--danger)",
-      cancelButtonColor: "var(--bg-tertiary)",
-    });
+    const confirmResult = await swalConfirm(
+      "Clear Image Cache?",
+      "This will delete all cached cover and metadata images. They will be re-downloaded when needed.",
+      "Yes, clear cache"
+    );
     if (!confirmResult.isConfirmed) return;
     setClearingCache(true);
     try {
-      const res = await fetch("/api/cache/clear", { method: "POST" });
-      const data = await res.json();
+      const data = await apiPost("/api/cache/clear");
       if (data.success) {
-        Swal.fire({
-          title: "Cache Cleared",
-          text: "Image cache cleared successfully!",
-          icon: "success",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-          confirmButtonColor: "var(--accent)",
-          timer: 1500,
-          showConfirmButton: false,
-        });
+        swalSuccess("Cache Cleared", "Image cache cleared successfully!");
         fetchCacheStats();
       } else {
-        Swal.fire("Error", data.error || "Failed to clear cache.", "error");
+        swalError("Error", data.error || "Failed to clear cache.");
       }
     } catch (err) {
       console.error(err);
-      Swal.fire("Error", err.message || "An error occurred.", "error");
+      swalError("Error", err.message || "An error occurred.");
     } finally {
       setClearingCache(false);
     }
@@ -611,9 +541,7 @@ export default function SettingsView({
               <span>Unsaved changes...</span>
             ) : (
               <>
-                <span className="u-style-67">
-                  ✓
-                </span>
+                <span className="u-style-67">✓</span>
                 <span>All changes saved</span>
               </>
             )}
@@ -762,10 +690,19 @@ export default function SettingsView({
                       }}
                     />
                     <div className="u-style-69">
-                      <button type="button" onClick={handleVerifyWtServer} disabled={verifyingWt} className="settings-market-btn u-style-70">
+                      <button
+                        type="button"
+                        onClick={handleVerifyWtServer}
+                        disabled={verifyingWt}
+                        className="settings-market-btn u-style-70"
+                      >
                         {verifyingWt ? "Verifying..." : "Verify Connection"}
                       </button>
-                      <button type="button" onClick={handleResetWtServer} className="settings-logout-btn u-style-71">
+                      <button
+                        type="button"
+                        onClick={handleResetWtServer}
+                        className="settings-logout-btn u-style-71"
+                      >
                         Reset to Default
                       </button>
                     </div>
@@ -798,10 +735,13 @@ export default function SettingsView({
                       }}
                       onBlur={(e) => {
                         const val = parseInt(e.target.value, 10);
-                        if (isNaN(val) || val < 5) { setImageCacheSizeLimit(5); } }} className="settings-text-input settings-number-input u-style-73" />
-                    <span className="u-style-74">
-                      GB
-                    </span>
+                        if (isNaN(val) || val < 5) {
+                          setImageCacheSizeLimit(5);
+                        }
+                      }}
+                      className="settings-text-input settings-number-input u-style-73"
+                    />
+                    <span className="u-style-74">GB</span>
                   </div>
                 </div>
 
@@ -817,7 +757,12 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <button type="button" onClick={handleClearCache} disabled={clearingCache} className="settings-logout-btn u-style-75">
+                    <button
+                      type="button"
+                      onClick={handleClearCache}
+                      disabled={clearingCache}
+                      className="settings-logout-btn u-style-75"
+                    >
                       {clearingCache ? (
                         <Loader2 size={14} className="spin" />
                       ) : (
@@ -843,7 +788,12 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <a href="https://discord.gg/PzfUBgQ2gt" target="_blank" rel="noreferrer" className="settings-connect-link u-style-76">
+                    <a
+                      href="https://discord.gg/PzfUBgQ2gt"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="settings-connect-link u-style-76"
+                    >
                       <MessageSquare size={16} />
                       <span>Join Discord</span>
                     </a>
@@ -980,7 +930,11 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <button type="button" onClick={() => onMarketplaceOpen("Anime")} className="settings-market-btn u-style-11">
+                    <button
+                      type="button"
+                      onClick={() => onMarketplaceOpen("Anime")}
+                      className="settings-market-btn u-style-11"
+                    >
                       Open Anime Extensions
                     </button>
                   </div>
@@ -1050,7 +1004,17 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control u-style-27">
-                    <input type="range" min="400" max="1600" step="20" value={mangaReaderWidth} onChange={(e) => setMangaReaderWidth(parseInt(e.target.value, 10)) } className="settings-range-slider u-style-77" />
+                    <input
+                      type="range"
+                      min="400"
+                      max="1600"
+                      step="20"
+                      value={mangaReaderWidth}
+                      onChange={(e) =>
+                        setMangaReaderWidth(parseInt(e.target.value, 10))
+                      }
+                      className="settings-range-slider u-style-77"
+                    />
                   </div>
                 </div>
 
@@ -1084,7 +1048,11 @@ export default function SettingsView({
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <button type="button" onClick={() => onMarketplaceOpen("Manga")} className="settings-market-btn u-style-11">
+                    <button
+                      type="button"
+                      onClick={() => onMarketplaceOpen("Manga")}
+                      className="settings-market-btn u-style-11"
+                    >
                       Open Manga Extensions
                     </button>
                   </div>
@@ -1186,7 +1154,11 @@ export default function SettingsView({
                         </div>
                       </div>
                       <div className="settings-row-control">
-                        <button type="button" onClick={handleMalLogout} className="settings-logout-btn u-style-11">
+                        <button
+                          type="button"
+                          onClick={handleMalLogout}
+                          className="settings-logout-btn u-style-11"
+                        >
                           <LogOut size={16} />
                           <span>Disconnect Account</span>
                         </button>
@@ -1206,14 +1178,17 @@ export default function SettingsView({
                     </div>
                     <div className="settings-row-control">
                       {url ? (
-                        <a href={url} target="_blank" rel="noreferrer" className="settings-connect-link u-style-81">
+                        <a
+                          href={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="settings-connect-link u-style-81"
+                        >
                           <LinkIcon size={16} />
                           <span>Authenticate Account</span>
                         </a>
                       ) : (
-                        <span className="u-style-82">
-                          OAuth URL Error
-                        </span>
+                        <span className="u-style-82">OAuth URL Error</span>
                       )}
                     </div>
                   </div>
@@ -1284,7 +1259,11 @@ export default function SettingsView({
                       </div>
 
                       {historyList.length > 0 && (
-                        <button type="button" onClick={handleClearHistory} className="settings-clear-history-btn u-style-88">
+                        <button
+                          type="button"
+                          onClick={handleClearHistory}
+                          className="settings-clear-history-btn u-style-88"
+                        >
                           Clear History
                         </button>
                       )}
@@ -1407,9 +1386,7 @@ export default function SettingsView({
               ) : changelog ? (
                 <ChangelogRenderer markdown={changelog} />
               ) : (
-                <p className="u-style-29">
-                  Failed to load release notes.
-                </p>
+                <p className="u-style-29">Failed to load release notes.</p>
               )}
             </div>
           )}

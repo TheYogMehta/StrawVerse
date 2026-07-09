@@ -19,6 +19,8 @@ import {
   Play,
 } from "lucide-react";
 import Swal from "sweetalert2";
+import { swalSuccess, swalError } from "../utils/swal";
+import { apiPost } from "../utils/common";
 
 export default function Catalog({
   type,
@@ -540,14 +542,10 @@ export default function Catalog({
         "downloads",
       ];
       if (forbidden.includes(trimmed.toLowerCase())) {
-        Swal.fire({
-          title: "Reserved Tag Name",
-          text: `"${trimmed}" is a reserved system tag and cannot be created manually.`,
-          icon: "warning",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-          confirmButtonColor: "var(--accent)",
-        });
+        swalError(
+          "Reserved Tag Name",
+          `"${trimmed}" is a reserved system tag and cannot be created manually.`,
+        );
         return;
       }
       if (!localTags.includes(trimmed)) {
@@ -591,42 +589,28 @@ export default function Catalog({
             },
           });
 
-          fetch("/api/local/tags/add", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type: type,
-              id: item.id,
-              provider:
-                item.provider !== "provider" && item.provider !== "local source"
-                  ? item.provider
-                  : undefined,
-              MalID: linkingMalItem.MalID || linkingMalItem.id,
-            }),
-          })
-            .then((res) => res.json())
-            .then((linkRes) => {
-              if (!linkRes.error) {
-                Swal.fire({
-                  title: "Linked!",
-                  text: `Successfully linked to "${item.title}"!`,
-                  icon: "success",
-                  background: "var(--bg-secondary)",
-                  color: "var(--text-main)",
-                  confirmButtonColor: "var(--accent)",
-                }).then(() => {
-                  setLinkingMalItem(null);
-                  setSearchQuery("");
-                  fetchData(1, activeFilters, "", null);
-                });
-              } else {
-                Swal.fire({
-                  title: "Error",
-                  text: linkRes.message || "Failed to link title.",
-                  icon: "error",
-                });
-              }
-            });
+          apiPost("/api/local/tags/add", {
+            type: type,
+            id: item.id,
+            provider:
+              item.provider !== "provider" && item.provider !== "local source"
+                ? item.provider
+                : undefined,
+            MalID: linkingMalItem.MalID || linkingMalItem.id,
+          }).then((linkRes) => {
+            if (!linkRes.error) {
+              swalSuccess(
+                "Linked!",
+                `Successfully linked to "${item.title}"!`,
+              ).then(() => {
+                setLinkingMalItem(null);
+                setSearchQuery("");
+                fetchData(1, activeFilters, "", null);
+              });
+            } else {
+              swalError("Error", linkRes.message || "Failed to link title.");
+            }
+          });
         }
       });
       return;

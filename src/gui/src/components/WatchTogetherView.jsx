@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import watchTogetherClient from "../utils/watchTogetherClient";
 import VideoPlayer from "./VideoPlayer";
 import Swal from "sweetalert2";
+import { swalError } from "../utils/swal";
 import "./css/WatchTogetherView.css";
 import {
   Users,
@@ -483,14 +484,10 @@ export default function WatchTogetherView({ onNavigate }) {
         start = 1;
         end = parseInt(singleMatch[1]);
       } else {
-        Swal.fire({
-          title: "Invalid Range",
-          text: "Invalid range format. Please use e.g. '1-50', '1 to 50', or '50'.",
-          icon: "error",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-          confirmButtonColor: "var(--accent)",
-        });
+        swalError(
+          "Invalid Range",
+          "Invalid range format. Please use e.g. '1-50', '1 to 50', or '50'.",
+        );
         return;
       }
     }
@@ -643,9 +640,7 @@ export default function WatchTogetherView({ onNavigate }) {
   if (malLoggedIn === null) {
     return (
       <div className="wt-landing-container">
-        <div className="u-style-114">
-          Loading settings...
-        </div>
+        <div className="u-style-114">Loading settings...</div>
       </div>
     );
   }
@@ -921,9 +916,7 @@ export default function WatchTogetherView({ onNavigate }) {
                   )}
                 </>
               ) : (
-                <div className="u-style-116">
-                  Nothing currently playing
-                </div>
+                <div className="u-style-116">Nothing currently playing</div>
               )}
             </div>
 
@@ -948,7 +941,11 @@ export default function WatchTogetherView({ onNavigate }) {
               (isSynopsisCollapsed && activeMedia ? (
                 <div className="wt-collapsed-synopsis-bar u-style-118">
                   <div className="u-style-119">
-                    <img src={selectedAnimeDetails?.image || selectedAnime.image} alt={selectedAnime.title} className="u-style-120" />
+                    <img
+                      src={selectedAnimeDetails?.image || selectedAnime.image}
+                      alt={selectedAnime.title}
+                      className="u-style-120"
+                    />
                     <div className="u-style-121">
                       <span className="u-style-122">
                         {selectedAnimeDetails?.title || selectedAnime.title}
@@ -958,7 +955,10 @@ export default function WatchTogetherView({ onNavigate }) {
                       </span>
                     </div>
                   </div>
-                  <button className="wt-btn-toggle-synopsis u-style-124" onClick={() => setIsSynopsisCollapsed(false)}>
+                  <button
+                    className="wt-btn-toggle-synopsis u-style-124"
+                    onClick={() => setIsSynopsisCollapsed(false)}
+                  >
                     Show Info
                   </button>
                 </div>
@@ -975,7 +975,10 @@ export default function WatchTogetherView({ onNavigate }) {
                         {selectedAnimeDetails?.title || selectedAnime.title}
                       </span>
                       {activeMedia && (
-                        <button className="wt-btn-toggle-synopsis u-style-126" onClick={() => setIsSynopsisCollapsed(true)}>
+                        <button
+                          className="wt-btn-toggle-synopsis u-style-126"
+                          onClick={() => setIsSynopsisCollapsed(true)}
+                        >
                           Hide Info
                         </button>
                       )}
@@ -989,9 +992,7 @@ export default function WatchTogetherView({ onNavigate }) {
 
             {/* Anime episodes section */}
             {loadingEpisodes && (
-              <div className="u-style-127">
-                Loading episodes list...
-              </div>
+              <div className="u-style-127">Loading episodes list...</div>
             )}
 
             {selectedAnime && !loadingEpisodes && animeEpisodes.length > 0 && (
@@ -1164,7 +1165,11 @@ export default function WatchTogetherView({ onNavigate }) {
                     {users.length > 99 ? "99+" : users.length}
                   </span>
                 </button>
-                <button onClick={() => setIsChatExpanded(false)} className="wt-chat-collapse-btn u-style-132" title="Collapse sidebar">
+                <button
+                  onClick={() => setIsChatExpanded(false)}
+                  className="wt-chat-collapse-btn u-style-132"
+                  title="Collapse sidebar"
+                >
                   <ChevronRight size={16} />
                 </button>
               </div>
@@ -1209,36 +1214,47 @@ export default function WatchTogetherView({ onNavigate }) {
                   /* Queue View */
                   <div className="u-style-135">
                     <div className="u-style-136">
-                      <h4 className="u-style-137">
-                        Shared Watch Queue
-                      </h4>
+                      <h4 className="u-style-137">Shared Watch Queue</h4>
                       {hasPrivileges && queue.length > 0 && (
-                        <button onClick={handleClearQueue} className="u-style-138">
+                        <button
+                          onClick={handleClearQueue}
+                          className="u-style-138"
+                        >
                           Clear All
                         </button>
                       )}
                     </div>
                     <div className="u-style-139">
                       {queue.length === 0 ? (
-                        <div className="u-style-111">
-                          Watch queue is empty.
-                        </div>
+                        <div className="u-style-111">Watch queue is empty.</div>
                       ) : (
                         queue.map((item, idx) => (
                           <div key={idx} className="wt-user-row u-style-140">
-                            <span className="u-style-113">
-                              #{idx + 1}
-                            </span>
-                            <span title={ item.title || `Anime #${item.animeID} - Ep ${item.episode}` } className="u-style-141">
+                            <span className="u-style-113">#{idx + 1}</span>
+                            <span
+                              title={
+                                item.title ||
+                                `Anime #${item.animeID} - Ep ${item.episode}`
+                              }
+                              className="u-style-141"
+                            >
                               {item.title ||
                                 `Anime #${item.animeID} - Ep ${item.episode}`}
                             </span>
                             {hasPrivileges && (
                               <div className="u-style-142">
-                                <button className="wt-btn-play-sm u-style-143" onClick={() => handlePlayFromQueue(item)}>
+                                <button
+                                  className="wt-btn-play-sm u-style-143"
+                                  onClick={() => handlePlayFromQueue(item)}
+                                >
                                   <Play size={10} />
                                 </button>
-                                <button className="wt-btn-delete-sm u-style-144" onClick={() => watchTogetherClient.sendRemoveQueue(idx) }>
+                                <button
+                                  className="wt-btn-delete-sm u-style-144"
+                                  onClick={() =>
+                                    watchTogetherClient.sendRemoveQueue(idx)
+                                  }
+                                >
                                   Delete
                                 </button>
                               </div>
@@ -1258,9 +1274,7 @@ export default function WatchTogetherView({ onNavigate }) {
                       {users.map((u, idx) => (
                         <div key={idx} className="wt-user-row">
                           <div className="u-style-146" />
-                          <span className="u-style-147">
-                            {u.username}
-                          </span>
+                          <span className="u-style-147">{u.username}</span>
                           {u.isHost && (
                             <span className="wt-user-badge-host">HOST</span>
                           )}
@@ -1314,28 +1328,58 @@ export default function WatchTogetherView({ onNavigate }) {
                 <ChevronLeft size={16} />
               </button>
 
-              <button onClick={() => { setActiveTab("chat"); setIsChatExpanded(true); }} className={`${`wt-chat-collapsed-icon ${activeTab === "chat" ? "active" : ""} u-style-65`}`} title="Chat">
+              <button
+                onClick={() => {
+                  setActiveTab("chat");
+                  setIsChatExpanded(true);
+                }}
+                className={`${`wt-chat-collapsed-icon ${activeTab === "chat" ? "active" : ""} u-style-65`}`}
+                title="Chat"
+              >
                 <MessageSquare size={16} />
                 {unreadCount > 0 && (
-                  <div className="wt-chat-unread-circle-mini u-style-149" title={`${unreadCount} new message(s)`}>
+                  <div
+                    className="wt-chat-unread-circle-mini u-style-149"
+                    title={`${unreadCount} new message(s)`}
+                  >
                     {unreadCount}
                   </div>
                 )}
               </button>
 
-              <button onClick={() => { setActiveTab("queue"); setIsChatExpanded(true); }} className={`${`wt-chat-collapsed-icon ${activeTab === "queue" ? "active" : ""} u-style-65`}`} title="Watch Queue">
+              <button
+                onClick={() => {
+                  setActiveTab("queue");
+                  setIsChatExpanded(true);
+                }}
+                className={`${`wt-chat-collapsed-icon ${activeTab === "queue" ? "active" : ""} u-style-65`}`}
+                title="Watch Queue"
+              >
                 <ListVideo size={16} />
                 {queue.length > 0 && (
-                  <div className="wt-chat-unread-circle-mini u-style-150" title={`${queue.length} items in queue`}>
+                  <div
+                    className="wt-chat-unread-circle-mini u-style-150"
+                    title={`${queue.length} items in queue`}
+                  >
                     {queue.length}
                   </div>
                 )}
               </button>
 
-              <button onClick={() => { setActiveTab("users"); setIsChatExpanded(true); }} className={`${`wt-chat-collapsed-icon ${activeTab === "users" ? "active" : ""} u-style-65`}`} title="Connected Users">
+              <button
+                onClick={() => {
+                  setActiveTab("users");
+                  setIsChatExpanded(true);
+                }}
+                className={`${`wt-chat-collapsed-icon ${activeTab === "users" ? "active" : ""} u-style-65`}`}
+                title="Connected Users"
+              >
                 <Users size={16} />
                 {users.length > 0 && (
-                  <div className="wt-chat-unread-circle-mini u-style-151" title={`${users.length} connected users`}>
+                  <div
+                    className="wt-chat-unread-circle-mini u-style-151"
+                    title={`${users.length} connected users`}
+                  >
                     {users.length}
                   </div>
                 )}

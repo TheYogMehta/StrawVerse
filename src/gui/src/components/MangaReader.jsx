@@ -13,6 +13,7 @@ import {
   Minimize2,
 } from "lucide-react";
 import "./css/MangaReader.css";
+import { apiPost } from "../utils/common";
 
 // Lazy-loaded page component with CSS transition fade-in
 function LazyMangaPage({ src, alt, style, shouldLoad }) {
@@ -108,13 +109,9 @@ export default function MangaReader({
         const data = await getRes.json();
         const currentSettings = data?.settings || {};
 
-        await fetch("/api/settings", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ...currentSettings,
-            mangaReaderWidth: val,
-          }),
+        await apiPost("/api/settings", {
+          ...currentSettings,
+          mangaReaderWidth: val,
         });
       } catch (err) {
         console.error("Failed to save reader width:", err);
@@ -431,7 +428,11 @@ export default function MangaReader({
 
     if (currentItem.type === "header") {
       return (
-        <div key={currentItem.id} data-chapter={currentItem.chapterId} className="splash-card u-style-58">
+        <div
+          key={currentItem.id}
+          data-chapter={currentItem.chapterId}
+          className="splash-card u-style-58"
+        >
           <div className="splash-card-overlay" />
           <div className="splash-card-content">
             <span className="splash-manga-title">
@@ -483,9 +484,7 @@ export default function MangaReader({
             alt={`Page ${currentItem.page}`}
             shouldLoad={true}
           />
-          <div className="page-num u-style-61">
-            Page {currentItem.page}
-          </div>
+          <div className="page-num u-style-61">Page {currentItem.page}</div>
         </div>
       );
     }
@@ -516,9 +515,7 @@ export default function MangaReader({
             alt={`Page ${page1.page}`}
             shouldLoad={true}
           />
-          <div className="page-num u-style-61">
-            Page {page1.page}
-          </div>
+          <div className="page-num u-style-61">Page {page1.page}</div>
         </div>
 
         {page2 && (
@@ -533,9 +530,7 @@ export default function MangaReader({
               alt={`Page ${page2.page}`}
               shouldLoad={true}
             />
-            <div className="page-num u-style-61">
-              Page {page2.page}
-            </div>
+            <div className="page-num u-style-61">Page {page2.page}</div>
           </div>
         )}
       </div>
@@ -564,21 +559,17 @@ export default function MangaReader({
 
     if (timeSpent > 0.5 || isFinal) {
       try {
-        await fetch("/api/history/update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mediaId: id,
-            type: "Manga",
-            title: mangaTitle || "Manga",
-            number: chNum,
-            currentTime: activePageRef.current,
-            duration: totalPages,
-            timeSpent,
-            image,
-            provider,
-            malid,
-          }),
+        await apiPost("/api/history/update", {
+          mediaId: id,
+          type: "Manga",
+          title: mangaTitle || "Manga",
+          number: chNum,
+          currentTime: activePageRef.current,
+          duration: totalPages,
+          timeSpent,
+          image,
+          provider,
+          malid,
         });
       } catch (err) {
         console.error("Failed to save read progress:", err);
@@ -638,7 +629,7 @@ export default function MangaReader({
     return () => {
       clearInterval(interval);
       saveReadProgress(true);
-      fetch("/api/discord/reset", { method: "POST" }).catch(() => {});
+      apiPost("/api/discord/reset").catch(() => {});
     };
   }, [id, activeChapterInView, items]);
 
@@ -695,17 +686,12 @@ export default function MangaReader({
         cacheID = initialChapterObj ? initialChapterObj.id : currentChapter;
       }
 
-      const response = await fetch("/api/read", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chapterID: apiChapterID,
-          Downloaded: isDownloadedLocal,
-          MangaID: id,
-          provider: provider,
-        }),
+      const data = await apiPost("/api/read", {
+        chapterID: apiChapterID,
+        Downloaded: isDownloadedLocal,
+        MangaID: id,
+        provider: provider,
       });
-      const data = await response.json();
 
       if (data && data.length > 0) {
         const sortedPages = [...data].sort((a, b) => a.page - b.page);
@@ -966,10 +952,21 @@ export default function MangaReader({
 
         <div className="header-right-section">
           <div className="reader-size-controls u-style-62">
-            <span className="u-style-63">
-              Width: {readerWidth}px
-            </span>
-            <input type="range" min="400" max="1600" step="20" value={readerWidth} onChange={(e) => { const val = parseInt(e.target.value, 10); setReaderWidth(val); localStorage.setItem("manga_reader_width", val); saveReaderWidthToSettings(val); }} className="u-style-64" />
+            <span className="u-style-63">Width: {readerWidth}px</span>
+            <input
+              type="range"
+              min="400"
+              max="1600"
+              step="20"
+              value={readerWidth}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                setReaderWidth(val);
+                localStorage.setItem("manga_reader_width", val);
+                saveReaderWidthToSettings(val);
+              }}
+              className="u-style-64"
+            />
           </div>
 
           <span className="chapter-title" title={mangaTitle || id}>

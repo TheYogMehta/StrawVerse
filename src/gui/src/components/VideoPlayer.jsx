@@ -1,6 +1,8 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useEffect, useRef, useState } from "react";
 import Hls from "hls.js";
+import Swal from "sweetalert2";
+import { apiPost } from "../utils/common";
 import watchTogetherClient from "../utils/watchTogetherClient";
 
 if (
@@ -350,18 +352,23 @@ export default function VideoPlayer({
   // Dynamic page title & media metadata sync
   useEffect(() => {
     const originalTitle = document.title;
-    const cleanEp = typeof currentEpisode === "object" ? (currentEpisode.number || currentEpisode.id) : currentEpisode;
+    const cleanEp =
+      typeof currentEpisode === "object"
+        ? currentEpisode.number || currentEpisode.id
+        : currentEpisode;
     const displayTitle = animeTitle
       ? `${animeTitle} - Ep ${cleanEp}`
       : "StrawVerse Video";
-    
+
     document.title = displayTitle;
 
     if ("mediaSession" in navigator) {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: displayTitle,
         artist: "StrawVerse",
-        artwork: image ? [{ src: image, sizes: "512x512", type: "image/png" }] : [],
+        artwork: image
+          ? [{ src: image, sizes: "512x512", type: "image/png" }]
+          : [],
       });
     }
 
@@ -376,7 +383,10 @@ export default function VideoPlayer({
 
     const handleEnterPiP = () => {
       setIsPip(true);
-      const cleanEp = typeof currentEpisode === "object" ? (currentEpisode.number || currentEpisode.id) : currentEpisode;
+      const cleanEp =
+        typeof currentEpisode === "object"
+          ? currentEpisode.number || currentEpisode.id
+          : currentEpisode;
       const displayTitle = animeTitle
         ? `${animeTitle} - Ep ${cleanEp}`
         : "StrawVerse Video";
@@ -385,7 +395,10 @@ export default function VideoPlayer({
 
     const handleLeavePiP = () => {
       setIsPip(false);
-      const cleanEp = typeof currentEpisode === "object" ? (currentEpisode.number || currentEpisode.id) : currentEpisode;
+      const cleanEp =
+        typeof currentEpisode === "object"
+          ? currentEpisode.number || currentEpisode.id
+          : currentEpisode;
       const displayTitle = animeTitle
         ? `${animeTitle} - Ep ${cleanEp}`
         : "StrawVerse Video";
@@ -548,7 +561,6 @@ export default function VideoPlayer({
       showIndicator(Minimize, "Exit Fullscreen");
     }
   };
-
 
   useEffect(() => {
     setCurrentEpisode(episodeNumOrId);
@@ -718,21 +730,17 @@ export default function VideoPlayer({
 
     if (duration > 0 && (timeSpent > 0.5 || isFinal)) {
       try {
-        await fetch("/api/history/update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mediaId: id,
-            type: "Anime",
-            title: animeTitleVal,
-            number: currentEpisodeObj ? currentEpisodeObj.number : 1,
-            currentTime,
-            duration,
-            timeSpent,
-            image,
-            provider,
-            malid,
-          }),
+        await apiPost("/api/history/update", {
+          mediaId: id,
+          type: "Anime",
+          title: animeTitleVal,
+          number: currentEpisodeObj ? currentEpisodeObj.number : 1,
+          currentTime,
+          duration,
+          timeSpent,
+          image,
+          provider,
+          malid,
         });
       } catch (err) {
         console.error("Failed to save watch progress:", err);
@@ -784,7 +792,7 @@ export default function VideoPlayer({
     return () => {
       clearInterval(interval);
       saveWatchProgress(true);
-      fetch("/api/discord/reset", { method: "POST" }).catch(() => {});
+      apiPost("/api/discord/reset").catch(() => {});
     };
   }, [id, currentEpisode, currentEpisodeObj]);
 
@@ -832,27 +840,23 @@ export default function VideoPlayer({
       const targetEpNum = currentEpisodeObj
         ? currentEpisodeObj.number
         : currentEpisode;
-      const response = await fetch("/api/watch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          isCurrentDownloaded
-            ? {
-                ep: id,
-                epNum: targetEpNum,
-                Downloaded: true,
-                subdub: playerSubDub,
-              }
-            : {
-                ep: targetEp,
-                Downloaded: false,
-                subdub: playerSubDub,
-                provider: provider,
-              },
-        ),
-        signal,
-      });
-      const data = await response.json();
+      const data = await apiPost(
+        "/api/watch",
+        isCurrentDownloaded
+          ? {
+              ep: id,
+              epNum: targetEpNum,
+              Downloaded: true,
+              subdub: playerSubDub,
+            }
+          : {
+              ep: targetEp,
+              Downloaded: false,
+              subdub: playerSubDub,
+              provider: provider,
+            },
+        { signal },
+      );
 
       if (signal?.aborted) return;
 
@@ -1482,9 +1486,7 @@ export default function VideoPlayer({
 
             return (
               <div className="player-quality-selector">
-                <span className="u-style-98">
-                  Language:
-                </span>
+                <span className="u-style-98">Language:</span>
                 <div className="player-qualities-wrapper">
                   {availableLangs.map((langKey) => (
                     <button
@@ -1502,9 +1504,7 @@ export default function VideoPlayer({
 
           {!loading && sources.length > 0 && (
             <div className="player-quality-selector">
-              <span className="u-style-98">
-                Source:
-              </span>
+              <span className="u-style-98">Source:</span>
               <div className="player-qualities-wrapper">
                 {sources.map((s, idx) => (
                   <button

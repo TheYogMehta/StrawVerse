@@ -1,7 +1,7 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useState, useEffect } from "react";
 import { Loader2, Download, ShieldAlert } from "lucide-react";
-import Swal from "sweetalert2";
+import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
 import "./css/Marketplace.css";
 
 export default function Marketplace({ initialType }) {
@@ -69,18 +69,11 @@ export default function Marketplace({ initialType }) {
 
   const handleAction = async (taskType, providerName) => {
     if (taskType === "remove") {
-      const confirmResult = await Swal.fire({
-        title: "Are you sure?",
-        text: `Do you want to remove the ${providerName} scraper?`,
-        icon: "warning",
-        showCancelButton: true,
-        confirmButtonText: "Yes, remove it",
-        cancelButtonText: "Cancel",
-        background: "var(--bg-secondary)",
-        color: "var(--text-main)",
-        confirmButtonColor: "var(--danger)",
-        cancelButtonColor: "var(--bg-tertiary)",
-      });
+      const confirmResult = await swalConfirm(
+        "Are you sure?",
+        `Do you want to remove the ${providerName} scraper?`,
+        "Yes, remove it",
+      );
       if (!confirmResult.isConfirmed) return;
     }
 
@@ -92,35 +85,20 @@ export default function Marketplace({ initialType }) {
         providerName,
       );
       if (res && res.type === "success") {
-        Swal.fire({
-          title: "Success",
-          text: res.msg || `${providerName} was updated successfully.`,
-          icon: "success",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-          confirmButtonColor: "var(--accent)",
-        });
+        swalSuccess(
+          "Success",
+          res.msg || `${providerName} was updated successfully.`,
+        );
         fetchMarketplace();
       } else {
-        Swal.fire({
-          title: "Error",
-          text: res?.msg || "Error performing scraper task.",
-          icon: "error",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-          confirmButtonColor: "var(--accent)",
-        });
+        swalError("Error", res?.msg || "Error performing scraper task.");
       }
     } catch (err) {
       console.error(err);
-      Swal.fire({
-        title: "Installation Failed",
-        text: err.message || "Scraper installation failed.",
-        icon: "error",
-        background: "var(--bg-secondary)",
-        color: "var(--text-main)",
-        confirmButtonColor: "var(--accent)",
-      });
+      swalError(
+        "Installation Failed",
+        err.message || "Scraper installation failed.",
+      );
     } finally {
       setProcessingId(null);
     }
