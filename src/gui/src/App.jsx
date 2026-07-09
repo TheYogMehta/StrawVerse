@@ -480,7 +480,18 @@ export default function App() {
       {isCinemaMode && <div className="cinema-mode-trigger" />}
       <Sidebar
         currentView={current.view}
-        setView={(view) => setHistory([{ view, params: {} }])}
+        setView={(view) => {
+          if (window.catalogCache) {
+            if (view === "home") {
+              delete window.catalogCache[`Anime_local`];
+              delete window.catalogCache[`Manga_local`];
+            } else if (view === "discover") {
+              delete window.catalogCache[`Anime_provider`];
+              delete window.catalogCache[`Manga_provider`];
+            }
+          }
+          setHistory([{ view, params: {} }]);
+        }}
         isCollapsed={isSidebarCollapsed}
         toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
         malLoggedIn={malLoggedIn}

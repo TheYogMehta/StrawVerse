@@ -166,8 +166,8 @@ async function checkForMappingUpdates() {
   let updateResponse = null;
   try {
     const url = storedTag
-      ? `https://mapper.theyogmehta.online/api/mapping/updates?version=${storedTag}&last_id=${lastId}`
-      : `https://mapper.theyogmehta.online/api/mapping/updates?last_id=${lastId}`;
+      ? `https://strawverse.theyogmehta.online/api/mapping/updates?version=${storedTag}&last_id=${lastId}`
+      : `https://strawverse.theyogmehta.online/api/mapping/updates?last_id=${lastId}`;
     const response = await axios.get(url, { responseType: "arraybuffer" });
     const buffer = Buffer.from(response.data);
     updateResponse = deserializeDelta(buffer);
@@ -195,7 +195,7 @@ async function checkForMappingUpdates() {
     if (!latestVersion) {
       try {
         const vRes = await axios.get(
-          "https://mapper.theyogmehta.online/api/mapping/version",
+          "https://strawverse.theyogmehta.online/api/mapping/version",
         );
         latestVersion = vRes.data?.version;
       } catch (e) {
@@ -206,7 +206,7 @@ async function checkForMappingUpdates() {
     }
 
     const downloadUrl =
-      "https://mapper.theyogmehta.online/api/mapping/download";
+      "https://strawverse.theyogmehta.online/api/mapping/download";
     const tempDbPath = path.join(userDataPath, "mapping_temp.db");
     const mappingDbPath = path.join(userDataPath, "mapping.db");
 

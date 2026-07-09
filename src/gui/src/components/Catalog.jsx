@@ -1,5 +1,11 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, no-unused-vars */
-import { useState, useEffect, useCallback, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+  useRef,
+} from "react";
 import "./css/Catalog.css";
 import {
   Search,
@@ -17,6 +23,7 @@ import {
   Tv,
   BookOpen,
   Play,
+  X,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError } from "../utils/swal";
@@ -33,37 +40,168 @@ export default function Catalog({
   const infiniteObserverRef = useRef(null);
   const isFetchingMoreRef = useRef(false);
 
-  const [data, setData] = useState({
-    results: [],
-    totalPages: 0,
-    currentPage: 1,
-    hasNextPage: false,
-  });
+  const wrapperRef = useRef(null);
+  const topSentinelRef = useRef(null);
+  const topObserverRef = useRef(null);
+  const isFetchingPrevRef = useRef(false);
+  const lastScrollHeightRef = useRef(0);
+  const pendingScrollAdjustRef = useRef(null);
+  const isRestoredRef = useRef(false);
+  const didFetchRef = useRef(false);
+  const lastTypeRef = useRef(type);
+  const lastProviderRef = useRef(provider);
+
+  if (lastTypeRef.current !== type || lastProviderRef.current !== provider) {
+    lastTypeRef.current = type;
+    lastProviderRef.current = provider;
+    didFetchRef.current = false;
+  }
+
+  if (!window.catalogCache) {
+    window.catalogCache = {};
+  }
+  const cacheKey = `${type}_${provider}`;
+  const cache = window.catalogCache[cacheKey];
+
+  const [data, setData] = useState(
+    () =>
+      cache?.data || {
+        results: [],
+        totalPages: 0,
+        currentPage: 1,
+        hasNextPage: false,
+      },
+  );
   const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [activeFilters, setActiveFilters] = useState({});
-  const [availableFilters, setAvailableFilters] = useState(null);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [searchQuery, setSearchQuery] = useState(
+    () => cache?.searchQuery || "",
+  );
+  const [currentPage, setCurrentPage] = useState(() => cache?.currentPage || 1);
+  const [activeFilters, setActiveFilters] = useState(
+    () => cache?.activeFilters || {},
+  );
+  const [availableFilters, setAvailableFilters] = useState(
+    () => cache?.availableFilters || null,
+  );
+  const [errorMsg, setErrorMsg] = useState(() => cache?.errorMsg || "");
   const [localTags, setLocalTags] = useState([]);
 
   const [linkingMalItem, setLinkingMalItem] = useState(null);
   const [stats, setStats] = useState(null);
   const [recentHistory, setRecentHistory] = useState([]);
-  const [infiniteScroll, setInfiniteScroll] = useState(true);
+  const [infiniteScroll, setInfiniteScroll] = useState(() =>
+    cache?.infiniteScroll !== undefined ? cache.infiniteScroll : true,
+  );
   const [infiniteLoading, setInfiniteLoading] = useState(false);
 
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [dragOverIndex, setDragOverIndex] = useState(null);
 
   const [discoverTab, setDiscoverTab] = useState(
-    () => sessionStorage.getItem("discover_tab") || "latest",
+    () =>
+      cache?.discoverTab || sessionStorage.getItem("discover_tab") || "latest",
+  );
+
+  const [fetchedPages, setFetchedPages] = useState(
+    () => cache?.fetchedPages || {},
+  );
+  const [loadedPageStart, setLoadedPageStart] = useState(
+    () => cache?.loadedPageStart || 1,
+  );
+  const [loadedPageEnd, setLoadedPageEnd] = useState(
+    () => cache?.loadedPageEnd || 1,
   );
   const [scheduleData, setScheduleData] = useState([]);
   const [calendarDayFilter, setCalendarDayFilter] = useState("Today");
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [scheduleUpdating, setScheduleUpdating] = useState(false);
   const [timeTicker, setTimeTicker] = useState(Date.now());
+
+  const handleScroll = (e) => {
+    const scrollTop = e.target.scrollTop;
+    const cacheKey = `${type}_${provider}`;
+    if (!window.catalogCache) {
+      window.catalogCache = {};
+    }
+    if (!window.catalogCache[cacheKey]) {
+      window.catalogCache[cacheKey] = {};
+    }
+    window.catalogCache[cacheKey].scrollPosition = scrollTop;
+  };
+
+  useEffect(() => {
+    const cacheKey = `${type}_${provider}`;
+    if (!window.catalogCache?.[cacheKey] && !didFetchRef.current) {
+      return;
+    }
+    if (!window.catalogCache) {
+      window.catalogCache = {};
+    }
+    const existingScroll = window.catalogCache[cacheKey]?.scrollPosition || 0;
+    window.catalogCache[cacheKey] = {
+      data,
+      searchQuery,
+      currentPage,
+      activeFilters,
+      availableFilters,
+      errorMsg,
+      discoverTab,
+      infiniteScroll,
+      fetchedPages,
+      loadedPageStart,
+      loadedPageEnd,
+      scrollPosition: existingScroll,
+    };
+  }, [
+    type,
+    provider,
+    data,
+    searchQuery,
+    currentPage,
+    activeFilters,
+    availableFilters,
+    errorMsg,
+    discoverTab,
+    infiniteScroll,
+    fetchedPages,
+    loadedPageStart,
+    loadedPageEnd,
+  ]);
+
+  useEffect(() => {
+    const cacheKey = `${type}_${provider}`;
+    const cache = window.catalogCache[cacheKey];
+    if (
+      cache &&
+      cache.scrollPosition &&
+      wrapperRef.current &&
+      data?.results &&
+      data.results.length > 0 &&
+      !isRestoredRef.current
+    ) {
+      wrapperRef.current.scrollTop = cache.scrollPosition;
+      isRestoredRef.current = true;
+    }
+  }, [data?.results]);
+
+  useLayoutEffect(() => {
+    if (pendingScrollAdjustRef.current && wrapperRef.current) {
+      const adjust = pendingScrollAdjustRef.current;
+      if (typeof adjust === "number") {
+        wrapperRef.current.scrollTop += adjust;
+      } else if (adjust.type === "prepend") {
+        const { pageSize } = adjust;
+        const cards = wrapperRef.current.querySelectorAll(".media-card");
+        if (cards && cards[0] && cards[pageSize]) {
+          const h =
+            cards[pageSize].getBoundingClientRect().top -
+            cards[0].getBoundingClientRect().top;
+          wrapperRef.current.scrollTop += h;
+        }
+      }
+      pendingScrollAdjustRef.current = null;
+    }
+  });
 
   const getCustomOrderKey = (currentTag = activeFilters.tag) => {
     return `${type}_${provider}_${currentTag || "all"}`;
@@ -169,6 +307,88 @@ export default function Catalog({
     return `/api/list/${type}/provider`;
   };
 
+  const preloadPagesAround = async (targetPage, currentFilters) => {
+    const pageBelow = targetPage + 1;
+    let belowResults = [];
+    try {
+      let endpoint = getApiEndpoint(currentFilters.tag);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filters: { ...currentFilters, page: pageBelow },
+        }),
+      });
+      if (response.ok) {
+        if (!wrapperRef.current) return;
+        const resData = await response.json();
+        if (resData?.results) {
+          belowResults = applyCustomOrder(resData.results, currentFilters);
+          setFetchedPages((prev) => ({ ...prev, [pageBelow]: belowResults }));
+          setLoadedPageEnd(pageBelow);
+          setData((prevData) => ({
+            ...prevData,
+            results: [...(prevData?.results || []), ...belowResults],
+          }));
+        }
+      }
+    } catch (e) {
+      console.error("Failed to preload page below:", e);
+    }
+
+    for (let p = targetPage - 1; p >= Math.max(1, targetPage - 3); p--) {
+      try {
+        let endpoint = getApiEndpoint(currentFilters.tag);
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            filters: { ...currentFilters, page: p },
+          }),
+        });
+        if (response.ok) {
+          if (!wrapperRef.current) return;
+          const resData = await response.json();
+          const sortedResults = applyCustomOrder(
+            resData?.results || [],
+            currentFilters,
+          );
+
+          if (wrapperRef.current) {
+            pendingScrollAdjustRef.current = {
+              type: "prepend",
+              pageSize: sortedResults.length,
+            };
+          }
+
+          setFetchedPages((prev) => {
+            const nextPages = { ...prev, [p]: sortedResults };
+            setLoadedPageStart(p);
+
+            const newResults = [];
+            for (let pageNum = p; pageNum <= pageBelow; pageNum++) {
+              const pageData =
+                pageNum === p ? sortedResults : nextPages[pageNum];
+              if (pageData) {
+                newResults.push(...pageData);
+              }
+            }
+
+            setData((prevData) => ({
+              ...prevData,
+              results: newResults,
+            }));
+
+            return nextPages;
+          });
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      } catch (e) {
+        console.error(`Failed to preload page ${p}:`, e);
+      }
+    }
+  };
+
   const fetchData = async (
     page = 1,
     currentFilters = activeFilters,
@@ -220,6 +440,9 @@ export default function Catalog({
           setErrorMsg(
             `Extension missing. Please install a provider for ${type} in Settings.`,
           );
+          setFetchedPages({});
+          setLoadedPageStart(1);
+          setLoadedPageEnd(1);
           setData({
             results: [],
             totalPages: 0,
@@ -240,6 +463,9 @@ export default function Catalog({
           } else {
             setErrorMsg("");
           }
+          setFetchedPages({});
+          setLoadedPageStart(1);
+          setLoadedPageEnd(1);
           setData({
             results: [],
             totalPages: 0,
@@ -253,21 +479,35 @@ export default function Catalog({
           currentFilters,
         );
         if (isAppend) {
-          setData((prev) => ({
+          setFetchedPages((prev) => ({ ...prev, [page]: sortedResults }));
+          setLoadedPageEnd(page);
+
+          setData((prevData) => ({
             ...resData,
-            results: [...(prev.results || []), ...sortedResults],
+            currentPage: page,
+            results: [...(prevData?.results || []), ...sortedResults],
           }));
         } else {
+          setFetchedPages({ [page]: sortedResults });
+          setLoadedPageStart(page);
+          setLoadedPageEnd(page);
+
           setData({
             ...resData,
+            currentPage: page,
             results: sortedResults,
           });
+
+          if (infiniteScroll && page > 1) {
+            preloadPagesAround(page, currentFilters);
+          }
         }
         if (resData?.site && siteFilterDefs[resData.site]) {
           setAvailableFilters(siteFilterDefs[resData.site]);
         } else {
           setAvailableFilters(null);
         }
+        didFetchRef.current = true;
       }
     } catch (err) {
       if (lastRequestRef.current !== currentRequestId) {
@@ -278,6 +518,9 @@ export default function Catalog({
         setErrorMsg(
           "Failed to load data. Please verify your settings or server connection.",
         );
+        setFetchedPages({});
+        setLoadedPageStart(1);
+        setLoadedPageEnd(1);
         setData({
           results: [],
           totalPages: 0,
@@ -301,20 +544,43 @@ export default function Catalog({
   };
 
   useEffect(() => {
-    if (provider !== "provider" || type !== "Anime") {
-      setDiscoverTab("latest");
-      sessionStorage.setItem("discover_tab", "latest");
+    const cacheKey = `${type}_${provider}`;
+    const cache = window.catalogCache[cacheKey];
+
+    if (cache) {
+      setData(cache.data);
+      setSearchQuery(cache.searchQuery);
+      setCurrentPage(cache.currentPage);
+      setActiveFilters(cache.activeFilters);
+      setAvailableFilters(cache.availableFilters);
+      setErrorMsg(cache.errorMsg);
+      setDiscoverTab(cache.discoverTab);
+      setInfiniteScroll(cache.infiniteScroll);
+      setFetchedPages(cache.fetchedPages);
+      setLoadedPageStart(cache.loadedPageStart);
+      setLoadedPageEnd(cache.loadedPageEnd);
+      isRestoredRef.current = false;
+      didFetchRef.current = true;
+    } else {
+      if (provider !== "provider" || type !== "Anime") {
+        setDiscoverTab("latest");
+        sessionStorage.setItem("discover_tab", "latest");
+      }
+
+      setCurrentPage(1);
+      setLinkingMalItem(null);
+      setSearchQuery("");
+      setFetchedPages({});
+      setLoadedPageStart(1);
+      setLoadedPageEnd(1);
+      isRestoredRef.current = false;
+
+      const defaultTag =
+        provider === "local" ? (type === "Manga" ? "Reading" : "Watching") : "";
+      const initFilters = defaultTag ? { tag: defaultTag } : {};
+      setActiveFilters(initFilters);
+      fetchData(1, initFilters, "", null);
     }
-
-    setCurrentPage(1);
-    setLinkingMalItem(null);
-    setSearchQuery("");
-
-    const defaultTag =
-      provider === "local" ? (type === "Manga" ? "Reading" : "Watching") : "";
-    const initFilters = defaultTag ? { tag: defaultTag } : {};
-    setActiveFilters(initFilters);
-    fetchData(1, initFilters, "", null);
 
     if (provider === "local") {
       fetch(`/api/local/tags/view/${type}`)
@@ -372,6 +638,43 @@ export default function Catalog({
       setRecentHistory([]);
     }
   }, [type, provider]);
+
+  const handleDismissHistory = async (item) => {
+    setRecentHistory((prev) =>
+      prev.filter((x) => {
+        if (x.media_id === item.media_id && x.type === item.type) return false;
+        if (item.mal_id && x.mal_id === item.mal_id && x.type === item.type)
+          return false;
+        if (!item.mal_id && !x.mal_id && x.type === item.type) {
+          const clean1 = (item.title || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+          const clean2 = (x.title || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+          if (clean1 === clean2) return false;
+        }
+        return true;
+      }),
+    );
+
+    try {
+      await fetch("/api/history/hide", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          mediaId: item.media_id,
+          type: item.type,
+          malId: item.mal_id,
+          title: item.title,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to hide entry:", err);
+    }
+  };
 
   useEffect(() => {
     if (
@@ -673,6 +976,110 @@ export default function Catalog({
     fetchData(page);
   };
 
+  const handleLoadPrevPage = async (prevPage) => {
+    if (fetchedPages[prevPage]) {
+      if (wrapperRef.current) {
+        lastScrollHeightRef.current = wrapperRef.current.scrollHeight;
+        pendingScrollAdjustRef.current = {
+          type: "prepend",
+          pageSize: fetchedPages[prevPage].length,
+        };
+      }
+
+      setFetchedPages((prev) => {
+        let newStart = prevPage;
+        let newEnd = loadedPageEnd;
+        if (newEnd - newStart + 1 > 3) {
+          newEnd -= 1;
+        }
+
+        const newResults = [];
+        for (let p = newStart; p <= newEnd; p++) {
+          const pageData = prev[p];
+          if (pageData) {
+            newResults.push(...pageData);
+          }
+        }
+
+        setLoadedPageStart(newStart);
+        setLoadedPageEnd(newEnd);
+        setData((prevData) => ({
+          ...prevData,
+          currentPage: prevPage,
+          results: newResults,
+        }));
+
+        return prev;
+      });
+      isFetchingPrevRef.current = false;
+      return;
+    }
+
+    if (wrapperRef.current) {
+      lastScrollHeightRef.current = wrapperRef.current.scrollHeight;
+      pendingScrollAdjustRef.current = "prepend";
+    }
+    setInfiniteLoading(true);
+    try {
+      const activeSearch = searchQuery;
+      let endpoint = getApiEndpoint(activeFilters.tag);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          filters: {
+            ...activeFilters,
+            page: prevPage,
+          },
+        }),
+      });
+      if (response.ok) {
+        const resData = await response.json();
+        const sortedResults = applyCustomOrder(
+          resData?.results || [],
+          activeFilters,
+        );
+
+        if (wrapperRef.current) {
+          pendingScrollAdjustRef.current = {
+            type: "prepend",
+            pageSize: sortedResults.length,
+          };
+        }
+
+        setFetchedPages((prev) => {
+          const nextPages = { ...prev, [prevPage]: sortedResults };
+
+          let newStart = prevPage;
+          let newEnd = loadedPageEnd;
+
+          const newResults = [];
+          for (let p = newStart; p <= newEnd; p++) {
+            const pageData = p === prevPage ? sortedResults : prev[p];
+            if (pageData) {
+              newResults.push(...pageData);
+            }
+          }
+
+          setLoadedPageStart(newStart);
+          setLoadedPageEnd(newEnd);
+          setData((prevData) => ({
+            ...prevData,
+            currentPage: prevPage,
+            results: newResults,
+          }));
+
+          return nextPages;
+        });
+      }
+    } catch (err) {
+      console.error("Failed to fetch prev page:", err);
+    } finally {
+      setInfiniteLoading(false);
+      isFetchingPrevRef.current = false;
+    }
+  };
+
   useEffect(() => {
     if (infiniteObserverRef.current) {
       infiniteObserverRef.current.disconnect();
@@ -688,15 +1095,14 @@ export default function Catalog({
           !loading &&
           !infiniteLoading &&
           !isFetchingMoreRef.current &&
-          (data.hasNextPage || currentPage < (data.totalPages || 0))
+          (data.hasNextPage || loadedPageEnd < (data.totalPages || 0))
         ) {
-          const nextPage = currentPage + 1;
+          const nextPage = loadedPageEnd + 1;
           isFetchingMoreRef.current = true;
-          setCurrentPage(nextPage);
           fetchData(nextPage, activeFilters, searchQuery, undefined, true);
         }
       },
-      { threshold: 0.1 },
+      { root: wrapperRef.current, threshold: 0.1 },
     );
 
     observer.observe(sentinelRef.current);
@@ -709,13 +1115,53 @@ export default function Catalog({
     infiniteLoading,
     data.hasNextPage,
     data.totalPages,
-    currentPage,
+    loadedPageEnd,
+    activeFilters,
+    searchQuery,
+  ]);
+
+  useEffect(() => {
+    if (topObserverRef.current) {
+      topObserverRef.current.disconnect();
+      topObserverRef.current = null;
+    }
+    if (!infiniteScroll || !topSentinelRef.current || loadedPageStart <= 1)
+      return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (
+          entry.isIntersecting &&
+          !loading &&
+          !infiniteLoading &&
+          !isFetchingPrevRef.current
+        ) {
+          const prevPage = loadedPageStart - 1;
+          isFetchingPrevRef.current = true;
+          handleLoadPrevPage(prevPage);
+        }
+      },
+      { root: wrapperRef.current, threshold: 0.1 },
+    );
+
+    observer.observe(topSentinelRef.current);
+    topObserverRef.current = observer;
+
+    return () => observer.disconnect();
+  }, [
+    infiniteScroll,
+    loading,
+    infiniteLoading,
+    loadedPageStart,
+    loadedPageEnd,
+    fetchedPages,
     activeFilters,
     searchQuery,
   ]);
 
   return (
-    <div className="catalog-wrapper">
+    <div ref={wrapperRef} onScroll={handleScroll} className="catalog-wrapper">
       <header className="catalog-header u-style-9">
         <div className="u-style-10">
           <h1 className="catalog-title u-style-11">
@@ -900,6 +1346,16 @@ export default function Catalog({
                       }
                     >
                       <div className="continue-img-container">
+                        <button
+                          className="continue-dismiss-btn"
+                          title={`Hide from Continue ${type === "Anime" ? "Watching" : "Reading"}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDismissHistory(item);
+                          }}
+                        >
+                          <X size={14} />
+                        </button>
                         <img
                           src={item.image || "/images/image-404.png"}
                           alt={item.title}
@@ -1269,6 +1725,13 @@ export default function Catalog({
         </div>
       ) : (
         <div className="content-container">
+          {infiniteScroll && loadedPageStart > 1 && (
+            <div
+              ref={topSentinelRef}
+              className="infinite-sentinel-top"
+              style={{ height: "1px" }}
+            />
+          )}
           <div className="content-grid">
             {data.results.map((item, index) => (
               <div

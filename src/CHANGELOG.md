@@ -1,5 +1,18 @@
 # Changelog
 
+# [8.0.2] - 2026-07-10
+
+### Website & Branding
+
+- **New Landing Page**: Launched a dedicated landing page at [strawverse.theyogmehta.online](https://strawverse.theyogmehta.online/).
+- **Mapping URL Migration**: Updated the mapping server URL from `mapping.theyogmehta.online` to [strawverse.theyogmehta.online](https://strawverse.theyogmehta.online/).
+
+### Bug Fixes
+
+- **Dropdown Z-Index Fix**: Fixed dropdown menus in Settings and Watch Together getting covered by other UI elements. Dropdowns now properly elevate above surrounding cards and panels when opened.
+- **Manga Chapter Splash Color Fix**: Fixed the chapter title text on the manga reader splash screen rendering with a bright white background block instead of the intended gradient text effect. The CSS `-webkit-background-clip` and `-webkit-text-fill-color` properties were incorrectly written in camelCase, preventing the gradient from clipping to the text.
+- **Back Button Navigation Fix**: Fixed the back button not navigating correctly when returning from detail or reader views.
+
 # [8.0.1] - 2026-07-09
 
 updated watch together episode api with new one

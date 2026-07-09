@@ -1908,7 +1908,7 @@ router.post("/api/mal/link", async (req, res) => {
       if (targetMalID) {
         if (MalID) {
           axios
-            .post("https://mapper.theyogmehta.online/mapping", {
+            .post("https://strawverse.theyogmehta.online/mapping", {
               malid: targetMalID,
               provider: resolvedProvider,
               id: cleanId,
@@ -1926,7 +1926,7 @@ router.post("/api/mal/link", async (req, res) => {
             );
         } else {
           axios
-            .delete("https://mapper.theyogmehta.online/mapping", {
+            .delete("https://strawverse.theyogmehta.online/mapping", {
               data: {
                 malid: targetMalID,
                 provider: resolvedProvider,
@@ -2623,6 +2623,67 @@ router.delete("/api/history/:type/:id", async (req, res) => {
   }
 });
 
+// Hide specific media tracking from continue watching/reading shelf
+router.post("/api/history/hide", async (req, res) => {
+  try {
+    const { mediaId, type, malId, title } = req.body;
+    if (!mediaId || !type) {
+      throw new Error("Missing parameters");
+    }
+
+    const isAnime = type === "Anime";
+    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
+    const idField = isAnime ? "anime_id" : "manga_id";
+    const titleField = isAnime ? "anime_title" : "manga_title";
+    const mainTable = isAnime ? "Anime" : "Manga";
+
+    let queryIds = [mediaId];
+
+    if (malId) {
+      const siblings = global.db
+        .prepare(`SELECT id FROM ${mainTable} WHERE MalID = ?`)
+        .all(String(malId));
+      siblings.forEach((s) => {
+        if (s.id) queryIds.push(s.id);
+      });
+    }
+
+    if (isAnime) {
+      let suffixIds = [];
+      queryIds.forEach((id) => {
+        suffixIds.push(id);
+        const stripped = id.replace(/-(dub|sub|hsub|both)$/, "");
+        suffixIds.push(
+          `${stripped}-sub`,
+          `${stripped}-hsub`,
+          `${stripped}-dub`,
+          `${stripped}-both`,
+        );
+      });
+      queryIds = Array.from(new Set(suffixIds));
+    }
+
+    const placeholders = queryIds.map(() => "?").join(",");
+    global.db
+      .prepare(
+        `UPDATE ${historyTable} SET hidden = 1 WHERE ${idField} IN (${placeholders})`,
+      )
+      .run(...queryIds);
+
+    if (title) {
+      global.db
+        .prepare(
+          `UPDATE ${historyTable} SET hidden = 1 WHERE LOWER(${titleField}) = LOWER(?)`,
+        )
+        .run(title);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Fetch progress history for specific title
 router.get("/api/history/progress", async (req, res) => {
   try {
@@ -2838,6 +2899,13 @@ router.get("/api/history/list", async (req, res) => {
     } catch (e) {}
 
     const limit = parseInt(req.query.limit || 50);
+    const includeHidden = req.query.include_hidden === "true";
+    const watchWhereClause = includeHidden
+      ? ""
+      : "WHERE (w.hidden IS NULL OR w.hidden = 0)";
+    const readWhereClause = includeHidden
+      ? ""
+      : "WHERE (r.hidden IS NULL OR r.hidden = 0)";
 
     const watchLogs = global.db
       .prepare(
@@ -2861,6 +2929,7 @@ router.get("/api/history/list", async (req, res) => {
       FROM WatchHistory w
       LEFT JOIN Anime a ON a.id = w.anime_id
       LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
+      ${watchWhereClause}
       ORDER BY w.last_watched DESC
       LIMIT ?
     `,
@@ -2894,6 +2963,7 @@ router.get("/api/history/list", async (req, res) => {
       FROM ReadHistory r
       LEFT JOIN Manga m ON m.id = r.manga_id
       LEFT JOIN MyMangaList mml ON mml.id = m.MalID
+      ${readWhereClause}
       ORDER BY r.last_read DESC
       LIMIT ?
     `,

@@ -572,3 +572,8 @@
   max-width: unset;
   text-align: center;
 }
+
+.settings-section:has(.custom-dropdown-trigger.open) {
+  position: relative;
+  z-index: 50;
+}

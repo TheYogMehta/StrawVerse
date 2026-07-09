@@ -172,7 +172,7 @@ async function updateHistory({
     run(
       `
       UPDATE ${historyTable} 
-      SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = CURRENT_TIMESTAMP, completed_at = ?
+      SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = CURRENT_TIMESTAMP, completed_at = ?, hidden = 0
       WHERE id = ?
     `,
       [

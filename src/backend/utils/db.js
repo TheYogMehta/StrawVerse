@@ -113,6 +113,7 @@ const tables = {
     is_completed: "INTEGER",
     last_watched: "TEXT",
     completed_at: "TEXT",
+    hidden: "INTEGER DEFAULT 0",
   },
   ReadHistory: {
     id: "INTEGER PRIMARY KEY AUTOINCREMENT",
@@ -125,6 +126,7 @@ const tables = {
     is_completed: "INTEGER",
     last_read: "TEXT",
     completed_at: "TEXT",
+    hidden: "INTEGER DEFAULT 0",
   },
   CatboxCache: {
     original_url: "TEXT PRIMARY KEY",

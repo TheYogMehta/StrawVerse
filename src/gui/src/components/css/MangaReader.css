@@ -340,8 +340,9 @@
   letter-spacing: 0.5px;
   margin-bottom: 16px;
   background: linear-gradient(to right, #ffffff, #a78bfa);
-  webkitbackgroundclip: text;
-  webkittextfillcolor: transparent;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 
 .splash-status-badge {

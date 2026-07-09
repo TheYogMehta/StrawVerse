@@ -36,6 +36,7 @@ export default function Dropdown({
       style={{
         minWidth: minWidth ? `${minWidth}px` : undefined,
         position: "relative",
+        zIndex: isOpen ? 50 : undefined,
       }}
       ref={dropdownRef}
     >

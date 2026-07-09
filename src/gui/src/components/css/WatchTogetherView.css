@@ -121,7 +121,11 @@
   width: 64px;
   height: 64px;
   border-radius: 16px;
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.2) 0%, rgba(124, 58, 237, 0.02) 80%);
+  background: radial-gradient(
+    circle,
+    rgba(124, 58, 237, 0.2) 0%,
+    rgba(124, 58, 237, 0.02) 80%
+  );
   border: 1px solid rgba(124, 58, 237, 0.25);
   display: flex;
   align-items: center;
@@ -132,7 +136,11 @@
 }
 
 .wt-landing-box:hover .wt-landing-icon-wrapper {
-  background: radial-gradient(circle, rgba(124, 58, 237, 0.3) 0%, rgba(124, 58, 237, 0.05) 80%);
+  background: radial-gradient(
+    circle,
+    rgba(124, 58, 237, 0.3) 0%,
+    rgba(124, 58, 237, 0.05) 80%
+  );
   border-color: rgba(124, 58, 237, 0.45);
   box-shadow: 0 6px 20px rgba(124, 58, 237, 0.25);
 }
@@ -267,7 +275,6 @@
   width: 100%;
   font-size: 0.82rem;
 }
-
 
 /* NEW LAYOUT STYLES */
 
@@ -539,7 +546,11 @@
   width: 100%;
   aspect-ratio: 16 / 9;
   max-height: 65vh;
-  background: radial-gradient(circle at center, rgba(124, 58, 237, 0.12) 0%, #07070a 100%);
+  background: radial-gradient(
+    circle at center,
+    rgba(124, 58, 237, 0.12) 0%,
+    #07070a 100%
+  );
   display: flex;
   align-items: center;
   justify-content: center;
@@ -584,7 +595,7 @@
   align-items: stretch;
   background: rgba(255, 255, 255, 0.02);
   border-radius: 12px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid rgba(255, 255, 255, 0.04);
   box-sizing: border-box;
 }
@@ -681,7 +692,11 @@
 /* Queue Scroll Area */
 .wt-queue-scroll {
   padding: 10px 24px;
-  background: radial-gradient(circle at top left, rgba(124, 58, 237, 0.05) 0%, transparent 60%);
+  background: radial-gradient(
+    circle at top left,
+    rgba(124, 58, 237, 0.05) 0%,
+    transparent 60%
+  );
 }
 
 .wt-queue-header {
@@ -804,7 +819,6 @@
   margin-right: 6px;
 }
 
-
 .wt-chat-input-lg {
   flex: 1;
   background: rgba(0, 0, 0, 0.5);
@@ -844,7 +858,6 @@
   align-items: center;
   gap: 8px;
 }
-
 
 /* Minimal Connection Lock Screen */
 .wt-minimal-lock {
@@ -1190,7 +1203,7 @@
 }
 
 .wt-chat-collapsed-icon.active::before {
-  content: '';
+  content: "";
   position: absolute;
   left: 0;
   top: 0;
@@ -1535,5 +1548,3 @@
   border-radius: 4px;
   cursor: pointer;
 }
-
-
