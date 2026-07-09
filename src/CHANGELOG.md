@@ -1,6 +1,6 @@
 # Changelog
 
-# [8.0.0]
+# [8.0.0] - 2026-07-09
 
 ### Downloader & Performance
 
