@@ -1,5 +1,12 @@
 # Changelog
 
+# [8.0.3] - 2026-07-10
+
+### App Updates & Installer
+
+- **App Updater**: app updater flow under the Settings > About tab.
+- **Real-Time Download Progress**: Displays real-time download speed and progress percentages directly inside a clean SweetAlert2 dialog during updates.
+
 # [8.0.2] - 2026-07-10
 
 ### Website & Branding
@@ -10,7 +17,7 @@
 ### Bug Fixes
 
 - **Dropdown Z-Index Fix**: Fixed dropdown menus in Settings and Watch Together getting covered by other UI elements. Dropdowns now properly elevate above surrounding cards and panels when opened.
-- **Manga Chapter Splash Color Fix**: Fixed the chapter title text on the manga reader splash screen rendering with a bright white background block instead of the intended gradient text effect. The CSS `-webkit-background-clip` and `-webkit-text-fill-color` properties were incorrectly written in camelCase, preventing the gradient from clipping to the text.
+- **Manga Chapter Splash Color Fix**: Fixed the chapter title text on the manga reader splash screen rendering with a bright white background block instead of the intended gradient text effect. The CSS `-webkit-background-clip` and `-webkit-text-fill-color` properties were incorrectly written in kebab-case, preventing the gradient from clipping to the text.
 - **Back Button Navigation Fix**: Fixed the back button not navigating correctly when returning from detail or reader views.
 
 # [8.0.1] - 2026-07-09
