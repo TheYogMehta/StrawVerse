@@ -643,6 +643,16 @@ autoUpdater.on("update-downloaded", () => {
 });
 
 ipcMain.handle("check-for-update", async () => {
+  if (!app.isPackaged) {
+    return new Promise((resolve) => {
+      setTimeout(() => {
+        if (global.win) {
+          global.win.webContents.send("update-not-available");
+        }
+        resolve({ success: true });
+      }, 1500);
+    });
+  }
   try {
     const result = await autoUpdater.checkForUpdates();
     return { success: true, version: result?.updateInfo?.version };

@@ -7,6 +7,7 @@ import {
   Trash2,
   MessageSquare,
   Link as LinkIcon,
+  RefreshCw,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../../utils/swal";
@@ -527,13 +528,16 @@ export default function SettingsView({
   const handleCheckForUpdates = async () => {
     Swal.fire({
       title: "Checking for updates...",
-      text: "Please wait while we check the registry.",
+      html: `
+        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 10px;">
+          Please wait while we check the registry.
+        </p>
+        <div class="custom-swal-spinner"></div>
+      `,
       allowOutsideClick: false,
+      showConfirmButton: false,
       background: "var(--bg-secondary)",
       color: "var(--text-main)",
-      didOpen: () => {
-        Swal.showLoading();
-      },
     });
 
     try {
@@ -571,9 +575,6 @@ export default function SettingsView({
                 showConfirmButton: false,
                 background: "var(--bg-secondary)",
                 color: "var(--text-main)",
-                didOpen: () => {
-                  Swal.showLoading();
-                },
               });
 
               const progressListener = window.sharedStateAPI.on(
@@ -1636,29 +1637,16 @@ export default function SettingsView({
                 </p>
               </div>
 
-              <div
-                style={{
-                  marginTop: "24px",
-                  paddingTop: "20px",
-                  borderTop: "1px solid var(--border)",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}
-              >
+              <div className="settings-update-card">
                 <span style={{ color: "var(--text-muted)", fontSize: "14px" }}>
                   Version: <strong>v{appVersion || "8.0.2"}</strong>
                 </span>
                 <button
                   type="button"
                   onClick={handleCheckForUpdates}
-                  className="btn-reinstall"
-                  style={{
-                    padding: "8px 16px",
-                    borderRadius: "8px",
-                    fontWeight: "600",
-                  }}
+                  className="update-btn-premium"
                 >
+                  <RefreshCw size={13} />
                   Check for Updates
                 </button>
               </div>
