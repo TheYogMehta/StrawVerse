@@ -60,6 +60,16 @@ Beyond standard downloading, StrawVerse includes real-time playback synchronizat
 
 ### For Linux
 
+#### Via Quick Installer (Recommended)
+
+Run the following command in your terminal to automatically download the latest version, make it executable, download the official icon, and create a desktop application shortcut:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/TheYogMehta/StrawVerse/main/install.sh | bash
+```
+
+#### Via Manual Download
+
 1. Go to [StrawVerse Releases](https://github.com/TheYogMehta/StrawVerse/releases).
 2. Download the AppImage `StrawVerse-<version>.AppImage` or the snap package.
 3. For AppImage: Make it executable using `chmod +x StrawVerse-<version>.AppImage` and run it.
