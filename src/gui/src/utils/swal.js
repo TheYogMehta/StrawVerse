@@ -35,7 +35,7 @@ export const swalConfirm = (title, text, confirmText = "Yes") =>
     confirmButtonColor: "var(--danger)",
     cancelButtonColor: "var(--bg-tertiary)",
   });
-
+// fallow-ignore-next-line unused-export
 export const swalInfo = (title, text) =>
   Swal.fire({
     ...THEME,

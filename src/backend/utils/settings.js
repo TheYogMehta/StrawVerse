@@ -43,9 +43,12 @@ async function settingupdate({
   imageCacheSizeLimit = null,
   developerMode = null,
   autoSkipIntro = null,
+  autoPlayNextEpisode = null,
   mangaReaderLayout = null,
   mangaReaderWidth = null,
   infoSortOrder = null,
+  upscalePreset = null,
+  forceHighPerformanceGpu = null,
 }) {
   const currentSettings = config;
 
@@ -116,6 +119,10 @@ async function settingupdate({
     autoSkipIntro = currentSettings?.autoSkipIntro ?? true;
   }
 
+  if (autoPlayNextEpisode === null) {
+    autoPlayNextEpisode = currentSettings?.autoPlayNextEpisode ?? true;
+  }
+
   if (mangaReaderLayout === null) {
     mangaReaderLayout = currentSettings?.mangaReaderLayout || "long-strip";
   }
@@ -128,6 +135,14 @@ async function settingupdate({
     infoSortOrder = currentSettings?.hasOwnProperty("infoSortOrder")
       ? currentSettings.infoSortOrder
       : null;
+  }
+
+  if (upscalePreset === null) {
+    upscalePreset = currentSettings?.upscalePreset || "off";
+  }
+
+  if (forceHighPerformanceGpu === null) {
+    forceHighPerformanceGpu = currentSettings?.forceHighPerformanceGpu ?? false;
   }
 
   config.quality = quality;
@@ -146,9 +161,12 @@ async function settingupdate({
   config.imageCacheSizeLimit = imageCacheSizeLimit;
   config.developerMode = developerMode;
   config.autoSkipIntro = autoSkipIntro;
+  config.autoPlayNextEpisode = autoPlayNextEpisode;
   config.mangaReaderLayout = mangaReaderLayout;
   config.mangaReaderWidth = mangaReaderWidth;
   config.infoSortOrder = infoSortOrder;
+  config.upscalePreset = upscalePreset;
+  config.forceHighPerformanceGpu = forceHighPerformanceGpu;
 
   if (config.enableDiscordRPC === true) {
     try {
@@ -253,6 +271,16 @@ async function settingfetch() {
       changes = true;
     }
 
+    if (!config?.hasOwnProperty("autoSkipIntro")) {
+      config.autoSkipIntro = true;
+      changes = true;
+    }
+
+    if (!config?.hasOwnProperty("autoPlayNextEpisode")) {
+      config.autoPlayNextEpisode = true;
+      changes = true;
+    }
+
     if (changes) {
       await settingSave();
     }
@@ -301,7 +329,11 @@ async function SettingsLoad() {
             malDiscordProfile: false,
             imageCacheSizeLimit: 5,
             developerMode: false,
+            autoSkipIntro: true,
+            autoPlayNextEpisode: true,
             infoSortOrder: null,
+            upscalePreset: "off",
+            forceHighPerformanceGpu: false,
           };
 
     if (config && !config.hasOwnProperty("imageCacheSizeLimit")) {
@@ -310,6 +342,14 @@ async function SettingsLoad() {
 
     if (config && !config.hasOwnProperty("developerMode")) {
       config.developerMode = false;
+    }
+
+    if (config && !config.hasOwnProperty("upscalePreset")) {
+      config.upscalePreset = "off";
+    }
+
+    if (config && !config.hasOwnProperty("forceHighPerformanceGpu")) {
+      config.forceHighPerformanceGpu = false;
     }
 
     const currentVersion = app.getVersion();
@@ -432,6 +472,11 @@ async function patchModulePaths() {
 
 // Load All downloaded Scrapers
 async function loadAllScrapers() {
+  // Statically mark cheerio and hls-parser as used for extensions/scrapers
+  if (false) {
+    require("cheerio");
+    require("hls-parser");
+  }
   try {
     await CheckScrapperFolderExists();
     logger.info("Loading all scrapers...");

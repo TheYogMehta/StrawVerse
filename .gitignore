@@ -5,3 +5,5 @@ TODO.TODO
 Api/
 src/scratch/
 src/release.sh
+src/mpv/linux
+src/mpv/win32

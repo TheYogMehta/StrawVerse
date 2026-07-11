@@ -45,6 +45,7 @@ export default function SettingsView({
   const [imageCacheSizeLimit, setImageCacheSizeLimit] = useState(5);
   const [developerMode, setDeveloperMode] = useState(false);
   const [autoSkipIntro, setAutoSkipIntro] = useState(true);
+  const [autoPlayNextEpisode, setAutoPlayNextEpisode] = useState(true);
   const [mangaReaderLayout, setMangaReaderLayout] = useState("long-strip");
   const [mangaReaderWidth, setMangaReaderWidth] = useState(800);
   const [cacheStats, setCacheStats] = useState(null);
@@ -262,6 +263,7 @@ export default function SettingsView({
         setImageCacheSizeLimit(s.imageCacheSizeLimit || 5);
         setDeveloperMode(s.developerMode);
         setAutoSkipIntro(s.autoSkipIntro);
+        setAutoPlayNextEpisode(s.autoPlayNextEpisode ?? true);
         const layoutVal = s.mangaReaderLayout || "long-strip";
         setMangaReaderLayout(layoutVal);
         localStorage.setItem("manga_reader_layout", layoutVal);
@@ -384,6 +386,8 @@ export default function SettingsView({
       dirty.developerMode = developerMode;
     if (autoSkipIntro !== settings.autoSkipIntro)
       dirty.autoSkipIntro = autoSkipIntro;
+    if (autoPlayNextEpisode !== (settings.autoPlayNextEpisode ?? true))
+      dirty.autoPlayNextEpisode = autoPlayNextEpisode;
     if (mangaReaderLayout !== (settings.mangaReaderLayout || "long-strip"))
       dirty.mangaReaderLayout = mangaReaderLayout;
     if (mangaReaderWidth !== (parseInt(settings.mangaReaderWidth, 10) || 800))
@@ -451,6 +455,7 @@ export default function SettingsView({
       malDiscordProfile !== settings.malDiscordProfile ||
       developerMode !== settings.developerMode ||
       autoSkipIntro !== settings.autoSkipIntro ||
+      autoPlayNextEpisode !== (settings.autoPlayNextEpisode ?? true) ||
       mangaReaderLayout !== (settings.mangaReaderLayout || "long-strip") ||
       mangaReaderWidth !== (parseInt(settings.mangaReaderWidth, 10) || 800) ||
       (isValidLimit && finalLimit !== (settings.imageCacheSizeLimit || 5));
@@ -478,6 +483,7 @@ export default function SettingsView({
     imageCacheSizeLimit,
     developerMode,
     autoSkipIntro,
+    autoPlayNextEpisode,
     mangaReaderLayout,
     mangaReaderWidth,
     settings,
@@ -1073,6 +1079,28 @@ export default function SettingsView({
                     <Dropdown
                       value={String(autoSkipIntro)}
                       onChange={(val) => setAutoSkipIntro(val === "true")}
+                      options={[
+                        { value: "true", label: "Yes" },
+                        { value: "false", label: "No" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Auto-Play Next Episode
+                    </div>
+                    <div className="settings-row-hint">
+                      Automatically play the next episode in the queue when the current episode ends.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={String(autoPlayNextEpisode)}
+                      onChange={(val) => setAutoPlayNextEpisode(val === "true")}
                       options={[
                         { value: "true", label: "Yes" },
                         { value: "false", label: "No" },

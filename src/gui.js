@@ -56,6 +56,12 @@ app.on("open-url", (event, url) => {
   handleCustomProtocolUrl(url);
 });
 
+try {
+  app.commandLine.appendSwitch("force_high_performance_gpu");
+} catch (e) {
+  logger.error("[GPU] Failed to check forceHighPerformanceGpu: " + e.message);
+}
+
 // Load package.json config dynamically for the auto-updater to support fork updates
 try {
   const pkg = require("./package.json");
@@ -83,9 +89,8 @@ try {
 //  functions
 const { logger } = require("./backend/utils/AppLogger");
 const { getKeyValue, setKeyValue } = require("./backend/utils/db");
-
 const { runStartupCleanup } = require("./backend/utils/ImageCacheManager");
-
+const { playInMpv } = require("./backend/utils/mpvPlayer");
 const {
   SettingsLoad,
   patchModulePaths,
@@ -459,34 +464,7 @@ const createWindow = () => {
     Menu.setApplicationMenu(menu);
   }
 
-  // max priority
-  if (process.platform === "win32") {
-    exec(
-      `powershell -Command "& {Get-Process -Id ${process.pid} | ForEach-Object { $_.PriorityClass = 'High' }}"`,
-      (error, stdout, stderr) => {
-        if (error) {
-          console.error("Failed to set process priority:", error);
-          logger.error(`Failed to set process priority : ${error.message}`);
-        } else {
-          logger.info("Process priority set to high.");
-        }
-      },
-    );
-  } else {
-    try {
-      const os = require("os");
-      os.setPriority(process.pid, -10);
-      logger.info("Process priority set to high on Unix.");
-    } catch (err) {
-      if (err.message.includes("EACCES") || err.message.includes("EPERM")) {
-        logger.warn(
-          "Could not set Unix process priority to high (requires elevated privileges).",
-        );
-      } else {
-        logger.error(`Failed to set Unix process priority : ${err.message}`);
-      }
-    }
-  }
+
 
   global.updatePowerSaveBlocker();
 };
@@ -676,6 +654,31 @@ ipcMain.handle("install-update", () => {
 
 ipcMain.handle("get-app-version", () => {
   return app.getVersion();
+});
+
+ipcMain.handle("play-in-mpv", async (event, options) => {
+  const win = BrowserWindow.getFocusedWindow() || global.win;
+  if (!win) return { success: false, error: "No focused window found." };
+  try {
+    await playInMpv(win, options);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle("control-mpv", (event, command, args) => {
+  if (global.activeMpvClient && !global.activeMpvClient.destroyed) {
+    try {
+      const payload = JSON.stringify({ command: [command, ...args] }) + "\n";
+      global.activeMpvClient.write(payload);
+      return { success: true };
+    } catch (err) {
+      logger.error(`[MPV Control IPC] Failed to write command ${command}: ${err.message}`);
+      return { success: false, error: err.message };
+    }
+  }
+  return { success: false, error: "MPV player is not active." };
 });
 
 // Find Free Port
