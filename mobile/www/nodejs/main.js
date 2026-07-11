@@ -53,7 +53,7 @@ try {
 function applyDefaultPaths() {
   const base = getDataPath
     ? getDataPath()
-    : path.join(process.cwd(), "strawverse-data");
+    : path.join(__dirname, "strawverse-data");
   if (!process.env.STRAWVERSE_DATA_DIR) {
     process.env.STRAWVERSE_DATA_DIR = path.join(base, "userData");
   }
@@ -116,8 +116,7 @@ async function boot() {
   } catch (_) {
     const initSqlJs = require("sql.js");
     global.__sqljs = await initSqlJs({
-      locateFile: (file) =>
-        path.join(__dirname, file),
+      locateFile: (file) => path.join(__dirname, file),
     });
   }
 
@@ -143,8 +142,12 @@ async function boot() {
   // and serve the bundled versions instead.
   // -------------------------------------------------------------------------
   const bundledModules = {};
-  try { bundledModules["cheerio"] = require("cheerio"); } catch (_) {}
-  try { bundledModules["axios"] = require("axios"); } catch (_) {}
+  try {
+    bundledModules["cheerio"] = require("cheerio");
+  } catch (_) {}
+  try {
+    bundledModules["axios"] = require("axios");
+  } catch (_) {}
 
   if (Object.keys(bundledModules).length > 0) {
     const origLoad = Module._load;
@@ -185,7 +188,10 @@ async function boot() {
   // http://localhost:3459 — different port = cross-origin.
   appExpress.use((_req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,PATCH,OPTIONS");
+    res.header(
+      "Access-Control-Allow-Methods",
+      "GET,POST,PUT,DELETE,PATCH,OPTIONS",
+    );
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (_req.method === "OPTIONS") return res.sendStatus(204);
     next();

@@ -47,18 +47,16 @@
       .logo span {
         color: var(--accent);
       }
-      .spinner {
-        width: 36px;
-        height: 36px;
-        border: 3px solid rgba(255, 255, 255, 0.12);
-        border-top-color: var(--accent);
-        border-radius: 50%;
-        animation: spin 0.9s linear infinite;
+      .app-logo-img {
+        width: 96px;
+        height: 96px;
+        object-fit: contain;
+        margin-bottom: 4px;
       }
-      @keyframes spin {
-        to {
-          transform: rotate(360deg);
-        }
+      .loader-gif {
+        width: 72px;
+        height: 72px;
+        object-fit: contain;
       }
       .status {
         font-size: 14px;
@@ -87,8 +85,9 @@
   </head>
   <body>
     <main>
+      <img src="nodejs/gui/dist/images/logo.webp" class="app-logo-img" alt="Logo" id="logo-img" onerror="this.style.display='none'" />
       <div class="logo">Straw<span>Verse</span></div>
-      <div class="spinner" id="spinner" role="status" aria-label="Starting"></div>
+      <img src="nodejs/gui/dist/images/loading.gif" class="loader-gif" alt="Loading" id="spinner" />
       <p class="status" id="status">Starting engine&hellip;</p>
       <p class="error" id="error"></p>
       <button id="retry" type="button">Retry</button>
