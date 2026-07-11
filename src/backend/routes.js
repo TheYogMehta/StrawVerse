@@ -5,7 +5,6 @@ const axios = require("axios");
 const JSZip = require("jszip");
 const path = require("path");
 const fs = require("fs");
-const { getHeaders } = require("./utils/proxyHeaders");
 
 const router = express.Router();
 
