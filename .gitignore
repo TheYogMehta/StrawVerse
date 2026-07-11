@@ -12,6 +12,7 @@ mobile/www/nodejs/backend/
 mobile/www/nodejs/gui/
 mobile/www/nodejs/node_modules/
 mobile/www/nodejs/CHANGELOG.md
+mobile/www/nodejs/package-lock.json
 .idea/
 .gradle/
 build/

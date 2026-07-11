@@ -43,7 +43,7 @@ function copyDir(from, to, { exclude = [] } = {}) {
 const backendSrc = path.join(srcDir, "backend");
 const backendDest = path.join(nodejsDir, "backend");
 copyDir(backendSrc, backendDest, { exclude: ["preload.js"] });
-console.log(`[sync] Copied src/backend -> mobile/nodejs/backend`);
+console.log(`[sync] Copied src/backend -> mobile/www/nodejs/backend`);
 
 // 2. Changelog (routes.js and the whats-new handler read it relative to the
 //    nodejs project root)
@@ -57,7 +57,7 @@ if (fs.existsSync(changelogSrc)) {
 const guiDist = path.join(srcDir, "gui", "dist");
 if (fs.existsSync(guiDist)) {
   copyDir(guiDist, path.join(nodejsDir, "gui", "dist"));
-  console.log(`[sync] Copied src/gui/dist -> mobile/nodejs/gui/dist`);
+  console.log(`[sync] Copied src/gui/dist -> mobile/www/nodejs/gui/dist`);
 } else {
   console.warn(
     `[sync] WARNING: src/gui/dist not found - run "npm run build" in src/ first`,
@@ -80,4 +80,3 @@ console.log(`[sync] Installing dependencies in mobile/www/nodejs...`);
 execSync("npm install --omit=dev", { cwd: nodejsDir, stdio: "inherit" });
 
 console.log("[sync] Done.");
-
