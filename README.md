@@ -184,3 +184,54 @@ Follow these steps to build application:
 - Start: Runs the app locally in the Electron environment without building an executable.
 - Ensure that your system has the latest versions of Node.js and Git installed for compatibility.
 - If you encounter any issues, feel free to open an issue or join our [Discord Server](https://discord.gg/PzfUBgQ2gt) for support and chat!
+
+---
+
+# Build and Run the Android Application
+
+Follow these steps to build and run the application on Android:
+
+## Prerequisites
+
+1. **Android SDK / Android Studio** installed.
+2. A connected **Android device** (with USB Debugging enabled) or an **emulator** running.
+3. Node.js & npm installed.
+
+## Steps to Build and Run
+
+1. **Install Dependencies**:
+   
+   In the repository root:
+   ```bash
+   npm install
+   ```
+
+   Go into the `mobile` folder and install its dependencies:
+   ```bash
+   cd mobile
+   npm install
+   ```
+
+2. **Prepare the Mobile Assets**:
+   
+   Build the GUI, sync the backend, and download the Android ffmpeg binaries:
+   ```bash
+   npm run prepare:app
+   ```
+
+3. **Sync with Capacitor**:
+   ```bash
+   npx cap sync android
+   ```
+
+4. **Run the Application**:
+   
+   * **Option A**: Directly from the terminal:
+     ```bash
+     npx cap run android
+     ```
+   
+   * **Option B**: Using Android Studio:
+     ```bash
+     npx cap open android
+     ```
