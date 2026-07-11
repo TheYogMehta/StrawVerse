@@ -65,10 +65,41 @@ const all = args.includes("--all");
 const force = args.includes("--force");
 
 async function download(url, dest) {
+  try {
+    execFileSync("curl", ["-L", "-o", dest, url], { stdio: "inherit" });
+    return;
+  } catch (err) {
+    console.warn(`[ffmpeg] curl download failed or not available: ${err.message}. Falling back to fetch...`);
+  }
+
   const res = await fetch(url, { redirect: "follow" });
   if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  fs.writeFileSync(dest, buf);
+
+  const contentLength = Number(res.headers.get("content-length")) || 0;
+  const fileStream = fs.createWriteStream(dest);
+
+  const body = res.body;
+  let downloadedBytes = 0;
+  let lastLoggedPercent = -10;
+
+  for await (const chunk of body) {
+    fileStream.write(chunk);
+    downloadedBytes += chunk.length;
+
+    if (contentLength > 0) {
+      const percent = Math.floor((downloadedBytes / contentLength) * 100);
+      if (percent >= lastLoggedPercent + 10) {
+        console.log(`[ffmpeg] Downloaded ${percent}% (${(downloadedBytes / 1024 / 1024).toFixed(1)} / ${(contentLength / 1024 / 1024).toFixed(1)} MB)...`);
+        lastLoggedPercent = percent;
+      }
+    } else {
+      if (downloadedBytes % (1024 * 1024) === 0) {
+        console.log(`[ffmpeg] Downloaded ${(downloadedBytes / 1024 / 1024).toFixed(1)} MB...`);
+      }
+    }
+  }
+
+  fileStream.end();
 }
 
 function extractFfmpeg(archivePath, workDir) {
