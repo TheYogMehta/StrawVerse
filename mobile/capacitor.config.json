@@ -1,0 +1,18 @@
+{
+  "appId": "app.strawverse.android",
+  "appName": "StrawVerse",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "allowNavigation": ["localhost", "127.0.0.1"]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": false
+  },
+  "plugins": {
+    "CapacitorNodeJS": {
+      "nodeDir": "nodejs"
+    }
+  }
+}

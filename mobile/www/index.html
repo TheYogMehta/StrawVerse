@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" style="background: #0c0c0e">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
+    />
+    <title>StrawVerse</title>
+    <style>
+      :root {
+        --bg: #0c0c0e;
+        --fg: #e8e8ea;
+        --muted: #8a8a93;
+        --accent: #e5484d;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        background: var(--bg);
+        color: var(--fg);
+        font-family: system-ui, -apple-system, sans-serif;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      main {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 20px;
+        padding: 24px;
+        text-align: center;
+      }
+      .logo {
+        font-size: 28px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      .logo span {
+        color: var(--accent);
+      }
+      .spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid rgba(255, 255, 255, 0.12);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .status {
+        font-size: 14px;
+        color: var(--muted);
+        line-height: 1.5;
+        max-width: 280px;
+      }
+      .error {
+        color: var(--accent);
+        font-size: 13px;
+        line-height: 1.5;
+        max-width: 300px;
+        display: none;
+      }
+      button {
+        display: none;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 24px;
+        font-size: 14px;
+        font-weight: 600;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="logo">Straw<span>Verse</span></div>
+      <div class="spinner" id="spinner" role="status" aria-label="Starting"></div>
+      <p class="status" id="status">Starting engine&hellip;</p>
+      <p class="error" id="error"></p>
+      <button id="retry" type="button">Retry</button>
+    </main>
+    <script src="loader.js" type="module"></script>
+  </body>
+</html>
