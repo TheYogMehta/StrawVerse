@@ -8,4 +8,15 @@ src/release.sh
 src/mpv/linux
 src/mpv/win32
 mobile/android/app/src/main/jniLibs/arm64-v8a/libffmpeg.so
-mobile/nodejs/*
+mobile/www/nodejs/backend/
+mobile/www/nodejs/gui/
+mobile/www/nodejs/node_modules/
+mobile/www/nodejs/CHANGELOG.md
+.idea/
+.gradle/
+build/
+local.properties
+**/local.properties
+**/.idea/
+**/.gradle/
+**/build/

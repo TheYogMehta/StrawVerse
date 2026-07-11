@@ -17,11 +17,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..", "..");
 const srcDir = path.join(repoRoot, "src");
-const nodejsDir = path.join(repoRoot, "mobile", "nodejs");
+const nodejsDir = path.join(repoRoot, "mobile", "www", "nodejs");
 
 function copyDir(from, to, { exclude = [] } = {}) {
   fs.rmSync(to, { recursive: true, force: true });
@@ -75,4 +76,8 @@ if (mobilePkg.version !== srcPkg.version) {
   console.log(`[sync] Bumped mobile backend version to ${srcPkg.version}`);
 }
 
+console.log(`[sync] Installing dependencies in mobile/www/nodejs...`);
+execSync("npm install --omit=dev", { cwd: nodejsDir, stdio: "inherit" });
+
 console.log("[sync] Done.");
+
