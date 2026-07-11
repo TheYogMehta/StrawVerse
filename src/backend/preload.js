@@ -31,4 +31,5 @@ contextBridge.exposeInMainWorld("sharedStateAPI", {
   playInMpv: (options) => ipcRenderer.invoke("play-in-mpv", options),
   controlMpv: (command, args) =>
     ipcRenderer.invoke("control-mpv", command, args),
+  checkWtHealth: (url) => ipcRenderer.invoke("check-wt-health", url),
 });

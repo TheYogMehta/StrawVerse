@@ -12,24 +12,51 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 
-/**
- * Handles the MAL OAuth deep link (strawverse://callback?code=...).
- *
- * MyAnimeList redirects the system browser to the strawverse:// scheme after
- * the user approves access (same scheme the desktop app registers). Android
- * routes that intent here; we forward the authorization code straight to the
- * embedded Node backend's /mal/callback endpoint, which exchanges it for a
- * token and pushes a "mal" event to the GUI over SSE. This is done natively
- * so it works even before/without the WebView's JS bridge.
- */
 public class MainActivity extends BridgeActivity {
 
     private static final String TAG = "StrawVerse";
     private static final int SERVER_PORT = 3459;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
+    public void onCreate(Bundle savedInstanceState) {
+        registerPlugin(CloudflareBypassPlugin.class);
         super.onCreate(savedInstanceState);
+        
+        try {
+            com.getcapacitor.Bridge bridge = getBridge();
+            if (bridge != null) {
+                java.lang.reflect.Field pluginsField = com.getcapacitor.Bridge.class.getDeclaredField("plugins");
+                pluginsField.setAccessible(true);
+                java.util.Map<String, com.getcapacitor.PluginHandle> plugins = 
+                    (java.util.Map<String, com.getcapacitor.PluginHandle>) pluginsField.get(bridge);
+                
+                if (plugins != null) {
+                    String globalJS = com.getcapacitor.JSExport.getGlobalJS(this, bridge.getConfig().isLoggingEnabled(), bridge.isDevMode());
+                    String bridgeJS = com.getcapacitor.JSExport.getBridgeJS(this);
+                    String pluginJS = com.getcapacitor.JSExport.getPluginJS(plugins.values());
+                    String localUrlJS = "window.WEBVIEW_SERVER_URL = 'http://localhost:" + SERVER_PORT + "';";
+                    String script = globalJS + "\n\n" + localUrlJS + "\n\n" + bridgeJS + "\n\n" + pluginJS;
+
+                    if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                        java.util.Set<String> allowedOrigins = new java.util.HashSet<>();
+                        allowedOrigins.add("http://localhost:" + SERVER_PORT);
+                        allowedOrigins.add("http://127.0.0.1:" + SERVER_PORT);
+                        
+                        androidx.webkit.WebViewCompat.addDocumentStartJavaScript(
+                            bridge.getWebView(),
+                            script,
+                            allowedOrigins
+                        );
+                        Log.i(TAG, "Natively injected Capacitor bridge for port " + SERVER_PORT + " via DOCUMENT_START_SCRIPT");
+                    } else {
+                        Log.w(TAG, "DOCUMENT_START_SCRIPT is not supported on this device!");
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to natively inject bridge for port 3459", e);
+        }
+
         handleDeepLink(getIntent());
     }
 
@@ -55,8 +82,6 @@ public class MainActivity extends BridgeActivity {
 
     private void forwardMalCallback(String code) {
         new Thread(() -> {
-            // The Node server may still be booting if the app was cold-started
-            // by the deep link; retry briefly.
             for (int attempt = 0; attempt < 20; attempt++) {
                 try {
                     String encoded = URLEncoder.encode(code, "UTF-8");

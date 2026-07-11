@@ -5,8 +5,14 @@ const axios = require("axios");
 const JSZip = require("jszip");
 const path = require("path");
 const fs = require("fs");
+const { getHeaders } = require("./utils/proxyHeaders");
 
 const router = express.Router();
+
+router.get("/capacitor.js", (req, res) => {
+  res.set("Content-Type", "application/javascript");
+  res.send("// dummy capacitor.js for non-mobile environments");
+});
 
 // functions
 const {
@@ -90,6 +96,18 @@ router.delete("/api/logs", async (req, res) => {
   try {
     await clearLogs();
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Get proxy headers for video playback
+router.get("/api/proxy-headers", (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: "URL is required" });
+  try {
+    const headers = getHeaders(url);
+    res.json(headers || {});
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

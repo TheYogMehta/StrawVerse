@@ -1,17 +1,3 @@
-/**
- * StrawVerse Android entrypoint.
- *
- * This file replaces src/gui.js on mobile. It:
- *   1. Installs module hooks so `electron`, `node:sqlite`, `discord-rpc` and
- *      `ffmpeg-static` resolve to Android-compatible shims.
- *   2. Receives runtime config (data dir, ffmpeg path, app version) from the
- *      native layer through the capacitor-nodejs channel.
- *   3. Boots the shared Express backend (synced from src/backend) on a fixed
- *      localhost port and serves the built React GUI.
- *   4. Signals "ready" back to the native loader page, which then navigates
- *      the WebView to http://localhost:<PORT>.
- */
-
 const Module = require("module");
 const path = require("path");
 const fs = require("fs");
@@ -19,9 +5,6 @@ const os = require("os");
 
 const PORT = 3459;
 
-// ---------------------------------------------------------------------------
-// 1. Module hooks (must run before anything requires backend code)
-// ---------------------------------------------------------------------------
 const shimMap = {
   electron: path.join(__dirname, "shims", "electron.js"),
   "node:sqlite": path.join(__dirname, "shims", "node-sqlite.js"),
@@ -35,25 +18,25 @@ Module._resolveFilename = function (request, ...rest) {
   return originalResolve.call(this, request, ...rest);
 };
 
-// ---------------------------------------------------------------------------
-// 2. Runtime config
-//    The loader page starts the Node runtime via NodeJS.start({ env }) and
-//    passes STRAWVERSE_* environment variables (ffmpeg path, app version).
-//    Storage paths default to the capacitor-nodejs per-user data directory.
-// ---------------------------------------------------------------------------
 let channel = null;
 let getDataPath = null;
 try {
-  // Built-in module provided by the capacitor-nodejs runtime.
   ({ channel, getDataPath } = require("bridge"));
 } catch (_) {
-  channel = null; // running outside the app (local dev / tests)
+  channel = null;
 }
 
 function applyDefaultPaths() {
-  const base = getDataPath
-    ? getDataPath()
-    : path.join(__dirname, "strawverse-data");
+  let base = null;
+  if (getDataPath) {
+    try {
+      base = getDataPath();
+    } catch (_) {}
+  }
+  if (!base || base === "/" || base === "/data") {
+    base = path.resolve(__dirname, "..", "..");
+  }
+
   if (!process.env.STRAWVERSE_DATA_DIR) {
     process.env.STRAWVERSE_DATA_DIR = path.join(base, "userData");
   }
@@ -61,26 +44,17 @@ function applyDefaultPaths() {
     process.env.STRAWVERSE_DOWNLOADS_DIR = path.join(base, "Downloads");
   }
   if (!process.env.STRAWVERSE_TEMP_DIR) {
-    process.env.STRAWVERSE_TEMP_DIR = getDataPath
-      ? os.tmpdir()
-      : path.join(base, "tmp");
+    process.env.STRAWVERSE_TEMP_DIR = os.tmpdir() || path.join(base, "tmp");
   }
   if (!process.env.STRAWVERSE_APP_VERSION) {
     process.env.STRAWVERSE_APP_VERSION = readOwnVersion();
   }
 
-  // Ensure the default downloads folder exists on Android.
-  // getDownloadsFolder() in the backend returns os.homedir() + "/Downloads",
-  // which does not exist on Android. Create it so ensureDirectoryExists()
-  // inside settingfetch() won't throw on every call.
-  const defaultDownloads = path.join(os.homedir(), "Downloads");
+  const defaultDownloads = path.join(base, "Downloads");
   try {
     fs.mkdirSync(defaultDownloads, { recursive: true });
-  } catch (_) {
-    // best-effort; if homedir is unwritable, settingfetch will handle it
-  }
+  } catch (_) {}
 
-  // Also create the app data and downloads dirs
   try {
     fs.mkdirSync(process.env.STRAWVERSE_DATA_DIR, { recursive: true });
     fs.mkdirSync(process.env.STRAWVERSE_DOWNLOADS_DIR, { recursive: true });
@@ -97,9 +71,6 @@ function readOwnVersion() {
   }
 }
 
-// ---------------------------------------------------------------------------
-// 3. Boot
-// ---------------------------------------------------------------------------
 let booted = false;
 
 async function boot() {
@@ -109,8 +80,6 @@ async function boot() {
   applyDefaultPaths();
   process.env.PLATFORM = "android";
 
-  // Pre-initialize sql.js only when better-sqlite3 isn't available, so the
-  // synchronous DatabaseSync constructor in the shim can use it.
   try {
     require.resolve("better-sqlite3");
   } catch (_) {
@@ -123,30 +92,22 @@ async function boot() {
   const electron = require("./shims/electron");
   const bridge = require("./bridge");
 
-  // Native message sink used by the electron shim (open-external etc.).
-  // Delivered to the GUI as SSE events; the WebView opens external URLs
-  // natively via shouldOverrideUrlLoading.
   global.__sendToNative = (channelName, data) => {
     bridge.broadcast(channelName, data);
     if (channel) channel.send(channelName, data);
   };
 
-  // Backend modules use global.win.webContents.send for push notifications.
   global.win = bridge.fakeWindow;
   global.PORT = PORT;
 
-  // -------------------------------------------------------------------------
-  // Expose bundled modules to dynamically loaded scrapers.
-  // Scrapers are downloaded at runtime and do require("cheerio") etc.
-  // After bundling, node_modules is deleted, so we intercept these requires
-  // and serve the bundled versions instead.
-  // -------------------------------------------------------------------------
   const bundledModules = {};
   try {
-    bundledModules["cheerio"] = require("cheerio");
+    const cheerio = require("cheerio");
+    bundledModules["cheerio"] = cheerio.default || cheerio;
   } catch (_) {}
   try {
-    bundledModules["axios"] = require("axios");
+    const axios = require("axios");
+    bundledModules["axios"] = axios.default || axios;
   } catch (_) {}
 
   if (Object.keys(bundledModules).length > 0) {
@@ -164,13 +125,105 @@ async function boot() {
     })`,
   );
 
-  // Order mirrors src/gui.js: DB first, then settings/providers, then routes.
   require("./backend/utils/db");
-  const { settingfetch } = require("./backend/utils/settings");
+
   try {
+    const axios = require("axios");
+    global.axios = axios.create({
+      timeout: 20000,
+    });
+    const { getHeaders } = require("./backend/utils/proxyHeaders");
+    global.axios.interceptors.request.use(
+      async (config) => {
+        const headers = getHeaders(config.url, config.method);
+        if (config.headers) {
+          if (headers["User-Agent"]) {
+            delete config.headers["user-agent"];
+            delete config.headers["User-Agent"];
+          }
+          if (headers["Referer"]) {
+            delete config.headers["referer"];
+            delete config.headers["Referer"];
+          }
+          if (headers["Cookie"]) {
+            const existingCookie =
+              config.headers["cookie"] || config.headers["Cookie"];
+            if (existingCookie) {
+              const existingCookieClean = existingCookie || "";
+              if (!existingCookieClean.includes("cf_clearance=")) {
+                headers.Cookie = existingCookieClean + "; " + headers.Cookie;
+              } else {
+                headers.Cookie = existingCookieClean.replace(
+                  /cf_clearance=[^;]+/g,
+                  headers.Cookie.trim().replace(/;$/, ""),
+                );
+              }
+            }
+          }
+        }
+        config.headers = {
+          ...config.headers,
+          ...headers,
+        };
+        return config;
+      },
+      (error) => Promise.reject(error),
+    );
+
+    global.axios.interceptors.response.use(
+      (response) => response,
+      async (error) => {
+        const { config, response } = error;
+        if (
+          response &&
+          (response.status === 403 || response.status === 503) &&
+          config &&
+          !config._retry &&
+          global?.cloudflarebypass
+        ) {
+          config._retry = true;
+          console.log(
+            `[android] Cloudflare challenge (status: ${response.status}) for ${config.url}. Retrying with bypass...`,
+          );
+          try {
+            const referer =
+              config.headers?.Referer || config.headers?.referer || "";
+            const ua =
+              config.headers["User-Agent"] ||
+              config.headers["user-agent"] ||
+              "";
+            await global.cloudflarebypass(config.url, true, referer, ua);
+            const newHeaders = getHeaders(config.url, config.method);
+            config.headers = {
+              ...config.headers,
+              ...newHeaders,
+            };
+            return global.axios(config);
+          } catch (bypassErr) {
+            return Promise.reject(bypassErr);
+          }
+        }
+        return Promise.reject(error);
+      },
+    );
+  } catch (err) {
+    logger.error("[android] failed to initialize global.axios: " + err.message);
+  }
+
+  const {
+    patchModulePaths,
+    SettingsLoad,
+    settingfetch,
+    loadAllScrapers,
+  } = require("./backend/utils/settings");
+
+  try {
+    await patchModulePaths();
+    await SettingsLoad();
+    await loadAllScrapers();
     await settingfetch();
   } catch (e) {
-    logger.error("[android] settingfetch failed (first boot?): " + e.message);
+    logger.error("[android] settings initialization failed: " + e.message);
   }
 
   const { registerSharedStateHandlers } = require("./backend/sharedState");
@@ -184,8 +237,6 @@ async function boot() {
   const express = require("express");
   const appExpress = express();
 
-  // CORS: the WebView loads from http://localhost but Express listens on
-  // http://localhost:3459 — different port = cross-origin.
   appExpress.use((_req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header(
@@ -211,24 +262,20 @@ async function boot() {
     if (channel) channel.send("server-ready", { port: PORT });
   });
 
-  // Background maintenance mirrors desktop startup (fire-and-forget).
-  try {
-    const {
-      checkForMappingUpdates,
-    } = require("./backend/utils/mappingUpdater");
-    checkForMappingUpdates().catch((e) =>
-      logger.error("[android] mapping update failed: " + e.message),
-    );
-  } catch (e) {
-    logger.error("[android] mapping updater unavailable: " + e.message);
-  }
+  setTimeout(() => {
+    try {
+      const {
+        checkForMappingUpdates,
+      } = require("./backend/utils/mappingUpdater");
+      checkForMappingUpdates().catch((e) =>
+        logger.error("[android] mapping update failed: " + e.message),
+      );
+    } catch (e) {
+      logger.error("[android] mapping updater unavailable: " + e.message);
+    }
+  }, 10000);
 }
 
-// ---------------------------------------------------------------------------
-// 4. Boot immediately. Runtime config (ffmpeg path, app version, storage
-//    overrides) arrives via env vars set by NodeJS.start({ env }) in the
-//    native loader, so there is nothing to wait for.
-// ---------------------------------------------------------------------------
 boot().catch((e) => {
   console.error("[android] boot failed:", e);
   if (channel) channel.send("boot-error", { message: e.message });

@@ -144,6 +144,9 @@ async function MangaDir(title, customdir) {
 
 // download folder Location
 function getDownloadsFolder() {
+  if (process.env.STRAWVERSE_DOWNLOADS_DIR) {
+    return process.env.STRAWVERSE_DOWNLOADS_DIR;
+  }
   const homeDir = os.homedir();
   return path.join(homeDir, "Downloads");
 }

@@ -4,7 +4,12 @@
   "webDir": "www",
   "server": {
     "androidScheme": "http",
-    "allowNavigation": ["localhost", "127.0.0.1"]
+    "allowNavigation": [
+      "localhost",
+      "127.0.0.1",
+      "http://localhost:3459",
+      "http://127.0.0.1:3459"
+    ]
   },
   "android": {
     "allowMixedContent": true,
@@ -13,6 +18,12 @@
   "plugins": {
     "CapacitorNodeJS": {
       "nodeDir": "nodejs"
+    },
+    "CapacitorHttp": {
+      "enabled": false
+    },
+    "CapacitorCookies": {
+      "enabled": false
     }
   }
 }

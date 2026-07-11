@@ -289,14 +289,27 @@ export default function VideoPlayer({
         }
 
         // Auto-skip logic
-        if (autoSkipIntro && !hasAutoSkipped && skipTimes && skipTimes.length > 0) {
+        if (
+          autoSkipIntro &&
+          !hasAutoSkipped &&
+          skipTimes &&
+          skipTimes.length > 0
+        ) {
           const currentSkip = skipTimes.find(
-            (s) => s.skipType === "op" && time >= s.interval.start && time < s.interval.end
+            (s) =>
+              s.skipType === "op" &&
+              time >= s.interval.start &&
+              time < s.interval.end,
           );
           if (currentSkip) {
-            console.log(`[Auto-Skip] Auto-skipping intro from ${time} to ${currentSkip.interval.end}`);
+            console.log(
+              `[Auto-Skip] Auto-skipping intro from ${time} to ${currentSkip.interval.end}`,
+            );
             if (window.sharedStateAPI.controlMpv) {
-              window.sharedStateAPI.controlMpv("seek", [currentSkip.interval.end, "absolute"]);
+              window.sharedStateAPI.controlMpv("seek", [
+                currentSkip.interval.end,
+                "absolute",
+              ]);
               setHasAutoSkipped(true);
             }
           }
@@ -306,7 +319,9 @@ export default function VideoPlayer({
         if (dur > 1320 && time >= 1320 && time < dur) {
           if (!outroTriggeredRef.current) {
             outroTriggeredRef.current = true;
-            console.log(`[Auto-Play] Reached outro at ${time}s. Loading next episode...`);
+            console.log(
+              `[Auto-Play] Reached outro at ${time}s. Loading next episode...`,
+            );
             if (nextIndex !== -1) {
               handleJumpToEpisode(sortedEpisodes[nextIndex]);
               return;
@@ -368,7 +383,12 @@ export default function VideoPlayer({
 
   // Auto-launch MPV when source is ready
   useEffect(() => {
-    if (selectedSource && !autoLaunchedRef.current && !mpvLaunched && !isMpvActive) {
+    if (
+      selectedSource &&
+      !autoLaunchedRef.current &&
+      !mpvLaunched &&
+      !isMpvActive
+    ) {
       autoLaunchedRef.current = true;
       launchMpv();
     }
@@ -430,6 +450,27 @@ export default function VideoPlayer({
     };
 
     try {
+      if (window.__STRAWVERSE_MOBILE__) {
+        const CloudflareBypass = window.Capacitor?.Plugins?.CloudflareBypass;
+        if (CloudflareBypass) {
+          try {
+            await CloudflareBypass.playVideo({ url: selectedSource.url });
+            if (onBack) onBack();
+          } catch (err) {
+            Swal.fire({
+              title: "Player Launch Failed",
+              text: err.message || "Could not launch external video player.",
+              icon: "error",
+              confirmButtonColor: "var(--accent-color)",
+              background: "var(--bg-secondary)",
+              color: "var(--text-main)",
+            });
+          }
+        }
+        launchingRef.current = false;
+        return;
+      }
+
       if (window.sharedStateAPI && window.sharedStateAPI.playInMpv) {
         const res = await window.sharedStateAPI.playInMpv(playOptions);
         if (res && !res.success) {
@@ -468,7 +509,11 @@ export default function VideoPlayer({
 
   const handleSeek = (e) => {
     const val = parseFloat(e.target.value);
-    if (!isNaN(val) && window.sharedStateAPI && window.sharedStateAPI.controlMpv) {
+    if (
+      !isNaN(val) &&
+      window.sharedStateAPI &&
+      window.sharedStateAPI.controlMpv
+    ) {
       window.sharedStateAPI.controlMpv("seek", [val, "absolute"]);
       setMpvProgress((prev) => ({ ...prev, currentTime: val }));
     }
@@ -501,7 +546,9 @@ export default function VideoPlayer({
       : 0;
 
   const activeSkipSegment = skipTimes?.find(
-    (s) => mpvProgress.currentTime >= s.interval.start && mpvProgress.currentTime < s.interval.end
+    (s) =>
+      mpvProgress.currentTime >= s.interval.start &&
+      mpvProgress.currentTime < s.interval.end,
   );
 
   if (isMpvActive) {
@@ -515,20 +562,28 @@ export default function VideoPlayer({
           <div className="mpv-loading-spinner-container">
             <Loader size={36} className="mpv-spin" />
             <h3>Fetching stream sources...</h3>
-            <p>{animeTitle} — Episode {currentEpisodeObj ? currentEpisodeObj.number : currentEpisode}</p>
+            <p>
+              {animeTitle} — Episode{" "}
+              {currentEpisodeObj ? currentEpisodeObj.number : currentEpisode}
+            </p>
           </div>
         ) : errorMsg ? (
           <div className="mpv-error-container">
             <AlertCircle size={36} className="error-icon" />
             <h3>Launch Error</h3>
             <p>{errorMsg}</p>
-            <button onClick={onBack} className="mpv-error-close-btn">Close</button>
+            <button onClick={onBack} className="mpv-error-close-btn">
+              Close
+            </button>
           </div>
         ) : (
           <div className="mpv-loading-spinner-container">
             <Loader size={36} className="mpv-spin" />
             <h3>Launching MPV Player...</h3>
-            <p>{animeTitle} — Episode {currentEpisodeObj ? currentEpisodeObj.number : currentEpisode}</p>
+            <p>
+              {animeTitle} — Episode{" "}
+              {currentEpisodeObj ? currentEpisodeObj.number : currentEpisode}
+            </p>
           </div>
         )}
       </div>

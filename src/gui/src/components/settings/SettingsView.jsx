@@ -122,19 +122,30 @@ export default function SettingsView({
     for (const proto of protocols) {
       const healthUrl = `${proto}${domain}/health`;
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        let isOk = false;
+        let data = null;
 
-        const res = await fetch(healthUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.server === "StrawVerse Watch Together") {
-            success = true;
-            serverInfo = data;
-            break;
+        if (window.sharedStateAPI && window.sharedStateAPI.checkWtHealth) {
+          const res = await window.sharedStateAPI.checkWtHealth(healthUrl);
+          if (res && res.ok) {
+            isOk = true;
+            data = res.data;
           }
+        } else {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3000);
+          const res = await fetch(healthUrl, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          if (res.ok) {
+            isOk = true;
+            data = await res.json();
+          }
+        }
+
+        if (isOk && data && data.server === "StrawVerse Watch Together") {
+          success = true;
+          serverInfo = data;
+          break;
         }
       } catch (err) {
         // Continue
@@ -551,6 +562,7 @@ export default function SettingsView({
         "update-available",
         (info) => {
           const targetVersion = info?.version || "New Version";
+          const isAndroid = info?.isAndroid || window.__STRAWVERSE_MOBILE__;
           Swal.fire({
             title: "Update Available!",
             text: `A new version (v${targetVersion}) is available. Would you like to download it?`,
@@ -614,10 +626,14 @@ export default function SettingsView({
 
                   Swal.fire({
                     title: "Update Ready!",
-                    text: "A new version has been downloaded. Would you like to restart the application now to apply the update?",
+                    text: isAndroid
+                      ? "A new version has been downloaded. Would you like to install the update now?"
+                      : "A new version has been downloaded. Would you like to restart the application now to apply the update?",
                     icon: "success",
                     showCancelButton: true,
-                    confirmButtonText: "Restart Now",
+                    confirmButtonText: isAndroid
+                      ? "Install Now"
+                      : "Restart Now",
                     cancelButtonText: "Later",
                     confirmButtonColor: "var(--accent)",
                     cancelButtonColor: "var(--bg-tertiary)",
@@ -1094,7 +1110,8 @@ export default function SettingsView({
                       Auto-Play Next Episode
                     </div>
                     <div className="settings-row-hint">
-                      Automatically play the next episode in the queue when the current episode ends.
+                      Automatically play the next episode in the queue when the
+                      current episode ends.
                     </div>
                   </div>
                   <div className="settings-row-control">

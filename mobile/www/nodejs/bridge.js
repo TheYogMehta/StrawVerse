@@ -1,31 +1,16 @@
-/**
- * HTTP <-> IPC bridge for the Android runtime.
- *
- * The desktop GUI talks to the Electron main process through
- * `window.sharedStateAPI` (contextBridge + ipcRenderer). On Android there is
- * no preload script, so the GUI loads a polyfill (src/gui/src/utils/
- * nativeBridge.js) that maps the same API onto:
- *
- *   POST /api/ipc/:channel   -> invoke an ipcMain handler, JSON in/out
- *   GET  /api/ipc/events     -> Server-Sent Events stream replacing
- *                               webContents.send() push messages
- *
- * This file also registers the mobile implementations of handlers that live
- * in gui.js on desktop (updates, changelog, app version, marketplace).
- */
-
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
 
 const electron = require("./shims/electron");
+const { getKeyValue, setKeyValue, queryOne, run } = require("./backend/utils/db");
+const { pipeline } = require("stream/promises");
+const got = require("got").default || require("got");
 
 const router = express.Router();
 
-// ---------------------------------------------------------------------------
-// SSE hub - replaces global.win.webContents.send(channel, data)
-// ---------------------------------------------------------------------------
 const sseClients = new Set();
+let pendingBypassRequest = null;
 
 function broadcast(channel, data) {
   const payload = `data: ${JSON.stringify({ channel, data })}\n\n`;
@@ -38,7 +23,6 @@ function broadcast(channel, data) {
   }
 }
 
-/** A `global.win` stand-in so backend `global.win.webContents.send` works. */
 const fakeWindow = {
   webContents: {
     send: (channel, data) => broadcast(channel, data),
@@ -55,12 +39,18 @@ router.get("/api/ipc/events", (req, res) => {
     Connection: "keep-alive",
   });
   res.write(": connected\n\n");
+
+  if (pendingBypassRequest) {
+    const payload = `data: ${JSON.stringify({ channel: "cf-bypass-request", data: pendingBypassRequest })}\n\n`;
+    res.write(payload);
+  }
+
   sseClients.add(res);
   const keepAlive = setInterval(() => {
     try {
       res.write(": ping\n\n");
     } catch (_) {
-      /* handled by close */
+      //
     }
   }, 25000);
   req.on("close", () => {
@@ -69,29 +59,28 @@ router.get("/api/ipc/events", (req, res) => {
   });
 });
 
-router.post("/api/ipc/:channel", express.json({ limit: "5mb" }), async (req, res) => {
-  const { channel } = req.params;
-  const args = Array.isArray(req.body?.args) ? req.body.args : [];
-  try {
-    const result = await electron.__invokeIpcHandler(channel, args);
-    res.json({ ok: true, result: result === undefined ? null : result });
-  } catch (e) {
-    res.status(500).json({ ok: false, error: e.message });
-  }
-});
+router.post(
+  "/api/ipc/:channel",
+  express.json({ limit: "5mb" }),
+  async (req, res) => {
+    const { channel } = req.params;
+    const args = Array.isArray(req.body?.args) ? req.body.args : [];
+    try {
+      const result = await electron.__invokeIpcHandler(channel, args);
+      res.json({ ok: true, result: result === undefined ? null : result });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  },
+);
 
-// ---------------------------------------------------------------------------
-// Mobile implementations of gui.js-owned IPC handlers
-// ---------------------------------------------------------------------------
 function registerMobileHandlers({ appVersion, repoSlug }) {
   const { ipcMain } = electron;
 
   ipcMain.handle("get-app-version", () => appVersion);
 
-  // --- "What's new" changelog dialog -------------------------------------
   ipcMain.handle("check-whats-new", async () => {
     try {
-      const { getKeyValue } = require("./backend/utils/db");
       const lastSeen = getKeyValue("Settings", "whatsNewSeenVersion");
       const disabled = getKeyValue("Settings", "whatsNewDisabled");
       if (disabled === true || lastSeen === appVersion) return null;
@@ -100,7 +89,6 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
       if (!fs.existsSync(changelogPath)) return null;
       const changelog = fs.readFileSync(changelogPath, "utf-8");
 
-      const { setKeyValue } = require("./backend/utils/db");
       setKeyValue("Settings", "whatsNewSeenVersion", appVersion);
       return { version: appVersion, changelog };
     } catch (e) {
@@ -110,7 +98,6 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
 
   ipcMain.handle("disable-whats-new", async () => {
     try {
-      const { setKeyValue } = require("./backend/utils/db");
       setKeyValue("Settings", "whatsNewDisabled", true);
       return { success: true };
     } catch (e) {
@@ -118,7 +105,6 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
     }
   });
 
-  // --- Updates: check GitHub releases, open the APK in the browser --------
   let latestReleaseCache = null;
 
   ipcMain.handle("check-for-update", async () => {
@@ -148,35 +134,163 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
     }
   });
 
+
+
+  async function runBackgroundDownload(url, destPath) {
+    try {
+      const downloadStream = got.stream(url);
+      const writeStream = fs.createWriteStream(destPath);
+      const startTime = Date.now();
+
+      downloadStream.on("downloadProgress", (progress) => {
+        const timeElapsed = (Date.now() - startTime) / 1000;
+        const bytesPerSecond =
+          timeElapsed > 0 ? progress.transferred / timeElapsed : 0;
+        broadcast("update-download-progress", {
+          percent: Math.round((progress.percent || 0) * 100),
+          transferred: progress.transferred,
+          total: progress.total,
+          bytesPerSecond: bytesPerSecond,
+        });
+      });
+
+      await pipeline(downloadStream, writeStream);
+      broadcast("update-downloaded");
+    } catch (err) {
+      console.error("[bridge] update download failed:", err.message);
+      broadcast("update-error", { message: err.message });
+    }
+  }
+
   ipcMain.handle("download-update", async () => {
-    // No silent install on Android - open the release APK in the browser.
     const release = latestReleaseCache;
     const apkAsset = release?.assets?.find((a) => a.name?.endsWith(".apk"));
-    const url =
-      apkAsset?.browser_download_url ||
-      release?.html_url ||
-      `https://github.com/${repoSlug}/releases/latest`;
-    if (typeof global.__sendToNative === "function") {
-      global.__sendToNative("open-external", { url });
+    const url = apkAsset?.browser_download_url;
+    if (!url) {
+      return { success: false, error: "No APK asset found in latest release" };
     }
-    return { opened: true };
+
+    const tempDir = process.env.STRAWVERSE_TEMP_DIR;
+    const destPath = path.join(tempDir, "update.apk");
+
+    runBackgroundDownload(url, destPath);
+    return { success: true };
   });
 
   ipcMain.handle("install-update", () => {
-    return { supported: false };
+    const tempDir = process.env.STRAWVERSE_TEMP_DIR;
+    const destPath = path.join(tempDir, "update.apk");
+    broadcast("trigger-install", { path: destPath });
+    return { success: true };
   });
 
-  // --- Marketplace: desktop opens a second window; mobile pushes an event -
   ipcMain.on("marketplace", (event, AnimeManga) => {
     broadcast("open-marketplace", { type: AnimeManga });
   });
 
-  // --- Cloudflare bypass needs a real browser window - degrade gracefully -
-  if (!electron.__ipcHandlers.has("ensure-cf-bypass")) {
-    ipcMain.handle("ensure-cf-bypass", async () => {
-      return { success: false, reason: "cf-bypass-unavailable-on-android" };
-    });
-  }
+  ipcMain.handle("ensure-cf-bypass", async (event, targetUrl) => {
+    if (!targetUrl) return { ok: true, success: true };
+    const domain = new URL(targetUrl).hostname.replace("www.", "");
+    broadcast("cf-bypass-request", { url: targetUrl });
+    for (let i = 0; i < 15; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const row = queryOne(
+        "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+        [`${domain}-cf_clearance`, domain, domain],
+      );
+      if (row) {
+        return { ok: true, success: true };
+      }
+    }
+    return { ok: false, success: false, reason: "timeout" };
+  });
+
+  ipcMain.handle("save-cf-cookies", async (event, targetUrl, cookieString) => {
+    if (!cookieString || !targetUrl) return { ok: false };
+    const domain = new URL(targetUrl).hostname.replace("www.", "");
+    const pairs = cookieString.split(";");
+    for (const pair of pairs) {
+      const parts = pair.trim().split("=");
+      if (parts.length >= 2) {
+        const name = parts[0].trim();
+        const value = parts.slice(1).join("=").trim();
+        if (name === "cf_clearance") {
+          const key = `${domain}-cf_clearance`;
+          const expiry = Date.now() + 1000 * 60 * 60 * 2;
+          const upsertSql = `
+            INSERT INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate, local_saved_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              value=excluded.value,
+              expirationDate=excluded.expirationDate,
+              local_saved_at=excluded.local_saved_at
+          `;
+          try {
+            run(upsertSql, [
+              key,
+              value,
+              "cf_clearance",
+              domain,
+              targetUrl,
+              "/",
+              "true",
+              "true",
+              expiry,
+              Date.now(),
+            ]);
+            if (global.clearCookieCache) {
+              global.clearCookieCache(domain);
+            }
+          } catch (e) {
+            console.error("[bridge] Failed to save cookie:", e.message);
+          }
+        }
+      }
+    }
+    return { ok: true };
+  });
+
+  global.cloudflarebypass = async (targetUrl, silent, referer, userAgent) => {
+    if (!targetUrl) return;
+    const domain = new URL(targetUrl).hostname.replace("www.", "");
+
+    try {
+      run(
+        "DELETE FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))",
+        [`${domain}-cf_clearance`, domain, domain],
+      );
+      if (global.clearCookieCache) {
+        global.clearCookieCache(domain);
+      }
+    } catch (e) {
+      console.error(
+        "[bridge] Failed to clear stale cookies from db:",
+        e.message,
+      );
+    }
+
+    pendingBypassRequest = { url: targetUrl, userAgent: userAgent };
+    broadcast("cf-bypass-request", pendingBypassRequest);
+
+    try {
+      for (let i = 0; i < 20; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const row = queryOne(
+          "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          [`${domain}-cf_clearance`, domain, domain],
+        );
+        if (row) {
+          if (global.clearCookieCache) {
+            global.clearCookieCache(domain);
+          }
+          return true;
+        }
+      }
+      throw new Error("Cloudflare bypass timeout");
+    } finally {
+      pendingBypassRequest = null;
+    }
+  };
 }
 
 function compareVersions(a, b) {

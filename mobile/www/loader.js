@@ -1,13 +1,3 @@
-/**
- * StrawVerse Android loader.
- *
- * Runs inside the Capacitor WebView before the real app loads:
- *   1. Starts the embedded Node.js runtime (capacitor-nodejs).
- *   2. Waits for the "server-ready" channel message OR polls /health.
- *   3. Navigates the WebView to the local Express server, which serves the
- *      exact same React GUI used by the desktop app.
- */
-// No bundler in www/ — Capacitor injects native plugin proxies globally.
 const NodeJS = window.Capacitor?.Plugins?.CapacitorNodeJS;
 
 const PORT = 3459;
@@ -46,7 +36,7 @@ async function waitForHealth(timeoutMs = 45000) {
       const res = await fetch(HEALTH_URL, { cache: "no-store" });
       if (res.ok) return true;
     } catch (_) {
-      /* server not up yet */
+      //
     }
     await new Promise((r) => setTimeout(r, 500));
   }
@@ -73,21 +63,28 @@ async function main() {
     });
 
     setStatus("Starting engine…");
-    await NodeJS.whenReady();
 
-    // Fallback: if the channel message was missed (e.g. app resumed),
-    // poll the health endpoint directly.
-    setStatus("Waiting for server…");
-    const healthy = await waitForHealth();
-    if (healthy) {
-      navigate();
-    } else if (!navigated) {
-      showError(
-        "The local server did not respond in time. Please retry, or reinstall the app if this keeps happening.",
-      );
+    const healthTimeout = 60000;
+    waitForHealth(healthTimeout).then((healthy) => {
+      if (healthy) {
+        navigate();
+      } else if (!navigated) {
+        showError(
+          "The local server did not respond in time. Please retry, or reinstall the app if this keeps happening.",
+        );
+      }
+    });
+
+    try {
+      await NodeJS.whenReady();
+      setStatus("Waiting for server…");
+    } catch (e) {
+      console.warn("whenReady failed, relying on health check:", e);
     }
   } catch (err) {
-    showError(`Failed to start: ${err.message || err}`);
+    if (!navigated) {
+      showError(`Failed to start: ${err.message || err}`);
+    }
   }
 }
 

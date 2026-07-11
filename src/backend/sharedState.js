@@ -123,6 +123,16 @@ function registerSharedStateHandlers() {
     await settingupdate(settingsObj);
     return { success: true };
   });
+
+  ipcMain.handle("check-wt-health", async (event, url) => {
+    try {
+      const axios = require("axios");
+      const res = await axios.get(url, { timeout: 3000 });
+      return { ok: true, data: res.data };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  });
 }
 
 module.exports = { registerSharedStateHandlers };

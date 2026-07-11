@@ -93,7 +93,10 @@ global.setFallbackReferer = (referer) => {
 function getHeaders(url, method = "GET") {
   const chromeVer = process.versions.chrome || "148.0.7778.218";
   let userAgent = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
-  if (process.platform === "linux") {
+  if (process.platform === "android" || process.env.PLATFORM === "android") {
+    userAgent =
+      "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+  } else if (process.platform === "linux") {
     userAgent = `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
   } else if (process.platform === "darwin") {
     userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
