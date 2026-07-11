@@ -46,6 +46,14 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     implementation "androidx.webkit:webkit:$androidxWebkitVersion"
+    implementation "org.chromium.net:cronet-embedded:119.6045.31"
+    implementation "androidx.media3:media3-exoplayer:1.4.1"
+    implementation "androidx.media3:media3-exoplayer-hls:1.4.1"
+    implementation "androidx.media3:media3-ui:1.4.1"
+    implementation("androidx.media3:media3-datasource-cronet:1.4.1") {
+        exclude group: 'com.google.android.gms', module: 'play-services-cronet'
+    }
+
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
