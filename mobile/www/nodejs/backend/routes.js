@@ -307,6 +307,8 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
     }
   }
 
+  console.log("[android] /api/list route request params:", req.params, "body:", JSON.stringify(req.body), "parsed filters:", JSON.stringify(filters));
+
   try {
     if (!AnimeManga || !provider) {
       return res.status(400).json({ error: "Missing parameters" });
@@ -2484,9 +2486,11 @@ router.get("/api/image", async (req, res) => {
     let response = await global.axios.get(decodedUrl, options);
     const contentType = response.headers["content-type"] || "image/jpeg";
 
+    const buf = Buffer.from(response.data);
+    console.log(`[api/image] Proxying ${decodedUrl} -> Status: ${response.status}, Content-Type: ${contentType}, Data Length: ${buf.length}, Magic: ${buf.slice(0, 8).toString("hex")}`);
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=86400");
-    return res.send(response.data);
+    return res.send(buf);
   } catch (err) {
     console.error("Image proxy direct fetch failed:", err.message);
     res.status(500).send("Failed to load image");

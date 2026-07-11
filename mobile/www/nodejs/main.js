@@ -1,8 +1,25 @@
+if (typeof global.File === "undefined") {
+  const { Blob } = require("buffer");
+  global.File = class File extends Blob {
+    constructor(parts, filename, options = {}) {
+      super(parts, options);
+      this.name = filename;
+      this.lastModified = options.lastModified || Date.now();
+    }
+  };
+}
+
 const Module = require("module");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-os.homedir = () => process.env.STRAWVERSE_DOWNLOADS_DIR || "/data/data/app.strawverse.android/files";
+os.homedir = () =>
+  process.env.STRAWVERSE_DOWNLOADS_DIR ||
+  "/data/data/app.strawverse.android/files";
+
+const cheerio = require("cheerio");
+const axios = require("axios");
+const got = require("got");
 
 const PORT = 3459;
 
@@ -16,7 +33,18 @@ const shimMap = {
 const originalResolve = Module._resolveFilename;
 Module._resolveFilename = function (request, ...rest) {
   if (shimMap[request]) return shimMap[request];
+  if (request === "cheerio" || request === "axios" || request === "got") {
+    return request;
+  }
   return originalResolve.call(this, request, ...rest);
+};
+
+const originalLoad = Module._load;
+Module._load = function (request, ...rest) {
+  if (request === "cheerio") return cheerio;
+  if (request === "axios") return axios;
+  if (request === "got") return got;
+  return originalLoad.call(this, request, ...rest);
 };
 
 let channel = null;
@@ -127,6 +155,20 @@ async function boot() {
   );
 
   require("./backend/utils/db");
+  try {
+    const { run } = require("./backend/utils/db");
+    run(
+      "DELETE FROM cookie WHERE name = 'user_agent' OR name = 'client_hints'",
+    );
+    logger.info(
+      "[android] Cleared stale User-Agent and Client Hints from database",
+    );
+  } catch (dbCleanupErr) {
+    logger.error(
+      "[android] Failed to clear stale cookies on startup: " +
+        dbCleanupErr.message,
+    );
+  }
 
   try {
     const axios = require("axios");
@@ -148,7 +190,19 @@ async function boot() {
           }
 
           let responseData = res.data;
-          if (typeof responseData === "string") {
+          if (res.isBase64) {
+            const buf = Buffer.from(responseData, "base64");
+            if (config.responseType === "arraybuffer") {
+              responseData = buf;
+            } else {
+              responseData = buf.toString("utf-8");
+              if (typeof responseData === "string") {
+                try {
+                  responseData = JSON.parse(responseData);
+                } catch (e) {}
+              }
+            }
+          } else if (typeof responseData === "string") {
             try {
               responseData = JSON.parse(responseData);
             } catch (e) {}
@@ -322,8 +376,8 @@ async function boot() {
     next();
   });
 
-  appExpress.use(express.urlencoded({ extended: true }));
-  appExpress.use(express.json());
+  appExpress.use(express.urlencoded({ limit: "50mb", extended: true }));
+  appExpress.use(express.json({ limit: "50mb" }));
   appExpress.use(bridge.router);
   appExpress.get("/health", (_req, res) => res.json({ ok: true }));
   appExpress.use(express.static(path.join(__dirname, "gui", "dist")));

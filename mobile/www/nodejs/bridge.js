@@ -228,6 +228,11 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
     });
   };
 
+  ipcMain.handle("set-device-user-agent", async (event, ua) => {
+    global.deviceUserAgent = ua;
+    return { ok: true };
+  });
+
   ipcMain.handle("ensure-cf-bypass", async (event, targetUrl) => {
     if (!targetUrl) return { ok: true, success: true };
     const domain = new URL(targetUrl).hostname.replace("www.", "");
@@ -247,7 +252,7 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
 
   ipcMain.handle(
     "save-cf-cookies",
-    async (event, targetUrl, cookieString) => {
+    async (event, targetUrl, cookieString, userAgent, clientHints) => {
       if (!cookieString || !targetUrl) return { ok: false };
       const domain = new URL(targetUrl).hostname.replace("www.", "");
       const pairs = cookieString.split(";");
@@ -288,6 +293,38 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
               savedClearance = true;
             }
           }
+        }
+
+        // Save User-Agent
+        if (userAgent) {
+          run(upsertSql, [
+            `${domain}-user_agent`,
+            userAgent,
+            "user_agent",
+            domain,
+            targetUrl,
+            "/",
+            "true",
+            "false",
+            expiry,
+            Date.now(),
+          ]);
+        }
+
+        // Save Client Hints
+        if (clientHints) {
+          run(upsertSql, [
+            `${domain}-client_hints`,
+            JSON.stringify(clientHints),
+            "client_hints",
+            domain,
+            targetUrl,
+            "/",
+            "true",
+            "false",
+            expiry,
+            Date.now(),
+          ]);
         }
 
         if (global.clearCookieCache) {

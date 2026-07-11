@@ -91,17 +91,57 @@ global.setFallbackReferer = (referer) => {
 };
 
 function getHeaders(url, method = "GET") {
+  let cookieDomain = "";
+  try {
+    cookieDomain = new URL(url).hostname;
+  } catch (e) {}
+
   const chromeVer = process.versions.chrome || "148.0.7778.218";
-  let userAgent = `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
-  if (process.platform === "linux") {
-    userAgent = `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
-  } else if (process.platform === "darwin") {
-    userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
+  let userAgent = global.deviceUserAgent;
+  if (!userAgent) {
+    if (process.platform === "linux") {
+      userAgent = `Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
+    } else if (process.platform === "darwin") {
+      userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
+    } else {
+      // Android / generic fallback (matches sec-ch-ua-platform Android)
+      userAgent = `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Mobile Safari/537.36`;
+    }
+  }
+
+  // Load custom User-Agent if bypassed
+  if (cookieDomain) {
+    const cleanDomain = cookieDomain.replace("www.", "").toLowerCase();
+    try {
+      const uaRow = queryOne("SELECT value FROM cookie WHERE id = ? LIMIT 1", [
+        `${cleanDomain}-user_agent`,
+      ]);
+      if (uaRow && uaRow.value) {
+        userAgent = uaRow.value;
+      }
+    } catch (e) {}
   }
 
   const headers = {
     "User-Agent": userAgent,
   };
+
+  // Load Client Hints if bypassed
+  if (cookieDomain) {
+    const cleanDomain = cookieDomain.replace("www.", "").toLowerCase();
+    try {
+      const hintsRow = queryOne(
+        "SELECT value FROM cookie WHERE id = ? LIMIT 1",
+        [`${cleanDomain}-client_hints`],
+      );
+      if (hintsRow && hintsRow.value) {
+        const hints = JSON.parse(hintsRow.value);
+        for (const [k, v] of Object.entries(hints)) {
+          headers[k] = v;
+        }
+      }
+    } catch (e) {}
+  }
 
   // kwik - animepahe
   if (url.includes("owocdn.top") || url.includes("uwucdn.top")) {
@@ -161,10 +201,7 @@ function getHeaders(url, method = "GET") {
     }
   }
 
-  let cookieDomain = "";
-  try {
-    cookieDomain = new URL(url).hostname;
-  } catch (e) {}
+  // cookieDomain is resolved at the top of the function
 
   if (cookieDomain) {
     const cached = cookieCache[cookieDomain];

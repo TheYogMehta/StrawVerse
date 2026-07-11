@@ -76,7 +76,7 @@ function ensureEventSource() {
                 res.cookies ? res.cookies.length : 0,
               );
               if (res.cookies && res.userAgent) {
-                invoke("save-cf-cookies", data.url, res.cookies, res.userAgent)
+                invoke("save-cf-cookies", data.url, res.cookies, res.userAgent, res.clientHints)
                   .then(() =>
                     console.log(
                       "[nativeBridge] cookies saved to backend successfully",
@@ -172,6 +172,9 @@ if (typeof window !== "undefined" && !window.sharedStateAPI) {
   window.__STRAWVERSE_MOBILE__ = true;
   setTimeout(() => {
     ensureEventSource();
+    invoke("set-device-user-agent", navigator.userAgent).catch((err) => {
+      console.error("[nativeBridge] Failed to set device User-Agent:", err);
+    });
   }, 1000);
 }
 

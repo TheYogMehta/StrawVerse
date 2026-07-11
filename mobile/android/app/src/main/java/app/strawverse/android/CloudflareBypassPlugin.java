@@ -39,8 +39,9 @@ public class CloudflareBypassPlugin extends Plugin {
             call.reject("URL is required");
             return;
         }
+        final String userAgent = call.getString("userAgent");
 
-        Log.i("StrawVerseBypass", "bypass() called with URL: " + url);
+        Log.i("StrawVerseBypass", "bypass() called with URL: " + url + " UA: " + userAgent);
 
         final String finalUrl = url;
         String challengeUrl = url;
@@ -119,7 +120,16 @@ public class CloudflareBypassPlugin extends Plugin {
                     final WebView webView = new WebView(getActivity());
                     webView.getSettings().setJavaScriptEnabled(true);
                     webView.getSettings().setDomStorageEnabled(true);
-                    final String effectiveUserAgent = webView.getSettings().getUserAgentString();
+                    
+                    final String effectiveUserAgent = (userAgent != null && !userAgent.isEmpty())
+                        ? userAgent
+                        : webView.getSettings().getUserAgentString();
+                    webView.getSettings().setUserAgentString(effectiveUserAgent);
+                    
+                    // Enable desktop mode viewport settings
+                    webView.getSettings().setUseWideViewPort(true);
+                    webView.getSettings().setLoadWithOverviewMode(true);
+                    
                     webView.getSettings().setSupportZoom(true);
                     webView.getSettings().setBuiltInZoomControls(true);
                     webView.getSettings().setDisplayZoomControls(false);
@@ -403,16 +413,27 @@ public class CloudflareBypassPlugin extends Plugin {
                     conn.setConnectTimeout(15000);
                     conn.setReadTimeout(15000);
 
-                    Log.i("StrawVerseBypass", "nativeRequest initiating: " + method + " -> " + url);
-                    // Set headers
+                    // Set headers (ensure we override the User-Agent to match WebView's user agent)
+                    String webViewUA = android.webkit.WebSettings.getDefaultUserAgent(getContext());
+                    boolean hasUA = false;
                     if (headers != null) {
                         java.util.Iterator<String> keys = headers.keys();
                         while (keys.hasNext()) {
                             String key = keys.next();
                             String value = headers.getString(key);
+                            if (key.equalsIgnoreCase("user-agent")) {
+                                hasUA = true;
+                            }
+                            if (key.equalsIgnoreCase("accept-encoding")) {
+                                continue;
+                            }
                             conn.setRequestProperty(key, value);
                             Log.i("StrawVerseBypass", "  Request Header: " + key + " = " + value);
                         }
+                    }
+                    if (!hasUA) {
+                        conn.setRequestProperty("User-Agent", webViewUA);
+                        Log.i("StrawVerseBypass", "  Request Header (Added): User-Agent = " + webViewUA);
                     }
 
                     // Set body if POST/PUT
@@ -434,15 +455,21 @@ public class CloudflareBypassPlugin extends Plugin {
                         ? conn.getInputStream() 
                         : conn.getErrorStream();
                         
-                    StringBuilder response = new StringBuilder();
+                    byte[] responseBytes;
                     if (is != null) {
-                        try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(is, "utf-8"))) {
-                            String line;
-                            while ((line = br.readLine()) != null) {
-                                response.append(line).append("\n");
+                        try (java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream()) {
+                            byte[] buffer = new byte[4096];
+                            int len;
+                            while ((len = is.read(buffer)) != -1) {
+                                bos.write(buffer, 0, len);
                             }
+                            responseBytes = bos.toByteArray();
                         }
+                    } else {
+                        responseBytes = new byte[0];
                     }
+
+                    String base64Data = android.util.Base64.encodeToString(responseBytes, android.util.Base64.NO_WRAP);
 
                     // Get response headers
                     JSObject resHeaders = new JSObject();
@@ -455,7 +482,8 @@ public class CloudflareBypassPlugin extends Plugin {
 
                     JSObject ret = new JSObject();
                     ret.put("status", responseCode);
-                    ret.put("data", response.toString());
+                    ret.put("data", base64Data);
+                    ret.put("isBase64", true);
                     ret.put("headers", resHeaders);
                     call.resolve(ret);
 
