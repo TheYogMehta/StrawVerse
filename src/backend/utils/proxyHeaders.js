@@ -174,12 +174,17 @@ function getHeaders(url, method = "GET") {
     if (cached && cached.expiry > Date.now()) {
       if (cached.value) {
         headers.Cookie = `cf_clearance=${cached.value};`;
+        if (cached.userAgent) headers["User-Agent"] = cached.userAgent;
       }
     } else {
       try {
         const row = queryOne(
           "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
           [`${cookieDomain}-cf_clearance`, cookieDomain, cookieDomain],
+        );
+        const profile = queryOne(
+          "SELECT value FROM cookie WHERE (id = ? OR (name = 'cf_user_agent' AND (? = domain OR ? LIKE '%.' || domain))) ORDER BY local_saved_at DESC LIMIT 1",
+          [`${cookieDomain}-cf-user-agent`, cookieDomain, cookieDomain],
         );
         let isValid = false;
         let expiryTime = Date.now() + 10 * 60 * 1000;
@@ -200,8 +205,10 @@ function getHeaders(url, method = "GET") {
 
         if (row && row.value && isValid) {
           headers.Cookie = `cf_clearance=${row.value};`;
+          if (profile?.value) headers["User-Agent"] = profile.value;
           cookieCache[cookieDomain] = {
             value: row.value,
+            userAgent: profile?.value || null,
             expiry: expiryTime,
           };
         } else {

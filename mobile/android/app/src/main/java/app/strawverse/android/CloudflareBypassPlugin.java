@@ -40,11 +40,16 @@ public class CloudflareBypassPlugin extends Plugin {
         Log.i("StrawVerseBypass", "bypass() called with URL: " + url);
 
         final String finalUrl = url;
-        String userAgent = call.getString("userAgent");
-        if (userAgent == null) {
-            userAgent = "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Mobile Safari/537.36";
+        String challengeUrl = url;
+        try {
+            Uri uri = Uri.parse(url);
+            if (uri.getHost() != null && uri.getHost().contains("animepahe") && uri.getPath() != null && uri.getPath().startsWith("/api")) {
+                challengeUrl = uri.getScheme() + "://" + uri.getAuthority() + "/";
+            }
+        } catch (Exception e) {
+            Log.w("StrawVerseBypass", "Unable to normalize challenge URL", e);
         }
-        final String finalUserAgent = userAgent;
+        final String finalChallengeUrl = challengeUrl;
 
         getActivity().runOnUiThread(new Runnable() {
             @Override
@@ -111,7 +116,7 @@ public class CloudflareBypassPlugin extends Plugin {
                     final WebView webView = new WebView(getActivity());
                     webView.getSettings().setJavaScriptEnabled(true);
                     webView.getSettings().setDomStorageEnabled(true);
-                    webView.getSettings().setUserAgentString(finalUserAgent);
+                    final String effectiveUserAgent = webView.getSettings().getUserAgentString();
                     webView.getSettings().setSupportZoom(true);
                     webView.getSettings().setBuiltInZoomControls(true);
                     webView.getSettings().setDisplayZoomControls(false);
@@ -144,8 +149,11 @@ public class CloudflareBypassPlugin extends Plugin {
                             if (cookieString != null && cookieString.contains("cf_clearance")) {
                                 Log.i("StrawVerseBypass", "Cookie poller detected cf_clearance!");
                                 finished[0] = true;
+                                handler.removeCallbacks(this);
+                                CookieManager.getInstance().flush();
                                 JSObject ret = new JSObject();
                                 ret.put("cookies", cookieString);
+                                ret.put("userAgent", effectiveUserAgent);
                                 call.resolve(ret);
                                 dialog.dismiss();
                                 webView.destroy();
@@ -162,10 +170,7 @@ public class CloudflareBypassPlugin extends Plugin {
                             finished[0] = true;
                             handler.removeCallbacks(cookiePoller);
 
-                            String cookieString = CookieManager.getInstance().getCookie(finalUrl);
-                            JSObject ret = new JSObject();
-                            ret.put("cookies", cookieString);
-                            call.resolve(ret);
+                            call.reject("Cloudflare verification cancelled");
                             dialog.dismiss();
                             webView.destroy();
                         }
@@ -178,10 +183,7 @@ public class CloudflareBypassPlugin extends Plugin {
                             finished[0] = true;
                             handler.removeCallbacks(cookiePoller);
 
-                            String cookieString = CookieManager.getInstance().getCookie(finalUrl);
-                            JSObject ret = new JSObject();
-                            ret.put("cookies", cookieString);
-                            call.resolve(ret);
+                            call.reject("Cloudflare verification cancelled");
                             webView.destroy();
                         }
                     });
@@ -211,7 +213,7 @@ public class CloudflareBypassPlugin extends Plugin {
                     CookieManager.getInstance().removeAllCookies(new android.webkit.ValueCallback<Boolean>() {
                         @Override
                         public void onReceiveValue(Boolean value) {
-                            webView.loadUrl(finalUrl);
+                            webView.loadUrl(finalChallengeUrl);
                             dialog.show();
                             handler.post(cookiePoller);
                         }

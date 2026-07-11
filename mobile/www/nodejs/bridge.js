@@ -3,7 +3,12 @@ const fs = require("fs");
 const path = require("path");
 
 const electron = require("./shims/electron");
-const { getKeyValue, setKeyValue, queryOne, run } = require("./backend/utils/db");
+const {
+  getKeyValue,
+  setKeyValue,
+  queryOne,
+  run,
+} = require("./backend/utils/db");
 const { pipeline } = require("stream/promises");
 const got = require("got").default || require("got");
 
@@ -134,8 +139,6 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
     }
   });
 
-
-
   async function runBackgroundDownload(url, destPath) {
     try {
       const downloadStream = got.stream(url);
@@ -205,19 +208,22 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
     return { ok: false, success: false, reason: "timeout" };
   });
 
-  ipcMain.handle("save-cf-cookies", async (event, targetUrl, cookieString) => {
-    if (!cookieString || !targetUrl) return { ok: false };
-    const domain = new URL(targetUrl).hostname.replace("www.", "");
-    const pairs = cookieString.split(";");
-    for (const pair of pairs) {
-      const parts = pair.trim().split("=");
-      if (parts.length >= 2) {
-        const name = parts[0].trim();
-        const value = parts.slice(1).join("=").trim();
-        if (name === "cf_clearance") {
-          const key = `${domain}-cf_clearance`;
-          const expiry = Date.now() + 1000 * 60 * 60 * 2;
-          const upsertSql = `
+  ipcMain.handle(
+    "save-cf-cookies",
+    async (event, targetUrl, cookieString, userAgent) => {
+      if (!cookieString || !targetUrl || !userAgent) return { ok: false };
+      const domain = new URL(targetUrl).hostname.replace("www.", "");
+      const pairs = cookieString.split(";");
+      let savedClearance = false;
+      for (const pair of pairs) {
+        const parts = pair.trim().split("=");
+        if (parts.length >= 2) {
+          const name = parts[0].trim();
+          const value = parts.slice(1).join("=").trim();
+          if (name === "cf_clearance") {
+            const key = `${domain}-cf_clearance`;
+            const expiry = Date.now() + 1000 * 60 * 60 * 2;
+            const upsertSql = `
             INSERT INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate, local_saved_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
@@ -225,30 +231,44 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
               expirationDate=excluded.expirationDate,
               local_saved_at=excluded.local_saved_at
           `;
-          try {
-            run(upsertSql, [
-              key,
-              value,
-              "cf_clearance",
-              domain,
-              targetUrl,
-              "/",
-              "true",
-              "true",
-              expiry,
-              Date.now(),
-            ]);
-            if (global.clearCookieCache) {
-              global.clearCookieCache(domain);
+            try {
+              run(upsertSql, [
+                key,
+                value,
+                "cf_clearance",
+                domain,
+                targetUrl,
+                "/",
+                "true",
+                "true",
+                expiry,
+                Date.now(),
+              ]);
+              run(upsertSql, [
+                `${domain}-cf-user-agent`,
+                userAgent,
+                "cf_user_agent",
+                domain,
+                targetUrl,
+                "/",
+                "true",
+                "false",
+                expiry,
+                Date.now(),
+              ]);
+              savedClearance = true;
+              if (global.clearCookieCache) {
+                global.clearCookieCache(domain);
+              }
+            } catch (e) {
+              console.error("[bridge] Failed to save cookie:", e.message);
             }
-          } catch (e) {
-            console.error("[bridge] Failed to save cookie:", e.message);
           }
         }
       }
-    }
-    return { ok: true };
-  });
+      return { ok: savedClearance };
+    },
+  );
 
   global.cloudflarebypass = async (targetUrl, silent, referer, userAgent) => {
     if (!targetUrl) return;
@@ -256,8 +276,8 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
 
     try {
       run(
-        "DELETE FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))",
-        [`${domain}-cf_clearance`, domain, domain],
+        "DELETE FROM cookie WHERE id IN (?, ?) OR (name IN ('cf_clearance', 'cf_user_agent') AND (? = domain OR ? LIKE '%.' || domain))",
+        [`${domain}-cf_clearance`, `${domain}-cf-user-agent`, domain, domain],
       );
       if (global.clearCookieCache) {
         global.clearCookieCache(domain);
@@ -279,7 +299,7 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
           "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
           [`${domain}-cf_clearance`, domain, domain],
         );
-        if (row) {
+        if (row?.value) {
           if (global.clearCookieCache) {
             global.clearCookieCache(domain);
           }

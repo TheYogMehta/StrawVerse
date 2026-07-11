@@ -75,8 +75,8 @@ function ensureEventSource() {
                 "[nativeBridge] CloudflareBypass resolved, cookies length:",
                 res.cookies ? res.cookies.length : 0,
               );
-              if (res.cookies) {
-                invoke("save-cf-cookies", data.url, res.cookies)
+              if (res.cookies && res.userAgent) {
+                invoke("save-cf-cookies", data.url, res.cookies, res.userAgent)
                   .then(() =>
                     console.log(
                       "[nativeBridge] cookies saved to backend successfully",

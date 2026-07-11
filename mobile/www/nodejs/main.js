@@ -194,8 +194,18 @@ async function boot() {
               "";
             await global.cloudflarebypass(config.url, true, referer, ua);
             const newHeaders = getHeaders(config.url, config.method);
+            const retryHeaders =
+              typeof config.headers?.toJSON === "function"
+                ? config.headers.toJSON()
+                : { ...(config.headers || {}) };
+            for (const key of Object.keys(retryHeaders)) {
+              const lowerKey = key.toLowerCase();
+              if (lowerKey === "cookie" || lowerKey === "user-agent") {
+                delete retryHeaders[key];
+              }
+            }
             config.headers = {
-              ...config.headers,
+              ...retryHeaders,
               ...newHeaders,
             };
             return global.axios(config);
