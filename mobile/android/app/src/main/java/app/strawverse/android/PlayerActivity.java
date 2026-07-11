@@ -5,20 +5,34 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.MediaController;
-import android.widget.VideoView;
 import android.widget.Toast;
+
+import androidx.media3.common.MediaItem;
+import androidx.media3.exoplayer.ExoPlayer;
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.source.MediaSource;
+import androidx.media3.ui.PlayerView;
+import androidx.media3.datasource.cronet.CronetDataSource;
+import androidx.media3.datasource.ResolvingDataSource;
+import androidx.media3.datasource.DataSpec;
+
+import org.chromium.net.CronetEngine;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 public class PlayerActivity extends Activity {
 
-    private VideoView videoView;
+    private PlayerView playerView;
+    private ExoPlayer player;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,
                 WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
@@ -31,8 +45,8 @@ public class PlayerActivity extends Activity {
                 | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
         );
 
-        videoView = new VideoView(this);
-        setContentView(videoView);
+        playerView = new PlayerView(this);
+        setContentView(playerView);
 
         String videoUrl = getIntent().getStringExtra("videoUrl");
         Bundle headersBundle = getIntent().getBundleExtra("headers");
@@ -43,29 +57,52 @@ public class PlayerActivity extends Activity {
         }
 
         try {
-            MediaController mediaController = new MediaController(this);
-            mediaController.setAnchorView(videoView);
-            videoView.setMediaController(mediaController);
+            player = new ExoPlayer.Builder(this).build();
+            playerView.setPlayer(player);
 
+            final Map<String, String> headersMap = new HashMap<>();
             if (headersBundle != null && !headersBundle.isEmpty()) {
-                java.util.Map<String, String> headersMap = new java.util.HashMap<>();
                 for (String key : headersBundle.keySet()) {
                     headersMap.put(key, headersBundle.getString(key));
                 }
-                videoView.setVideoURI(Uri.parse(videoUrl), headersMap);
-            } else {
-                videoView.setVideoURI(Uri.parse(videoUrl));
             }
 
-            videoView.setOnPreparedListener(mp -> videoView.start());
+            CronetEngine cronetEngine = new CronetEngine.Builder(this).build();
+            Executor executor = Executors.newSingleThreadExecutor();
 
-            videoView.setOnErrorListener((mp, what, extra) -> {
-                Toast.makeText(PlayerActivity.this, "Playback Error", Toast.LENGTH_SHORT).show();
-                finish();
-                return true;
-            });
+            String userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
+            if (headersMap.containsKey("User-Agent")) {
+                userAgentString = headersMap.get("User-Agent");
+            } else if (headersMap.containsKey("user-agent")) {
+                userAgentString = headersMap.get("user-agent");
+            }
 
-            videoView.setOnCompletionListener(mp -> finish());
+            CronetDataSource.Factory cronetDataSourceFactory =
+                    new CronetDataSource.Factory(cronetEngine, executor)
+                            .setUserAgent(userAgentString);
+
+            ResolvingDataSource.Factory resolvingFactory =
+                    new ResolvingDataSource.Factory(
+                            cronetDataSourceFactory,
+                            new ResolvingDataSource.Resolver() {
+                                @Override
+                                public DataSpec resolveDataSpec(DataSpec dataSpec) {
+                                    if (!headersMap.isEmpty()) {
+                                        return dataSpec.buildUpon()
+                                                .setHttpRequestHeaders(headersMap)
+                                                .build();
+                                    }
+                                    return dataSpec;
+                                }
+                            }
+                    );
+
+            MediaSource mediaSource = new DefaultMediaSourceFactory(resolvingFactory)
+                    .createMediaSource(MediaItem.fromUri(Uri.parse(videoUrl)));
+
+            player.setMediaSource(mediaSource);
+            player.prepare();
+            player.play();
 
         } catch (Exception e) {
             Toast.makeText(this, "Failed to initialize player: " + e.getMessage(), Toast.LENGTH_SHORT).show();
@@ -74,9 +111,18 @@ public class PlayerActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        super.onPause();
+        if (player != null) {
+            player.pause();
+        }
+    }
+
+    @Override
     protected void onDestroy() {
-        if (videoView != null) {
-            videoView.stopPlayback();
+        if (player != null) {
+            player.release();
+            player = null;
         }
         super.onDestroy();
     }
