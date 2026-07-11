@@ -18,14 +18,12 @@ const steps = [
   "bundle-backend.mjs",
   "copy-missing-assets.mjs",
   "fetch-ffmpeg.mjs",
-  "generate-icons.py",
 ];
 
 for (const script of steps) {
   const scriptPath = path.join(__dirname, script);
   console.log(`\n▶ Running ${script}...\n`);
-  const runner = script.endsWith(".py") ? "python3" : "node";
-  execFileSync(runner, [scriptPath], {
+  execFileSync("node", [scriptPath], {
     cwd: path.resolve(__dirname, ".."),
     stdio: "inherit",
   });
