@@ -7,3 +7,5 @@ src/scratch/
 src/release.sh
 src/mpv/linux
 src/mpv/win32
+mobile/android/app/src/main/jniLibs/arm64-v8a/libffmpeg.so
+mobile/nodejs/*
