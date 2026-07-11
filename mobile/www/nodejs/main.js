@@ -2,6 +2,7 @@ const Module = require("module");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+os.homedir = () => process.env.STRAWVERSE_DOWNLOADS_DIR || "/data/data/app.strawverse.android/files";
 
 const PORT = 3459;
 
@@ -129,8 +130,59 @@ async function boot() {
 
   try {
     const axios = require("axios");
+    const defaultAdapter = axios.defaults.adapter;
+
+    const nativeAxiosAdapter = async (config) => {
+      if (global.sendNativeRequest) {
+        try {
+          console.log(
+            `[android] Routing Axios request natively: ${config.method?.toUpperCase()} -> ${config.url}`,
+          );
+          const res = await global.sendNativeRequest(config);
+
+          const parsedHeaders = {};
+          if (res.headers) {
+            for (const [key, val] of Object.entries(res.headers)) {
+              parsedHeaders[key.toLowerCase()] = val;
+            }
+          }
+
+          let responseData = res.data;
+          if (typeof responseData === "string") {
+            try {
+              responseData = JSON.parse(responseData);
+            } catch (e) {}
+          }
+
+          const axiosResponse = {
+            data: responseData,
+            status: res.status,
+            statusText: "",
+            headers: parsedHeaders,
+            config: config,
+            request: {},
+          };
+
+          if (res.status >= 200 && res.status < 300) {
+            return axiosResponse;
+          } else {
+            const error = new Error(
+              `Request failed with status code ${res.status}`,
+            );
+            error.response = axiosResponse;
+            error.config = config;
+            throw error;
+          }
+        } catch (err) {
+          throw err;
+        }
+      }
+      return defaultAdapter(config);
+    };
+
     global.axios = axios.create({
       timeout: 20000,
+      adapter: nativeAxiosAdapter,
     });
     const { getHeaders } = require("./backend/utils/proxyHeaders");
     global.axios.interceptors.request.use(
@@ -185,6 +237,10 @@ async function boot() {
           console.log(
             `[android] Cloudflare challenge (status: ${response.status}) for ${config.url}. Retrying with bypass...`,
           );
+          console.log(
+            `[android] Initial request headers:`,
+            JSON.stringify(config.headers || {}),
+          );
           try {
             const referer =
               config.headers?.Referer || config.headers?.referer || "";
@@ -194,6 +250,10 @@ async function boot() {
               "";
             await global.cloudflarebypass(config.url, true, referer, ua);
             const newHeaders = getHeaders(config.url, config.method);
+            console.log(
+              `[android] Freshly fetched bypass headers:`,
+              JSON.stringify(newHeaders),
+            );
             const retryHeaders =
               typeof config.headers?.toJSON === "function"
                 ? config.headers.toJSON()
@@ -208,6 +268,10 @@ async function boot() {
               ...retryHeaders,
               ...newHeaders,
             };
+            console.log(
+              `[android] Final retry request headers:`,
+              JSON.stringify(config.headers),
+            );
             return global.axios(config);
           } catch (bypassErr) {
             return Promise.reject(bypassErr);

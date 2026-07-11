@@ -14,6 +14,18 @@ const got = require("got").default || require("got");
 
 const router = express.Router();
 
+router.get("/api/proxy-headers", (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).json({ error: "URL is required" });
+  try {
+    const proxyHeaders = require("./backend/utils/proxyHeaders");
+    const headers = proxyHeaders.getHeaders(url);
+    res.json(headers || {});
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 const sseClients = new Set();
 let pendingBypassRequest = null;
 
@@ -191,6 +203,31 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
     broadcast("open-marketplace", { type: AnimeManga });
   });
 
+  global.sendNativeRequest = (config) => {
+    return new Promise((resolve, reject) => {
+      const requestId = Math.random().toString(36).substring(7);
+      global.pendingRequests.set(requestId, { resolve, reject });
+
+      let body = config.data;
+      if (body && typeof body === "object") {
+        body = JSON.stringify(body);
+      }
+
+      const headers =
+        typeof config.headers?.toJSON === "function"
+          ? config.headers.toJSON()
+          : { ...(config.headers || {}) };
+
+      broadcast("native-request", {
+        requestId,
+        url: config.url,
+        method: config.method || "GET",
+        headers,
+        body,
+      });
+    });
+  };
+
   ipcMain.handle("ensure-cf-bypass", async (event, targetUrl) => {
     if (!targetUrl) return { ok: true, success: true };
     const domain = new URL(targetUrl).hostname.replace("www.", "");
@@ -210,63 +247,75 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
 
   ipcMain.handle(
     "save-cf-cookies",
-    async (event, targetUrl, cookieString, userAgent) => {
-      if (!cookieString || !targetUrl || !userAgent) return { ok: false };
+    async (event, targetUrl, cookieString) => {
+      if (!cookieString || !targetUrl) return { ok: false };
       const domain = new URL(targetUrl).hostname.replace("www.", "");
       const pairs = cookieString.split(";");
       let savedClearance = false;
-      for (const pair of pairs) {
-        const parts = pair.trim().split("=");
-        if (parts.length >= 2) {
-          const name = parts[0].trim();
-          const value = parts.slice(1).join("=").trim();
-          if (name === "cf_clearance") {
-            const key = `${domain}-cf_clearance`;
-            const expiry = Date.now() + 1000 * 60 * 60 * 2;
-            const upsertSql = `
-            INSERT INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate, local_saved_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-              value=excluded.value,
-              expirationDate=excluded.expirationDate,
-              local_saved_at=excluded.local_saved_at
-          `;
-            try {
-              run(upsertSql, [
-                key,
-                value,
-                "cf_clearance",
-                domain,
-                targetUrl,
-                "/",
-                "true",
-                "true",
-                expiry,
-                Date.now(),
-              ]);
-              run(upsertSql, [
-                `${domain}-cf-user-agent`,
-                userAgent,
-                "cf_user_agent",
-                domain,
-                targetUrl,
-                "/",
-                "true",
-                "false",
-                expiry,
-                Date.now(),
-              ]);
+
+      const expiry = Date.now() + 1000 * 60 * 60 * 24 * 30; // 30 days
+      const upsertSql = `
+        INSERT INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate, local_saved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          value=excluded.value,
+          expirationDate=excluded.expirationDate,
+          local_saved_at=excluded.local_saved_at
+      `;
+
+      try {
+        // Save all cookies
+        for (const pair of pairs) {
+          const parts = pair.trim().split("=");
+          if (parts.length >= 2) {
+            const name = parts[0].trim();
+            const value = parts.slice(1).join("=").trim();
+
+            run(upsertSql, [
+              `${domain}-${name}`,
+              value,
+              name,
+              domain,
+              targetUrl,
+              "/",
+              "true",
+              "false",
+              expiry,
+              Date.now(),
+            ]);
+
+            if (name === "cf_clearance") {
               savedClearance = true;
-              if (global.clearCookieCache) {
-                global.clearCookieCache(domain);
-              }
-            } catch (e) {
-              console.error("[bridge] Failed to save cookie:", e.message);
             }
           }
         }
+
+        if (global.clearCookieCache) {
+          global.clearCookieCache(domain);
+        }
+      } catch (e) {
+        console.error("[bridge] Failed to save cookies:", e.message);
       }
+
       return { ok: savedClearance };
+    },
+  );
+
+  global.pendingRequests = new Map();
+
+  ipcMain.handle(
+    "native-response",
+    async (event, requestId, success, response, error) => {
+      const pending = global.pendingRequests.get(requestId);
+      if (pending) {
+        global.pendingRequests.delete(requestId);
+        if (success) {
+          pending.resolve(response);
+        } else {
+          pending.reject(new Error(error));
+        }
+      }
+      return { ok: true };
     },
   );
 
@@ -276,7 +325,7 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
 
     try {
       run(
-        "DELETE FROM cookie WHERE id IN (?, ?) OR (name IN ('cf_clearance', 'cf_user_agent') AND (? = domain OR ? LIKE '%.' || domain))",
+        "DELETE FROM cookie WHERE id IN (?, ?) OR ((name IN ('cf_clearance', 'cf_user_agent') OR name LIKE 'sec-ch-ua%') AND (? = domain OR ? LIKE '%.' || domain))",
         [`${domain}-cf_clearance`, `${domain}-cf-user-agent`, domain, domain],
       );
       if (global.clearCookieCache) {

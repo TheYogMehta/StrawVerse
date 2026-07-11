@@ -1,0 +1,460 @@
+/* ================================================
+   MPV Floating Controller Overlay - VideoPlayer.css
+   ================================================ */
+
+/* Full-Screen Loading / Launch Overlay */
+.mpv-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(8, 8, 12, 0.65);
+  backdrop-filter: blur(16px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.mpv-loading-card {
+  width: 90%;
+  max-width: 400px;
+  padding: 36px 24px;
+  background: rgba(20, 20, 30, 0.65) !important;
+  backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+
+.mpv-loading-spinner-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.mpv-spin {
+  animation: mpv-spin-anim 1s linear infinite;
+  color: var(--accent-color, #a78bfa);
+  filter: drop-shadow(0 0 8px rgba(167, 139, 250, 0.4));
+}
+
+@keyframes mpv-spin-anim {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.mpv-loading-spinner-container h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  color: #ffffff;
+}
+
+.mpv-loading-spinner-container p {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0;
+}
+
+/* Error Container styling */
+.mpv-error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.mpv-error-container .error-icon {
+  color: #ef4444;
+  filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.4));
+}
+
+.mpv-error-container h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0;
+  color: #ffffff;
+}
+
+.mpv-error-container p {
+  font-size: 13px;
+  color: #fca5a5;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.mpv-error-close-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  padding: 8px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.2s ease;
+}
+
+.mpv-error-close-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Docked Floating Controller Bar */
+.mpv-floating-controller {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  width: 90%;
+  max-width: 500px;
+  padding: 16px 20px;
+  background: rgba(13, 13, 20, 0.72) !important;
+  backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: slideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 15px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.mpv-floating-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mpv-pulse-dot {
+  width: 7px;
+  height: 7px;
+  background-color: #10b981;
+  border-radius: 50%;
+  display: inline-block;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulse-dot-anim 1.5s infinite ease-in-out;
+}
+
+@keyframes pulse-dot-anim {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.4);
+    opacity: 0.4;
+  }
+}
+
+.mpv-episode-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #ffffff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Floating Skip Intro / Outro Button inside small controller */
+.mpv-floating-skip-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 8px;
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 10px rgba(109, 40, 217, 0.3);
+  animation: slideUpSmall 0.2s ease-out;
+}
+
+@keyframes slideUpSmall {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.mpv-floating-skip-btn:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 4px 12px rgba(109, 40, 217, 0.5);
+}
+
+/* Floating Timeline */
+.mpv-floating-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mpv-slider-wrapper {
+  position: relative;
+  width: 100%;
+  height: 20px;
+  display: flex;
+  align-items: center;
+}
+
+.mpv-timeline-slider {
+  width: 100%;
+  -webkit-appearance: none;
+  background: rgba(255, 255, 255, 0.08);
+  height: 5px;
+  border-radius: 2.5px;
+  outline: none;
+  cursor: pointer;
+  z-index: 2;
+  position: relative;
+}
+
+.mpv-timeline-slider::-webkit-slider-runnable-track {
+  background: transparent;
+}
+
+.mpv-timeline-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 0 8px rgba(167, 139, 250, 0.8);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.mpv-timeline-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.2);
+  background: #a78bfa;
+}
+
+/* Highlighted skip intervals on small controller track */
+.mpv-timeline-marker {
+  position: absolute;
+  height: 5px;
+  border-radius: 2.5px;
+  pointer-events: none;
+  opacity: 0.8;
+  z-index: 1;
+}
+
+.mpv-timeline-marker.op {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.mpv-timeline-marker.ed {
+  background: linear-gradient(90deg, #a855f7, #7e22ce);
+}
+
+.mpv-progress-time {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+  font-family: monospace;
+}
+
+/* Remote Control Buttons Panel */
+.mpv-floating-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.mpv-ctrl-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 50%;
+  color: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mpv-ctrl-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.mpv-ctrl-btn.play-pause {
+  width: 38px;
+  height: 38px;
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+  color: #ffffff;
+  border: none;
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+}
+
+.mpv-ctrl-btn.play-pause:hover {
+  transform: scale(1.04);
+  box-shadow: 0 6px 16px rgba(124, 58, 237, 0.45);
+}
+
+.mpv-ctrl-btn.close-btn {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+
+.mpv-ctrl-btn.close-btn:hover {
+  background: rgba(239, 68, 68, 0.18);
+  color: #ffffff;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* Prep Dashboard styling */
+.mpv-prep-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+}
+
+.mpv-prep-header h3 {
+  font-size: 18px;
+  font-weight: 700;
+  margin: 0 0 6px 0;
+  color: #ffffff;
+}
+
+.mpv-prep-header p {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+  margin: 0;
+}
+
+.mpv-selector-group {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mpv-selector-group label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.mpv-source-dropdown {
+  width: 100%;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #ffffff;
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mpv-source-dropdown:focus {
+  border-color: var(--accent-color, #a78bfa);
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.25);
+}
+
+.mpv-source-dropdown option {
+  background: #14141e;
+  color: #ffffff;
+}
+
+.mpv-prep-actions {
+  display: flex;
+  gap: 12px;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.mpv-play-btn {
+  flex: 1;
+  padding: 12px 20px;
+  background: linear-gradient(135deg, var(--accent-color, #a78bfa), #8b5cf6);
+  border: none;
+  border-radius: 12px;
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 15px rgba(139, 92, 246, 0.3);
+}
+
+.mpv-play-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.4);
+}
+
+.mpv-cancel-btn {
+  padding: 12px 20px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mpv-cancel-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}

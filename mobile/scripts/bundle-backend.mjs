@@ -39,7 +39,7 @@ try {
   console.log("[bundle] Successfully created main.bundle.js");
 
   // 2. Copy sql-wasm.wasm to the root of www/nodejs/
-  const wasmSrc = path.join(nodejsDir, "node_modules", "sql.js", "dist", "sql-wasm.wasm");
+  const wasmSrc = path.join(mobileRoot, "node_modules", "sql.js", "dist", "sql-wasm.wasm");
   const wasmDest = path.join(nodejsDir, "sql-wasm.wasm");
   if (fs.existsSync(wasmSrc)) {
     fs.copyFileSync(wasmSrc, wasmDest);
@@ -48,13 +48,25 @@ try {
     console.warn("[bundle] Warning: sql-wasm.wasm not found in node_modules!");
   }
 
-  // 3. Edit package.json main field to point to main.bundle.js
+  // 3. Edit package.json main field to point to main.bundle.js and sync version
   const pkgPath = path.join(nodejsDir, "package.json");
   if (fs.existsSync(pkgPath)) {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     pkg.main = "main.bundle.js";
+    try {
+      const srcPkgPath = path.join(mobileRoot, "..", "src", "package.json");
+      if (fs.existsSync(srcPkgPath)) {
+        const srcPkg = JSON.parse(fs.readFileSync(srcPkgPath, "utf8"));
+        if (pkg.version !== srcPkg.version) {
+          pkg.version = srcPkg.version;
+          console.log(`[bundle] Bumped mobile backend version to ${srcPkg.version}`);
+        }
+      }
+    } catch (e) {
+      console.warn("[bundle] Warning: Could not sync version from src/package.json:", e.message);
+    }
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2), "utf8");
-    console.log("[bundle] Updated package.json main to main.bundle.js");
+    console.log("[bundle] Updated package.json main to main.bundle.js and synced version");
   }
 
   // 4. Clean up workspace: delete node_modules and backend/ (both restored
@@ -63,7 +75,6 @@ try {
   console.log("[bundle] Cleaning up workspace for fast Capacitor copy...");
   const foldersToDelete = [
     path.join(nodejsDir, "node_modules"),
-    path.join(nodejsDir, "backend"),
   ];
   for (const folder of foldersToDelete) {
     if (fs.existsSync(folder)) {
@@ -71,9 +82,7 @@ try {
     }
   }
 
-  // Remove synced files that are now inside the bundle
   const filesToDelete = [
-    "CHANGELOG.md",
     "package-lock.json",
   ];
   for (const file of filesToDelete) {

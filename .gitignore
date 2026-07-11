@@ -8,10 +8,9 @@ src/release.sh
 src/mpv/linux
 src/mpv/win32
 mobile/android/app/src/main/jniLibs/arm64-v8a/libffmpeg.so
-mobile/www/nodejs/backend/
-mobile/www/nodejs/gui/
+mobile/www/nodejs/gui/dist/
+mobile/www/nodejs/gui/node_modules/
 mobile/www/nodejs/node_modules/
-mobile/www/nodejs/CHANGELOG.md
 mobile/www/nodejs/package-lock.json
 .idea/
 .gradle/

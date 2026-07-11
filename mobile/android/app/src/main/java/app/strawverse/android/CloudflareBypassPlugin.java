@@ -9,6 +9,8 @@ import android.provider.Settings;
 import android.webkit.CookieManager;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
 import com.getcapacitor.JSObject;
@@ -25,6 +27,7 @@ import android.widget.RelativeLayout;
 import android.widget.TextView;
 import android.util.Log;
 import java.io.File;
+import java.util.Map;
 
 @CapacitorPlugin(name = "CloudflareBypass")
 public class CloudflareBypassPlugin extends Plugin {
@@ -139,6 +142,7 @@ public class CloudflareBypassPlugin extends Plugin {
                     dialog.setCancelable(true);
 
                     final boolean[] finished = {false};
+                    final Map<String, String> capturedClientHints = new java.util.concurrent.ConcurrentHashMap<>();
                     final android.os.Handler handler = new android.os.Handler();
                     final Runnable cookiePoller = new Runnable() {
                         @Override
@@ -154,6 +158,13 @@ public class CloudflareBypassPlugin extends Plugin {
                                 JSObject ret = new JSObject();
                                 ret.put("cookies", cookieString);
                                 ret.put("userAgent", effectiveUserAgent);
+                                
+                                JSObject hints = new JSObject();
+                                for (Map.Entry<String, String> entry : capturedClientHints.entrySet()) {
+                                    hints.put(entry.getKey(), entry.getValue());
+                                }
+                                ret.put("clientHints", hints);
+
                                 call.resolve(ret);
                                 dialog.dismiss();
                                 webView.destroy();
@@ -189,6 +200,25 @@ public class CloudflareBypassPlugin extends Plugin {
                     });
 
                     webView.setWebViewClient(new WebViewClient() {
+                        @Override
+                        public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                            String reqUrl = request.getUrl().toString();
+                            if (reqUrl.contains("animepahe")) {
+                                Log.i("StrawVerseBypass", "WebView Request: " + request.getMethod() + " -> " + reqUrl);
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                    Map<String, String> headers = request.getRequestHeaders();
+                                    Log.i("StrawVerseBypass", "WebView Request Headers: " + headers.toString());
+                                    for (Map.Entry<String, String> entry : headers.entrySet()) {
+                                        String key = entry.getKey().toLowerCase();
+                                        if (key.startsWith("sec-ch-ua")) {
+                                            capturedClientHints.put(entry.getKey(), entry.getValue());
+                                        }
+                                    }
+                                }
+                            }
+                            return super.shouldInterceptRequest(view, request);
+                        }
+
                         @Override
                         public void onPageFinished(WebView view, String finishedUrl) {
                             super.onPageFinished(view, finishedUrl);
@@ -351,6 +381,87 @@ public class CloudflareBypassPlugin extends Plugin {
                         }
                     }
                 });
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void nativeRequest(final PluginCall call) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String url = call.getString("url");
+                String method = call.getString("method");
+                if (method == null) method = "GET";
+                JSObject headers = call.getObject("headers");
+                String body = call.getString("body");
+
+                try {
+                    java.net.URL urlObj = new java.net.URL(url);
+                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) urlObj.openConnection();
+                    conn.setRequestMethod(method.toUpperCase());
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(15000);
+
+                    Log.i("StrawVerseBypass", "nativeRequest initiating: " + method + " -> " + url);
+                    // Set headers
+                    if (headers != null) {
+                        java.util.Iterator<String> keys = headers.keys();
+                        while (keys.hasNext()) {
+                            String key = keys.next();
+                            String value = headers.getString(key);
+                            conn.setRequestProperty(key, value);
+                            Log.i("StrawVerseBypass", "  Request Header: " + key + " = " + value);
+                        }
+                    }
+
+                    // Set body if POST/PUT
+                    if ("POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method)) {
+                        if (body != null) {
+                            conn.setDoOutput(true);
+                            try (java.io.OutputStream os = conn.getOutputStream()) {
+                                byte[] input = body.getBytes("utf-8");
+                                os.write(input, 0, input.length);
+                            }
+                        }
+                    }
+
+                    int responseCode = conn.getResponseCode();
+                    Log.i("StrawVerseBypass", "nativeRequest response code: " + responseCode);
+                    
+                    // Read response
+                    java.io.InputStream is = (responseCode >= 200 && responseCode < 300) 
+                        ? conn.getInputStream() 
+                        : conn.getErrorStream();
+                        
+                    StringBuilder response = new StringBuilder();
+                    if (is != null) {
+                        try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(is, "utf-8"))) {
+                            String line;
+                            while ((line = br.readLine()) != null) {
+                                response.append(line).append("\n");
+                            }
+                        }
+                    }
+
+                    // Get response headers
+                    JSObject resHeaders = new JSObject();
+                    for (java.util.Map.Entry<String, java.util.List<String>> entries : conn.getHeaderFields().entrySet()) {
+                        String key = entries.getKey();
+                        if (key != null) {
+                            resHeaders.put(key, String.join(", ", entries.getValue()));
+                        }
+                    }
+
+                    JSObject ret = new JSObject();
+                    ret.put("status", responseCode);
+                    ret.put("data", response.toString());
+                    ret.put("headers", resHeaders);
+                    call.resolve(ret);
+
+                } catch (Exception e) {
+                    call.reject("Native request failed: " + e.getMessage());
+                }
             }
         }).start();
     }

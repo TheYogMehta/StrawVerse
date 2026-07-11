@@ -1,0 +1,110 @@
+.logs-wrapper {
+  flex: 1;
+  padding: 30px;
+  overflow: hidden;
+  height: 100%;
+  background-color: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+}
+
+.logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.logs-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+
+.logs-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn-log-action {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: white;
+  border-radius: 8px;
+  padding: 8px 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: var(--transition);
+}
+
+.btn-log-action:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.terminal-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: #050507;
+  border: 1px solid #1f222d;
+  border-radius: 12px;
+}
+
+.terminal-header {
+  background-color: #0a0a0f;
+  padding: 12px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #16181f;
+}
+
+.btn-clear-logs {
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  transition: var(--transition);
+  outline: none;
+}
+
+.btn-clear-logs:hover {
+  background-color: rgba(239, 68, 68, 0.2);
+}
+
+.terminal-title {
+  font-size: 12px;
+  font-family: monospace;
+  color: var(--text-muted);
+}
+
+.terminal-pre {
+  flex: 1;
+  padding: 20px;
+  font-family: monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #a7f3d0; /* green terminal tint */
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+.loading-center-logs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+}

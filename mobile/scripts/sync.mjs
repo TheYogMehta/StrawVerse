@@ -14,7 +14,6 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const steps = [
-  "sync-backend.mjs",
   "bundle-backend.mjs",
   "copy-missing-assets.mjs",
   "fetch-ffmpeg.mjs",

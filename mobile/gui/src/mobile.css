@@ -1,0 +1,230 @@
+/*
+ * Mobile retrofit for the Android app (and any narrow window).
+ *
+ * Desktop styles are untouched - everything here lives behind a single
+ * max-width media query. The main structural change: the left sidebar
+ * becomes a bottom navigation bar (icon-only), which is the natural
+ * pattern on phones and requires zero JSX changes.
+ *
+ * Selectors are prefixed with `html` to out-rank component stylesheets,
+ * which are bundled AFTER this file (they're imported inside components).
+ */
+
+@media (max-width: 768px) {
+  /* ---------------------------------------------------------------- */
+  /* Layout: column with content on top, nav bar pinned at the bottom */
+  /* ---------------------------------------------------------------- */
+  html .app-layout {
+    flex-direction: column;
+    height: 100dvh;
+  }
+
+  html .app-layout > main {
+    order: 1;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Sidebar -> bottom navigation bar                                  */
+  /* ---------------------------------------------------------------- */
+  html .sidebar,
+  html .sidebar.collapsed {
+    order: 2;
+    width: 100% !important;
+    height: auto;
+    min-height: 0;
+    flex-direction: row;
+    align-items: center;
+    border-right: none;
+    border-top: 1px solid var(--border, #27272a);
+    padding: 0;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    flex-shrink: 0;
+  }
+
+  /* Logo + collapse toggle are noise on a phone */
+  html .sidebar .sidebar-header,
+  html .sidebar.collapsed .sidebar-header {
+    display: none;
+  }
+
+  html .sidebar .sidebar-nav {
+    flex: 1;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    padding: 6px 4px;
+    gap: 0;
+    overflow-y: visible;
+    overflow-x: auto;
+  }
+
+  html .sidebar .sidebar-footer {
+    border-top: none;
+    padding: 6px 4px;
+    margin: 0;
+    flex-direction: row;
+    align-items: center;
+  }
+
+  html .sidebar .sidebar-item {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 3px;
+    padding: 8px 10px;
+    width: auto;
+    min-width: 52px;
+    font-size: 10px;
+  }
+
+  html .sidebar.collapsed .sidebar-item {
+    justify-content: center;
+  }
+
+  html .sidebar .sidebar-item span {
+    font-size: 10px;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Cinema mode (video player): hide the nav bar entirely             */
+  /* ---------------------------------------------------------------- */
+  html .cinema-mode .sidebar,
+  html .cinema-mode .sidebar.collapsed {
+    display: none;
+  }
+
+  html .cinema-mode-trigger {
+    display: none;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Overlays and toasts                                               */
+  /* ---------------------------------------------------------------- */
+  html .whats-new-overlay {
+    padding: 16px;
+  }
+
+  html .whats-new-card {
+    width: 100%;
+    max-width: 100%;
+    max-height: 85dvh;
+  }
+
+  html .toast-container {
+    left: 12px;
+    right: 12px;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+  }
+
+  html .toast-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Catalog (Home / Discover)                                         */
+  /* ---------------------------------------------------------------- */
+  html .catalog-header {
+    grid-template-columns: 1fr;
+    justify-items: stretch;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  html .catalog-header > * {
+    justify-self: center;
+  }
+
+  html .search-form {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  html .content-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 14px;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Info view (anime/manga details)                                   */
+  /* ---------------------------------------------------------------- */
+  html .details-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+
+  html .cover-wrapper {
+    max-width: 200px;
+    margin: 0 auto;
+  }
+
+  html .info-title {
+    font-size: 22px;
+    text-align: center;
+  }
+
+  html .search-input-box,
+  html .search-input-box:focus {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Video player: scene finder panel becomes full-width sheet         */
+  /* ---------------------------------------------------------------- */
+  html .scene-finder-panel {
+    width: 100%;
+    border-left: none;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Marketplace                                                       */
+  /* ---------------------------------------------------------------- */
+  html .market-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Watch Together: chat panel becomes full-width overlay             */
+  /* ---------------------------------------------------------------- */
+  html .wt-right-chat.expanded {
+    width: 100%;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Settings: tab row scrolls horizontally instead of clipping        */
+  /* ---------------------------------------------------------------- */
+  html .settings-tabs-row {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  html .settings-tab-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* General touch ergonomics                                          */
+  /* ---------------------------------------------------------------- */
+  html button,
+  html [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}
