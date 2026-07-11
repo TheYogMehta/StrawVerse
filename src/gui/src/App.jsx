@@ -22,6 +22,8 @@ export default function App() {
   const [whatsNewDate, setWhatsNewDate] = useState("");
   const [toasts, setToasts] = useState([]);
   const [infoSortOrder, setInfoSortOrder] = useState(null);
+  const [activePlayerParams, setActivePlayerParams] = useState(null);
+  const [playerKey, setPlayerKey] = useState(0);
 
   const showToast = (title, body, icon) => {
     const id = Date.now();
@@ -323,6 +325,7 @@ export default function App() {
       case "info":
         return (
           <InfoView
+            key={`${current.params.id}-${playerKey}`}
             id={current.params.id}
             type={current.params.type}
             localMalProvider={current.params.provider}
@@ -343,32 +346,32 @@ export default function App() {
               image,
               malid,
             ) => {
-              setHistory((prev) => {
-                const next = [...prev];
-                if (next.length > 0) {
-                  const last = next[next.length - 1];
-                  if (last.view === "info" && last.params) {
-                    last.params = { ...last.params, autoPlay: false };
+              setHistory((prev) =>
+                prev.map((item, idx) => {
+                  if (idx === prev.length - 1 && item.view === "info" && item.params) {
+                    return {
+                      ...item,
+                      params: {
+                        ...item.params,
+                        autoPlay: false,
+                      },
+                    };
                   }
-                }
-                return [
-                  ...next,
-                  {
-                    view: "watch",
-                    params: {
-                      id: animeId,
-                      ep: epIdOrNum,
-                      isDownloaded,
-                      subdub,
-                      episodesList,
-                      downloadedEpisodes,
-                      animeTitle,
-                      provider,
-                      image,
-                      malid,
-                    },
-                  },
-                ];
+                  return item;
+                })
+              );
+
+              setActivePlayerParams({
+                id: animeId,
+                ep: epIdOrNum,
+                isDownloaded,
+                subdub,
+                episodesList,
+                downloadedEpisodes,
+                animeTitle,
+                provider,
+                image,
+                malid,
               });
             }}
             onRead={(
@@ -411,22 +414,7 @@ export default function App() {
             }}
           />
         );
-      case "watch":
-        return (
-          <VideoPlayer
-            id={current.params.id}
-            episodeNumOrId={current.params.ep}
-            isDownloaded={current.params.isDownloaded}
-            subdub={current.params.subdub}
-            episodesList={current.params.episodesList || []}
-            downloadedEpisodes={current.params.downloadedEpisodes}
-            animeTitle={current.params.animeTitle || ""}
-            provider={current.params.provider}
-            image={current.params.image || ""}
-            onBack={navigateBack}
-            malid={current.params.malid}
-          />
-        );
+
       case "read":
         return (
           <MangaReader
@@ -473,7 +461,7 @@ export default function App() {
     }
   };
 
-  const isCinemaMode = current.view === "watch";
+  const isCinemaMode = !!activePlayerParams;
 
   return (
     <div className={`app-layout ${isCinemaMode ? "cinema-mode" : ""}`}>
@@ -499,6 +487,39 @@ export default function App() {
         onOpenWatchTogether={() => setIsWTModalOpen(true)}
       />
       <main className="u-style-8">{renderActiveView()}</main>
+
+      {activePlayerParams && (
+        <VideoPlayer
+          id={activePlayerParams.id}
+          episodeNumOrId={activePlayerParams.ep}
+          isDownloaded={activePlayerParams.isDownloaded}
+          subdub={activePlayerParams.subdub}
+          episodesList={activePlayerParams.episodesList || []}
+          downloadedEpisodes={activePlayerParams.downloadedEpisodes}
+          animeTitle={activePlayerParams.animeTitle || ""}
+          provider={activePlayerParams.provider}
+          image={activePlayerParams.image || ""}
+          onBack={() => {
+            setHistory((prev) =>
+              prev.map((item, idx) => {
+                if (idx === prev.length - 1 && item.view === "info" && item.params) {
+                  return {
+                    ...item,
+                    params: {
+                      ...item.params,
+                      autoPlay: false,
+                    },
+                  };
+                }
+                return item;
+              })
+            );
+            setActivePlayerParams(null);
+            setPlayerKey((prev) => prev + 1);
+          }}
+          malid={activePlayerParams.malid}
+        />
+      )}
 
       {current.view !== "watch-together" && (
         <WatchTogetherBar onOpenModal={() => navigateTo("watch-together")} />

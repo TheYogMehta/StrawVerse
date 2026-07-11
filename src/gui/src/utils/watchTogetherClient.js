@@ -1,5 +1,5 @@
 // Opcodes matching Go server protocol
-export const OPCODES = {
+const OPCODES = {
   JOIN_ROOM: 0x01,
   ROOM_JOINED: 0x02,
   USER_EVENT: 0x03,
@@ -16,7 +16,7 @@ export const OPCODES = {
   REMOVE_QUEUE: 0x0e,
 };
 
-export const USER_EVENTS = {
+const USER_EVENTS = {
   JOINED: 0x00,
   LEFT: 0x01,
   HOST_CHANGE: 0x02,
@@ -486,5 +486,5 @@ class WatchTogetherClient {
   }
 }
 
-export const watchTogetherClient = new WatchTogetherClient();
+const watchTogetherClient = new WatchTogetherClient();
 export default watchTogetherClient;
