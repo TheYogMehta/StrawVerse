@@ -15,6 +15,7 @@
 const Module = require("module");
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 
 const PORT = 3459;
 
@@ -50,7 +51,6 @@ try {
 }
 
 function applyDefaultPaths() {
-  const os = require("os");
   const base = getDataPath
     ? getDataPath()
     : path.join(process.cwd(), "strawverse-data");
@@ -68,6 +68,23 @@ function applyDefaultPaths() {
   if (!process.env.STRAWVERSE_APP_VERSION) {
     process.env.STRAWVERSE_APP_VERSION = readOwnVersion();
   }
+
+  // Ensure the default downloads folder exists on Android.
+  // getDownloadsFolder() in the backend returns os.homedir() + "/Downloads",
+  // which does not exist on Android. Create it so ensureDirectoryExists()
+  // inside settingfetch() won't throw on every call.
+  const defaultDownloads = path.join(os.homedir(), "Downloads");
+  try {
+    fs.mkdirSync(defaultDownloads, { recursive: true });
+  } catch (_) {
+    // best-effort; if homedir is unwritable, settingfetch will handle it
+  }
+
+  // Also create the app data and downloads dirs
+  try {
+    fs.mkdirSync(process.env.STRAWVERSE_DATA_DIR, { recursive: true });
+    fs.mkdirSync(process.env.STRAWVERSE_DOWNLOADS_DIR, { recursive: true });
+  } catch (_) {}
 }
 
 function readOwnVersion() {
@@ -100,7 +117,7 @@ async function boot() {
     const initSqlJs = require("sql.js");
     global.__sqljs = await initSqlJs({
       locateFile: (file) =>
-        path.join(__dirname, "node_modules", "sql.js", "dist", file),
+        path.join(__dirname, file),
     });
   }
 
@@ -119,6 +136,24 @@ async function boot() {
   global.win = bridge.fakeWindow;
   global.PORT = PORT;
 
+  // -------------------------------------------------------------------------
+  // Expose bundled modules to dynamically loaded scrapers.
+  // Scrapers are downloaded at runtime and do require("cheerio") etc.
+  // After bundling, node_modules is deleted, so we intercept these requires
+  // and serve the bundled versions instead.
+  // -------------------------------------------------------------------------
+  const bundledModules = {};
+  try { bundledModules["cheerio"] = require("cheerio"); } catch (_) {}
+  try { bundledModules["axios"] = require("axios"); } catch (_) {}
+
+  if (Object.keys(bundledModules).length > 0) {
+    const origLoad = Module._load;
+    Module._load = function (request, parent, isMain) {
+      if (bundledModules[request]) return bundledModules[request];
+      return origLoad.call(this, request, parent, isMain);
+    };
+  }
+
   const { logger } = require("./backend/utils/AppLogger");
   logger.info(
     `[android] Booting StrawVerse backend (sqlite backend: ${
@@ -129,7 +164,11 @@ async function boot() {
   // Order mirrors src/gui.js: DB first, then settings/providers, then routes.
   require("./backend/utils/db");
   const { settingfetch } = require("./backend/utils/settings");
-  await settingfetch();
+  try {
+    await settingfetch();
+  } catch (e) {
+    logger.error("[android] settingfetch failed (first boot?): " + e.message);
+  }
 
   const { registerSharedStateHandlers } = require("./backend/sharedState");
   registerSharedStateHandlers();
@@ -141,6 +180,17 @@ async function boot() {
 
   const express = require("express");
   const appExpress = express();
+
+  // CORS: the WebView loads from http://localhost but Express listens on
+  // http://localhost:3459 — different port = cross-origin.
+  appExpress.use((_req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,PATCH,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (_req.method === "OPTIONS") return res.sendStatus(204);
+    next();
+  });
+
   appExpress.use(express.urlencoded({ extended: true }));
   appExpress.use(express.json());
   appExpress.use(bridge.router);
@@ -158,9 +208,9 @@ async function boot() {
   // Background maintenance mirrors desktop startup (fire-and-forget).
   try {
     const {
-      checkAndUpdateMappings,
+      checkForMappingUpdates,
     } = require("./backend/utils/mappingUpdater");
-    checkAndUpdateMappings().catch((e) =>
+    checkForMappingUpdates().catch((e) =>
       logger.error("[android] mapping update failed: " + e.message),
     );
   } catch (e) {

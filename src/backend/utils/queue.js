@@ -505,7 +505,7 @@ async function downloadEpisodeByQuality(
     }
 
     let selectedSource = sourcesArray?.sources?.find(
-      (source) => source?.quality === config?.quality ?? "1080p",
+      (source) => source?.quality === (config?.quality ?? "1080p"),
     );
 
     if (!selectedSource) {

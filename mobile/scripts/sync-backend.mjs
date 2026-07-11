@@ -79,4 +79,22 @@ if (mobilePkg.version !== srcPkg.version) {
 console.log(`[sync] Installing dependencies in mobile/www/nodejs...`);
 execSync("npm install --omit=dev", { cwd: nodejsDir, stdio: "inherit" });
 
+console.log(
+  `[sync] Cleaning up unused symlinks and build tools inside node_modules...`,
+);
+const binDir = path.join(nodejsDir, "node_modules", ".bin");
+if (fs.existsSync(binDir)) {
+  fs.rmSync(binDir, { recursive: true, force: true });
+}
+const betterSqliteBins = path.join(
+  nodejsDir,
+  "node_modules",
+  "better-sqlite3",
+  "build",
+  "node_gyp_bins",
+);
+if (fs.existsSync(betterSqliteBins)) {
+  fs.rmSync(betterSqliteBins, { recursive: true, force: true });
+}
+
 console.log("[sync] Done.");
