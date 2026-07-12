@@ -8,6 +8,7 @@ const fs = require("fs");
 const path = require("path");
 const { providerFetch } = require("./settings");
 const { getHeaders } = require("./proxyHeaders");
+const { queryAll } = require("./db");
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
 
@@ -476,24 +477,23 @@ async function getProviderOrThrow(type, name) {
   return pObj;
 }
 
-function resolveDownloadFolder(type, id, subdub, baseDir) {
+async function resolveDownloadFolder(type, id, subdub, baseDir) {
   let typeDir = path.join(baseDir, type, id);
 
   if (!fs.existsSync(typeDir)) {
     const idStripped = id.replace(/-(dub|sub|hsub|both)$/, "");
 
     if (type === "Anime") {
-      const downloads = global.db
-        .prepare(
-          "SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?",
-        )
-        .all(
+      const downloads = await queryAll(
+        "SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?",
+        [
           subdub ? `${idStripped}-${subdub}` : id,
           id,
           `${idStripped}-sub`,
           `${idStripped}-hsub`,
           idStripped,
-        );
+        ],
+      );
       if (downloads && downloads.length > 0) {
         const candidateFolders = new Set();
         for (const d of downloads) {
@@ -508,9 +508,10 @@ function resolveDownloadFolder(type, id, subdub, baseDir) {
         }
         const refTitle = downloads[0].title;
         if (refTitle) {
-          const titleFallback = global.db
-            .prepare("SELECT * FROM Anime WHERE title = ? OR title = ?")
-            .all(refTitle, subdub ? `${refTitle} ${subdub}` : refTitle);
+          const titleFallback = await queryAll(
+            "SELECT * FROM Anime WHERE title = ? OR title = ?",
+            [refTitle, subdub ? `${refTitle} ${subdub}` : refTitle],
+          );
           for (const d of titleFallback || []) {
             const fn = d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
             if (fn) {
@@ -536,9 +537,10 @@ function resolveDownloadFolder(type, id, subdub, baseDir) {
         }
       }
     } else {
-      const downloads = global.db
-        .prepare("SELECT * FROM Manga WHERE id = ? OR id = ?")
-        .all(id, idStripped);
+      const downloads = await queryAll(
+        "SELECT * FROM Manga WHERE id = ? OR id = ?",
+        [id, idStripped],
+      );
       if (downloads && downloads.length > 0) {
         const existingDownload = downloads.find((d) => {
           const folderName =

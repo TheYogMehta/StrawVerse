@@ -9,7 +9,7 @@ const {
 const { providerFetch, settingfetch } = require("./utils/settings");
 const { getDownloadsFolder } = require("./utils/DirectoryMaker");
 const { logger } = require("./utils/AppLogger");
-const { queryOne } = require("./utils/db");
+const { queryOne, queryAll, run } = require("./utils/db");
 const ImageCacheManager = require("./utils/ImageCacheManager");
 const {
   addToQueue,
@@ -133,9 +133,7 @@ async function downloadAnimeSingle(
     const dbId = `${strippedId}-${resolvedSubDub}`;
 
     if (saveinfo) {
-      const existing = global.db
-        .prepare("SELECT id FROM Anime WHERE id = ?")
-        .get(dbId);
+      const existing = await queryOne("SELECT id FROM Anime WHERE id = ?", [dbId]);
       if (!existing) {
         const lookupId =
           Animeprovider.provider_name === "pahe"
@@ -200,9 +198,7 @@ async function downloadAnimeSingle(
     let targetMalid = malid;
     if (!targetMalid) {
       try {
-        const row = global.db
-          .prepare("SELECT MalID FROM Anime WHERE id = ?")
-          .get(dbId);
+        const row = await queryOne("SELECT MalID FROM Anime WHERE id = ?", [dbId]);
         if (row && row.MalID) {
           targetMalid = row.MalID;
         }
@@ -351,9 +347,7 @@ async function downloadMangaSingle(
       preFetchedProvider || (await providerFetch("Manga", provider));
 
     if (saveinfo) {
-      const existing = global.db
-        .prepare("SELECT id FROM Manga WHERE id = ?")
-        .get(mangaid);
+      const existing = await queryOne("SELECT id FROM Manga WHERE id = ?", [mangaid]);
       if (!existing) {
         let mangainfo = await MangaInfo(Mangaprovider, mangaid);
         if (mangainfo) {
@@ -494,7 +488,7 @@ async function cleanupEmptyDownloadFolder(folderPath, type, id) {
       logger.info(`Removed empty download folder: ${folderPath}`);
       if (id) {
         try {
-          global.db.prepare(`DELETE FROM ${type} WHERE id = ?`).run(id);
+          await run(`DELETE FROM ${type} WHERE id = ?`, [id]);
           logger.info(`Cleaned up DB entry for ${type}: ${id}`);
           removeIdFromCustomOrders(id);
         } catch (_) {}
@@ -503,21 +497,17 @@ async function cleanupEmptyDownloadFolder(folderPath, type, id) {
   } catch (_) {}
 }
 
-function removeIdFromCustomOrders(deletedId) {
-  if (!global.db || !deletedId) return;
+async function removeIdFromCustomOrders(deletedId) {
+  if (!deletedId) return;
   try {
-    const rows = global.db
-      .prepare("SELECT key, value FROM Settings WHERE key LIKE 'custom_order_%'")
-      .all();
+    const rows = await queryAll("SELECT key, value FROM Settings WHERE key LIKE 'custom_order_%'");
     for (const row of rows) {
       if (row.value) {
         try {
           const orderArray = JSON.parse(row.value);
           if (Array.isArray(orderArray) && orderArray.includes(deletedId)) {
             const newOrder = orderArray.filter((id) => id !== deletedId);
-            global.db
-              .prepare("UPDATE Settings SET value = ? WHERE key = ?")
-              .run(JSON.stringify(newOrder), row.key);
+            await run("UPDATE Settings SET value = ? WHERE key = ?", [JSON.stringify(newOrder), row.key]);
             logger.info(
               `[customOrder] Cleaned up deleted ID ${deletedId} from settings key ${row.key}`,
             );

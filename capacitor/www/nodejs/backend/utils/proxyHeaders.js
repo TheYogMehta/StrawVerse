@@ -96,6 +96,15 @@ function getHeaders(url, method = "GET") {
     cookieDomain = new URL(url).hostname;
   } catch (e) {}
 
+  let cleanDomain = "";
+  if (cookieDomain) {
+    cleanDomain = cookieDomain.replace("www.", "").toLowerCase();
+    if (cleanDomain.endsWith("animepahe.pw") || cleanDomain.includes("kwik.cx") || cleanDomain.includes("owocdn.top") || cleanDomain.includes("uwucdn.top")) {
+      cleanDomain = "animepahe.pw";
+      cookieDomain = "animepahe.pw";
+    }
+  }
+
   const chromeVer = process.versions.chrome || "148.0.7778.218";
   let userAgent = global.deviceUserAgent;
   if (!userAgent) {
@@ -111,7 +120,6 @@ function getHeaders(url, method = "GET") {
 
   // Load custom User-Agent if bypassed
   if (cookieDomain) {
-    const cleanDomain = cookieDomain.replace("www.", "").toLowerCase();
     try {
       const uaRow = queryOne("SELECT value FROM cookie WHERE id = ? LIMIT 1", [
         `${cleanDomain}-user_agent`,
@@ -130,7 +138,6 @@ function getHeaders(url, method = "GET") {
 
   // Load Client Hints if bypassed
   if (cookieDomain) {
-    const cleanDomain = cookieDomain.replace("www.", "").toLowerCase();
     try {
       const hintsRow = queryOne(
         "SELECT value FROM cookie WHERE id = ? LIMIT 1",
@@ -205,8 +212,19 @@ function getHeaders(url, method = "GET") {
 
   // cookieDomain is resolved at the top of the function
 
-  if (cookieDomain) {
-    const cached = cookieCache[cookieDomain];
+  let targetCookieDomain = cookieDomain;
+  if (targetCookieDomain) {
+    if (
+      cleanDomain.includes("kwik.cx") ||
+      cleanDomain.includes("owocdn.top") ||
+      cleanDomain.includes("uwucdn.top")
+    ) {
+      targetCookieDomain = "animepahe.pw";
+    }
+  }
+
+  if (targetCookieDomain) {
+    const cached = cookieCache[targetCookieDomain];
     if (cached && cached.expiry > Date.now()) {
       if (cached.value) {
         headers.Cookie = `cf_clearance=${cached.value};`;
@@ -215,7 +233,7 @@ function getHeaders(url, method = "GET") {
       try {
         const row = queryOne(
           "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-          [`${cookieDomain}-cf_clearance`, cookieDomain, cookieDomain],
+          [`${targetCookieDomain}-cf_clearance`, targetCookieDomain, targetCookieDomain],
         );
         let isValid = false;
         let expiryTime = Date.now() + 10 * 60 * 1000;
@@ -236,12 +254,12 @@ function getHeaders(url, method = "GET") {
 
         if (row && row.value && isValid) {
           headers.Cookie = `cf_clearance=${row.value};`;
-          cookieCache[cookieDomain] = {
+          cookieCache[targetCookieDomain] = {
             value: row.value,
             expiry: expiryTime,
           };
         } else {
-          cookieCache[cookieDomain] = {
+          cookieCache[targetCookieDomain] = {
             value: null,
             expiry: Date.now() + 30 * 1000,
           };

@@ -1,5 +1,4 @@
 // libs
-const { app } = require("electron");
 const Module = require("module");
 const path = require("path");
 const got = require("got").default || require("got");
@@ -11,9 +10,8 @@ const {
   ensureDirectoryExists,
 } = require("./DirectoryMaker");
 const { MalRefreshTokenGen } = require("./mal.js");
-const { StartDiscordRPC, StopDiscordRPC } = require("./discord");
 const { logger } = require("./AppLogger.js");
-const userDataPath = app.getPath("userData");
+const userDataPath = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
 const { getKeyValue, setKeyValue } = require("./db");
 
 const appNodeModules = path.join(__dirname, "..", "..", "node_modules");
@@ -168,19 +166,7 @@ async function settingupdate({
   config.upscalePreset = upscalePreset;
   config.forceHighPerformanceGpu = forceHighPerformanceGpu;
 
-  if (config.enableDiscordRPC === true) {
-    try {
-      await StartDiscordRPC();
-      logger.info("Discord RPC Activated");
-    } catch (err) {
-      logger.error(
-        `Failed to activate Discord RPC (will retry when watching): ${err.message}`,
-      );
-    }
-  } else {
-    let stopped = await StopDiscordRPC();
-    if (stopped) logger.info("Discord RPC DISABLED");
-  }
+  // Discord RPC removed on Android
 
   await settingSave();
   return {
@@ -298,7 +284,8 @@ async function SettingsLoad() {
   try {
     let storedConfig = null;
     try {
-      const rows = global.db.prepare("SELECT key, value FROM Settings").all();
+      const { queryAll } = require("./db");
+      const rows = await queryAll("SELECT key, value FROM Settings");
       if (rows && rows.length > 0) {
         storedConfig = {};
         for (const row of rows) {
@@ -352,7 +339,7 @@ async function SettingsLoad() {
       config.forceHighPerformanceGpu = false;
     }
 
-    const currentVersion = app.getVersion();
+    const currentVersion = require("../../package.json").version || "1.0.0";
     if (!config.lastVersion || config.lastVersion !== currentVersion) {
       config.showWhatsNew = true;
       config.lastVersion = currentVersion;
@@ -362,14 +349,7 @@ async function SettingsLoad() {
       let Tosave = await MalRefreshTokenGen(config.malToken);
       await settingupdate(Tosave);
     }
-    if (config?.enableDiscordRPC === true) {
-      try {
-        await StartDiscordRPC();
-        logger.info("Discord RPC Activated");
-      } catch (err) {
-        logger.error(err);
-      }
-    }
+    // Discord RPC removed on Android
     await settingSave();
   } catch (err) {
     logger.error("Failed To Load Config");
@@ -427,7 +407,7 @@ async function settingSave() {
 
 // Check Folder Exists
 async function CheckScrapperFolderExists() {
-  const Scraper = path.join(userDataPath, "scrapers");
+  const Scraper = path.join(userDataPath, "scrapper");
   if (!fs.existsSync(Scraper)) {
     fs.mkdirSync(Scraper, { recursive: true });
     logger.info(`Created scraper folder: ${Scraper}`);
@@ -445,7 +425,7 @@ async function CheckScrapperFolderExists() {
     logger.info(`Created Manga scraper folder: ${ScraperManga}`);
   }
 
-  ScraperIcons = path.join(Scraper, "icons");
+  ScraperIcons = path.join(Scraper, "ico");
   if (!fs.existsSync(ScraperIcons)) {
     fs.mkdirSync(ScraperIcons, { recursive: true });
     logger.info(`Created icons folder: ${ScraperIcons}`);

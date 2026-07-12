@@ -1,6 +1,6 @@
 const { spawn } = require("child_process");
 const { logger } = require("./AppLogger");
-const ffmpeg = require("ffmpeg-static");
+const ffmpeg = null;
 const iso6391 = require("iso-639-1");
 const path = require("path");
 const got = require("got").default || require("got");
@@ -9,7 +9,6 @@ const os = require("os");
 const zlib = require("zlib");
 const stream = require("stream");
 const { promisify } = require("util");
-const { app } = require("electron");
 const crypto = require("crypto");
 const { getHeaders } = require("./proxyHeaders");
 
@@ -58,19 +57,13 @@ async function getFfmpegPath() {
     return resolvedFfmpegPath;
   }
 
-  const defaultPath = ffmpeg.replace("app.asar", "app.asar.unpacked");
-  if (fs.existsSync(defaultPath)) {
+  const defaultPath = ffmpeg ? ffmpeg.replace("app.asar", "app.asar.unpacked") : null;
+  if (defaultPath && fs.existsSync(defaultPath)) {
     resolvedFfmpegPath = defaultPath;
     return resolvedFfmpegPath;
   }
 
-  let userDataDir;
-  try {
-    userDataDir = app.getPath("userData");
-  } catch (e) {
-    userDataDir = path.join(os.homedir(), ".strawverse");
-  }
-
+  const userDataDir = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
   const binDir = path.join(userDataDir, "bin");
   const localFfmpegPath = path.join(
     binDir,

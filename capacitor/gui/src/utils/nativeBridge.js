@@ -1,25 +1,52 @@
-/**
- * sharedStateAPI polyfill for non-Electron environments (Android app, web).
- *
- * On desktop, Electron's preload script exposes `window.sharedStateAPI`
- * backed by ipcRenderer. On Android the same backend runs embedded via
- * nodejs-mobile and exposes the identical handlers over HTTP:
- *
- *   POST /api/ipc/:channel   { args: [...] } -> { ok, result }
- *   GET  /api/ipc/events     Server-Sent Events for push messages
- *
- * Importing this module is a no-op on desktop (the preload API wins).
- */
+const routeMap = {
+  "get-shared-state": { path: "/api/state/history", method: "GET" },
+  "set-shared-state": { path: "/api/state/history", method: "POST" },
+  extensions: { path: "/api/extensions", method: "POST" },
+  "check-whats-new": { path: "/api/whats-new", method: "GET" },
+  "disable-whats-new": { path: "/api/whats-new/disable", method: "POST" },
+  "check-for-update": { path: "/api/update/check", method: "GET" },
+  "download-update": { path: "/api/update/download", method: "POST" },
+  "install-update": { path: "/api/update/install", method: "POST" },
+  "set-device-user-agent": { path: "/api/device/user-agent", method: "POST" },
+  "ensure-cf-bypass": { path: "/api/cf-bypass", method: "POST" },
+  "save-cf-cookies": { path: "/api/cf-bypass/save", method: "POST" },
+  "get-settings": { path: "/api/settings/get", method: "POST" },
+  "update-setting": { path: "/api/settings/update", method: "POST" },
+  "update-settings": { path: "/api/settings/update-multiple", method: "POST" },
+  "native-response": { path: "/api/native-response", method: "POST" },
+  "check-wt-health": { path: "/api/update/health", method: "GET" },
+  "get-app-version": { path: "/api/version", method: "GET" },
+};
 
 function invoke(channel, ...args) {
-  return fetch(`/api/ipc/${encodeURIComponent(channel)}`, {
-    method: "POST",
+  const route = routeMap[channel];
+  if (!route) {
+    return Promise.reject(new Error(`Unknown REST action: ${channel}`));
+  }
+
+  const fetchOptions = {
+    method: route.method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ args }),
-  }).then(async (res) => {
+  };
+
+  let url = route.path;
+  if (route.method === "POST") {
+    fetchOptions.body = JSON.stringify({ args });
+  } else if (args.length > 0) {
+    url +=
+      "?" +
+      new URLSearchParams(
+        args.map((a, i) => [
+          `arg${i}`,
+          typeof a === "object" ? JSON.stringify(a) : a,
+        ]),
+      ).toString();
+  }
+
+  return fetch(url, fetchOptions).then(async (res) => {
     const body = await res.json().catch(() => ({}));
     if (!res.ok || body.ok === false) {
-      throw new Error(body.error || `IPC channel "${channel}" failed`);
+      throw new Error(body.error || `REST request to "${route.path}" failed`);
     }
     return body.result;
   });
@@ -69,14 +96,24 @@ function ensureEventSource() {
           console.log(
             "[nativeBridge] Found CloudflareBypass plugin, invoking bypass()",
           );
-          CloudflareBypass.bypass({ url: data.url, userAgent: data.userAgent })
+          CloudflareBypass.bypass({
+            url: data.url,
+            userAgent: data.userAgent,
+            referer: data.referer,
+          })
             .then((res) => {
               console.log(
                 "[nativeBridge] CloudflareBypass resolved, cookies length:",
                 res.cookies ? res.cookies.length : 0,
               );
               if (res.cookies && res.userAgent) {
-                invoke("save-cf-cookies", data.url, res.cookies, res.userAgent, res.clientHints)
+                invoke(
+                  "save-cf-cookies",
+                  data.url,
+                  res.cookies,
+                  res.userAgent,
+                  res.clientHints,
+                )
                   .then(() =>
                     console.log(
                       "[nativeBridge] cookies saved to backend successfully",
@@ -137,8 +174,7 @@ function createPolyfill() {
   return {
     get: () => invoke("get-shared-state"),
     set: (newState) => invoke("set-shared-state", newState),
-    discordrpc: (AnimeName, Episode) =>
-      invoke("update-discordrpc", AnimeName, Episode),
+    discordrpc: () => {},
     on: (channel, callback) => {
       ensureEventSource();
       if (!eventListeners.has(channel)) eventListeners.set(channel, new Set());

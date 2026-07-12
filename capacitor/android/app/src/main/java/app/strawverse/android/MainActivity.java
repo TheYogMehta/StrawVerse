@@ -11,6 +11,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
@@ -24,11 +25,80 @@ public class MainActivity extends BridgeActivity {
 
     private static final String TAG = "StrawVerse";
     private static final int SERVER_PORT = 3459;
+    private android.app.AlertDialog permissionDialog;
+
+    private void launchPermissionSettings() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            try {
+                android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+                android.net.Uri uri = android.net.Uri.fromParts("package", getPackageName(), null);
+                intent.setData(uri);
+                startActivity(intent);
+            } catch (Exception e) {
+                android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION);
+                startActivity(intent);
+            }
+        }
+    }
+
+    private void startPermissionPolling() {
+        new Thread(() -> {
+            while (true) {
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                    if (android.os.Environment.isExternalStorageManager()) {
+                        runOnUiThread(() -> {
+                            if (permissionDialog != null && permissionDialog.isShowing()) {
+                                permissionDialog.dismiss();
+                            }
+                            try {
+                                Intent intent = new Intent(MainActivity.this, MainActivity.class);
+                                intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                                startActivity(intent);
+                            } catch (Exception e) {
+                                Log.e(TAG, "Failed to auto-resume app: " + e.getMessage());
+                            }
+                        });
+                        break;
+                    }
+                } else {
+                    break;
+                }
+                try {
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        }).start();
+    }
+
+    private void showPermissionDialog() {
+        if (permissionDialog != null && permissionDialog.isShowing()) return;
+
+        runOnUiThread(() -> {
+            android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(MainActivity.this);
+            builder.setTitle("Storage Permission Required");
+            builder.setMessage("Strawverse requires All Files Access permission to store downloads, databases, and scrapers in public storage. Please grant this permission to continue.");
+            builder.setCancelable(false);
+            builder.setPositiveButton("Grant Permission", (dialog, which) -> {
+                launchPermissionSettings();
+                startPermissionPolling();
+            });
+            permissionDialog = builder.create();
+            permissionDialog.show();
+        });
+    }
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(CloudflareBypassPlugin.class);
         super.onCreate(savedInstanceState);
+
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (!android.os.Environment.isExternalStorageManager()) {
+                showPermissionDialog();
+            }
+        }
 
         com.getcapacitor.Bridge bridge = getBridge();
         if (bridge != null) {
@@ -144,6 +214,37 @@ public class MainActivity extends BridgeActivity {
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            if (android.os.Environment.isExternalStorageManager()) {
+                if (permissionDialog != null && permissionDialog.isShowing()) {
+                    permissionDialog.dismiss();
+                }
+                new Thread(() -> {
+                    try {
+                        java.io.File extStorage = android.os.Environment.getExternalStorageDirectory();
+                        java.io.File publicRoot = new java.io.File(extStorage, "Strawverse");
+                        
+                        new java.io.File(publicRoot, "data").mkdirs();
+                        new java.io.File(publicRoot, "Anime").mkdirs();
+                        new java.io.File(publicRoot, "Manga").mkdirs();
+                        java.io.File scrapperRoot = new java.io.File(publicRoot, "scrapper");
+                        new java.io.File(scrapperRoot, "Anime").mkdirs();
+                        new java.io.File(scrapperRoot, "Manga").mkdirs();
+                        new java.io.File(scrapperRoot, "ico").mkdirs();
+                        Log.i(TAG, "Successfully pre-created Strawverse folders in public storage on resume");
+                    } catch (Exception e) {
+                        Log.e(TAG, "Failed to create public folders on resume: " + e.getMessage());
+                    }
+                }).start();
+            } else {
+                showPermissionDialog();
+            }
+        }
+    }
+
+    @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         handleDeepLink(intent);
@@ -194,106 +295,6 @@ public class MainActivity extends BridgeActivity {
     }
 
     private WebResourceResponse fetchNativelyWithHeaders(WebResourceRequest request) {
-        try {
-            String url = request.getUrl().toString();
-            Map<String, String> customHeaders = new HashMap<>();
-            try {
-                URL headersUrl = new URL("http://127.0.0.1:" + SERVER_PORT + "/api/proxy-headers?url=" + URLEncoder.encode(url, "UTF-8"));
-                HttpURLConnection hConn = (HttpURLConnection) headersUrl.openConnection();
-                hConn.setRequestMethod("GET");
-                hConn.setConnectTimeout(1500);
-                hConn.setReadTimeout(1500);
-                int status = hConn.getResponseCode();
-                if (status == 200) {
-                    try (InputStream is = hConn.getInputStream();
-                         BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"))) {
-                        StringBuilder sb = new StringBuilder();
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            sb.append(line);
-                        }
-                        org.json.JSONObject json = new org.json.JSONObject(sb.toString());
-                        java.util.Iterator<String> keys = json.keys();
-                        while (keys.hasNext()) {
-                            String key = keys.next();
-                            customHeaders.put(key, json.getString(key));
-                        }
-                    }
-                }
-                hConn.disconnect();
-            } catch (Exception e) {
-                Log.w(TAG, "Failed to fetch custom headers from proxy: " + e.getMessage());
-            }
-
-            URL targetUrl = new URL(url);
-            HttpURLConnection conn = (HttpURLConnection) targetUrl.openConnection();
-            conn.setRequestMethod(request.getMethod());
-            conn.setConnectTimeout(15000);
-            conn.setReadTimeout(15000);
-            conn.setInstanceFollowRedirects(true);
-
-            for (Map.Entry<String, String> header : request.getRequestHeaders().entrySet()) {
-                conn.setRequestProperty(header.getKey(), header.getValue());
-            }
-
-            for (Map.Entry<String, String> header : customHeaders.entrySet()) {
-                conn.setRequestProperty(header.getKey(), header.getValue());
-            }
-
-            String webViewCookie = android.webkit.CookieManager.getInstance().getCookie(url);
-            if (webViewCookie != null && !webViewCookie.isEmpty()) {
-                conn.setRequestProperty("Cookie", webViewCookie);
-            }
-            if (customHeaders.containsKey("Cookie")) {
-                conn.setRequestProperty("Cookie", customHeaders.get("Cookie"));
-            }
-
-            int responseCode = conn.getResponseCode();
-            String responseMessage = conn.getResponseMessage();
-            if (responseMessage == null || responseMessage.isEmpty()) {
-                responseMessage = "OK";
-            }
-
-            Map<String, String> responseHeaders = new HashMap<>();
-            for (Map.Entry<String, List<String>> header : conn.getHeaderFields().entrySet()) {
-                String key = header.getKey();
-                if (key != null) {
-                    List<String> values = header.getValue();
-                    StringBuilder valSb = new StringBuilder();
-                    for (int i = 0; i < values.size(); i++) {
-                        valSb.append(values.get(i));
-                        if (i < values.size() - 1) {
-                            valSb.append(", ");
-                        }
-                    }
-                    responseHeaders.put(key, valSb.toString());
-                }
-            }
-
-            responseHeaders.put("Access-Control-Allow-Origin", "*");
-            responseHeaders.put("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-            responseHeaders.put("Access-Control-Allow-Headers", "*");
-
-            String contentType = conn.getContentType();
-            String mimeType = "image/jpeg";
-            String encoding = "UTF-8";
-            if (contentType != null) {
-                String[] parts = contentType.split(";");
-                mimeType = parts[0].trim();
-                for (int i = 1; i < parts.length; i++) {
-                    String part = parts[i].trim();
-                    if (part.toLowerCase().startsWith("charset=")) {
-                        encoding = part.substring(8).trim();
-                    }
-                }
-            }
-
-            InputStream responseStream = (responseCode >= 400) ? conn.getErrorStream() : conn.getInputStream();
-            Log.i(TAG, "WebView Intercept Successful: " + url + " -> Response Code: " + responseCode);
-            return new WebResourceResponse(mimeType, encoding, responseCode, responseMessage, responseHeaders, responseStream);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to natively fetch url in WebView interceptor: " + e.getMessage(), e);
-            return null;
-        }
+        return WebViewRequestHelper.fetchNativelyWithHeaders(getApplicationContext(), request);
     }
 }

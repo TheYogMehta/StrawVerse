@@ -1,4 +1,3 @@
-const { app, BrowserWindow, net, session } = require("electron");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
@@ -13,7 +12,7 @@ let bypassBusy = false;
 const CF_CLEARANCE_UPSERT = `INSERT OR REPLACE INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate, local_saved_at)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-app.on("before-quit", () => {
+process.on("exit", () => {
   isQuitting = true;
 });
 
@@ -582,9 +581,91 @@ async function electronNetAdapter(config) {
         }
       }
 
+      if (global.sendNativeRequest) {
+        try {
+          const nativeConfig = {
+            url,
+            method: method.toUpperCase(),
+            headers: requestHeaders,
+            data: typeof data === "object" ? JSON.stringify(data) : data,
+            responseType: "arraybuffer",
+          };
+          const res = await global.sendNativeRequest(nativeConfig);
+          const responseHeaders = {};
+          if (res.headers) {
+            for (const [k, v] of Object.entries(res.headers)) {
+              responseHeaders[k.toLowerCase()] = v;
+            }
+          }
+
+          let responseData;
+          const buf = Buffer.from(res.data, res.isBase64 ? "base64" : "utf-8");
+          if (responseType === "arraybuffer") {
+            responseData = buf;
+          } else {
+            const text = buf.toString("utf-8");
+            const contentType = responseHeaders["content-type"] || "";
+            if (contentType.includes("application/json")) {
+              try {
+                responseData = JSON.parse(text);
+              } catch (e) {
+                responseData = text;
+              }
+            } else {
+              responseData = text;
+            }
+          }
+
+          const response = {
+            data: responseData,
+            status: res.status,
+            statusText: "",
+            headers: responseHeaders,
+            config,
+            request: null,
+          };
+
+          if (res.status >= 200 && res.status < 300) {
+            resolve(response);
+          } else {
+            const error = new Error(`Request failed with status code ${res.status}`);
+            error.response = response;
+            error.config = config;
+            reject(error);
+          }
+          return;
+        } catch (err) {
+          if (err.response) {
+            const res = err.response;
+            const responseHeaders = {};
+            if (res.headers) {
+              for (const [k, v] of Object.entries(res.headers)) {
+                responseHeaders[k.toLowerCase()] = v;
+              }
+            }
+            const buf = Buffer.from(res.data, res.isBase64 ? "base64" : "utf-8");
+            const response = {
+              data: responseType === "arraybuffer" ? buf : buf.toString("utf-8"),
+              status: res.status,
+              statusText: "",
+              headers: responseHeaders,
+              config,
+              request: null,
+            };
+            const error = new Error(`Request failed with status code ${res.status}`);
+            error.response = response;
+            error.config = config;
+            reject(error);
+          } else {
+            reject(err);
+          }
+          return;
+        }
+      }
+
+      // Fallback if not running inside Android
       const options = {
         method: method.toUpperCase(),
-        session: session.fromPartition("persist:scrapper"),
         headers: requestHeaders,
       };
 
@@ -598,19 +679,17 @@ async function electronNetAdapter(config) {
         }
       }
 
-      let signal;
       let timeoutId;
       if (timeout && timeout > 0) {
         const controller = new AbortController();
-        signal = controller.signal;
-        options.signal = signal;
+        options.signal = controller.signal;
         timeoutId = setTimeout(() => {
           controller.abort();
         }, timeout);
       }
 
       try {
-        const res = await net.fetch(url, options);
+        const res = await globalThis.fetch(url, options);
         if (timeoutId) clearTimeout(timeoutId);
 
         const responseHeaders = {};

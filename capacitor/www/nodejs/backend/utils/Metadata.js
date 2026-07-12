@@ -5,7 +5,7 @@ const path = require("path");
 const fs = require("fs");
 const child_process = require("child_process");
 const { getFfmpegPath } = require("./downloader");
-const { tables, exec, queryAll, queryOne, run } = require("./db");
+const { tables, exec, queryAll, queryOne, run, batchRun } = require("./db");
 const { getHeaders } = require("./proxyHeaders");
 const ImageCacheManager = require("./ImageCacheManager");
 
@@ -61,36 +61,24 @@ function getEpisodeNumberFromFilename(filename) {
   return match ? parseFloat(match[0]) : null;
 }
 
-function getMalIdFromMapping(type, providerName, cleanId) {
-  if (!global.mappingDb || !cleanId) return null;
+async function getMalIdFromMapping(type, providerName, cleanId) {
+  if (!cleanId) return null;
   const name = (providerName || "").toLowerCase();
   try {
     let row = null;
     if (type === "Anime") {
       if (name.includes("pahe")) {
-        row = global.mappingDb
-          .prepare(
-            "SELECT malid FROM animepahe WHERE id = ? OR uuid = ? LIMIT 1",
-          )
-          .get(cleanId, cleanId);
+        row = await mappingQueryOne("SELECT malid FROM animepahe WHERE id = ? OR uuid = ? LIMIT 1", [cleanId, cleanId]);
       } else if (name.includes("anikoto")) {
-        row = global.mappingDb
-          .prepare("SELECT malid FROM anikototv WHERE id = ? LIMIT 1")
-          .get(cleanId);
+        row = await mappingQueryOne("SELECT malid FROM anikototv WHERE id = ? LIMIT 1", [cleanId]);
       } else if (name.includes("anineko")) {
-        row = global.mappingDb
-          .prepare("SELECT malid FROM anineko WHERE id = ? LIMIT 1")
-          .get(cleanId);
+        row = await mappingQueryOne("SELECT malid FROM anineko WHERE id = ? LIMIT 1", [cleanId]);
       }
     } else if (type === "Manga") {
       if (name.includes("weebcentral")) {
-        row = global.mappingDb
-          .prepare("SELECT malid FROM weebcentral WHERE id = ? LIMIT 1")
-          .get(cleanId);
+        row = await mappingQueryOne("SELECT malid FROM weebcentral WHERE id = ? LIMIT 1", [cleanId]);
       } else if (name.includes("allmanga")) {
-        row = global.mappingDb
-          .prepare("SELECT malid FROM allmanga WHERE id = ? LIMIT 1")
-          .get(cleanId);
+        row = await mappingQueryOne("SELECT malid FROM allmanga WHERE id = ? LIMIT 1", [cleanId]);
       }
     }
     return row?.malid || null;
@@ -109,16 +97,14 @@ async function MetadataAdd(type, valuesToAdd) {
   if (!valuesToAdd.MalID || valuesToAdd.MalID === "") {
     const cleanId = valuesToAdd.id.replace(/-(dub|sub|hsub|both)$/, "");
     try {
-      const customMappingRow = global.db
-        .prepare("SELECT malid FROM unlinked_mal_ids WHERE id = ?")
-        .get(cleanId);
+      const customMappingRow = await queryOne("SELECT malid FROM unlinked_mal_ids WHERE id = ?", [cleanId]);
 
       if (customMappingRow !== undefined) {
         valuesToAdd.MalID = customMappingRow.malid
           ? String(customMappingRow.malid)
           : null;
       } else {
-        const malId = getMalIdFromMapping(type, valuesToAdd.provider, cleanId);
+        const malId = await getMalIdFromMapping(type, valuesToAdd.provider, cleanId);
         if (malId) {
           valuesToAdd.MalID = String(malId);
         }
@@ -128,9 +114,7 @@ async function MetadataAdd(type, valuesToAdd) {
     }
   }
 
-  let existingRecord = global.db
-    .prepare(`SELECT * FROM ${type} WHERE id = ?`)
-    .get(valuesToAdd?.id);
+  let existingRecord = await queryOne(`SELECT * FROM ${type} WHERE id = ?`, [valuesToAdd?.id]);
 
   if (!existingRecord) {
     if (valuesToAdd?.ImageUrl) {
@@ -220,9 +204,7 @@ async function MetadataAdd(type, valuesToAdd) {
           .join(", ") + ", CURRENT_TIMESTAMP";
       const values = Object.values(filteredValues);
 
-      global.db
-        .prepare(`INSERT INTO ${type} (${fields}) VALUES (${placeholders})`)
-        .run(...values);
+      await run(`INSERT INTO ${type} (${fields}) VALUES (${placeholders})`, values);
     } catch (error) {
       throw new Error(`Error inserting into ${type}: ${error.message}`);
     }
@@ -237,11 +219,7 @@ async function MetadataAdd(type, valuesToAdd) {
       const defaultTag = JSON.stringify([
         type === "Manga" ? "Reading" : "Watching",
       ]);
-      global.db
-        .prepare(
-          `UPDATE ${type} SET CustomTag = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
-        )
-        .run(defaultTag, existingRecord.id);
+      await run(`UPDATE ${type} SET CustomTag = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`, [defaultTag, existingRecord.id]);
     }
 
     if (!existingRecord.MalID || existingRecord.MalID === "") {
@@ -252,47 +230,33 @@ async function MetadataAdd(type, valuesToAdd) {
             /\s+(sub|dub|both)$/i,
             "",
           );
-          const match = global.db
-            .prepare(
-              `SELECT MalID FROM ${type} WHERE (title LIKE ? OR folder_name LIKE ?) AND MalID IS NOT NULL AND MalID != '' LIMIT 1`,
-            )
-            .get(`%${baseTitle}%`, `%${baseTitle}%`);
+          const match = await queryOne(`SELECT MalID FROM ${type} WHERE (title LIKE ? OR folder_name LIKE ?) AND MalID IS NOT NULL AND MalID != '' LIMIT 1`, [`%${baseTitle}%`, `%${baseTitle}%`]);
           if (match?.MalID) {
             malIdToUpdate = match.MalID;
           }
         } catch (_) {}
       }
       if (malIdToUpdate) {
-        global.db
-          .prepare(
-            `UPDATE ${type} SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
-          )
-          .run(String(malIdToUpdate), existingRecord.id);
+        await run(`UPDATE ${type} SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`, [String(malIdToUpdate), existingRecord.id]);
       }
     }
   }
 }
 
 // Remove metadata
-function MetadataRemove(type, id) {
+async function MetadataRemove(type, id) {
   if (!tables[type]) {
     throw new Error(`Invalid table: ${type}`);
   }
   try {
-    const row = global.db
-      .prepare(`SELECT image_url FROM ${type} WHERE id = ? OR folder_name = ?`)
-      .get(id, id);
+    const row = await queryOne(`SELECT image_url FROM ${type} WHERE id = ? OR folder_name = ?`, [id, id]);
 
     if (row && row.image_url) {
       const imageUrl = row.image_url;
       const countAnime =
-        global.db
-          .prepare("SELECT COUNT(*) as count FROM Anime WHERE image_url = ?")
-          .get(imageUrl)?.count || 0;
+        await queryOne("SELECT COUNT(*) as count FROM Anime WHERE image_url = ?", [imageUrl])?.count || 0;
       const countManga =
-        global.db
-          .prepare("SELECT COUNT(*) as count FROM Manga WHERE image_url = ?")
-          .get(imageUrl)?.count || 0;
+        await queryOne("SELECT COUNT(*) as count FROM Manga WHERE image_url = ?", [imageUrl])?.count || 0;
       if (countAnime + countManga <= 1) {
         ImageCacheManager.removeCachedImage(imageUrl).catch((err) => {
           logger.error(`Error in removeCachedImage: ${err.message}`);
@@ -300,9 +264,7 @@ function MetadataRemove(type, id) {
       }
     }
 
-    global.db
-      .prepare(`DELETE FROM ${type} WHERE id = ? OR folder_name = ?`)
-      .run(id, id);
+    await run(`DELETE FROM ${type} WHERE id = ? OR folder_name = ?`, [id, id]);
   } catch (error) {
     throw new Error(`Error deleting from ${type}: ${error.message}`);
   }
@@ -387,15 +349,9 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
         tag.toLowerCase() !== "downloads"
       ) {
         const likeTag = `%"${tag}"%`;
-        storedMetadata = global.db
-          .prepare(
-            `SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`,
-          )
-          .all(tag, likeTag);
+        storedMetadata = await queryAll(`SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`, [tag, likeTag]);
       } else {
-        storedMetadata = global.db
-          .prepare(`SELECT * FROM ${type} ORDER BY last_updated DESC`)
-          .all();
+        storedMetadata = await queryAll(`SELECT * FROM ${type} ORDER BY last_updated DESC`);
       }
     } catch (err) {
       storedMetadata = [];
@@ -428,15 +384,9 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
         tag.toLowerCase() !== "downloads"
       ) {
         const likeTag = `%"${tag}"%`;
-        storedMetadata = global.db
-          .prepare(
-            `SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`,
-          )
-          .all(tag, likeTag);
+        storedMetadata = await queryAll(`SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`, [tag, likeTag]);
       } else {
-        storedMetadata = global.db
-          .prepare(`SELECT * FROM ${type} ORDER BY last_updated DESC`)
-          .all();
+        storedMetadata = await queryAll(`SELECT * FROM ${type} ORDER BY last_updated DESC`);
       }
     } catch (err) {
       storedMetadata = [];
@@ -514,11 +464,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
             ? "id, title, totalEpisodes, watched, status"
             : "id, title, totalChapters as totalEpisodes, read as watched, status";
         const placeholders = uniqueMalIds.map(() => "?").join(",");
-        const malRows = global.db
-          .prepare(
-            `SELECT ${columns} FROM ${tableName} WHERE id IN (${placeholders})`,
-          )
-          .all(...uniqueMalIds.map(String));
+        const malRows = await queryAll(`SELECT ${columns} FROM ${tableName} WHERE id IN (${placeholders})`, uniqueMalIds.map(String));
         malRows.forEach((r) => {
           malMap[String(r.id)] = {
             title: r.title || null,
@@ -635,11 +581,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
     const siblingsMap = {};
     if (type === "Anime") {
       try {
-        const animeRows = global.db
-          .prepare(
-            "SELECT id, MalID FROM Anime WHERE MalID IS NOT NULL AND MalID != ''",
-          )
-          .all();
+        const animeRows = await queryAll("SELECT id, MalID FROM Anime WHERE MalID IS NOT NULL AND MalID != ''");
         animeRows.forEach((r) => {
           if (!siblingsMap[r.MalID]) {
             siblingsMap[r.MalID] = [];
@@ -652,16 +594,12 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
     const watchMap = {};
     if (type === "Anime") {
       try {
-        const watchRows = global.db
-          .prepare(
-            `
+        const watchRows = await queryAll(`
           SELECT anime_id, COUNT(DISTINCT episode_number) as count 
           FROM WatchHistory 
           WHERE is_completed = 1 
           GROUP BY anime_id
-        `,
-          )
-          .all();
+        `);
         watchRows.forEach((r) => {
           watchMap[r.anime_id] = r.count;
         });
@@ -671,9 +609,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
     const mappingMap = {};
     if (type === "Anime") {
       try {
-        const mappingRows = global.mappingDb
-          .prepare("SELECT malid, livechart_id FROM anime")
-          .all();
+        const mappingRows = await mappingQueryAll("SELECT malid, livechart_id FROM anime");
         mappingRows.forEach((r) => {
           mappingMap[Number(r.malid)] = r.livechart_id;
         });
@@ -685,15 +621,11 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
     if (type === "Anime") {
       try {
         const now = Math.floor(Date.now() / 1000);
-        const upcomingRows = global.mappingDb
-          .prepare(
-            `
+        const upcomingRows = await mappingQueryAll(`
           SELECT livechart_id, episode, date 
           FROM next_episodes 
           WHERE date > ?
-        `,
-          )
-          .all(now);
+        `, [now]);
         upcomingRows.forEach((r) => {
           if (
             !upcomingMap[r.livechart_id] ||
@@ -703,16 +635,12 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
           }
         });
 
-        const maxAiredRows = global.mappingDb
-          .prepare(
-            `
+        const maxAiredRows = await mappingQueryAll(`
           SELECT livechart_id, MAX(episode) as max_aired 
           FROM next_episodes 
           WHERE date <= ? 
           GROUP BY livechart_id
-        `,
-          )
-          .all(now);
+        `, [now]);
         maxAiredRows.forEach((r) => {
           maxAiredMap[r.livechart_id] = r.max_aired;
         });
@@ -1568,37 +1496,36 @@ async function MalEpMap(data = []) {
 
     let NotChanged = false;
 
-    let InsertOrUpdateQuery = global.db.prepare(`
-      INSERT INTO MyAnimeList (id, title, image, totalEpisodes, watched, status, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET 
-        title = excluded.title,
-        image = excluded.image,
-        totalEpisodes = excluded.totalEpisodes,
-        watched = excluded.watched,
-        status = excluded.status,
-        updated_at = excluded.updated_at
-    `);
+    const operations = [];
+    for (const entry of data) {
+      const existing = existingMap.get(entry.id.toString());
 
-    global.db.exec("BEGIN");
-    try {
-      for (const entry of data) {
-        const existing = existingMap.get(entry.id.toString());
+      if (
+        existing &&
+        existing.title === entry.title &&
+        existing.image === entry.image &&
+        existing.totalEpisodes === parseInt(entry.totalEpisodes ?? 0) &&
+        existing.watched === parseInt(entry.watched ?? 0) &&
+        existing.status === entry.status &&
+        existing.updated_at === entry.updated_at
+      ) {
+        NotChanged = true;
+        continue;
+      }
 
-        if (
-          existing &&
-          existing.title === entry.title &&
-          existing.image === entry.image &&
-          existing.totalEpisodes === parseInt(entry.totalEpisodes ?? 0) &&
-          existing.watched === parseInt(entry.watched ?? 0) &&
-          existing.status === entry.status &&
-          existing.updated_at === entry.updated_at
-        ) {
-          NotChanged = true;
-          continue;
-        }
-
-        InsertOrUpdateQuery.run(
+      operations.push({
+        sql: `
+          INSERT INTO MyAnimeList (id, title, image, totalEpisodes, watched, status, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET 
+            title = excluded.title,
+            image = excluded.image,
+            totalEpisodes = excluded.totalEpisodes,
+            watched = excluded.watched,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        `,
+        params: [
           entry.id.toString(),
           entry.title,
           entry.image,
@@ -1606,12 +1533,12 @@ async function MalEpMap(data = []) {
           parseInt(entry.watched ?? 0),
           entry.status,
           entry.updated_at,
-        );
-      }
-      global.db.exec("COMMIT");
-    } catch (e) {
-      global.db.exec("ROLLBACK");
-      throw e;
+        ]
+      });
+    }
+
+    if (operations.length > 0) {
+      await batchRun("main", operations);
     }
 
     return NotChanged;
@@ -1630,13 +1557,9 @@ async function MalMangaMap(data = []) {
 
     const ids = data.map((entry) => entry.id.toString());
 
-    const existingEntries = global.db
-      .prepare(
-        `SELECT * FROM MyMangaList WHERE id IN (${ids
+    const existingEntries = await queryAll(`SELECT * FROM MyMangaList WHERE id IN (${ids
           .map(() => "?")
-          .join(",")})`,
-      )
-      .all(...ids);
+          .join(",")})`, ids);
 
     const existingMap = new Map(
       existingEntries.map((entry) => [entry.id, entry]),
@@ -1644,37 +1567,36 @@ async function MalMangaMap(data = []) {
 
     let NotChanged = false;
 
-    let InsertOrUpdateQuery = global.db.prepare(`
-      INSERT INTO MyMangaList (id, title, image, totalChapters, read, status, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET 
-        title = excluded.title,
-        image = excluded.image,
-        totalChapters = excluded.totalChapters,
-        read = excluded.read,
-        status = excluded.status,
-        updated_at = excluded.updated_at
-    `);
+    const operations = [];
+    for (const entry of data) {
+      const existing = existingMap.get(entry.id.toString());
 
-    db.exec("BEGIN");
-    try {
-      for (const entry of data) {
-        const existing = existingMap.get(entry.id.toString());
+      if (
+        existing &&
+        existing.title === entry.title &&
+        existing.image === entry.image &&
+        existing.totalChapters === parseInt(entry.totalChapters ?? 0) &&
+        existing.read === parseInt(entry.read ?? 0) &&
+        existing.status === entry.status &&
+        existing.updated_at === entry.updated_at
+      ) {
+        NotChanged = true;
+        continue;
+      }
 
-        if (
-          existing &&
-          existing.title === entry.title &&
-          existing.image === entry.image &&
-          existing.totalChapters === parseInt(entry.totalChapters ?? 0) &&
-          existing.read === parseInt(entry.read ?? 0) &&
-          existing.status === entry.status &&
-          existing.updated_at === entry.updated_at
-        ) {
-          NotChanged = true;
-          continue;
-        }
-
-        InsertOrUpdateQuery.run(
+      operations.push({
+        sql: `
+          INSERT INTO MyMangaList (id, title, image, totalChapters, read, status, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET 
+            title = excluded.title,
+            image = excluded.image,
+            totalChapters = excluded.totalChapters,
+            read = excluded.read,
+            status = excluded.status,
+            updated_at = excluded.updated_at
+        `,
+        params: [
           entry.id.toString(),
           entry.title,
           entry.image,
@@ -1682,12 +1604,12 @@ async function MalMangaMap(data = []) {
           parseInt(entry.read ?? 0),
           entry.status,
           entry.updated_at,
-        );
-      }
-      global.db.exec("COMMIT");
-    } catch (e) {
-      global.db.exec("ROLLBACK");
-      throw e;
+        ]
+      });
+    }
+
+    if (operations.length > 0) {
+      await batchRun("main", operations);
     }
 
     return NotChanged;

@@ -144,8 +144,7 @@ async function MangaDir(title, customdir) {
 
 // download folder Location
 function getDownloadsFolder() {
-  const homeDir = os.homedir();
-  return path.join(homeDir, "Downloads");
+  return process.env.STRAWVERSE_PUBLIC_ROOT || process.env.NODEJS_MOBILE_DATA_DIR || path.join(os.homedir(), "Downloads");
 }
 
 // Check Path Exists
@@ -156,7 +155,15 @@ async function ensureDirectoryExists(directoryPath) {
   try {
     await fs.promises.access(directoryPath);
   } catch (err) {
-    throw new Error("Invalid directory path");
+    if (err.code === "ENOENT") {
+      try {
+        await fs.promises.mkdir(directoryPath, { recursive: true });
+      } catch (mkdirErr) {
+        throw new Error("Invalid directory path");
+      }
+    } else {
+      throw new Error("Invalid directory path");
+    }
   }
 }
 

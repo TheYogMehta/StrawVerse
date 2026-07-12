@@ -303,11 +303,7 @@ async function MalSyncType(type, force = false) {
   if (force || isSyncExpired || !MalMappingDate) {
     if (MalMappingDate && !force) {
       try {
-        let latestLocal = global.db
-          .prepare(
-            `SELECT id, updated_at FROM ${type === "anime" ? "MyAnimeList" : "MyMangaList"} ORDER BY updated_at DESC LIMIT 1`,
-          )
-          .get();
+        let latestLocal = await queryOne(`SELECT id, updated_at FROM ${type === "anime" ? "MyAnimeList" : "MyMangaList"} ORDER BY updated_at DESC LIMIT 1`);
         if (latestLocal) {
           let checkData = await MalFetchList(type, 1, 1);
           if (checkData?.results?.length > 0) {
@@ -471,26 +467,18 @@ async function autoTrackMAL(type, mediaId, number) {
 
     if (type === "Anime") {
       const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
-      localRecord = global.db
-        .prepare(
-          `
+      localRecord = await queryOne(`
         SELECT MalID FROM Anime 
         WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
-      `,
-        )
-        .get(
-          mediaId,
+      `, [mediaId,
           `${strippedId}-sub`,
           `${strippedId}-hsub`,
           `${strippedId}-dub`,
           `${strippedId}-both`,
           mediaId,
-          strippedId,
-        );
+          strippedId,]);
     } else {
-      localRecord = global.db
-        .prepare(`SELECT MalID FROM Manga WHERE id = ? OR folder_name = ?`)
-        .get(mediaId, mediaId);
+      localRecord = await queryOne(`SELECT MalID FROM Manga WHERE id = ? OR folder_name = ?`, [mediaId, mediaId]);
     }
 
     let malid = null;
@@ -502,34 +490,26 @@ async function autoTrackMAL(type, mediaId, number) {
       if (type === "Anime") {
         try {
           const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
-          const row = global.mappingDb
-            .prepare(
-              `
+          const row = await mappingQueryOne(`
               SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
               UNION
               SELECT malid FROM anikototv WHERE id = ?
               UNION
               SELECT malid FROM anineko WHERE id = ?
               LIMIT 1
-            `,
-            )
-            .get(strippedId, strippedId, strippedId, strippedId);
+            `, [strippedId, strippedId, strippedId, strippedId]);
           if (row?.malid) {
             malid = parseInt(row.malid);
           }
         } catch (err) {}
       } else if (type === "Manga") {
         try {
-          const row = global.mappingDb
-            .prepare(
-              `
+          const row = await mappingQueryOne(`
               SELECT malid FROM weebcentral WHERE id = ?
               UNION
               SELECT malid FROM allmanga WHERE id = ?
               LIMIT 1
-            `,
-            )
-            .get(mediaId, mediaId);
+            `, [mediaId, mediaId]);
           if (row?.malid) {
             malid = parseInt(row.malid);
           }
@@ -541,11 +521,7 @@ async function autoTrackMAL(type, mediaId, number) {
       const malListTable = type === "Anime" ? "MyAnimeList" : "MyMangaList";
       const totalCol = type === "Anime" ? "totalEpisodes" : "totalChapters";
       const progressCol = type === "Anime" ? "watched" : "read";
-      const malInfo = global.db
-        .prepare(
-          `SELECT status, ${progressCol}, ${totalCol} FROM ${malListTable} WHERE id = ?`,
-        )
-        .get(String(malid));
+      const malInfo = await queryOne(`SELECT status, ${progressCol}, ${totalCol} FROM ${malListTable} WHERE id = ?`, [String(malid)]);
 
       const currentProgress = malInfo ? parseInt(malInfo[progressCol] || 0) : 0;
       if (number <= currentProgress) {
@@ -570,15 +546,11 @@ async function autoTrackMAL(type, mediaId, number) {
 
       // Update local database cache immediately
       try {
-        global.db
-          .prepare(
-            `
+        await run(`
           UPDATE ${malListTable}
           SET ${progressCol} = ?, status = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `,
-          )
-          .run(number, nextStatus, String(malid));
+        `, [number, nextStatus, String(malid)]);
       } catch (dbErr) {
         logger.error(
           `Error updating local MAL table in autoTrackMAL: ${dbErr.message}`,
@@ -588,11 +560,7 @@ async function autoTrackMAL(type, mediaId, number) {
       // Send in-app notification via IPC
       try {
         let displayTitle = type;
-        const titleRecord = global.db
-          .prepare(
-            `SELECT title FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ?`,
-          )
-          .get(mediaId);
+        const titleRecord = await queryOne(`SELECT title FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ?`, [mediaId]);
         displayTitle = titleRecord?.title || type;
 
         if (global.win && !global.win.isDestroyed()) {
@@ -639,7 +607,7 @@ async function MalRemoveFromList(type = "anime", malid) {
 
     const table = isAnime ? "MyAnimeList" : "MyMangaList";
     try {
-      global.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(String(malid));
+      await run(`DELETE FROM ${table} WHERE id = ?`, [String(malid)]);
     } catch (_) {}
 
     await MalSyncType(type, true);

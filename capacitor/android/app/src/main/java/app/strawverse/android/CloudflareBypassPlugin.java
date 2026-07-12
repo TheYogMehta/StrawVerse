@@ -29,6 +29,7 @@ import android.widget.TextView;
 import android.util.Log;
 import java.io.File;
 import java.util.Map;
+import java.util.HashMap;
 import org.json.JSONObject;
 import java.util.List;
 import java.util.ArrayList;
@@ -41,6 +42,12 @@ public class CloudflareBypassPlugin extends Plugin {
     private final List<Runnable> pendingTasks = new ArrayList<>();
     private final Map<String, PluginCall> activeFetchCalls = new java.util.concurrent.ConcurrentHashMap<>();
 
+    public static String cleanUserAgent(String ua) {
+        if (ua == null) return null;
+        return ua.replaceAll("(?i)\\s*;?\\s*wv\\b", "")
+                 .replaceAll("(?i)Version/[0-9.]+\\s+", "");
+    }
+
     @PluginMethod
     public void bypass(PluginCall call) {
         String url = call.getString("url");
@@ -48,9 +55,10 @@ public class CloudflareBypassPlugin extends Plugin {
             call.reject("URL is required");
             return;
         }
-        final String userAgent = call.getString("userAgent");
+        final String userAgent = cleanUserAgent(call.getString("userAgent"));
+        final String referer = call.getString("referer");
 
-        Log.i("StrawVerseBypass", "bypass() called with URL: " + url + " UA: " + userAgent);
+        Log.i("StrawVerseBypass", "bypass() called with URL: " + url + " UA: " + userAgent + " Ref: " + referer);
 
         final String finalUrl = url;
         String challengeUrl = url;
@@ -69,7 +77,7 @@ public class CloudflareBypassPlugin extends Plugin {
             String host = challengeUri.getHost();
             if (host != null) {
                 String baseDomain = host.startsWith("www.") ? host.substring(4) : host;
-                String[] targetUrls = { finalChallengeUrl, finalUrl, "https://" + host + "/", "http://" + host + "/" };
+                String[] targetUrls = { finalChallengeUrl, finalUrl, "https://" + host + "/" };
                 
                 for (String tUrl : targetUrls) {
                     Log.i("StrawVerseBypass", "Cookies BEFORE clear for URL " + tUrl + ": " + CookieManager.getInstance().getCookie(tUrl));
@@ -173,9 +181,9 @@ public class CloudflareBypassPlugin extends Plugin {
                                         webView.getSettings().setJavaScriptEnabled(true);
                                         webView.getSettings().setDomStorageEnabled(true);
                                         
-                                        final String effectiveUserAgent = (userAgent != null && !userAgent.isEmpty())
+                                        final String effectiveUserAgent = cleanUserAgent((userAgent != null && !userAgent.isEmpty())
                                             ? userAgent
-                                            : webView.getSettings().getUserAgentString();
+                                            : webView.getSettings().getUserAgentString());
                                         webView.getSettings().setUserAgentString(effectiveUserAgent);
                                         
                                         // Enable desktop mode viewport settings
@@ -301,8 +309,19 @@ public class CloudflareBypassPlugin extends Plugin {
                                             }
                                         });
 
-                                        Log.i("StrawVerseBypass", "Loading challenge URL in WebView and showing Dialog");
-                                        webView.loadUrl(finalChallengeUrl);
+                                         Map<String, String> extraHeaders = new java.util.HashMap<>();
+                                         String finalRef = (referer != null && !referer.isEmpty()) ? referer : null;
+                                          if (finalRef == null) {
+                                              Map<String, String> rules = AppDatabase.getHeadersForUrl(getContext(), finalChallengeUrl);
+                                              if (rules.containsKey("Referer")) {
+                                                  finalRef = rules.get("Referer");
+                                              }
+                                          }
+                                         if (finalRef != null && !finalRef.isEmpty()) {
+                                             extraHeaders.put("Referer", finalRef);
+                                         }
+                                         Log.i("StrawVerseBypass", "Loading challenge URL in WebView and showing Dialog with extra headers: " + extraHeaders);
+                                         webView.loadUrl(finalChallengeUrl, extraHeaders);
                                         dialog.show();
                                         handler.post(cookiePoller);
 
@@ -405,30 +424,27 @@ public class CloudflareBypassPlugin extends Plugin {
             public void run() {
                 final Bundle headersBundle = new Bundle();
                 try {
-                    String localApiUrl = "http://127.0.0.1:3459/api/proxy-headers?method=GET&url=" + java.net.URLEncoder.encode(videoUrl, "UTF-8");
-                    java.net.HttpURLConnection conn = (java.net.HttpURLConnection) new java.net.URL(localApiUrl).openConnection();
-                    conn.setRequestMethod("GET");
-                    conn.setConnectTimeout(2000);
-                    conn.setReadTimeout(2000);
-                    if (conn.getResponseCode() == 200) {
-                        java.io.InputStream in = conn.getInputStream();
-                        java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(in));
-                        StringBuilder sb = new StringBuilder();
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            sb.append(line);
-                        }
-                        reader.close();
-                        
-                        org.json.JSONObject json = new org.json.JSONObject(sb.toString());
-                        java.util.Iterator<String> keys = json.keys();
-                        while (keys.hasNext()) {
-                            String key = keys.next();
-                            headersBundle.putString(key, json.getString(key));
+                    Map<String, String> headersMap = AppDatabase.getHeadersForUrl(getContext(), videoUrl);
+                    for (Map.Entry<String, String> entry : headersMap.entrySet()) {
+                        headersBundle.putString(entry.getKey(), entry.getValue());
+                    }
+
+                    String webViewCookie = CookieManager.getInstance().getCookie(videoUrl);
+                    if (webViewCookie != null && !webViewCookie.isEmpty()) {
+                        headersBundle.putString("Cookie", webViewCookie);
+                    }
+
+                    if (!headersBundle.containsKey("User-Agent") && !headersBundle.containsKey("user-agent")) {
+                        String dbUA = AppDatabase.getStoredUserAgent(getContext(), videoUrl);
+                        if (dbUA != null && !dbUA.isEmpty()) {
+                            headersBundle.putString("User-Agent", dbUA);
+                        } else {
+                            String webViewUA = android.webkit.WebSettings.getDefaultUserAgent(getContext());
+                            headersBundle.putString("User-Agent", webViewUA);
                         }
                     }
                 } catch (Exception e) {
-                    Log.e("StrawVerseBypass", "Failed to fetch proxy headers dynamically: " + e.getMessage());
+                    Log.e("StrawVerseBypass", "Failed to construct headers bundle: " + e.getMessage());
                 }
 
                 getActivity().runOnUiThread(new Runnable() {
@@ -450,44 +466,24 @@ public class CloudflareBypassPlugin extends Plugin {
         }).start();
     }
 
-    private static String mergeCookies(String explicitCookies, String browserCookies) {
-        java.util.LinkedHashMap<String, String> merged = new java.util.LinkedHashMap<>();
-        addCookies(merged, explicitCookies);
-        addCookies(merged, browserCookies);
-        StringBuilder result = new StringBuilder();
-        for (Map.Entry<String, String> cookie : merged.entrySet()) {
-            if (result.length() > 0) result.append("; ");
-            result.append(cookie.getKey()).append("=").append(cookie.getValue());
-        }
-        return result.toString();
-    }
 
-    private static void addCookies(java.util.LinkedHashMap<String, String> target, String cookieString) {
-        if (cookieString == null || cookieString.trim().isEmpty()) return;
-        for (String pair : cookieString.split(";")) {
-            int separator = pair.indexOf('=');
-            if (separator <= 0) continue;
-            String name = pair.substring(0, separator).trim();
-            String value = pair.substring(separator + 1).trim();
-            if (!name.isEmpty()) target.put(name, value);
-        }
-    }
-
-    private static String cookieNames(String cookieString) {
-        java.util.ArrayList<String> names = new java.util.ArrayList<>();
-        for (String pair : cookieString.split(";")) {
-            int separator = pair.indexOf('=');
-            if (separator > 0) names.add(pair.substring(0, separator).trim());
-        }
-        return names.toString();
-    }
 
     @PluginMethod
     public void nativeRequest(final PluginCall call) {
         String url = call.getString("url");
         if (url != null && url.contains("animepahe")) {
-            executeWebViewRequest(url, call.getString("method"), call.getObject("headers"), call.getString("body"), call);
-            return;
+            boolean isStatic = url.contains("/uploads/") 
+                || url.endsWith(".webp") 
+                || url.endsWith(".png") 
+                || url.endsWith(".jpg") 
+                || url.endsWith(".jpeg") 
+                || url.endsWith(".gif")
+                || url.endsWith(".js")
+                || url.endsWith(".css");
+            if (!isStatic) {
+                executeWebViewRequest(url, call.getString("method"), call.getObject("headers"), call.getString("body"), call);
+                return;
+            }
         }
 
         new Thread(new Runnable() {
@@ -519,7 +515,10 @@ public class CloudflareBypassPlugin extends Plugin {
                         while (keys.hasNext()) {
                             String key = keys.next();
                             String value = headers.getString(key);
-                            if (key.equalsIgnoreCase("user-agent")) hasUA = true;
+                            if (key.equalsIgnoreCase("user-agent")) {
+                                hasUA = true;
+                                value = cleanUserAgent(value);
+                            }
                             if (key.equalsIgnoreCase("cookie")) {
                                 explicitCookies = value;
                                 continue;
@@ -528,7 +527,7 @@ public class CloudflareBypassPlugin extends Plugin {
                             conn.setRequestProperty(key, value);
                         }
                     }
-                    if (!hasUA) conn.setRequestProperty("User-Agent", webViewUA);
+                    if (!hasUA) conn.setRequestProperty("User-Agent", cleanUserAgent(webViewUA));
                     if (conn.getRequestProperty("Accept") == null) {
                         conn.setRequestProperty("Accept", "*/*");
                     }
@@ -537,10 +536,10 @@ public class CloudflareBypassPlugin extends Plugin {
                     }
 
                     String browserCookies = CookieManager.getInstance().getCookie(url);
-                    String mergedCookies = mergeCookies(explicitCookies, browserCookies);
+                    String mergedCookies = AppDatabase.mergeCookies(explicitCookies, browserCookies);
                     if (!mergedCookies.isEmpty()) {
                         conn.setRequestProperty("Cookie", mergedCookies);
-                        Log.i("StrawVerseBypass", "nativeRequest cookies: " + cookieNames(mergedCookies));
+                        Log.i("StrawVerseBypass", "nativeRequest cookies: " + AppDatabase.cookieNames(mergedCookies));
                     }
                     if ("POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method)) {
                         if (body != null) {
@@ -691,13 +690,18 @@ public class CloudflareBypassPlugin extends Plugin {
             }
             
             int status = responseObj.getInt("status");
-            String responseData = responseObj.getString("data");
+            String responseData = responseObj.optString("data", "");
             JSONObject resHeaders = responseObj.getJSONObject("headers");
             
-            String base64Data = android.util.Base64.encodeToString(
-                    responseData.getBytes("utf-8"), 
-                    android.util.Base64.NO_WRAP
-            );
+            String base64Data;
+            if (responseObj.optBoolean("isBase64", false)) {
+                base64Data = responseData;
+            } else {
+                base64Data = android.util.Base64.encodeToString(
+                        responseData.getBytes("utf-8"), 
+                        android.util.Base64.NO_WRAP
+                );
+            }
             
             JSObject jsResHeaders = new JSObject();
             java.util.Iterator<String> keys = resHeaders.keys();
@@ -729,11 +733,51 @@ public class CloudflareBypassPlugin extends Plugin {
             public void run() {
                 try {
                     Uri uri = Uri.parse(url);
-                    final String origin = uri.getScheme() + "://" + uri.getAuthority() + "/";
+                    final String finalOrigin = uri.getScheme() + "://" + uri.getAuthority() + "/";
                     
                     if (backgroundWebView == null) {
                         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 100);
                         return;
+                    }
+
+                    String reqUA = null;
+                    if (headers != null) {
+                        reqUA = headers.optString("User-Agent", headers.optString("user-agent", ""));
+                    }
+                    if (reqUA == null || reqUA.isEmpty()) {
+                        reqUA = AppDatabase.getStoredUserAgent(getContext(), url);
+                    }
+                    if (reqUA != null && !reqUA.isEmpty()) {
+                        backgroundWebView.getSettings().setUserAgentString(cleanUserAgent(reqUA));
+                    } else {
+                        String webViewUA = cleanUserAgent(android.webkit.WebSettings.getDefaultUserAgent(getContext()));
+                        backgroundWebView.getSettings().setUserAgentString(webViewUA);
+                    }
+
+                    String cookieVal = null;
+                    if (headers != null) {
+                        cookieVal = headers.optString("Cookie", headers.optString("cookie", ""));
+                    }
+                    if (cookieVal == null || cookieVal.isEmpty()) {
+                        String cfCookie = AppDatabase.getStoredCfClearanceCookie(getContext(), url);
+                        if (cfCookie != null && !cfCookie.isEmpty()) {
+                            cookieVal = "cf_clearance=" + cfCookie;
+                        }
+                    }
+                    
+                    if (cookieVal != null && !cookieVal.isEmpty()) {
+                        String host = uri.getHost();
+                        if (host != null) {
+                            for (String pair : cookieVal.split(";")) {
+                                String cleanPair = pair.trim();
+                                if (!cleanPair.isEmpty()) {
+                                    String cookieString = cleanPair + "; Domain=" + host + "; Path=/; Secure; HttpOnly";
+                                    CookieManager.getInstance().setCookie(finalOrigin, cookieString);
+                                }
+                            }
+                            CookieManager.getInstance().flush();
+                            Log.i("StrawVerseBypass", "Synced cookies to CookieManager for: " + finalOrigin);
+                        }
                     }
                     
                     if (isWebViewLoading) {
@@ -741,11 +785,25 @@ public class CloudflareBypassPlugin extends Plugin {
                         return;
                     }
                     
-                    if (!origin.equals(lastLoadedOrigin)) {
-                        Log.i("StrawVerseBypass", "Loading origin in background WebView: " + origin);
+                    if (!finalOrigin.equals(lastLoadedOrigin)) {
+                        Map<String, String> extraHeaders = new HashMap<>();
+                        String finalRef = null;
+                        if (headers != null) {
+                            finalRef = headers.optString("Referer", headers.optString("referer", ""));
+                        }
+                        if (finalRef == null || finalRef.isEmpty()) {
+                            Map<String, String> rules = AppDatabase.getHeadersForUrl(getContext(), finalOrigin);
+                            if (rules.containsKey("Referer")) {
+                                finalRef = rules.get("Referer");
+                            }
+                        }
+                        if (finalRef != null && !finalRef.isEmpty()) {
+                            extraHeaders.put("Referer", finalRef);
+                        }
+                        Log.i("StrawVerseBypass", "Loading origin in background WebView: " + finalOrigin + " with extra headers: " + extraHeaders);
                         isWebViewLoading = true;
-                        lastLoadedOrigin = origin;
-                        backgroundWebView.loadUrl(origin);
+                        lastLoadedOrigin = finalOrigin;
+                        backgroundWebView.loadUrl(finalOrigin, extraHeaders);
                         pendingTasks.add(this);
                         return;
                     }
@@ -774,23 +832,28 @@ public class CloudflareBypassPlugin extends Plugin {
                     
                     final String requestId = call.getCallbackId();
                     activeFetchCalls.put(requestId, call);
-                    
-                    String jsCode = "(function() {\n" +
+                                      String jsCode = "(function() {\n" +
                         "  var url = '" + url.replace("'", "\\'") + "';\n" +
                         "  var options = " + fetchOptions.toString() + ";\n" +
                         "  var reqId = '" + requestId + "';\n" +
                         "  fetch(url, options)\n" +
                         "    .then(function(res) {\n" +
-                        "      return res.text().then(function(text) {\n" +
+                        "      return res.blob().then(function(blob) {\n" +
                         "        var headers = {};\n" +
                         "        res.headers.forEach(function(val, key) {\n" +
                         "          headers[key] = val;\n" +
                         "        });\n" +
-                        "        AndroidFetchBridge.onFetchResponse(reqId, JSON.stringify({\n" +
-                        "          status: res.status,\n" +
-                        "          headers: headers,\n" +
-                        "          data: text\n" +
-                        "        }));\n" +
+                        "        var reader = new FileReader();\n" +
+                        "        reader.onloadend = function() {\n" +
+                        "          var base64data = reader.result.split(',')[1] || '';\n" +
+                        "          AndroidFetchBridge.onFetchResponse(reqId, JSON.stringify({\n" +
+                        "            status: res.status,\n" +
+                        "            headers: headers,\n" +
+                        "            data: base64data,\n" +
+                        "            isBase64: true\n" +
+                        "          }));\n" +
+                        "        };\n" +
+                        "        reader.readAsDataURL(blob);\n" +
                         "      });\n" +
                         "    })\n" +
                         "    .catch(function(err) {\n" +

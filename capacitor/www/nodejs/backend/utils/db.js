@@ -1,14 +1,218 @@
-const { app } = require("electron");
 const path = require("path");
 const fs = require("fs");
-const { DatabaseSync } = require("node:sqlite");
 const { logger } = require("./AppLogger");
 
-// database create [ gets created in /user/your_name/AppData/Roaming ]
-const userDataPath = app.getPath("userData");
+let channel = null;
+try {
+  ({ channel } = require("bridge"));
+} catch (_) {
+  channel = null;
+}
 
-global.db = new DatabaseSync(path.join(userDataPath, "database.db"));
-global.mappingDb = new DatabaseSync(path.join(userDataPath, "mapping.db"));
+global.db = true;
+global.mappingDb = true;
+
+// Request-response tracking
+const pendingRequests = new Map();
+let requestCounter = 0;
+
+// Listen for responses from Java's DatabaseBridge
+if (channel) {
+  channel.addListener("db-response", (response) => {
+    if (!response || typeof response.requestId === "undefined") return;
+    const pending = pendingRequests.get(response.requestId);
+    if (pending) {
+      pendingRequests.delete(response.requestId);
+      if (response.error) {
+        pending.reject(new Error(response.error));
+      } else {
+        pending.resolve(response.result);
+      }
+    }
+  });
+}
+
+/**
+ * Send a database request to Java and return a Promise for the result.
+ */
+function dbRequest(eventName, data) {
+  return new Promise((resolve, reject) => {
+    if (!channel) {
+      reject(
+        new Error("Bridge channel not available — cannot access database"),
+      );
+      return;
+    }
+    const requestId = ++requestCounter;
+    const timeout = setTimeout(() => {
+      pendingRequests.delete(requestId);
+      reject(
+        new Error(`Database request timeout (${eventName}, id=${requestId})`),
+      );
+    }, 30000); // 30s timeout
+
+    pendingRequests.set(requestId, {
+      resolve: (result) => {
+        clearTimeout(timeout);
+        resolve(result);
+      },
+      reject: (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      },
+    });
+
+    channel.send(eventName, { requestId, ...data });
+  });
+}
+
+// ─── Public API (async) ─────────────────────────────────────────────────────
+
+// Main database helpers
+async function queryAll(sql, params = []) {
+  try {
+    const result = await dbRequest("db-query-all", { db: "main", sql, params });
+    return result.rows || [];
+  } catch (e) {
+    logger.error(`Database queryAll error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+async function queryOne(sql, params = []) {
+  try {
+    const result = await dbRequest("db-query-one", { db: "main", sql, params });
+    return result.row || null;
+  } catch (e) {
+    logger.error(`Database queryOne error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+async function run(sql, params = []) {
+  try {
+    return await dbRequest("db-run", { db: "main", sql, params });
+  } catch (e) {
+    logger.error(`Database run error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+async function exec(sql) {
+  try {
+    return await dbRequest("db-exec", { db: "main", sql, params: [] });
+  } catch (e) {
+    logger.error(`Database exec error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+async function pragma(sql, dbName = "main") {
+  try {
+    return await dbRequest("db-pragma", { db: dbName, sql });
+  } catch (e) {
+    logger.error(`Database pragma error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+async function getKeyValue(tableName, key) {
+  try {
+    const row = await queryOne(`SELECT value FROM ${tableName} WHERE key = ?`, [
+      key,
+    ]);
+    return row ? JSON.parse(row.value) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function setKeyValue(tableName, key, value) {
+  try {
+    await run(
+      `INSERT INTO ${tableName} (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [key, JSON.stringify(value)],
+    );
+  } catch (e) {
+    logger.error(
+      `Error writing key ${key} to SQLite table ${tableName}: ${e.message}`,
+    );
+  }
+}
+
+// Mapping database helpers
+async function mappingQueryAll(sql, params = []) {
+  try {
+    const result = await dbRequest("db-query-all", {
+      db: "mapping",
+      sql,
+      params,
+    });
+    return result.rows || [];
+  } catch (e) {
+    logger.error(`Mapping queryAll error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+async function mappingQueryOne(sql, params = []) {
+  try {
+    const result = await dbRequest("db-query-one", {
+      db: "mapping",
+      sql,
+      params,
+    });
+    return result.row || null;
+  } catch (e) {
+    logger.error(`Mapping queryOne error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+async function mappingRun(sql, params = []) {
+  try {
+    return await dbRequest("db-run", { db: "mapping", sql, params });
+  } catch (e) {
+    logger.error(`Mapping run error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+async function mappingExec(sql) {
+  try {
+    return await dbRequest("db-exec", { db: "mapping", sql, params: [] });
+  } catch (e) {
+    logger.error(`Mapping exec error on "${sql}": ${e.message}`);
+    throw e;
+  }
+}
+
+/**
+ * Batch run: execute many SQL statements in a single bridge call + transaction.
+ * Each operation is { sql: string, params: any[] }.
+ * Significantly faster for bulk inserts (mapping updates, etc.)
+ */
+async function batchRun(dbName, operations) {
+  try {
+    return await dbRequest("db-batch-run", { db: dbName, operations });
+  } catch (e) {
+    logger.error(`Database batchRun error: ${e.message}`);
+    throw e;
+  }
+}
+
+/**
+ * Close and reopen a database connection (used during mapping updates).
+ */
+async function closeDb(dbName) {
+  return dbRequest("db-close", { db: dbName });
+}
+
+async function openDb(dbName) {
+  return dbRequest("db-open", { db: dbName });
+}
+
+// ─── Table schema ───────────────────────────────────────────────────────────
 
 const tables = {
   Anime: {
@@ -138,7 +342,6 @@ const tables = {
     referer: "TEXT",
     updatedAt: "INTEGER",
   },
-
   unlinked_mal_ids: {
     id: "TEXT PRIMARY KEY",
     malid: "TEXT",
@@ -151,187 +354,153 @@ const tables = {
   },
 };
 
-function getKeyValue(tableName, key) {
-  try {
-    const row = global.db
-      .prepare(`SELECT value FROM ${tableName} WHERE key = ?`)
-      .get(key);
-    return row ? JSON.parse(row.value) : null;
-  } catch {
-    return null;
-  }
-}
+// ─── Async initialization ───────────────────────────────────────────────────
 
-function setKeyValue(tableName, key, value) {
-  try {
-    global.db
-      .prepare(
-        `INSERT INTO ${tableName} (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      )
-      .run(key, JSON.stringify(value));
-  } catch (e) {
-    logger.error(
-      `Error writing key ${key} to SQLite table ${tableName}: ${e.message}`,
-    );
-  }
-}
+/**
+ * Initialize both databases via the Java bridge.
+ * Must be called once at boot before any DB operations.
+ */
+async function initDatabase() {
+  const dbPath =
+    process.env.STRAWVERSE_PUBLIC_ROOT ||
+    process.env.NODEJS_MOBILE_DATA_DIR ||
+    process.cwd();
+  logger.info(`[db] Initializing databases at: ${dbPath}`);
 
-function queryAll(sql, params = []) {
-  try {
-    return global.db.prepare(sql).all(...params);
-  } catch (e) {
-    logger.error(`Database queryAll error on "${sql}": ${e.message}`);
-    throw e;
-  }
-}
+  // Tell Java to open both databases
+  await dbRequest("db-init", { dataDir: dbPath });
+  logger.info("[db] Java bridge connected — databases opened");
 
-function queryOne(sql, params = []) {
-  try {
-    return global.db.prepare(sql).get(...params);
-  } catch (e) {
-    logger.error(`Database queryOne error on "${sql}": ${e.message}`);
-    throw e;
-  }
-}
+  // Create tables & update schema
+  for (const [tableName, columns] of Object.entries(tables)) {
+    const columnsString = Object.entries(columns)
+      .map(([col, definition]) => `${col} ${definition}`)
+      .join(", ");
 
-function run(sql, params = []) {
-  try {
-    return global.db.prepare(sql).run(...params);
-  } catch (e) {
-    logger.error(`Database run error on "${sql}": ${e.message}`);
-    throw e;
+    try {
+      await exec(`CREATE TABLE IF NOT EXISTS ${tableName} (${columnsString})`);
+      await updateTableSchema(tableName, columns);
+    } catch (error) {
+      throw new Error(`Error creating table ${tableName}: ${error.message}`);
+    }
   }
-}
 
-function exec(sql) {
+  // Drop deprecated/unused tables
   try {
-    return global.db.exec(sql);
-  } catch (e) {
-    logger.error(`Database exec error on "${sql}": ${e.message}`);
-    throw e;
-  }
-}
-
-// Drop deprecated/unused tables from user database file dynamically
-try {
-  const existingTables = global.db
-    .prepare(
+    const existingTables = await queryAll(
       "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-    )
-    .all()
-    .map((r) => r.name);
-  existingTables.forEach((name) => {
-    if (!tables.hasOwnProperty(name)) {
-      global.db.exec(`DROP TABLE IF EXISTS ${name}`);
-      logger.info(`Dropped deprecated table: ${name}`);
-    }
-  });
-} catch (e) {
-  logger.error("Failed to clean up deprecated tables: " + e.message);
-}
-
-try {
-  global.db.exec("DROP TABLE IF EXISTS next_episodes");
-  global.db.exec(
-    "DELETE FROM Settings WHERE key = 'last_livechart_schedule_run'",
-  );
-} catch (e) {
-  logger.error(
-    "[db] Failed to drop next_episodes table from global.db: " + e.message,
-  );
-}
-
-// Create tables & update schema
-Object.entries(tables).forEach(([tableName, columns]) => {
-  const columnsString = Object.entries(columns)
-    .map(([col, definition]) => `${col} ${definition}`)
-    .join(", ");
-
-  try {
-    global.db.exec(
-      `CREATE TABLE IF NOT EXISTS ${tableName} (${columnsString})`,
     );
-    updateTableSchema(tableName, columns);
-  } catch (error) {
-    throw new Error(`Error creating table ${tableName}: ${error.message}`);
-  }
-});
-
-// Migrate legacy "config" JSON settings row to individual rows if it exists
-try {
-  const rawConfigRow = global.db
-    .prepare("SELECT value FROM Settings WHERE key = ?")
-    .get("config");
-  if (rawConfigRow && rawConfigRow.value) {
-    const parsed = JSON.parse(rawConfigRow.value);
-    if (parsed && typeof parsed === "object") {
-      const booleanKeys = new Set([
-        "developerMode",
-        "autoLoadNextChapter",
-        "enableDiscordRPC",
-        "mergeSubtitles",
-        "malDiscordProfile",
-        "autoSkipIntro",
-        "Pagination",
-      ]);
-      const insertStmt = global.db.prepare(
-        "INSERT INTO Settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      );
-      for (const [k, v] of Object.entries(parsed)) {
-        let val = v;
-        if (booleanKeys.has(k)) {
-          if (v === "on") val = true;
-          else if (v === "off") val = false;
-        }
-        insertStmt.run(k, JSON.stringify(val));
+    for (const { name } of existingTables) {
+      if (!tables.hasOwnProperty(name)) {
+        await exec(`DROP TABLE IF EXISTS ${name}`);
+        logger.info(`Dropped deprecated table: ${name}`);
       }
-      global.db.prepare("DELETE FROM Settings WHERE key = ?").run("config");
-      logger.info(
-        "[db] Successfully migrated legacy config JSON row to individual database rows",
-      );
     }
+  } catch (e) {
+    logger.error("Failed to clean up deprecated tables: " + e.message);
   }
-} catch (migErr) {
-  logger.error("[db] Error migrating legacy settings: " + migErr.message);
-}
 
-// Create unique index for SkipTimes
-try {
-  global.db.exec(
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_skiptimes_anime_ep ON SkipTimes (anime_id, episode_number)",
-  );
-} catch (e) {
-  logger.error("Failed to create unique index on SkipTimes: " + e.message);
-}
-
-// Drop unused EpisodesDataId column from Anime table
-try {
-  const animeColumns = global.db
-    .prepare("PRAGMA table_info(Anime)")
-    .all()
-    .map((col) => col.name);
-  if (animeColumns.includes("EpisodesDataId")) {
-    global.db.exec("ALTER TABLE Anime DROP COLUMN EpisodesDataId");
-    logger.info("[db] Dropped unused EpisodesDataId column from Anime table");
-  }
-} catch (e) {
-  logger.error("[db] Failed to drop EpisodesDataId column: " + e.message);
-}
-
-function updateTableSchema(tableName, expectedColumns) {
+  // Drop legacy next_episodes table and stale settings
   try {
-    const existingColumns = global.db
-      .prepare(`PRAGMA table_info(${tableName})`)
-      .all()
-      .map((col) => col.name);
+    await exec("DROP TABLE IF EXISTS next_episodes");
+    await run("DELETE FROM Settings WHERE key = 'last_livechart_schedule_run'");
+  } catch (e) {
+    logger.error("[db] Failed to drop next_episodes table: " + e.message);
+  }
 
-    Object.entries(expectedColumns).forEach(([col, definition]) => {
-      if (!existingColumns.includes(col)) {
-        global.db.exec(
-          `ALTER TABLE ${tableName} ADD COLUMN ${col} ${definition}`,
+  // Create unique index for SkipTimes
+  try {
+    await exec(
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_skiptimes_anime_ep ON SkipTimes (anime_id, episode_number)",
+    );
+  } catch (e) {
+    logger.error("Failed to create unique index on SkipTimes: " + e.message);
+  }
+
+  // Drop unused EpisodesDataId column from Anime table
+  try {
+    const animeColumns = await queryAll("PRAGMA table_info(Anime)");
+    if (animeColumns.some((col) => col.name === "EpisodesDataId")) {
+      await exec("ALTER TABLE Anime DROP COLUMN EpisodesDataId");
+      logger.info("[db] Dropped unused EpisodesDataId column from Anime table");
+    }
+  } catch (e) {
+    logger.error("[db] Failed to drop EpisodesDataId column: " + e.message);
+  }
+
+  // Migrate legacy "config" JSON settings row to individual rows
+  try {
+    const rawConfigRow = await queryOne(
+      "SELECT value FROM Settings WHERE key = ?",
+      ["config"],
+    );
+    if (rawConfigRow && rawConfigRow.value) {
+      const parsed = JSON.parse(rawConfigRow.value);
+      if (parsed && typeof parsed === "object") {
+        const booleanKeys = new Set([
+          "developerMode",
+          "autoLoadNextChapter",
+          "enableDiscordRPC",
+          "mergeSubtitles",
+          "malDiscordProfile",
+          "autoSkipIntro",
+          "Pagination",
+        ]);
+        const ops = [];
+        for (const [k, v] of Object.entries(parsed)) {
+          let val = v;
+          if (booleanKeys.has(k)) {
+            if (v === "on") val = true;
+            else if (v === "off") val = false;
+          }
+          ops.push({
+            sql: "INSERT INTO Settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params: [k, JSON.stringify(val)],
+          });
+        }
+        if (ops.length > 0) {
+          await batchRun("main", ops);
+        }
+        await run("DELETE FROM Settings WHERE key = ?", ["config"]);
+        logger.info(
+          "[db] Successfully migrated legacy config JSON row to individual database rows",
         );
       }
-    });
+    }
+  } catch (migErr) {
+    logger.error("[db] Error migrating legacy settings: " + migErr.message);
+  }
+
+  // Clean up orphaned history records
+  try {
+    const watchDeleted = await run(
+      "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
+    );
+    const readDeleted = await run(
+      "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
+    );
+    if (watchDeleted.changes > 0 || readDeleted.changes > 0) {
+      logger.info(
+        `Database cleanup: Deleted ${watchDeleted.changes} orphaned watch history entries and ${readDeleted.changes} read history entries.`,
+      );
+    }
+  } catch (e) {
+    logger.error("Failed to run database history cleanup: " + e.message);
+  }
+
+  logger.info("[db] Database initialization complete");
+}
+
+async function updateTableSchema(tableName, expectedColumns) {
+  try {
+    const existingColumns = await queryAll(`PRAGMA table_info(${tableName})`);
+    const existingNames = existingColumns.map((col) => col.name);
+
+    for (const [col, definition] of Object.entries(expectedColumns)) {
+      if (!existingNames.includes(col)) {
+        await exec(`ALTER TABLE ${tableName} ADD COLUMN ${col} ${definition}`);
+      }
+    }
   } catch (error) {
     throw new Error(
       `Error updating table schema for ${tableName}: ${error.message}`,
@@ -339,33 +508,21 @@ function updateTableSchema(tableName, expectedColumns) {
   }
 }
 
-// Clean up history records that don't have matching local Anime/Manga metadata
-try {
-  const watchDeleted = global.db
-    .prepare(
-      "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
-    )
-    .run();
-  const readDeleted = global.db
-    .prepare(
-      "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
-    )
-    .run();
-  if (watchDeleted.changes > 0 || readDeleted.changes > 0) {
-    logger.info(
-      `Database cleanup: Deleted ${watchDeleted.changes} orphaned watch history entries and ${readDeleted.changes} read history entries.`,
-    );
-  }
-} catch (e) {
-  logger.error("Failed to run database history cleanup: " + e.message);
-}
-
 module.exports = {
   tables,
+  initDatabase,
   getKeyValue,
   setKeyValue,
   queryAll,
   queryOne,
   run,
   exec,
+  pragma,
+  mappingQueryAll,
+  mappingQueryOne,
+  mappingRun,
+  mappingExec,
+  batchRun,
+  closeDb,
+  openDb,
 };

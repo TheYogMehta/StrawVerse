@@ -70,3 +70,18 @@ try {
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
 }
+
+task patchCapacitorNodeJS {
+    doLast {
+        def targetFile = file("${rootProject.projectDir}/../node_modules/capacitor-nodejs/android/src/main/java/net/hampoelz/capacitor/nodejs/CapacitorNodeJS.java")
+        if (targetFile.exists()) {
+            exec {
+                commandLine 'bash', file('patch-capacitor-nodejs.sh').absolutePath, targetFile.absolutePath
+            }
+        } else {
+            logger.warn("CapacitorNodeJS.java not found at expected path, skipping patch")
+        }
+    }
+}
+
+preBuild.dependsOn patchCapacitorNodeJS

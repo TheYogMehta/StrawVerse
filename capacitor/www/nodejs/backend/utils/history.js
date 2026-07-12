@@ -1,6 +1,5 @@
 const { queryOne, queryAll, run } = require("./db");
 const { logger } = require("./AppLogger");
-const { UpdateDiscordRPC } = require("./discord");
 const { autoTrackMAL } = require("./mal");
 
 async function updateHistory({
@@ -231,18 +230,6 @@ async function updateHistory({
       }
     }
   }
-
-  try {
-    UpdateDiscordRPC(
-      resolvedTitle || type,
-      parsedNum,
-      type,
-      image,
-      mediaId,
-      currentTime,
-      duration,
-    ).catch(() => {});
-  } catch (rpcErr) {}
 }
 
 module.exports = {

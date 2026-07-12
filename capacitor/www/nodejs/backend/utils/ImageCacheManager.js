@@ -1,15 +1,15 @@
-const { app } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
 const axios = require("axios");
 
 const { logger } = require("./AppLogger");
-const { getKeyValue } = require("./db");
+const { getKeyValue, queryOne, queryAll, run } = require("./db");
 const { getHeaders } = require("./proxyHeaders");
 
 function getImageCacheDir() {
-  const dir = path.join(app.getPath("userData"), "image_cache");
+  const userDataPath = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
+  const dir = path.join(userDataPath, ".cache");
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -20,13 +20,9 @@ function getHash(url) {
   return crypto.createHash("md5").update(url).digest("hex");
 }
 
-function getCacheStats() {
+async function getCacheStats() {
   try {
-    const row = global.db
-      .prepare(
-        "SELECT COUNT(*) as count, SUM(file_size) as size FROM ImageCache",
-      )
-      .get();
+    const row = await queryOne("SELECT COUNT(*) as count, SUM(file_size) as size FROM ImageCache");
     return {
       filesCount: row?.count || 0,
       sizeInBytes: row?.size || 0,
@@ -46,7 +42,7 @@ async function clearCache() {
         await fs.promises.unlink(path.join(dir, file));
       } catch (_) {}
     }
-    global.db.prepare("DELETE FROM ImageCache").run();
+    await run("DELETE FROM ImageCache");
     logger.info("Image cache cleared successfully.");
     return { success: true };
   } catch (e) {
@@ -84,14 +80,8 @@ async function cacheImage(url, buffer = null) {
     let imageBuffer = buffer;
     if (!imageBuffer) {
       const headersObj = getHeaders(url);
-      const requestHeaders = {};
-      if (headersObj.Referer) requestHeaders["Referer"] = headersObj.Referer;
-      if (headersObj["User-Agent"])
-        requestHeaders["User-Agent"] = headersObj["User-Agent"];
-      if (headersObj.Cookie) requestHeaders["Cookie"] = headersObj.Cookie;
-
       const response = await axios.get(url, {
-        headers: requestHeaders,
+        headers: headersObj,
         responseType: "arraybuffer",
         timeout: 10000,
       });
@@ -102,18 +92,14 @@ async function cacheImage(url, buffer = null) {
     const fileSize = imageBuffer.length;
 
     const now = Date.now();
-    global.db
-      .prepare(
-        `
+    await run(`
       INSERT INTO ImageCache (url, filename, file_size, last_accessed)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(url) DO UPDATE SET
         filename = excluded.filename,
         file_size = excluded.file_size,
         last_accessed = excluded.last_accessed
-    `,
-      )
-      .run(url, filename, fileSize, now);
+    `, [url, filename, fileSize, now]);
 
     enforceLimit().catch((err) =>
       logger.error("Cache eviction error: " + err.message),
@@ -128,10 +114,10 @@ async function cacheImage(url, buffer = null) {
 
 async function enforceLimit() {
   try {
-    const limitGb = getKeyValue("Settings", "imageCacheSizeLimit") ?? 5;
+    const limitGb = await getKeyValue("Settings", "imageCacheSizeLimit") ?? 5;
     const limitBytes = limitGb * 1024 * 1024 * 1024;
 
-    const stats = getCacheStats();
+    const stats = await getCacheStats();
     if (stats.sizeInBytes <= limitBytes) {
       return;
     }
@@ -140,17 +126,9 @@ async function enforceLimit() {
       `Image cache size (${(stats.sizeInBytes / (1024 * 1024)).toFixed(1)} MB) exceeds limit (${limitGb} GB). Evicting oldest items...`,
     );
 
-    const items = global.db
-      .prepare(
-        "SELECT url, filename, file_size FROM ImageCache ORDER BY last_accessed ASC",
-      )
-      .all();
+    const items = await queryAll("SELECT url, filename, file_size FROM ImageCache ORDER BY last_accessed ASC");
     let currentSize = stats.sizeInBytes;
     const cacheDir = getImageCacheDir();
-
-    const deleteStmt = global.db.prepare(
-      "DELETE FROM ImageCache WHERE url = ?",
-    );
 
     for (const item of items) {
       if (currentSize <= limitBytes * 0.9) {
@@ -163,7 +141,7 @@ async function enforceLimit() {
         }
       } catch (_) {}
 
-      deleteStmt.run(item.url);
+      await run("DELETE FROM ImageCache WHERE url = ?", [item.url]);
       currentSize -= item.file_size;
     }
 
@@ -183,13 +161,8 @@ async function runStartupCleanup() {
     const cacheDir = getImageCacheDir();
 
     const cutoff = Date.now() - 518400000;
-    const expiredItems = global.db
-      .prepare("SELECT url, filename FROM ImageCache WHERE last_accessed < ?")
-      .all(cutoff);
+    const expiredItems = await queryAll("SELECT url, filename FROM ImageCache WHERE last_accessed < ?", [cutoff]);
 
-    const deleteStmt = global.db.prepare(
-      "DELETE FROM ImageCache WHERE url = ?",
-    );
     for (const item of expiredItems) {
       try {
         const filePath = path.join(cacheDir, item.filename);
@@ -197,7 +170,7 @@ async function runStartupCleanup() {
           await fs.promises.unlink(filePath);
         }
       } catch (_) {}
-      deleteStmt.run(item.url);
+      await run("DELETE FROM ImageCache WHERE url = ?", [item.url]);
     }
     if (expiredItems.length > 0) {
       logger.info(`Evicted ${expiredItems.length} expired image cache files.`);
@@ -207,9 +180,7 @@ async function runStartupCleanup() {
 
     const diskFiles = await fs.promises.readdir(cacheDir);
     const trackedFiles = new Set(
-      global.db
-        .prepare("SELECT filename FROM ImageCache")
-        .all()
+      (await queryAll("SELECT filename FROM ImageCache"))
         .map((r) => r.filename),
     );
 
@@ -228,13 +199,11 @@ async function runStartupCleanup() {
       );
     }
 
-    const allDbItems = global.db
-      .prepare("SELECT url, filename FROM ImageCache")
-      .all();
+    const allDbItems = await queryAll("SELECT url, filename FROM ImageCache");
     for (const item of allDbItems) {
       const filePath = path.join(cacheDir, item.filename);
       if (!fs.existsSync(filePath)) {
-        deleteStmt.run(item.url);
+        await run("DELETE FROM ImageCache WHERE url = ?", [item.url]);
       }
     }
 
@@ -250,21 +219,15 @@ async function migrateDatabaseBase64Images() {
     let migratedCount = 0;
 
     for (const type of types) {
-      const cols = global.db
-        .prepare(`PRAGMA table_info(${type})`)
-        .all()
+      const cols = await queryAll(`PRAGMA table_info(${type})`)
         .map((col) => col.name);
       if (!cols.includes("image")) {
         continue;
       }
 
-      const rows = global.db
-        .prepare(
-          `SELECT id, image, image_url FROM ${type} WHERE image IS NOT NULL`,
-        )
-        .all();
+      const rows = await queryAll(`SELECT id, image, image_url FROM ${type} WHERE image IS NOT NULL`);
       if (rows.length === 0) {
-        global.db.exec(`ALTER TABLE ${type} DROP COLUMN image`);
+        await exec(`ALTER TABLE ${type} DROP COLUMN image`);
         logger.info(`Dropped empty 'image' column from ${type} table.`);
         continue;
       }
@@ -289,11 +252,7 @@ async function migrateDatabaseBase64Images() {
               row.image.startsWith("http://") ||
               row.image.startsWith("https://")
             ) {
-              global.db
-                .prepare(
-                  `UPDATE ${type} SET image = NULL, image_url = COALESCE(image_url, ?) WHERE id = ?`,
-                )
-                .run(row.image, row.id);
+              await run(`UPDATE ${type} SET image = NULL, image_url = COALESCE(image_url, ?) WHERE id = ?`, [row.image, row.id]);
               migratedCount++;
               continue;
             }
@@ -312,16 +271,12 @@ async function migrateDatabaseBase64Images() {
             `https://strawverse.internal/fallback-image/${type}/${row.id}`;
 
           await cacheImage(imageUrl, buffer);
-          global.db
-            .prepare(
-              `UPDATE ${type} SET image = NULL, image_url = ? WHERE id = ?`,
-            )
-            .run(imageUrl, row.id);
+          await run(`UPDATE ${type} SET image = NULL, image_url = ? WHERE id = ?`, [imageUrl, row.id]);
           migratedCount++;
         }
       }
 
-      global.db.exec(`ALTER TABLE ${type} DROP COLUMN image`);
+      await exec(`ALTER TABLE ${type} DROP COLUMN image`);
       logger.info(
         `Successfully dropped migrated 'image' column from ${type} table.`,
       );
@@ -331,7 +286,7 @@ async function migrateDatabaseBase64Images() {
       logger.info(
         `Successfully migrated ${migratedCount} database images to disk cache. Running vacuum...`,
       );
-      global.db.exec("VACUUM");
+      await exec("VACUUM");
       logger.info("Database vacuum completed.");
     }
   } catch (e) {
@@ -342,16 +297,14 @@ async function migrateDatabaseBase64Images() {
 async function removeCachedImage(url) {
   try {
     if (!url) return;
-    const row = global.db
-      .prepare("SELECT filename FROM ImageCache WHERE url = ?")
-      .get(url);
+    const row = await queryOne("SELECT filename FROM ImageCache WHERE url = ?", [url]);
     if (row) {
       const cacheDir = getImageCacheDir();
       const filePath = path.join(cacheDir, row.filename);
       if (fs.existsSync(filePath)) {
         await fs.promises.unlink(filePath);
       }
-      global.db.prepare("DELETE FROM ImageCache WHERE url = ?").run(url);
+      await run("DELETE FROM ImageCache WHERE url = ?", [url]);
     }
   } catch (e) {
     logger.error(`Failed to remove cached image for ${url}: ${e.message}`);

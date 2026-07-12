@@ -1,3 +1,7 @@
+if (!process.env.NODEJS_MOBILE_DATA_DIR && process.env.DATADIR) {
+  process.env.NODEJS_MOBILE_DATA_DIR = process.env.DATADIR;
+}
+
 if (typeof global.File === "undefined") {
   const { Blob } = require("buffer");
   global.File = class File extends Blob {
@@ -23,16 +27,38 @@ const got = require("got");
 
 const PORT = 3459;
 
-const shimMap = {
-  electron: path.join(__dirname, "shims", "electron.js"),
-  "node:sqlite": path.join(__dirname, "shims", "node-sqlite.js"),
-  "discord-rpc": path.join(__dirname, "shims", "discord-rpc.js"),
-  "ffmpeg-static": path.join(__dirname, "shims", "ffmpeg-static.js"),
+const sseClients = new Set();
+let pendingBypassRequest = null;
+let PageHistory = [];
+global.pendingRequests = new Map();
+
+function broadcast(channel, data) {
+  const payload = `data: ${JSON.stringify({ channel, data })}\n\n`;
+  for (const res of sseClients) {
+    try {
+      res.write(payload);
+    } catch (_) {
+      sseClients.delete(res);
+    }
+  }
+}
+
+const fakeWindow = {
+  webContents: {
+    send: (channel, data) => broadcast(channel, data),
+  },
+  isDestroyed: () => false,
+  show: () => {},
+  focus: () => {},
 };
+
+function normalizeHostname(value) {
+  if (!value) return "";
+  return value.startsWith("www.") ? value.slice(4) : value;
+}
 
 const originalResolve = Module._resolveFilename;
 Module._resolveFilename = function (request, ...rest) {
-  if (shimMap[request]) return shimMap[request];
   if (request === "cheerio" || request === "axios" || request === "got") {
     return request;
   }
@@ -109,24 +135,14 @@ async function boot() {
   applyDefaultPaths();
   process.env.PLATFORM = "android";
 
-  try {
-    require.resolve("better-sqlite3");
-  } catch (_) {
-    const initSqlJs = require("sql.js");
-    global.__sqljs = await initSqlJs({
-      locateFile: (file) => path.join(__dirname, file),
-    });
-  }
 
-  const electron = require("./shims/electron");
-  const bridge = require("./bridge");
 
   global.__sendToNative = (channelName, data) => {
-    bridge.broadcast(channelName, data);
+    broadcast(channelName, data);
     if (channel) channel.send(channelName, data);
   };
 
-  global.win = bridge.fakeWindow;
+  global.win = fakeWindow;
   global.PORT = PORT;
 
   const bundledModules = {};
@@ -148,16 +164,14 @@ async function boot() {
   }
 
   const { logger } = require("./backend/utils/AppLogger");
-  logger.info(
-    `[android] Booting StrawVerse backend (sqlite backend: ${
-      require("./shims/node-sqlite").__backend
-    })`,
-  );
+  logger.info("[android] Booting StrawVerse backend (sqlite backend: native Java bridge)");
 
-  require("./backend/utils/db");
+  const { initDatabase, run } = require("./backend/utils/db");
+  await initDatabase();
+  logger.info("[android] Database initialized via Java bridge");
+
   try {
-    const { run } = require("./backend/utils/db");
-    run(
+    await run(
       "DELETE FROM cookie WHERE name = 'user_agent' OR name = 'client_hints'",
     );
     logger.info(
@@ -173,6 +187,38 @@ async function boot() {
   try {
     const axios = require("axios");
     const defaultAdapter = axios.defaults.adapter;
+
+    global.pendingRequests = new Map();
+    let nativeRequestCounter = 0;
+
+    global.sendNativeRequest = (config) => {
+      return new Promise((resolve, reject) => {
+        const requestId = ++nativeRequestCounter;
+        const timeout = setTimeout(() => {
+          global.pendingRequests.delete(requestId);
+          reject(new Error(`Native request timeout for ${config.url}`));
+        }, 30000);
+
+        global.pendingRequests.set(requestId, {
+          resolve: (res) => {
+            clearTimeout(timeout);
+            resolve(res);
+          },
+          reject: (err) => {
+            clearTimeout(timeout);
+            reject(err);
+          }
+        });
+
+        broadcast("native-request", {
+          requestId,
+          url: config.url,
+          method: config.method || "GET",
+          headers: config.headers || {},
+          body: config.data || null
+        });
+      });
+    };
 
     const nativeAxiosAdapter = async (config) => {
       if (global.sendNativeRequest) {
@@ -354,13 +400,46 @@ async function boot() {
     logger.error("[android] settings initialization failed: " + e.message);
   }
 
-  const { registerSharedStateHandlers } = require("./backend/sharedState");
-  registerSharedStateHandlers();
+  const { queryOne, run: dbRun } = require("./backend/utils/db");
 
-  bridge.registerMobileHandlers({
-    appVersion: process.env.STRAWVERSE_APP_VERSION,
-    repoSlug: process.env.STRAWVERSE_REPO || "TheYogMehta/StrawVerse",
-  });
+  global.cloudflarebypass = async (targetUrl, silent, referer, userAgent) => {
+    if (!targetUrl) return;
+    const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
+
+    try {
+      await dbRun(
+        "DELETE FROM cookie WHERE id IN (?, ?) OR ((name IN ('cf_clearance', 'cf_user_agent') OR name LIKE 'sec-ch-ua%') AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))",
+        [`${domain}-cf_clearance`, `${domain}-cf-user-agent`, domain, domain],
+      );
+      if (global.clearCookieCache) {
+        global.clearCookieCache(domain);
+      }
+    } catch (e) {
+      console.error("[main] Failed to clear stale cookies:", e.message);
+    }
+
+    pendingBypassRequest = { url: targetUrl, userAgent, referer };
+    broadcast("cf-bypass-request", pendingBypassRequest);
+
+    try {
+      for (let i = 0; i < 20; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const row = await queryOne(
+          "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          [`${domain}-cf_clearance`, domain, domain],
+        );
+        if (row?.value) {
+          if (global.clearCookieCache) {
+            global.clearCookieCache(domain);
+          }
+          return true;
+        }
+      }
+      throw new Error("Cloudflare bypass timeout");
+    } finally {
+      pendingBypassRequest = null;
+    }
+  };
 
   const express = require("express");
   const appExpress = express();
@@ -378,7 +457,374 @@ async function boot() {
 
   appExpress.use(express.urlencoded({ limit: "50mb", extended: true }));
   appExpress.use(express.json({ limit: "50mb" }));
-  appExpress.use(bridge.router);
+  const router = express.Router();
+
+  router.get("/api/proxy-headers", (req, res) => {
+    const { url } = req.query;
+    if (!url) return res.status(400).json({ error: "URL is required" });
+    try {
+      const proxyHeaders = require("./backend/utils/proxyHeaders");
+      const headers = proxyHeaders.getHeaders(url);
+      res.json(headers || {});
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get("/api/ipc/events", (req, res) => {
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    });
+    res.write(": connected\n\n");
+
+    if (pendingBypassRequest) {
+      res.write(`data: ${JSON.stringify({ channel: "cf-bypass-request", data: pendingBypassRequest })}\n\n`);
+    }
+
+    sseClients.add(res);
+    const keepAlive = setInterval(() => {
+      try {
+        res.write(": ping\n\n");
+      } catch (_) {}
+    }, 25000);
+
+    req.on("close", () => {
+      clearInterval(keepAlive);
+      sseClients.delete(res);
+    });
+  });
+
+  router.get("/api/version", (req, res) => {
+    res.json({ ok: true, result: process.env.STRAWVERSE_APP_VERSION || "1.0.0" });
+  });
+
+  router.get("/api/state/history", (req, res) => {
+    res.json({ ok: true, result: PageHistory });
+  });
+
+  router.post("/api/state/history", (req, res) => {
+    PageHistory = req.body.args?.[0] || [];
+    res.json({ ok: true, result: PageHistory });
+  });
+
+  router.post("/api/extensions", async (req, res) => {
+    try {
+      const [TaskType, AnimeManga, ExtentionName] = req.body.args || [];
+      const { HandleExtensions } = require("./backend/utils/settings");
+      const result = await HandleExtensions(TaskType, AnimeManga, ExtentionName);
+      res.json({ ok: true, result });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  router.get("/api/whats-new", async (req, res) => {
+    try {
+      const appVersion = process.env.STRAWVERSE_APP_VERSION || "1.0.0";
+      const { getKeyValue, setKeyValue } = require("./backend/utils/db");
+      const lastSeen = await getKeyValue("Settings", "whatsNewSeenVersion");
+      const disabled = await getKeyValue("Settings", "whatsNewDisabled");
+      if (disabled === true || lastSeen === appVersion) {
+        return res.json({ ok: true, result: null });
+      }
+
+      const changelogPath = path.join(__dirname, "CHANGELOG.md");
+      if (!fs.existsSync(changelogPath)) {
+        return res.json({ ok: true, result: null });
+      }
+      const changelog = fs.readFileSync(changelogPath, "utf-8");
+
+      await setKeyValue("Settings", "whatsNewSeenVersion", appVersion);
+      res.json({ ok: true, result: { version: appVersion, changelog } });
+    } catch (e) {
+      res.json({ ok: true, result: null });
+    }
+  });
+
+  router.post("/api/whats-new/disable", async (req, res) => {
+    try {
+      const { setKeyValue } = require("./backend/utils/db");
+      await setKeyValue("Settings", "whatsNewDisabled", true);
+      res.json({ ok: true, result: { success: true } });
+    } catch (e) {
+      res.json({ ok: true, result: { success: false } });
+    }
+  });
+
+  router.get("/api/update/check", (req, res) => res.json({ ok: true, result: null }));
+  router.post("/api/update/download", (req, res) => res.json({ ok: true, result: null }));
+  router.post("/api/update/install", (req, res) => res.json({ ok: true, result: null }));
+
+  router.post("/api/device/user-agent", (req, res) => {
+    let ua = req.body.args?.[0];
+    if (ua) {
+      ua = ua.replace(/\s*;?\s*wv\b/gi, "")
+             .replace(/Version\/[0-9.]+\s+/gi, "");
+    }
+    global.deviceUserAgent = ua;
+    res.json({ ok: true, result: { ok: true } });
+  });
+
+  router.post("/api/cf-bypass", async (req, res) => {
+    try {
+      const [targetUrl, referer, userAgent] = req.body.args || [];
+      if (!targetUrl) return res.json({ ok: true, result: { ok: true, success: true } });
+      const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
+      broadcast("cf-bypass-request", { url: targetUrl, referer, userAgent });
+
+      for (let i = 0; i < 15; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        const row = await queryOne(
+          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          [`${domain}-cf_clearance`, domain, domain],
+        );
+        const now = Date.now();
+        const isCurrent =
+          row?.value &&
+          (Number(row.expirationDate) > now ||
+            (Number(row.local_saved_at) > 0 &&
+              now - Number(row.local_saved_at) < 2 * 60 * 60 * 1000));
+        if (isCurrent) {
+          return res.json({ ok: true, result: { ok: true, success: true } });
+        }
+      }
+      res.json({ ok: true, result: { ok: false, success: false, reason: "timeout" } });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  router.post("/api/cf-bypass/save", async (req, res) => {
+    try {
+      const [targetUrl, cookieString, userAgent, clientHints] = req.body.args || [];
+      if (!cookieString || !targetUrl) return res.json({ ok: true, result: { ok: false } });
+      const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
+      const pairs = cookieString.split(";");
+      let savedClearance = false;
+
+      const expiry = Date.now() + 1000 * 60 * 60 * 24 * 30; // 30 days
+      const upsertSql = `
+        INSERT INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate, local_saved_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          value = excluded.value,
+          expirationDate = excluded.expirationDate,
+          local_saved_at = excluded.local_saved_at
+      `;
+
+      for (const pair of pairs) {
+        const idx = pair.indexOf("=");
+        if (idx === -1) continue;
+        const name = pair.substring(0, idx).trim();
+        const value = pair.substring(idx + 1).trim();
+
+        if (name === "cf_clearance") {
+          await dbRun(upsertSql, [
+            `${domain}-cf_clearance`,
+            value,
+            name,
+            domain,
+            targetUrl,
+            "/",
+            1,
+            1,
+            expiry.toString(),
+            Date.now().toString(),
+          ]);
+          savedClearance = true;
+        }
+        if (name === "cf_user_agent" || name === "user_agent") {
+          await dbRun(upsertSql, [
+            `${domain}-cf_user_agent`,
+            value,
+            "user_agent",
+            domain,
+            targetUrl,
+            "/",
+            1,
+            1,
+            expiry.toString(),
+            Date.now().toString(),
+          ]);
+        }
+        if (name.startsWith("sec-ch-ua")) {
+          await dbRun(upsertSql, [
+            `${domain}-${name}`,
+            value,
+            name,
+            domain,
+            targetUrl,
+            "/",
+            1,
+            1,
+            expiry.toString(),
+            Date.now().toString(),
+          ]);
+        }
+      }
+
+      if (userAgent) {
+        await dbRun(upsertSql, [
+          `${domain}-user_agent`,
+          userAgent,
+          "user_agent",
+          domain,
+          targetUrl,
+          "/",
+          1,
+          1,
+          expiry.toString(),
+          Date.now().toString(),
+        ]);
+      }
+
+      if (clientHints) {
+        await dbRun(upsertSql, [
+          `${domain}-client_hints`,
+          typeof clientHints === "string" ? clientHints : JSON.stringify(clientHints),
+          "client_hints",
+          domain,
+          targetUrl,
+          "/",
+          1,
+          1,
+          expiry.toString(),
+          Date.now().toString(),
+        ]);
+      }
+
+      res.json({ ok: true, result: { ok: savedClearance } });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  router.post("/api/settings/get", async (req, res) => {
+    try {
+      const [keys] = req.body.args || [];
+      const { settingfetch, getScraperIconsPath } = require("./backend/utils/settings");
+      const { MalCreateUrl } = require("./backend/utils/mal");
+
+      const setting = await settingfetch();
+      let settingsObj = {};
+
+      const getProviders = () => ({
+        Anime: global.Anime_providers ? Object.keys(global.Anime_providers) : [],
+        Manga: global.Manga_providers ? Object.keys(global.Manga_providers) : [],
+      });
+
+      const getIconUrl = (name, valScraper) => {
+        if (valScraper?.logo) return valScraper.logo;
+        const iconsDir = getScraperIconsPath();
+        if (iconsDir) {
+          const iconPath = require("path").join(iconsDir, `${name}.ico`);
+          if (require("fs").existsSync(iconPath)) {
+            return `/api/image?url=${encodeURIComponent(`file://${iconPath}`)}`;
+          }
+        }
+        return null;
+      };
+
+      const getInstalledExtensions = () => ({
+        Anime: global.Anime_providers
+          ? Object.entries(global.Anime_providers).map(([key, val]) => ({
+              name: key,
+              version: val.version || "1.0.0",
+              icon: getIconUrl(key, val),
+            }))
+          : [],
+        Manga: global.Manga_providers
+          ? Object.entries(global.Manga_providers).map(([key, val]) => ({
+              name: key,
+              version: val.version || "1.0.0",
+              icon: getIconUrl(key, val),
+            }))
+          : [],
+      });
+
+      if (Array.isArray(keys)) {
+        for (const k of keys) {
+          if (k === "malUsername") {
+            settingsObj[k] = setting?.malUsername || global.malUsername || null;
+          } else if (k === "providers") {
+            settingsObj[k] = getProviders();
+          } else if (k === "installedExtensions") {
+            settingsObj[k] = getInstalledExtensions();
+          } else {
+            settingsObj[k] = setting[k];
+          }
+        }
+      } else {
+        settingsObj = {
+          ...setting,
+          providers: getProviders(),
+          installedExtensions: getInstalledExtensions(),
+        };
+      }
+
+      let url = null;
+      if (
+        !Array.isArray(keys) &&
+        (!setting.mal_on_off || setting.mal_on_off === null)
+      ) {
+        url = await MalCreateUrl();
+      }
+
+      res.json({
+        ok: true,
+        result: {
+          settings: settingsObj,
+          url: url,
+          MalLoggedIn: global.MalLoggedIn || false,
+          malUsername: setting?.malUsername || global.malUsername || null,
+        }
+      });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  router.post("/api/settings/update", async (req, res) => {
+    try {
+      const [key, value] = req.body.args || [];
+      const { settingupdate } = require("./backend/utils/settings");
+      await settingupdate({ [key]: value });
+      res.json({ ok: true, result: { success: true } });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  router.post("/api/settings/update-multiple", async (req, res) => {
+    try {
+      const [settingsObj] = req.body.args || [];
+      const { settingupdate } = require("./backend/utils/settings");
+      await settingupdate(settingsObj);
+      res.json({ ok: true, result: { success: true } });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  router.post("/api/ipc/native-response", (req, res) => {
+    const [requestId, success, response, error] = req.body.args || [];
+    const pending = global.pendingRequests.get(requestId);
+    if (pending) {
+      global.pendingRequests.delete(requestId);
+      if (success) {
+        pending.resolve(response);
+      } else {
+        pending.reject(new Error(error));
+      }
+    }
+    res.json({ ok: true, result: { ok: true } });
+  });
+
+  router.get("/api/update/health", (req, res) => res.json({ ok: true, result: { ok: true } }));
+
+  appExpress.use(router);
   appExpress.get("/health", (_req, res) => res.json({ ok: true }));
   appExpress.use(express.static(path.join(__dirname, "gui", "dist")));
 

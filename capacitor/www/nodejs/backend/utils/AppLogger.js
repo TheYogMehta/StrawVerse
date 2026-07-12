@@ -1,10 +1,14 @@
 const winston = require("winston");
-const { app } = require("electron");
 const path = require("path");
 const fs = require("fs");
 
-const userDataPath = app.getPath("userData");
-const LogFilePath = path.join(userDataPath, "app.log");
+const userDataPath = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
+const LogFilePath = path.join(userDataPath, "data", "app.log");
+
+const logDir = path.dirname(LogFilePath);
+if (!fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir, { recursive: true });
+}
 
 if (fs.existsSync(LogFilePath)) {
   fs.unlinkSync(LogFilePath);
