@@ -29,9 +29,17 @@ import android.widget.TextView;
 import android.util.Log;
 import java.io.File;
 import java.util.Map;
+import org.json.JSONObject;
+import java.util.List;
+import java.util.ArrayList;
 
 @CapacitorPlugin(name = "CloudflareBypass")
 public class CloudflareBypassPlugin extends Plugin {
+    private WebView backgroundWebView = null;
+    private String lastLoadedOrigin = null;
+    private boolean isWebViewLoading = false;
+    private final List<Runnable> pendingTasks = new ArrayList<>();
+    private final Map<String, PluginCall> activeFetchCalls = new java.util.concurrent.ConcurrentHashMap<>();
 
     @PluginMethod
     public void bypass(PluginCall call) {
@@ -476,6 +484,12 @@ public class CloudflareBypassPlugin extends Plugin {
 
     @PluginMethod
     public void nativeRequest(final PluginCall call) {
+        String url = call.getString("url");
+        if (url != null && url.contains("animepahe")) {
+            executeWebViewRequest(url, call.getString("method"), call.getObject("headers"), call.getString("body"), call);
+            return;
+        }
+
         new Thread(new Runnable() {
             @Override
             public void run() {
@@ -602,5 +616,195 @@ public class CloudflareBypassPlugin extends Plugin {
                 }
             }
         }).start();
+    }
+
+    private void initBackgroundWebView() {
+        if (backgroundWebView != null) return;
+        
+        getActivity().runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                backgroundWebView = new WebView(getActivity());
+                backgroundWebView.getSettings().setJavaScriptEnabled(true);
+                backgroundWebView.getSettings().setDomStorageEnabled(true);
+                
+                String webViewUA = android.webkit.WebSettings.getDefaultUserAgent(getContext());
+                backgroundWebView.getSettings().setUserAgentString(webViewUA);
+                
+                CookieManager.getInstance().setAcceptCookie(true);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    CookieManager.getInstance().setAcceptThirdPartyCookies(backgroundWebView, true);
+                }
+                
+                backgroundWebView.addJavascriptInterface(CloudflareBypassPlugin.this, "AndroidFetchBridge");
+                
+                backgroundWebView.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public void onPageFinished(WebView view, String url) {
+                        super.onPageFinished(view, url);
+                        Log.i("StrawVerseBypass", "Background WebView finished loading: " + url);
+                        isWebViewLoading = false;
+                        runPendingTasks();
+                    }
+                    
+                    @Override
+                    public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                        Log.e("StrawVerseBypass", "Background WebView error: " + description + " for " + failingUrl);
+                    }
+                });
+            }
+        });
+    }
+
+    private void runPendingTasks() {
+        getActivity().runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                List<Runnable> tasks = new ArrayList<>(pendingTasks);
+                pendingTasks.clear();
+                for (Runnable task : tasks) {
+                    task.run();
+                }
+            }
+        });
+    }
+
+    @android.webkit.JavascriptInterface
+    public void onFetchResponse(final String requestId, final String value) {
+        Log.i("StrawVerseBypass", "Received WebView fetch response for ID: " + requestId);
+        final PluginCall call = activeFetchCalls.remove(requestId);
+        if (call == null) {
+            Log.w("StrawVerseBypass", "No active PluginCall found for ID: " + requestId);
+            return;
+        }
+        
+        try {
+            if (value == null || value.isEmpty()) {
+                call.reject("Empty response from WebView fetch");
+                return;
+            }
+            
+            JSONObject responseObj = new JSONObject(value);
+            if (responseObj.has("error")) {
+                call.reject(responseObj.getString("error"));
+                return;
+            }
+            
+            int status = responseObj.getInt("status");
+            String responseData = responseObj.getString("data");
+            JSONObject resHeaders = responseObj.getJSONObject("headers");
+            
+            String base64Data = android.util.Base64.encodeToString(
+                    responseData.getBytes("utf-8"), 
+                    android.util.Base64.NO_WRAP
+            );
+            
+            JSObject jsResHeaders = new JSObject();
+            java.util.Iterator<String> keys = resHeaders.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                jsResHeaders.put(key, resHeaders.getString(key));
+            }
+            
+            JSObject ret = new JSObject();
+            ret.put("status", status);
+            ret.put("data", base64Data);
+            ret.put("isBase64", true);
+            ret.put("headers", jsResHeaders);
+            
+            Log.i("StrawVerseBypass", "WebView fetch completed asynchronously: status " + status);
+            call.resolve(ret);
+            
+        } catch (Exception e) {
+            Log.e("StrawVerseBypass", "Failed to parse WebView fetch output in interface", e);
+            call.reject("Failed to parse WebView fetch output: " + e.getMessage());
+        }
+    }
+
+    private void executeWebViewRequest(final String url, final String method, final JSObject headers, final String body, final PluginCall call) {
+        initBackgroundWebView();
+        
+        getActivity().runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Uri uri = Uri.parse(url);
+                    final String origin = uri.getScheme() + "://" + uri.getAuthority() + "/";
+                    
+                    if (backgroundWebView == null) {
+                        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(this, 100);
+                        return;
+                    }
+                    
+                    if (isWebViewLoading) {
+                        pendingTasks.add(this);
+                        return;
+                    }
+                    
+                    if (!origin.equals(lastLoadedOrigin)) {
+                        Log.i("StrawVerseBypass", "Loading origin in background WebView: " + origin);
+                        isWebViewLoading = true;
+                        lastLoadedOrigin = origin;
+                        backgroundWebView.loadUrl(origin);
+                        pendingTasks.add(this);
+                        return;
+                    }
+                    
+                    Log.i("StrawVerseBypass", "Executing WebView fetch for: " + url);
+                    
+                    JSObject fetchOptions = new JSObject();
+                    fetchOptions.put("method", method.toUpperCase());
+                    
+                    if (headers != null) {
+                        JSObject fetchHeaders = new JSObject();
+                        java.util.Iterator<String> keys = headers.keys();
+                        while (keys.hasNext()) {
+                            String key = keys.next();
+                            if (key.equalsIgnoreCase("cookie") || key.equalsIgnoreCase("host") || key.equalsIgnoreCase("user-agent")) {
+                                continue;
+                            }
+                            fetchHeaders.put(key, headers.getString(key));
+                        }
+                        fetchOptions.put("headers", fetchHeaders);
+                    }
+                    
+                    if (body != null && !body.isEmpty()) {
+                        fetchOptions.put("body", body);
+                    }
+                    
+                    final String requestId = call.getCallbackId();
+                    activeFetchCalls.put(requestId, call);
+                    
+                    String jsCode = "(function() {\n" +
+                        "  var url = '" + url.replace("'", "\\'") + "';\n" +
+                        "  var options = " + fetchOptions.toString() + ";\n" +
+                        "  var reqId = '" + requestId + "';\n" +
+                        "  fetch(url, options)\n" +
+                        "    .then(function(res) {\n" +
+                        "      return res.text().then(function(text) {\n" +
+                        "        var headers = {};\n" +
+                        "        res.headers.forEach(function(val, key) {\n" +
+                        "          headers[key] = val;\n" +
+                        "        });\n" +
+                        "        AndroidFetchBridge.onFetchResponse(reqId, JSON.stringify({\n" +
+                        "          status: res.status,\n" +
+                        "          headers: headers,\n" +
+                        "          data: text\n" +
+                        "        }));\n" +
+                        "      });\n" +
+                        "    })\n" +
+                        "    .catch(function(err) {\n" +
+                        "      AndroidFetchBridge.onFetchResponse(reqId, JSON.stringify({ error: err.message || String(err) }));\n" +
+                        "    });\n" +
+                        "})()";
+                    
+                    backgroundWebView.evaluateJavascript(jsCode, null);
+                    
+                } catch (Exception e) {
+                    Log.e("StrawVerseBypass", "Error setting up WebView request", e);
+                    call.reject("Error setting up WebView request: " + e.getMessage());
+                }
+            }
+        });
     }
 }
