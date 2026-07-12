@@ -33,6 +33,8 @@ export default function InfoView({
   onBack,
   onWatch: propOnWatch,
   onRead: propOnRead,
+  title: propTitle,
+  onSearchFallback,
 }) {
   const [id, setId] = useState(propId);
   const [localMalProvider, setLocalMalProvider] =
@@ -1387,6 +1389,10 @@ export default function InfoView({
       });
       const data = await response.json();
       if (!data.error) {
+        if (window.catalogCache) {
+          delete window.catalogCache[`Anime_local`];
+          delete window.catalogCache[`Manga_local`];
+        }
         setCurrentTags(updatedTag ? [updatedTag] : []);
 
         // Refresh custom tag list
@@ -1737,9 +1743,66 @@ export default function InfoView({
             {details?.message ||
               `The requested ${type.toLowerCase()} could not be found or failed to load.`}
           </p>
-          <button onClick={onBack} className="btn-back u-style-34">
-            <span>Go Back</span>
-          </button>
+          <div
+            style={{
+              display: "flex",
+              gap: "10px",
+              marginTop: "15px",
+              flexWrap: "wrap",
+              justifyContent: "center",
+            }}
+          >
+            <button
+              onClick={onBack}
+              className="btn-back u-style-34"
+              style={{ margin: 0 }}
+            >
+              <span>Go Back</span>
+            </button>
+            {propTitle && onSearchFallback && (
+              <button
+                onClick={() => onSearchFallback(propTitle)}
+                className="btn-back u-style-34"
+                style={{
+                  backgroundColor: "var(--accent-blue, #3b82f6)",
+                  border: "none",
+                  margin: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <Search size={16} />
+                <span>Search Title</span>
+              </button>
+            )}
+            {currentTags && currentTags.length > 0 && (
+              <button
+                onClick={async () => {
+                  const confirmed = await swalConfirm(
+                    "Remove from Library",
+                    "Are you sure you want to remove this entry from your library/watchlist?",
+                  );
+                  if (confirmed) {
+                    await saveTags("");
+                    if (onBack) onBack();
+                  }
+                }}
+                className="btn-back u-style-34"
+                style={{
+                  backgroundColor: "var(--accent-red, #ef4444)",
+                  border: "none",
+                  margin: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                }}
+              >
+                <Trash2 size={16} />
+                <span>Remove from Library</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -2033,29 +2096,27 @@ export default function InfoView({
           </div>
 
           {/* Consolidated MyAnimeList Integration Box */}
-          {details?.MalLoggedIn && (
-            <div className="mal-box glass-panel">
-              <div className="mal-box-header u-style-39">
-                <h3 className="mal-title u-style-11">
-                  MyAnimeList Integration
-                </h3>
-                {details.malid ? (
-                  <div className="mal-link-status u-style-27">
-                    <span className="mal-link-badge">
-                      Linked (ID: {details.malid})
-                    </span>
-                    <button onClick={handleUnlinkMal} className="btn-unlink">
-                      Unlink
-                    </button>
-                  </div>
-                ) : (
-                  <button onClick={startMalLink} className="btn-link-mal">
-                    Link MyAnimeList Title
+          <div className="mal-box glass-panel">
+            <div className="mal-box-header u-style-39">
+              <h3 className="mal-title u-style-11">MyAnimeList Integration</h3>
+              {details?.malid ? (
+                <div className="mal-link-status u-style-27">
+                  <span className="mal-link-badge">
+                    Linked (ID: {details.malid})
+                  </span>
+                  <button onClick={handleUnlinkMal} className="btn-unlink">
+                    Unlink
                   </button>
-                )}
-              </div>
+                </div>
+              ) : (
+                <button onClick={startMalLink} className="btn-link-mal">
+                  Link MyAnimeList Title
+                </button>
+              )}
+            </div>
 
-              {details.malid ? (
+            {details?.malid ? (
+              details?.MalLoggedIn ? (
                 <div className="mal-row">
                   <div className="input-group">
                     <label className="input-label">
@@ -2134,12 +2195,17 @@ export default function InfoView({
                 </div>
               ) : (
                 <p className="mal-unlinked-placeholder u-style-42">
-                  This title is not linked to a MyAnimeList entry. Link it to
-                  synchronize your status and watch history automatically.
+                  Log in to MyAnimeList in Settings to synchronize your status
+                  and progress automatically.
                 </p>
-              )}
-            </div>
-          )}
+              )
+            ) : (
+              <p className="mal-unlinked-placeholder u-style-42">
+                This title is not linked to a MyAnimeList entry. Link it to
+                synchronize your status and watch history automatically.
+              </p>
+            )}
+          </div>
         </div>
       </div>
 

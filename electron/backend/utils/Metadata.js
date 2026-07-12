@@ -113,7 +113,7 @@ async function MetadataAdd(type, valuesToAdd) {
         .prepare("SELECT malid FROM unlinked_mal_ids WHERE id = ?")
         .get(cleanId);
 
-      if (customMappingRow !== undefined) {
+      if (customMappingRow) {
         valuesToAdd.MalID = customMappingRow.malid
           ? String(customMappingRow.malid)
           : null;
@@ -1709,4 +1709,5 @@ module.exports = {
   FetchLocalProviderInfo,
   MalMangaMap,
   formatFallbackTitle,
+  getMalIdFromMapping,
 };

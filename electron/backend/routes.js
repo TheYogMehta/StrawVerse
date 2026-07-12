@@ -65,10 +65,16 @@ const {
   getSourceById,
   MetadataRemove,
   MetadataAdd,
+  getMalIdFromMapping,
 } = require("./utils/Metadata");
 const { updateHistory } = require("./utils/history");
 const { getHeaders } = require("./utils/proxyHeaders");
-const { getKeyValue, setKeyValue, queryOne, run } = require("./utils/db");
+const {
+  getKeyValue,
+  setKeyValue,
+  queryOne,
+  run,
+} = require("./utils/db");
 const ImageCacheManager = require("./utils/ImageCacheManager");
 const { UpdateDiscordRPC } = require("./utils/discord");
 const segmentKeyCache = {};
@@ -969,7 +975,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
         let resolvedMalId = undefined;
         let isCustom = false;
 
-        if (customMappingRow !== undefined) {
+        if (customMappingRow) {
           isCustom = true;
           if (customMappingRow.malid) {
             resolvedMalId = parseInt(customMappingRow.malid);
@@ -1253,7 +1259,20 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
     );
     logger.error(`Error message: ${err.message}`);
     logger.error(`Stack trace: ${err.stack}`);
-    return res.json({ error: true, message: err?.message });
+    let localTag = data?.CustomTag || "";
+    if (!localTag) {
+      try {
+        const row = global.db
+          .prepare(`SELECT CustomTag FROM ${AnimeManga} WHERE id = ?`)
+          .get(id);
+        if (row) localTag = row.CustomTag || "";
+      } catch (_) {}
+    }
+    return res.json({
+      error: true,
+      message: err?.message,
+      CustomTag: localTag,
+    });
   }
 });
 
