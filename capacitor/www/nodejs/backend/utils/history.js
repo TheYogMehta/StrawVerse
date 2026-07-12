@@ -31,9 +31,10 @@ async function updateHistory({
 
   if (!resolvedTitle || resolvedTitle === type) {
     try {
-      const localRec = queryOne(`SELECT title FROM ${mainTable} WHERE id = ?`, [
-        mediaId,
-      ]);
+      const localRec = await queryOne(
+        `SELECT title FROM ${mainTable} WHERE id = ?`,
+        [mediaId],
+      );
       if (localRec && localRec.title) {
         resolvedTitle = localRec.title;
       }
@@ -56,11 +57,12 @@ async function updateHistory({
       const cleanId = isAnime
         ? mediaId.replace(/-(dub|sub|hsub|both)$/, "")
         : mediaId;
-      const exists = queryOne(`SELECT id FROM ${mainTable} WHERE id = ?`, [
-        cleanId,
-      ]);
+      const exists = await queryOne(
+        `SELECT id FROM ${mainTable} WHERE id = ?`,
+        [cleanId],
+      );
       if (!exists) {
-        run(
+        await run(
           `
           INSERT INTO ${mainTable} (id, title, provider, MalID, image_url, last_updated)
           VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -74,7 +76,7 @@ async function updateHistory({
           ],
         );
       } else {
-        run(
+        await run(
           `
           UPDATE ${mainTable} 
           SET provider = COALESCE(provider, ?), 
@@ -94,13 +96,14 @@ async function updateHistory({
   let queryIds = [mediaId];
   if (isAnime) {
     try {
-      const localRec = queryOne(`SELECT MalID FROM Anime WHERE id = ?`, [
+      const localRec = await queryOne(`SELECT MalID FROM Anime WHERE id = ?`, [
         mediaId,
       ]);
       if (localRec && localRec.MalID) {
-        const siblings = queryAll(`SELECT id FROM Anime WHERE MalID = ?`, [
-          localRec.MalID,
-        ]);
+        const siblings = await queryAll(
+          `SELECT id FROM Anime WHERE MalID = ?`,
+          [localRec.MalID],
+        );
         siblings.forEach((s) => {
           if (s.id) queryIds.push(s.id);
         });
@@ -121,13 +124,14 @@ async function updateHistory({
     queryIds = Array.from(new Set(suffixIds));
   } else {
     try {
-      const localRec = queryOne(`SELECT MalID FROM Manga WHERE id = ?`, [
+      const localRec = await queryOne(`SELECT MalID FROM Manga WHERE id = ?`, [
         mediaId,
       ]);
       if (localRec && localRec.MalID) {
-        const siblings = queryAll(`SELECT id FROM Manga WHERE MalID = ?`, [
-          localRec.MalID,
-        ]);
+        const siblings = await queryAll(
+          `SELECT id FROM Manga WHERE MalID = ?`,
+          [localRec.MalID],
+        );
         siblings.forEach((s) => {
           if (s.id) queryIds.push(s.id);
         });
@@ -137,7 +141,7 @@ async function updateHistory({
   }
 
   const placeholders = queryIds.map(() => "?").join(",");
-  let record = queryOne(
+  let record = await queryOne(
     `
     SELECT * FROM ${historyTable} 
     WHERE ${idField} IN (${placeholders}) AND ${numberField} = ?
@@ -146,7 +150,7 @@ async function updateHistory({
   );
 
   if (!record && resolvedTitle && resolvedTitle !== type) {
-    record = queryOne(
+    record = await queryOne(
       `
       SELECT * FROM ${historyTable} 
       WHERE LOWER(${titleField}) = LOWER(?) AND ${numberField} = ?
@@ -168,7 +172,7 @@ async function updateHistory({
         ? new Date().toISOString()
         : record.completed_at;
 
-    run(
+    await run(
       `
       UPDATE ${historyTable} 
       SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = CURRENT_TIMESTAMP, completed_at = ?, hidden = 0
@@ -200,7 +204,7 @@ async function updateHistory({
     }
   } else {
     const compAt = isComp === 1 ? new Date().toISOString() : null;
-    run(
+    await run(
       `
       INSERT INTO ${historyTable} (${idField}, ${titleField}, ${numberField}, ${currentField}, ${totalField}, time_spent, is_completed, ${timeField}, completed_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)

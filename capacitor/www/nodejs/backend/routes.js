@@ -69,10 +69,19 @@ const {
   getSourceById,
   MetadataRemove,
   MetadataAdd,
+  getMalIdFromMapping,
 } = require("./utils/Metadata");
 const { updateHistory } = require("./utils/history");
 const { getHeaders } = require("./utils/proxyHeaders");
-const { getKeyValue, setKeyValue, queryOne, queryAll, run } = require("./utils/db");
+const {
+  getKeyValue,
+  setKeyValue,
+  queryOne,
+  queryAll,
+  run,
+  mappingQueryOne,
+  mappingQueryAll,
+} = require("./utils/db");
 const ImageCacheManager = require("./utils/ImageCacheManager");
 const UpdateDiscordRPC = async () => {};
 const segmentKeyCache = {};
@@ -306,7 +315,14 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
     }
   }
 
-  console.log("[android] /api/list route request params:", req.params, "body:", JSON.stringify(req.body), "parsed filters:", JSON.stringify(filters));
+  console.log(
+    "[android] /api/list route request params:",
+    req.params,
+    "body:",
+    JSON.stringify(req.body),
+    "parsed filters:",
+    JSON.stringify(filters),
+  );
 
   try {
     if (!AnimeManga || !provider) {
@@ -418,11 +434,14 @@ router.get("/api/schedule/weekly", async (req, res) => {
     const now = Math.floor(Date.now() / 1000);
     const oneWeekLater = now + 7 * 24 * 3600;
 
-    const episodes = await mappingQueryAll(`
+    const episodes = await mappingQueryAll(
+      `
         SELECT livechart_id, episode, date, title, image FROM next_episodes 
         WHERE date >= ? AND date <= ?
         ORDER BY date ASC
-      `, [now, oneWeekLater]);
+      `,
+      [now, oneWeekLater],
+    );
 
     const enriched = [];
 
@@ -430,7 +449,10 @@ router.get("/api/schedule/weekly", async (req, res) => {
       let malid = null;
       if (global.mappingDb) {
         try {
-          const row = await mappingQueryOne("SELECT malid FROM anime WHERE livechart_id = ?", [ep.livechart_id]);
+          const row = await mappingQueryOne(
+            "SELECT malid FROM anime WHERE livechart_id = ?",
+            [ep.livechart_id],
+          );
           if (row && row.malid) {
             malid = row.malid;
           }
@@ -507,14 +529,17 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
 
         if (AnimeManga === "Anime" && global.mappingDb && cleanId) {
           try {
-            const row = await mappingQueryOne(`
+            const row = await mappingQueryOne(
+              `
                 SELECT malid, 'pahe' AS provider FROM animepahe WHERE id = ? OR uuid = ?
                 UNION
                 SELECT malid, 'anikoto' AS provider FROM anikototv WHERE id = ?
                 UNION
                 SELECT malid, 'anineko' AS provider FROM anineko WHERE id = ?
                 LIMIT 1
-              `, [cleanId, cleanId, cleanId, cleanId]);
+              `,
+              [cleanId, cleanId, cleanId, cleanId],
+            );
             if (row) {
               resolvedMalId = row.malid;
               resolvedProvider = row.provider;
@@ -523,12 +548,15 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
           } catch (err2) {}
         } else if (AnimeManga === "Manga" && global.mappingDb && cleanId) {
           try {
-            const row = await mappingQueryOne(`
+            const row = await mappingQueryOne(
+              `
                 SELECT malid, 'weebcentral' AS provider FROM weebcentral WHERE id = ?
                 UNION
                 SELECT malid, 'allmanga' AS provider FROM allmanga WHERE id = ?
                 LIMIT 1
-              `, [cleanId, cleanId]);
+              `,
+              [cleanId, cleanId],
+            );
             if (row) {
               resolvedMalId = row.malid;
               resolvedProvider = row.provider;
@@ -552,7 +580,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             if (currentAnimeProvider !== resolvedProvider) {
               if (currentAnimeProvider === "pahe") {
                 try {
-                  const targetRow = await mappingQueryOne("SELECT id, uuid FROM animepahe WHERE malid = ? LIMIT 1", [resolvedMalId]);
+                  const targetRow = await mappingQueryOne(
+                    "SELECT id, uuid FROM animepahe WHERE malid = ? LIMIT 1",
+                    [resolvedMalId],
+                  );
                   if (targetRow) {
                     resolvedId = targetRow.uuid || targetRow.id;
                     resolvedProvider = "pahe";
@@ -560,7 +591,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 } catch (err2) {}
               } else if (currentAnimeProvider === "anikoto") {
                 try {
-                  const targetRow = await mappingQueryOne("SELECT id FROM anikototv WHERE malid = ? LIMIT 1", [resolvedMalId]);
+                  const targetRow = await mappingQueryOne(
+                    "SELECT id FROM anikototv WHERE malid = ? LIMIT 1",
+                    [resolvedMalId],
+                  );
                   if (targetRow) {
                     resolvedId = targetRow.id;
                     resolvedProvider = "anikoto";
@@ -568,7 +602,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 } catch (err2) {}
               } else if (currentAnimeProvider === "anineko") {
                 try {
-                  const targetRow = await mappingQueryOne("SELECT id FROM anineko WHERE malid = ? LIMIT 1", [resolvedMalId]);
+                  const targetRow = await mappingQueryOne(
+                    "SELECT id FROM anineko WHERE malid = ? LIMIT 1",
+                    [resolvedMalId],
+                  );
                   if (targetRow) {
                     resolvedId = targetRow.id;
                     resolvedProvider = "anineko";
@@ -588,7 +625,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             if (currentMangaProvider !== resolvedProvider) {
               if (currentMangaProvider === "weebcentral") {
                 try {
-                  const targetRow = await mappingQueryOne("SELECT id FROM weebcentral WHERE malid = ? LIMIT 1", [resolvedMalId]);
+                  const targetRow = await mappingQueryOne(
+                    "SELECT id FROM weebcentral WHERE malid = ? LIMIT 1",
+                    [resolvedMalId],
+                  );
                   if (targetRow) {
                     resolvedId = targetRow.id;
                     resolvedProvider = "weebcentral";
@@ -596,7 +636,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 } catch (err2) {}
               } else if (currentMangaProvider === "allmanga") {
                 try {
-                  const targetRow = await mappingQueryOne("SELECT id FROM allmanga WHERE malid = ? LIMIT 1", [resolvedMalId]);
+                  const targetRow = await mappingQueryOne(
+                    "SELECT id FROM allmanga WHERE malid = ? LIMIT 1",
+                    [resolvedMalId],
+                  );
                   if (targetRow) {
                     resolvedId = targetRow.id;
                     resolvedProvider = "allmanga";
@@ -638,13 +681,16 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
           let rows = [];
           try {
             if (global.mappingDb) {
-              rows = await mappingQueryAll(`
+              rows = await mappingQueryAll(
+                `
                 SELECT 'pahe' AS provider, id, uuid FROM animepahe WHERE malid = ?
                 UNION ALL
                 SELECT 'anikoto' AS provider, id, NULL AS uuid FROM anikototv WHERE malid = ?
                 UNION ALL
                 SELECT 'anineko' AS provider, id, NULL AS uuid FROM anineko WHERE malid = ?
-              `, [targetMalId, targetMalId, targetMalId]);
+              `,
+                [targetMalId, targetMalId, targetMalId],
+              );
             }
           } catch (_) {}
 
@@ -664,11 +710,14 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
           let rows = [];
           try {
             if (global.mappingDb) {
-              rows = await mappingQueryAll(`
+              rows = await mappingQueryAll(
+                `
                 SELECT 'weebcentral' AS provider, id FROM weebcentral WHERE malid = ?
                 UNION ALL
                 SELECT 'allmanga' AS provider, id FROM allmanga WHERE malid = ?
-              `, [targetMalId, targetMalId]);
+              `,
+                [targetMalId, targetMalId],
+              );
             }
           } catch (_) {}
 
@@ -742,7 +791,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
           ) {
             if (global?.mappingDb && data.malid) {
               try {
-                const mappingRow = await mappingQueryOne(`SELECT id, uuid FROM animepahe WHERE malid = ?`, [Number(data.malid)]);
+                const mappingRow = await mappingQueryOne(
+                  `SELECT id, uuid FROM animepahe WHERE malid = ?`,
+                  [Number(data.malid)],
+                );
                 if (mappingRow) {
                   const cleanOldId = id.replace(/-(dub|sub|hsub|both)$/, "");
                   const newId = mappingRow.uuid || mappingRow.id;
@@ -761,15 +813,15 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
 
                     if (AnimeInfo && AnimeInfo?.title) {
                       try {
-                        await run("UPDATE OR REPLACE Anime SET id = REPLACE(id, ?, ?) WHERE id = ? OR id LIKE ?", [cleanOldId,
-                            newId,
-                            cleanOldId,
-                            `${cleanOldId}-%`,]);
+                        await run(
+                          "UPDATE OR REPLACE Anime SET id = REPLACE(id, ?, ?) WHERE id = ? OR id LIKE ?",
+                          [cleanOldId, newId, cleanOldId, `${cleanOldId}-%`],
+                        );
 
-                        await run("UPDATE WatchHistory SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?", [cleanOldId,
-                            newId,
-                            cleanOldId,
-                            `${cleanOldId}-%`,]);
+                        await run(
+                          "UPDATE WatchHistory SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?",
+                          [cleanOldId, newId, cleanOldId, `${cleanOldId}-%`],
+                        );
 
                         logger.info(
                           `[pahe-resolve] Successfully updated Anime ID from ${cleanOldId} to ${newId}`,
@@ -827,7 +879,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
 
             // Update SQLite database with fresh online metadata so the cache is updated
             try {
-              await run(`UPDATE Anime SET description = ?, status = ?, genres = ?, aired = ?, image_url = ?, provider = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`, [AnimeInfo.description || "",
+              await run(
+                `UPDATE Anime SET description = ?, status = ?, genres = ?, aired = ?, image_url = ?, provider = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+                [
+                  AnimeInfo.description || "",
                   AnimeInfo.status || "",
                   Array.isArray(AnimeInfo.genres)
                     ? AnimeInfo.genres.join(",")
@@ -835,7 +890,9 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                   AnimeInfo.aired || "",
                   AnimeInfo.image_url || AnimeInfo.image || "",
                   Animeprovider.provider_name,
-                  id,]);
+                  id,
+                ],
+              );
             } catch (dbErr) {
               logger.error(
                 `Failed to update local metadata for Anime ${id}: ${dbErr.message}`,
@@ -885,7 +942,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
 
             // Update SQLite database with fresh online metadata so the cache is updated
             try {
-              await run(`UPDATE Manga SET description = ?, genres = ?, released = ?, author = ?, image_url = ?, provider = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`, [MangaInfoData.description || "",
+              await run(
+                `UPDATE Manga SET description = ?, genres = ?, released = ?, author = ?, image_url = ?, provider = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+                [
+                  MangaInfoData.description || "",
                   Array.isArray(MangaInfoData.genres)
                     ? MangaInfoData.genres.join(",")
                     : MangaInfoData.genres || "",
@@ -893,7 +953,9 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                   MangaInfoData.author || "",
                   MangaInfoData.image_url || MangaInfoData.image || "",
                   Mangaprovider.provider_name,
-                  id,]);
+                  id,
+                ],
+              );
             } catch (dbErr) {
               logger.error(
                 `Failed to update local metadata for Manga ${id}: ${dbErr.message}`,
@@ -919,12 +981,15 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
         const cleanId = id.replace(/-(dub|sub|hsub|both)$/, "");
 
         // 1. Check if there is a custom mapping/unlink record
-        const customMappingRow = await queryOne("SELECT malid FROM unlinked_mal_ids WHERE id = ?", [id]);
+        const customMappingRow = await queryOne(
+          "SELECT malid FROM unlinked_mal_ids WHERE id = ?",
+          [id],
+        );
 
         let resolvedMalId = undefined;
         let isCustom = false;
 
-        if (customMappingRow !== undefined) {
+        if (customMappingRow) {
           isCustom = true;
           if (customMappingRow.malid) {
             resolvedMalId = parseInt(customMappingRow.malid);
@@ -942,7 +1007,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             data.malid = resolvedMalId;
             if (isCustom) {
               try {
-                await run(`UPDATE ${AnimeManga} SET MalID = ? WHERE id = ?`, [String(resolvedMalId), id]);
+                await run(`UPDATE ${AnimeManga} SET MalID = ? WHERE id = ?`, [
+                  String(resolvedMalId),
+                  id,
+                ]);
               } catch (_) {}
             }
 
@@ -961,7 +1029,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 LEFT JOIN anime an ON an.malid = rm.malid
                 LIMIT 1
               `;
-              mappingRow = await mappingQueryOne(query, [resolvedMalId, resolvedMalId]);
+              mappingRow = await mappingQueryOne(query, [
+                resolvedMalId,
+                resolvedMalId,
+              ]);
             } else {
               const query = `
                 SELECT 
@@ -973,13 +1044,19 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 LEFT JOIN allmanga allm ON allm.malid = rm.malid
                 LIMIT 1
               `;
-              mappingRow = await mappingQueryOne(query, [resolvedMalId, resolvedMalId]);
+              mappingRow = await mappingQueryOne(query, [
+                resolvedMalId,
+                resolvedMalId,
+              ]);
             }
           } else {
             data.malid = null;
             if (isCustom) {
               try {
-                await run(`UPDATE ${AnimeManga} SET MalID = NULL WHERE id = ?`, [id]);
+                await run(
+                  `UPDATE ${AnimeManga} SET MalID = NULL WHERE id = ?`,
+                  [id],
+                );
               } catch (_) {}
             }
           }
@@ -1006,7 +1083,12 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               LEFT JOIN anineko neko ON neko.malid = rm.malid
               LEFT JOIN anime an ON an.malid = rm.malid
             `;
-            mappingRow = await mappingQueryOne(query, [cleanId, cleanId, cleanId, cleanId]);
+            mappingRow = await mappingQueryOne(query, [
+              cleanId,
+              cleanId,
+              cleanId,
+              cleanId,
+            ]);
           } else {
             const query = `
               WITH resolved AS (
@@ -1028,14 +1110,20 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
           if (mappingRow && mappingRow.malid) {
             data.malid = parseInt(mappingRow.malid);
             try {
-              await run(`UPDATE ${AnimeManga} SET MalID = ? WHERE id = ?`, [String(data.malid), id]);
+              await run(`UPDATE ${AnimeManga} SET MalID = ? WHERE id = ?`, [
+                String(data.malid),
+                id,
+              ]);
             } catch (_) {}
           }
         }
 
         if (mappingRow && mappingRow.malid) {
           try {
-            const linkedRecords = await queryAll(`SELECT id, provider, title, folder_name FROM ${AnimeManga} WHERE MalID = ?`, [String(data.malid)]);
+            const linkedRecords = await queryAll(
+              `SELECT id, provider, title, folder_name FROM ${AnimeManga} WHERE MalID = ?`,
+              [String(data.malid)],
+            );
 
             const linkedProvidersMap = {};
             linkedRecords.forEach((r) => {
@@ -1117,11 +1205,14 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               if (mappingRow.livechart_id) {
                 const livechartId = mappingRow.livechart_id;
                 const now = Math.floor(Date.now() / 1000);
-                const nextEp = await mappingQueryOne(`
+                const nextEp = await mappingQueryOne(
+                  `
                     SELECT episode, date FROM next_episodes 
                     WHERE livechart_id = ? AND date > ? 
                     ORDER BY date ASC LIMIT 1
-                  `, [livechartId, now]);
+                  `,
+                  [livechartId, now],
+                );
 
                 if (nextEp) {
                   const diff = nextEp.date - now;
@@ -1151,7 +1242,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
     if (data.malid && global.MalLoggedIn) {
       try {
         if (AnimeManga === "Anime") {
-          const MalInfo = await queryOne("SELECT * FROM MyAnimeList WHERE id = ?", [String(data.malid)]);
+          const MalInfo = await queryOne(
+            "SELECT * FROM MyAnimeList WHERE id = ?",
+            [String(data.malid)],
+          );
           if (MalInfo) {
             data.watched = MalInfo.watched ?? 0;
             data.malStatus = MalInfo.status ?? "plan_to_watch";
@@ -1160,7 +1254,10 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             }
           }
         } else if (AnimeManga === "Manga") {
-          const MalInfo = await queryOne("SELECT * FROM MyMangaList WHERE id = ?", [String(data.malid)]);
+          const MalInfo = await queryOne(
+            "SELECT * FROM MyMangaList WHERE id = ?",
+            [String(data.malid)],
+          );
           if (MalInfo) {
             data.watched = MalInfo.read ?? 0;
             data.malStatus = MalInfo.status ?? "plan_to_read";
@@ -1184,7 +1281,21 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
     );
     logger.error(`Error message: ${err.message}`);
     logger.error(`Stack trace: ${err.stack}`);
-    return res.json({ error: true, message: err?.message });
+    let localTag = data?.CustomTag || "";
+    if (!localTag) {
+      try {
+        const row = await queryOne(
+          `SELECT CustomTag FROM ${AnimeManga} WHERE id = ?`,
+          [id],
+        );
+        if (row) localTag = row.CustomTag || "";
+      } catch (_) {}
+    }
+    return res.json({
+      error: true,
+      message: err?.message,
+      CustomTag: localTag,
+    });
   }
 });
 
@@ -1374,6 +1485,7 @@ router.post("/api/download/remove", async (req, res) => {
 
 // Play Video From m3u8 url
 router.post("/api/watch", async (req, res) => {
+  logger.info("[DEBUG /api/watch] req.body: " + JSON.stringify(req.body));
   const { ep, epNum, Downloaded, provider = null, subdub } = req.body;
   try {
     if (!Downloaded) {
@@ -1737,13 +1849,20 @@ router.post("/api/mal/link", async (req, res) => {
         let dbRow = null;
         try {
           if (type === "Anime") {
-            dbRow = await queryOne("SELECT MalID FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?", [cleanId,
+            dbRow = await queryOne(
+              "SELECT MalID FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?",
+              [
+                cleanId,
                 `${cleanId}-sub`,
                 `${cleanId}-hsub`,
                 `${cleanId}-dub`,
-                `${cleanId}-both`,]);
+                `${cleanId}-both`,
+              ],
+            );
           } else {
-            dbRow = await queryOne("SELECT MalID FROM Manga WHERE id = ?", [cleanId]);
+            dbRow = await queryOne("SELECT MalID FROM Manga WHERE id = ?", [
+              cleanId,
+            ]);
           }
         } catch (e) {}
         if (dbRow && dbRow.MalID) {
@@ -1793,11 +1912,16 @@ router.post("/api/mal/link", async (req, res) => {
       if (!providerTitle) {
         try {
           if (type === "Anime") {
-            const row = await queryOne("SELECT title, MalID FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? LIMIT 1", [cleanId,
+            const row = await queryOne(
+              "SELECT title, MalID FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? LIMIT 1",
+              [
+                cleanId,
                 `${cleanId}-sub`,
                 `${cleanId}-hsub`,
                 `${cleanId}-dub`,
-                `${cleanId}-both`,]);
+                `${cleanId}-both`,
+              ],
+            );
             if (row) {
               providerTitle = row.title;
               if (!targetMalID && row.MalID) {
@@ -1805,7 +1929,10 @@ router.post("/api/mal/link", async (req, res) => {
               }
             }
           } else {
-            const row = await queryOne("SELECT title, MalID FROM Manga WHERE id = ? LIMIT 1", [cleanId]);
+            const row = await queryOne(
+              "SELECT title, MalID FROM Manga WHERE id = ? LIMIT 1",
+              [cleanId],
+            );
             if (row) {
               providerTitle = row.title;
               if (!targetMalID && row.MalID) {
@@ -1864,12 +1991,12 @@ router.post("/api/mal/link", async (req, res) => {
       if (MalID) {
         await run(
           "INSERT OR REPLACE INTO unlinked_mal_ids (id, malid) VALUES (?, ?)",
-          [id, MalID]
+          [id, MalID],
         );
       } else {
         await run(
           "INSERT OR REPLACE INTO unlinked_mal_ids (id, malid) VALUES (?, NULL)",
-          [id]
+          [id],
         );
       }
     } catch (err) {
@@ -1879,9 +2006,15 @@ router.post("/api/mal/link", async (req, res) => {
     }
 
     if (type === "Anime") {
-      await run(`UPDATE Anime SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?`, [MalID, id, `${id}-sub`, `${id}-hsub`, `${id}-dub`, `${id}-both`]);
+      await run(
+        `UPDATE Anime SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?`,
+        [MalID, id, `${id}-sub`, `${id}-hsub`, `${id}-dub`, `${id}-both`],
+      );
     } else {
-      await run(`UPDATE Manga SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`, [MalID, id]);
+      await run(
+        `UPDATE Manga SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+        [MalID, id],
+      );
     }
 
     return res.json({
@@ -1908,7 +2041,9 @@ router.get("/api/local/tags/view/:type", async (req, res) => {
         ? ["Reading", "Downloads", "Plan to Read"]
         : ["Watching", "Downloads", "Plan to Watch"];
 
-    const rows = await queryAll(`SELECT CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`);
+    const rows = await queryAll(
+      `SELECT CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`,
+    );
     const allTagsSet = new Set(defaultTags);
     for (const r of rows) {
       const tag = r.CustomTag ? r.CustomTag.trim() : "";
@@ -2002,15 +2137,23 @@ router.post("/api/local/tags/add", async (req, res) => {
     let existing = null;
     if (type === "Anime") {
       const strippedId = id.replace(/-(dub|sub|hsub|both)$/, "");
-      existing = await queryOne(`SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`, [id,
+      existing = await queryOne(
+        `SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
+        [
+          id,
           `${strippedId}-sub`,
           `${strippedId}-hsub`,
           `${strippedId}-dub`,
           `${strippedId}-both`,
           id,
-          strippedId,]);
+          strippedId,
+        ],
+      );
     } else {
-      existing = await queryOne(`SELECT * FROM Manga WHERE id = ? OR folder_name = ?`, [id, id]);
+      existing = await queryOne(
+        `SELECT * FROM Manga WHERE id = ? OR folder_name = ?`,
+        [id, id],
+      );
     }
 
     if (existing) {
@@ -2031,12 +2174,18 @@ router.post("/api/local/tags/add", async (req, res) => {
       }
       if (updates.length > 0) {
         params.push(existing.id);
-        await run(`UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`, params);
+        await run(
+          `UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+          params,
+        );
 
         // SYNC TAGS to other rows sharing same MalID
         const targetMalID = resolvedMalID || existing.MalID;
         if (CustomTag !== undefined && targetMalID && targetMalID !== "") {
-          await run(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`, [tagValue, targetMalID]);
+          await run(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`, [
+            tagValue,
+            targetMalID,
+          ]);
         }
       }
     } else {
@@ -2122,10 +2271,17 @@ router.post("/api/local/tags/add", async (req, res) => {
       }
 
       await MetadataAdd(type, values);
-      await run(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`, [resolvedMalID, tagValue, id]);
+      await run(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`, [
+        resolvedMalID,
+        tagValue,
+        id,
+      ]);
 
       if (resolvedMalID && resolvedMalID !== "") {
-        await run(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`, [tagValue, resolvedMalID]);
+        await run(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`, [
+          tagValue,
+          resolvedMalID,
+        ]);
       }
     }
 
@@ -2138,7 +2294,10 @@ router.post("/api/local/tags/add", async (req, res) => {
       targetMalID !== ""
     ) {
       try {
-        const rowsToClean = await queryAll(`SELECT id, folder_name FROM ${type} WHERE MalID = ?`, [targetMalID]);
+        const rowsToClean = await queryAll(
+          `SELECT id, folder_name FROM ${type} WHERE MalID = ?`,
+          [targetMalID],
+        );
 
         const baseDir = await getBaseDownloadDir();
 
@@ -2236,7 +2395,9 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
     }
 
     const table = type === "Anime" ? "Anime" : "Manga";
-    const existing = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [oldId]);
+    const existing = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [
+      oldId,
+    ]);
 
     if (existing) {
       await run(`DELETE FROM ${table} WHERE id = ?`, [oldId]);
@@ -2247,14 +2408,23 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
       const placeholders = columns.map(() => "?").join(", ");
       const values = columns.map((col) => existing[col]);
 
-      await run(`
+      await run(
+        `
         INSERT OR REPLACE INTO ${table} (${columns.join(", ")})
         VALUES (${placeholders})
-      `, values);
+      `,
+        values,
+      );
       if (type === "Anime") {
-        await run(`UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?`, [newId, oldId]);
+        await run(`UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?`, [
+          newId,
+          oldId,
+        ]);
       } else {
-        await run(`UPDATE ReadHistory SET manga_id = ? WHERE manga_id = ?`, [newId, oldId]);
+        await run(`UPDATE ReadHistory SET manga_id = ? WHERE manga_id = ?`, [
+          newId,
+          oldId,
+        ]);
       }
       return res.json({ success: true, migrated: true });
     }
@@ -2277,6 +2447,25 @@ router.get("/api/image", async (req, res) => {
 
     decodedUrl = decodeURIComponent(imageUrl);
 
+    if (decodedUrl.includes("animepahe")) {
+      try {
+        const activeCookieRow = await queryOne(
+          "SELECT domain FROM cookie WHERE name = 'cf_clearance' AND domain LIKE '%animepahe%' LIMIT 1",
+        );
+        if (activeCookieRow && activeCookieRow.domain) {
+          const matchedDomain = activeCookieRow.domain.replace(/^\./, "");
+          const parsed = new URL(decodedUrl);
+          const domainParts = matchedDomain.split(".");
+          const tld = domainParts[domainParts.length - 1];
+
+          const hostParts = parsed.hostname.split(".");
+          hostParts[hostParts.length - 1] = tld;
+          parsed.hostname = hostParts.join(".");
+          decodedUrl = parsed.toString();
+        }
+      } catch (dbErr) {}
+    }
+
     // local file
     if (decodedUrl.startsWith("file://") || decodedUrl.startsWith("/")) {
       const filePath = decodedUrl.startsWith("file://")
@@ -2293,13 +2482,14 @@ router.get("/api/image", async (req, res) => {
 
     // Check if the image is in cache
     try {
-      const cached = queryOne("SELECT filename FROM ImageCache WHERE url = ?", [
-        decodedUrl,
-      ]);
+      const cached = await queryOne(
+        "SELECT filename FROM ImageCache WHERE url = ?",
+        [decodedUrl],
+      );
       const cacheDir = ImageCacheManager.getImageCacheDir();
       if (cached && fs.existsSync(path.join(cacheDir, cached.filename))) {
         // Update last_accessed
-        run("UPDATE ImageCache SET last_accessed = ? WHERE url = ?", [
+        await run("UPDATE ImageCache SET last_accessed = ? WHERE url = ?", [
           Date.now(),
           decodedUrl,
         ]);
@@ -2331,7 +2521,9 @@ router.get("/api/image", async (req, res) => {
     const contentType = response.headers["content-type"] || "image/jpeg";
 
     const buf = Buffer.from(response.data);
-    console.log(`[api/image] Proxying ${decodedUrl} -> Status: ${response.status}, Content-Type: ${contentType}, Data Length: ${buf.length}, Magic: ${buf.slice(0, 8).toString("hex")}`);
+    console.log(
+      `[api/image] Proxying ${decodedUrl} -> Status: ${response.status}, Content-Type: ${contentType}, Data Length: ${buf.length}, Magic: ${buf.slice(0, 8).toString("hex")}`,
+    );
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=86400");
     return res.send(buf);
@@ -2506,7 +2698,10 @@ router.post("/api/history/hide", async (req, res) => {
     let queryIds = [mediaId];
 
     if (malId) {
-      const siblings = await queryAll(`SELECT id FROM ${mainTable} WHERE MalID = ?`, [String(malId)]);
+      const siblings = await queryAll(
+        `SELECT id FROM ${mainTable} WHERE MalID = ?`,
+        [String(malId)],
+      );
       siblings.forEach((s) => {
         if (s.id) queryIds.push(s.id);
       });
@@ -2528,10 +2723,16 @@ router.post("/api/history/hide", async (req, res) => {
     }
 
     const placeholders = queryIds.map(() => "?").join(",");
-    await run(`UPDATE ${historyTable} SET hidden = 1 WHERE ${idField} IN (${placeholders})`, queryIds);
+    await run(
+      `UPDATE ${historyTable} SET hidden = 1 WHERE ${idField} IN (${placeholders})`,
+      queryIds,
+    );
 
     if (title) {
-      await run(`UPDATE ${historyTable} SET hidden = 1 WHERE LOWER(${titleField}) = LOWER(?)`, [title]);
+      await run(
+        `UPDATE ${historyTable} SET hidden = 1 WHERE LOWER(${titleField}) = LOWER(?)`,
+        [title],
+      );
     }
 
     res.json({ success: true });
@@ -2565,10 +2766,16 @@ router.get("/api/history/progress", async (req, res) => {
       // Resolve sibling IDs from DB if linked via MalID
       let resolvedTitle = null;
       try {
-        const localRec = await queryOne(`SELECT MalID, title FROM Anime WHERE id = ?`, [mediaId]);
+        const localRec = await queryOne(
+          `SELECT MalID, title FROM Anime WHERE id = ?`,
+          [mediaId],
+        );
         if (localRec) {
           if (localRec.MalID) {
-            const siblings = await queryAll(`SELECT id FROM Anime WHERE MalID = ?`, [localRec.MalID]);
+            const siblings = await queryAll(
+              `SELECT id FROM Anime WHERE MalID = ?`,
+              [localRec.MalID],
+            );
             siblings.forEach((s) => {
               if (s.id) queryIds.push(s.id);
             });
@@ -2624,10 +2831,16 @@ router.get("/api/history/progress", async (req, res) => {
       let queryIds = [mediaId];
       let resolvedTitle = null;
       try {
-        const localRec = await queryOne(`SELECT MalID, title FROM Manga WHERE id = ?`, [mediaId]);
+        const localRec = await queryOne(
+          `SELECT MalID, title FROM Manga WHERE id = ?`,
+          [mediaId],
+        );
         if (localRec) {
           if (localRec.MalID) {
-            const siblings = await queryAll(`SELECT id FROM Manga WHERE MalID = ?`, [localRec.MalID]);
+            const siblings = await queryAll(
+              `SELECT id FROM Manga WHERE MalID = ?`,
+              [localRec.MalID],
+            );
             siblings.forEach((s) => {
               if (s.id) queryIds.push(s.id);
             });
@@ -2726,8 +2939,30 @@ router.get("/api/history/stats", async (req, res) => {
 router.get("/api/history/list", async (req, res) => {
   try {
     try {
-      await run("DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)");
-      await run("DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)");
+      const watchRows = await queryAll(
+        "SELECT DISTINCT anime_id FROM WatchHistory",
+      );
+      const animeRows = await queryAll("SELECT id FROM Anime");
+      const animeIds = new Set(animeRows.map((r) => r.id));
+      const toDelete = [];
+      for (const row of watchRows) {
+        if (row.anime_id) {
+          const strippedId = row.anime_id.replace(/-(dub|sub|hsub|both)$/, "");
+          if (!animeIds.has(strippedId)) {
+            toDelete.push(row.anime_id);
+          }
+        }
+      }
+      if (toDelete.length > 0) {
+        const placeholders = toDelete.map(() => "?").join(",");
+        await run(
+          `DELETE FROM WatchHistory WHERE anime_id IN (${placeholders})`,
+          toDelete,
+        );
+      }
+      await run(
+        "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
+      );
     } catch (e) {}
 
     const limit = parseInt(req.query.limit || 50);
@@ -2739,7 +2974,8 @@ router.get("/api/history/list", async (req, res) => {
       ? ""
       : "WHERE (r.hidden IS NULL OR r.hidden = 0)";
 
-    const watchLogs = await queryAll(`
+    const watchLogs = await queryAll(
+      `
       SELECT 
         w.id,
         'Anime' AS type,
@@ -2750,26 +2986,51 @@ router.get("/api/history/list", async (req, res) => {
         w.duration,
         w.time_spent,
         w.is_completed,
-        w.last_watched AS date,
-        a.image_url,
-        a.provider,
-        a.MalID AS mal_id,
-        CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
-        mal.totalEpisodes AS total_count
+        w.last_watched AS date
       FROM WatchHistory w
-      LEFT JOIN Anime a ON a.id = w.anime_id
-      LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
       ${watchWhereClause}
       ORDER BY w.last_watched DESC
       LIMIT ?
-    `, [limit]);
+    `,
+      [limit],
+    );
+
+    const strippedIds = Array.from(
+      new Set(
+        watchLogs.map((log) =>
+          log.media_id.replace(/-(dub|sub|hsub|both)$/, ""),
+        ),
+      ),
+    );
+    let animeMap = {};
+    if (strippedIds.length > 0) {
+      const placeholders = strippedIds.map(() => "?").join(",");
+      const animeRows = await queryAll(
+        `
+        SELECT a.id, a.image_url, a.provider, a.MalID, mal.totalEpisodes
+        FROM Anime a
+        LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
+        WHERE a.id IN (${placeholders})
+      `,
+        strippedIds,
+      );
+      animeRows.forEach((row) => {
+        animeMap[row.id] = row;
+      });
+    }
 
     watchLogs.forEach((log) => {
-      log.image = log.image_url || null;
-      delete log.image_url;
+      const strippedId = log.media_id.replace(/-(dub|sub|hsub|both)$/, "");
+      const animeInfo = animeMap[strippedId];
+      log.image = animeInfo?.image_url || null;
+      log.provider = animeInfo?.provider || null;
+      log.mal_id = animeInfo?.MalID || null;
+      log.exists_in_catalog = animeInfo ? 1 : 0;
+      log.total_count = animeInfo?.totalEpisodes || null;
     });
 
-    const readLogs = await queryAll(`
+    const readLogs = await queryAll(
+      `
       SELECT 
         r.id,
         'Manga' AS type,
@@ -2792,7 +3053,9 @@ router.get("/api/history/list", async (req, res) => {
       ${readWhereClause}
       ORDER BY r.last_read DESC
       LIMIT ?
-    `, [limit]);
+    `,
+      [limit],
+    );
 
     readLogs.forEach((log) => {
       log.image = log.image_url || null;

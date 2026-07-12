@@ -404,6 +404,13 @@ export default function SettingsView({
           await window.sharedStateAPI.updateSettings(dirty);
         }
 
+        if (dirty.Animeprovider || dirty.Mangaprovider) {
+          if (window.catalogCache) {
+            delete window.catalogCache[`Anime_provider`];
+            delete window.catalogCache[`Manga_provider`];
+          }
+        }
+
         // Silently update comparison base to reset hasChanges state
         setSettings({
           ...settings,

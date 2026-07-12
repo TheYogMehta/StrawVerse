@@ -141,7 +141,50 @@ async function setKeyValue(tableName, key, value) {
 }
 
 // Mapping database helpers
+const mappingTablesCache = new Set();
+let lastMappingTablesCheck = 0;
+
+async function refreshMappingTables() {
+  try {
+    const result = await dbRequest("db-query-all", {
+      db: "mapping",
+      sql: "SELECT name FROM sqlite_master WHERE type='table'",
+      params: [],
+    });
+    const rows = result.rows || [];
+    mappingTablesCache.clear();
+    for (const r of rows) {
+      if (r.name) mappingTablesCache.add(r.name.toLowerCase());
+    }
+    lastMappingTablesCheck = Date.now();
+  } catch (e) {}
+}
+
 async function mappingQueryAll(sql, params = []) {
+  if (
+    Date.now() - lastMappingTablesCheck > 10000 ||
+    mappingTablesCache.size === 0
+  ) {
+    await refreshMappingTables();
+  }
+
+  const tablesToCheck = [
+    "anime",
+    "animepahe",
+    "anikototv",
+    "anineko",
+    "manga",
+    "weebcentral",
+    "allmanga",
+    "next_episodes",
+  ];
+  const sqlLower = sql.toLowerCase();
+  for (const t of tablesToCheck) {
+    if (sqlLower.includes(t) && !mappingTablesCache.has(t)) {
+      return [];
+    }
+  }
+
   try {
     const result = await dbRequest("db-query-all", {
       db: "mapping",
@@ -150,12 +193,39 @@ async function mappingQueryAll(sql, params = []) {
     });
     return result.rows || [];
   } catch (e) {
+    if (e.message?.includes("no such table")) {
+      return [];
+    }
     logger.error(`Mapping queryAll error on "${sql}": ${e.message}`);
     throw e;
   }
 }
 
 async function mappingQueryOne(sql, params = []) {
+  if (
+    Date.now() - lastMappingTablesCheck > 10000 ||
+    mappingTablesCache.size === 0
+  ) {
+    await refreshMappingTables();
+  }
+
+  const tablesToCheck = [
+    "anime",
+    "animepahe",
+    "anikototv",
+    "anineko",
+    "manga",
+    "weebcentral",
+    "allmanga",
+    "next_episodes",
+  ];
+  const sqlLower = sql.toLowerCase();
+  for (const t of tablesToCheck) {
+    if (sqlLower.includes(t) && !mappingTablesCache.has(t)) {
+      return null;
+    }
+  }
+
   try {
     const result = await dbRequest("db-query-one", {
       db: "mapping",
@@ -164,6 +234,9 @@ async function mappingQueryOne(sql, params = []) {
     });
     return result.row || null;
   } catch (e) {
+    if (e.message?.includes("no such table")) {
+      return null;
+    }
     logger.error(`Mapping queryOne error on "${sql}": ${e.message}`);
     throw e;
   }
@@ -473,15 +546,35 @@ async function initDatabase() {
 
   // Clean up orphaned history records
   try {
-    const watchDeleted = await run(
-      "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
+    const watchRows = await queryAll(
+      "SELECT DISTINCT anime_id FROM WatchHistory",
     );
+    const animeRows = await queryAll("SELECT id FROM Anime");
+    const animeIds = new Set(animeRows.map((r) => r.id));
+    const toDelete = [];
+    for (const row of watchRows) {
+      if (row.anime_id) {
+        const strippedId = row.anime_id.replace(/-(dub|sub|hsub|both)$/, "");
+        if (!animeIds.has(strippedId)) {
+          toDelete.push(row.anime_id);
+        }
+      }
+    }
+    let watchChanges = 0;
+    if (toDelete.length > 0) {
+      const placeholders = toDelete.map(() => "?").join(",");
+      const deleteRes = await run(
+        `DELETE FROM WatchHistory WHERE anime_id IN (${placeholders})`,
+        toDelete,
+      );
+      watchChanges = deleteRes.changes || 0;
+    }
     const readDeleted = await run(
       "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
     );
-    if (watchDeleted.changes > 0 || readDeleted.changes > 0) {
+    if (watchChanges > 0 || readDeleted.changes > 0) {
       logger.info(
-        `Database cleanup: Deleted ${watchDeleted.changes} orphaned watch history entries and ${readDeleted.changes} read history entries.`,
+        `Database cleanup: Deleted ${watchChanges} orphaned watch history entries and ${readDeleted.changes} read history entries.`,
       );
     }
   } catch (e) {

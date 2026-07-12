@@ -973,8 +973,51 @@ export default function VideoPlayer({
   }, [subtitles]);
 
   useEffect(() => {
-    if (!selectedSource || !videoRef.current) return;
+    if (!selectedSource) return;
 
+    if (window.Capacitor?.Plugins?.CloudflareBypass) {
+      const url = sourceUrl;
+      const subtitleList = processedSubtitles || [];
+      const sourcesList = sources.map((src, idx) => ({
+        url: typeof src.url === "string" ? src.url : src.url?.url || "",
+        quality: src.quality || `Source ${idx + 1}`,
+        headers: src.headers || {},
+        isM3U8: !!src.isM3U8,
+      }));
+      const skipsList = skipTimes || [];
+      const currentSourceIdx = sources.findIndex(
+        (src) => src === selectedSource,
+      );
+
+      console.log(
+        "[NATIVE VIDEO PLAYBACK] Launching native PlayerActivity with parameters",
+      );
+      window.Capacitor.Plugins.CloudflareBypass.playVideo({
+        url,
+        animeTitle: animeTitle || "Anime Stream",
+        subtitles: subtitleList,
+        sources: sourcesList,
+        skipTimes: skipsList,
+        currentSourceIndex: currentSourceIdx >= 0 ? currentSourceIdx : 0,
+        animeId: id,
+        episodeNumber: currentEpisodeObj ? currentEpisodeObj.number : 1,
+        provider: provider || "",
+        image: image || "",
+        malid: String(malid || ""),
+      })
+        .then(() => {
+          if (onBack) onBack();
+        })
+        .catch((err) => {
+          console.error(
+            "[NATIVE VIDEO PLAYBACK] Failed to launch native player:",
+            err,
+          );
+        });
+      return;
+    }
+
+    if (!videoRef.current) return;
     const video = videoRef.current;
 
     if (hlsRef.current) {

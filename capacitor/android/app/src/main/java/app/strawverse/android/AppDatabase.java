@@ -95,8 +95,10 @@ public class AppDatabase {
             String domain = uri.getHost();
             if (domain != null) {
                 domain = domain.replace("www.", "").toLowerCase();
-                if (domain.endsWith("animepahe.pw") || domain.contains("kwik.cx") || domain.contains("owocdn.top") || domain.contains("uwucdn.top")) {
+                if (domain.endsWith("animepahe.pw")) {
                     domain = "animepahe.pw";
+                } else if (domain.contains("kwik.cx") || domain.contains("owocdn.top") || domain.contains("uwucdn.top")) {
+                    domain = "kwik.cx";
                 }
                 cursor = db.rawQuery(
                     "SELECT value FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
@@ -123,8 +125,10 @@ public class AppDatabase {
             String domain = uri.getHost();
             if (domain != null) {
                 domain = domain.replace("www.", "").toLowerCase();
-                if (domain.endsWith("animepahe.pw") || domain.contains("kwik.cx") || domain.contains("owocdn.top") || domain.contains("uwucdn.top")) {
+                if (domain.endsWith("animepahe.pw")) {
                     domain = "animepahe.pw";
+                } else if (domain.contains("kwik.cx") || domain.contains("owocdn.top") || domain.contains("uwucdn.top")) {
+                    domain = "kwik.cx";
                 }
                 cursor = db.rawQuery(
                     "SELECT value FROM cookie WHERE id = ? LIMIT 1",

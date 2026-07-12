@@ -207,8 +207,9 @@ async function settingfetch() {
     }
     // checking Animeprovider is valid
     if (
-      !config?.Animeprovider ||
-      !global.Anime_providers.hasOwnProperty(config?.Animeprovider)
+      global.scrapersLoaded &&
+      (!config?.Animeprovider ||
+        !global.Anime_providers.hasOwnProperty(config?.Animeprovider))
     ) {
       config.Animeprovider = null;
       changes = true;
@@ -225,8 +226,9 @@ async function settingfetch() {
 
     // checking Mangaprovider is valid
     if (
-      !config?.Mangaprovider ||
-      !global.Manga_providers.hasOwnProperty(config?.Mangaprovider)
+      global.scrapersLoaded &&
+      (!config?.Mangaprovider ||
+        !global.Manga_providers.hasOwnProperty(config?.Mangaprovider))
     ) {
       config.Mangaprovider = "weebcentral";
       changes = true;
@@ -519,6 +521,7 @@ async function loadAllScrapers() {
         version: val.version,
       })),
     });
+    global.scrapersLoaded = true;
   } catch (err) {
     logger.error(`Error in loadAllScrapers: ${err.message}`);
   }

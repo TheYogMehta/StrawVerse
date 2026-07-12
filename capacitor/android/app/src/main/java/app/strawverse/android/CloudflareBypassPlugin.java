@@ -273,7 +273,7 @@ public class CloudflareBypassPlugin extends Plugin {
                                             @Override
                                             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                                                 String reqUrl = request.getUrl().toString();
-                                                if (reqUrl.contains("animepahe")) {
+                                                if (reqUrl.contains("animepahe") || reqUrl.contains("anikototv") || reqUrl.contains("megaplay") || reqUrl.contains("weebcentral") || reqUrl.contains("allmanga") || reqUrl.contains("anineko")) {
                                                     Log.i("StrawVerseBypass", "WebView Request: " + request.getMethod() + " -> " + reqUrl);
                                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                                                         Map<String, String> headers = request.getRequestHeaders();
@@ -412,58 +412,38 @@ public class CloudflareBypassPlugin extends Plugin {
 
     @PluginMethod
     public void playVideo(PluginCall call) {
-        String url = call.getString("url");
-        if (url == null) {
-            call.reject("URL is required");
-            return;
-        }
+        final String animeId = call.getString("animeId", "");
+        final String episodeId = call.getString("episodeId", "");
+        final double episodeNumber = call.getDouble("episodeNumber", 0.0);
+        final boolean downloaded = call.getBoolean("downloaded", false);
+        final String subdub = call.getString("subdub", "sub");
+        final String provider = call.getString("provider", "");
+        final String animeTitle = call.getString("animeTitle", "Anime Stream");
+        final String image = call.getString("image", "");
+        final String malid = call.getData().optString("malid", "");
 
-        final String videoUrl = url;
-        new Thread(new Runnable() {
+        getActivity().runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                final Bundle headersBundle = new Bundle();
                 try {
-                    Map<String, String> headersMap = AppDatabase.getHeadersForUrl(getContext(), videoUrl);
-                    for (Map.Entry<String, String> entry : headersMap.entrySet()) {
-                        headersBundle.putString(entry.getKey(), entry.getValue());
-                    }
-
-                    String webViewCookie = CookieManager.getInstance().getCookie(videoUrl);
-                    if (webViewCookie != null && !webViewCookie.isEmpty()) {
-                        headersBundle.putString("Cookie", webViewCookie);
-                    }
-
-                    if (!headersBundle.containsKey("User-Agent") && !headersBundle.containsKey("user-agent")) {
-                        String dbUA = AppDatabase.getStoredUserAgent(getContext(), videoUrl);
-                        if (dbUA != null && !dbUA.isEmpty()) {
-                            headersBundle.putString("User-Agent", dbUA);
-                        } else {
-                            String webViewUA = android.webkit.WebSettings.getDefaultUserAgent(getContext());
-                            headersBundle.putString("User-Agent", webViewUA);
-                        }
-                    }
+                    Context context = getActivity();
+                    Intent intent = new Intent(context, PlayerActivity.class);
+                    intent.putExtra("animeId", animeId);
+                    intent.putExtra("episodeId", episodeId);
+                    intent.putExtra("episodeNumber", episodeNumber);
+                    intent.putExtra("downloaded", downloaded);
+                    intent.putExtra("subdub", subdub);
+                    intent.putExtra("provider", provider);
+                    intent.putExtra("animeTitle", animeTitle);
+                    intent.putExtra("image", image);
+                    intent.putExtra("malid", malid);
+                    context.startActivity(intent);
+                    call.resolve();
                 } catch (Exception e) {
-                    Log.e("StrawVerseBypass", "Failed to construct headers bundle: " + e.getMessage());
+                    call.reject("Failed to open player: " + e.getMessage());
                 }
-
-                getActivity().runOnUiThread(new Runnable() {
-                    @Override
-                    public void run() {
-                        try {
-                            Context context = getActivity();
-                            Intent intent = new Intent(context, PlayerActivity.class);
-                            intent.putExtra("videoUrl", videoUrl);
-                            intent.putExtra("headers", headersBundle);
-                            context.startActivity(intent);
-                            call.resolve();
-                        } catch (Exception e) {
-                            call.reject("Failed to open player: " + e.getMessage());
-                        }
-                    }
-                });
             }
-        }).start();
+        });
     }
 
 
@@ -471,7 +451,7 @@ public class CloudflareBypassPlugin extends Plugin {
     @PluginMethod
     public void nativeRequest(final PluginCall call) {
         String url = call.getString("url");
-        if (url != null && url.contains("animepahe")) {
+        if (url != null && (url.contains("animepahe") || url.contains("anikototv") || url.contains("megaplay") || url.contains("weebcentral") || url.contains("allmanga") || url.contains("anineko"))) {
             boolean isStatic = url.contains("/uploads/") 
                 || url.endsWith(".webp") 
                 || url.endsWith(".png") 

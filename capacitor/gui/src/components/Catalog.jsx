@@ -34,6 +34,7 @@ export default function Catalog({
   provider,
   onSelectMedia,
   onTypeChange,
+  initialSearchQuery = "",
 }) {
   const lastRequestRef = useRef(null);
   const sentinelRef = useRef(null);
@@ -116,6 +117,7 @@ export default function Catalog({
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [scheduleUpdating, setScheduleUpdating] = useState(false);
   const [timeTicker, setTimeTicker] = useState(Date.now());
+  const lastLoadedKeyRef = useRef(`${type}_${provider}`);
 
   const handleScroll = (e) => {
     const scrollTop = e.target.scrollTop;
@@ -130,15 +132,14 @@ export default function Catalog({
   };
 
   useEffect(() => {
-    const cacheKey = `${type}_${provider}`;
-    if (!window.catalogCache?.[cacheKey] && !didFetchRef.current) {
-      return;
-    }
+    const activeKey = lastLoadedKeyRef.current;
+    if (!activeKey) return;
+    if (!didFetchRef.current) return;
     if (!window.catalogCache) {
       window.catalogCache = {};
     }
-    const existingScroll = window.catalogCache[cacheKey]?.scrollPosition || 0;
-    window.catalogCache[cacheKey] = {
+    const existingScroll = window.catalogCache[activeKey]?.scrollPosition || 0;
+    window.catalogCache[activeKey] = {
       data,
       searchQuery,
       currentPage,
@@ -153,8 +154,6 @@ export default function Catalog({
       scrollPosition: existingScroll,
     };
   }, [
-    type,
-    provider,
     data,
     searchQuery,
     currentPage,
@@ -474,6 +473,7 @@ export default function Catalog({
           });
         }
       } else {
+        lastLoadedKeyRef.current = `${type}_${provider}`;
         const sortedResults = applyCustomOrder(
           resData?.results || [],
           currentFilters,
@@ -547,7 +547,8 @@ export default function Catalog({
     const cacheKey = `${type}_${provider}`;
     const cache = window.catalogCache[cacheKey];
 
-    if (cache) {
+    if (cache && !initialSearchQuery) {
+      lastLoadedKeyRef.current = cacheKey;
       setData(cache.data);
       setSearchQuery(cache.searchQuery);
       setCurrentPage(cache.currentPage);
@@ -569,17 +570,19 @@ export default function Catalog({
 
       setCurrentPage(1);
       setLinkingMalItem(null);
-      setSearchQuery("");
+      const startQuery = initialSearchQuery || "";
+      setSearchQuery(startQuery);
       setFetchedPages({});
       setLoadedPageStart(1);
       setLoadedPageEnd(1);
       isRestoredRef.current = false;
+      didFetchRef.current = false;
 
       const defaultTag =
         provider === "local" ? (type === "Manga" ? "Reading" : "Watching") : "";
       const initFilters = defaultTag ? { tag: defaultTag } : {};
       setActiveFilters(initFilters);
-      fetchData(1, initFilters, "", null);
+      fetchData(1, initFilters, startQuery, null);
     }
 
     if (provider === "local") {
@@ -1118,6 +1121,7 @@ export default function Catalog({
     loadedPageEnd,
     activeFilters,
     searchQuery,
+    discoverTab,
   ]);
 
   useEffect(() => {
@@ -1158,6 +1162,7 @@ export default function Catalog({
     fetchedPages,
     activeFilters,
     searchQuery,
+    discoverTab,
   ]);
 
   return (
@@ -1634,6 +1639,8 @@ export default function Catalog({
                                       ep.malid,
                                       "mal",
                                       "Back to Calendar",
+                                      undefined,
+                                      ep.title,
                                     );
                                   } else {
                                     triggerScrapeSearch(ep.title);

@@ -24,6 +24,7 @@ export default function App() {
   const [infoSortOrder, setInfoSortOrder] = useState(null);
   const [activePlayerParams, setActivePlayerParams] = useState(null);
   const [playerKey, setPlayerKey] = useState(0);
+  const [reloadCounter, setReloadCounter] = useState(0);
 
   const showToast = (title, body, icon) => {
     const id = Date.now();
@@ -290,6 +291,7 @@ export default function App() {
       case "home":
         return (
           <Catalog
+            key={`home-${contentType}-${reloadCounter}`}
             type={contentType}
             provider="local"
             onTypeChange={setContentType}
@@ -308,9 +310,11 @@ export default function App() {
       case "discover":
         return (
           <Catalog
+            key={`discover-${contentType}-${reloadCounter}`}
             type={contentType}
             provider="provider"
             onTypeChange={setContentType}
+            initialSearchQuery={current.params?.searchQuery || ""}
             onSelectMedia={(id, prov, backText, autoPlay) =>
               navigateTo("info", {
                 id,
@@ -334,6 +338,12 @@ export default function App() {
             sortOrder={infoSortOrder}
             setSortOrder={setInfoSortOrder}
             onBack={navigateBack}
+            title={current.params.title}
+            onSearchFallback={(title) => {
+              setHistory([
+                { view: "discover", params: { searchQuery: title } },
+              ]);
+            }}
             onWatch={(
               animeId,
               epIdOrNum,
@@ -348,7 +358,11 @@ export default function App() {
             ) => {
               setHistory((prev) =>
                 prev.map((item, idx) => {
-                  if (idx === prev.length - 1 && item.view === "info" && item.params) {
+                  if (
+                    idx === prev.length - 1 &&
+                    item.view === "info" &&
+                    item.params
+                  ) {
                     return {
                       ...item,
                       params: {
@@ -358,7 +372,7 @@ export default function App() {
                     };
                   }
                   return item;
-                })
+                }),
               );
 
               setActivePlayerParams({
@@ -478,6 +492,9 @@ export default function App() {
               delete window.catalogCache[`Manga_provider`];
             }
           }
+          if (view === current.view) {
+            setReloadCounter((prev) => prev + 1);
+          }
           setHistory([{ view, params: {} }]);
         }}
         isCollapsed={isSidebarCollapsed}
@@ -502,7 +519,11 @@ export default function App() {
           onBack={() => {
             setHistory((prev) =>
               prev.map((item, idx) => {
-                if (idx === prev.length - 1 && item.view === "info" && item.params) {
+                if (
+                  idx === prev.length - 1 &&
+                  item.view === "info" &&
+                  item.params
+                ) {
                   return {
                     ...item,
                     params: {
@@ -512,7 +533,7 @@ export default function App() {
                   };
                 }
                 return item;
-              })
+              }),
             );
             setActivePlayerParams(null);
             setPlayerKey((prev) => prev + 1);

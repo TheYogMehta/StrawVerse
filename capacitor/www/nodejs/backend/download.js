@@ -133,7 +133,9 @@ async function downloadAnimeSingle(
     const dbId = `${strippedId}-${resolvedSubDub}`;
 
     if (saveinfo) {
-      const existing = await queryOne("SELECT id FROM Anime WHERE id = ?", [dbId]);
+      const existing = await queryOne("SELECT id FROM Anime WHERE id = ?", [
+        dbId,
+      ]);
       if (!existing) {
         const lookupId =
           Animeprovider.provider_name === "pahe"
@@ -198,7 +200,9 @@ async function downloadAnimeSingle(
     let targetMalid = malid;
     if (!targetMalid) {
       try {
-        const row = await queryOne("SELECT MalID FROM Anime WHERE id = ?", [dbId]);
+        const row = await queryOne("SELECT MalID FROM Anime WHERE id = ?", [
+          dbId,
+        ]);
         if (row && row.MalID) {
           targetMalid = row.MalID;
         }
@@ -347,7 +351,9 @@ async function downloadMangaSingle(
       preFetchedProvider || (await providerFetch("Manga", provider));
 
     if (saveinfo) {
-      const existing = await queryOne("SELECT id FROM Manga WHERE id = ?", [mangaid]);
+      const existing = await queryOne("SELECT id FROM Manga WHERE id = ?", [
+        mangaid,
+      ]);
       if (!existing) {
         let mangainfo = await MangaInfo(Mangaprovider, mangaid);
         if (mangainfo) {
@@ -500,14 +506,19 @@ async function cleanupEmptyDownloadFolder(folderPath, type, id) {
 async function removeIdFromCustomOrders(deletedId) {
   if (!deletedId) return;
   try {
-    const rows = await queryAll("SELECT key, value FROM Settings WHERE key LIKE 'custom_order_%'");
+    const rows = await queryAll(
+      "SELECT key, value FROM Settings WHERE key LIKE 'custom_order_%'",
+    );
     for (const row of rows) {
       if (row.value) {
         try {
           const orderArray = JSON.parse(row.value);
           if (Array.isArray(orderArray) && orderArray.includes(deletedId)) {
             const newOrder = orderArray.filter((id) => id !== deletedId);
-            await run("UPDATE Settings SET value = ? WHERE key = ?", [JSON.stringify(newOrder), row.key]);
+            await run("UPDATE Settings SET value = ? WHERE key = ?", [
+              JSON.stringify(newOrder),
+              row.key,
+            ]);
             logger.info(
               `[customOrder] Cleaned up deleted ID ${deletedId} from settings key ${row.key}`,
             );
@@ -542,21 +553,6 @@ function wrapImagesInObject(obj) {
         imgUrl.startsWith("https://") ||
         imgUrl.startsWith("file://")
       ) {
-        if (imgUrl.startsWith("http://") || imgUrl.startsWith("https://")) {
-          try {
-            const cached = queryOne(
-              "SELECT filename FROM ImageCache WHERE url = ?",
-              [imgUrl],
-            );
-            if (cached) {
-              const cacheDir = ImageCacheManager.getImageCacheDir();
-              const localPath = path.join(cacheDir, cached.filename);
-              if (fs.existsSync(localPath)) {
-                imgUrl = "file://" + localPath;
-              }
-            }
-          } catch (_) {}
-        }
         newObj.image = `/api/image?url=${encodeURIComponent(imgUrl)}`;
       }
     }

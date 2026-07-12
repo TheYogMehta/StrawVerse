@@ -99,9 +99,26 @@ function getHeaders(url, method = "GET") {
   let cleanDomain = "";
   if (cookieDomain) {
     cleanDomain = cookieDomain.replace("www.", "").toLowerCase();
-    if (cleanDomain.endsWith("animepahe.pw") || cleanDomain.includes("kwik.cx") || cleanDomain.includes("owocdn.top") || cleanDomain.includes("uwucdn.top")) {
+    if (cleanDomain.includes("animepahe")) {
       cleanDomain = "animepahe.pw";
       cookieDomain = "animepahe.pw";
+      try {
+        const activeCookieRow = queryOne(
+          "SELECT domain FROM cookie WHERE name = 'cf_clearance' AND domain LIKE '%animepahe%' LIMIT 1",
+        );
+        if (activeCookieRow && activeCookieRow.domain) {
+          const matchedDomain = activeCookieRow.domain.replace(/^\./, "");
+          cleanDomain = matchedDomain;
+          cookieDomain = matchedDomain;
+        }
+      } catch (dbErr) {}
+    } else if (
+      cleanDomain.includes("kwik.cx") ||
+      cleanDomain.includes("owocdn.top") ||
+      cleanDomain.includes("uwucdn.top")
+    ) {
+      cleanDomain = "kwik.cx";
+      cookieDomain = "kwik.cx";
     }
   }
 
@@ -219,7 +236,7 @@ function getHeaders(url, method = "GET") {
       cleanDomain.includes("owocdn.top") ||
       cleanDomain.includes("uwucdn.top")
     ) {
-      targetCookieDomain = "animepahe.pw";
+      targetCookieDomain = "kwik.cx";
     }
   }
 
@@ -233,7 +250,11 @@ function getHeaders(url, method = "GET") {
       try {
         const row = queryOne(
           "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-          [`${targetCookieDomain}-cf_clearance`, targetCookieDomain, targetCookieDomain],
+          [
+            `${targetCookieDomain}-cf_clearance`,
+            targetCookieDomain,
+            targetCookieDomain,
+          ],
         );
         let isValid = false;
         let expiryTime = Date.now() + 10 * 60 * 1000;
