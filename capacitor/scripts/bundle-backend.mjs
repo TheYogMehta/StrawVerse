@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const mobileRoot = path.resolve(__dirname, "..");
-const nodejsDir = path.join(mobileRoot, "www", "nodejs");
+const capacitorRoot = path.resolve(__dirname, "..");
+const nodejsDir = path.join(capacitorRoot, "www", "nodejs");
 
 console.log("[bundle] Bundling Node.js backend using esbuild...");
 
@@ -39,7 +39,7 @@ try {
   console.log("[bundle] Successfully created main.bundle.js");
 
   // 2. Copy sql-wasm.wasm to the root of www/nodejs/
-  const wasmSrc = path.join(mobileRoot, "node_modules", "sql.js", "dist", "sql-wasm.wasm");
+  const wasmSrc = path.join(capacitorRoot, "node_modules", "sql.js", "dist", "sql-wasm.wasm");
   const wasmDest = path.join(nodejsDir, "sql-wasm.wasm");
   if (fs.existsSync(wasmSrc)) {
     fs.copyFileSync(wasmSrc, wasmDest);
@@ -54,16 +54,16 @@ try {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     pkg.main = "main.bundle.js";
     try {
-      const srcPkgPath = path.join(mobileRoot, "..", "src", "package.json");
+      const srcPkgPath = path.join(capacitorRoot, "..", "electron", "package.json");
       if (fs.existsSync(srcPkgPath)) {
         const srcPkg = JSON.parse(fs.readFileSync(srcPkgPath, "utf8"));
         if (pkg.version !== srcPkg.version) {
           pkg.version = srcPkg.version;
-          console.log(`[bundle] Bumped mobile backend version to ${srcPkg.version}`);
+          console.log(`[bundle] Bumped capacitor backend version to ${srcPkg.version}`);
         }
       }
     } catch (e) {
-      console.warn("[bundle] Warning: Could not sync version from src/package.json:", e.message);
+      console.warn("[bundle] Warning: Could not sync version from electron/package.json:", e.message);
     }
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2), "utf8");
     console.log("[bundle] Updated package.json main to main.bundle.js and synced version");
@@ -71,7 +71,7 @@ try {
 
   // 4. Clean up workspace: delete node_modules and backend/ (both restored
   //    by sync-backend.mjs on next run). Keep shims/, main.js, bridge.js —
-  //    those are mobile-specific source files needed for the next bundle.
+  //    those are capacitor-specific source files needed for the next bundle.
   console.log("[bundle] Cleaning up workspace for fast Capacitor copy...");
   const foldersToDelete = [
     path.join(nodejsDir, "node_modules"),

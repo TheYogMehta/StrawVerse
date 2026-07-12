@@ -12,6 +12,11 @@ const {
 const { pipeline } = require("stream/promises");
 const got = require("got").default || require("got");
 
+function normalizeHostname(value) {
+  if (!value) return "";
+  return value.startsWith("www.") ? value.slice(4) : value;
+}
+
 const router = express.Router();
 
 router.get("/api/proxy-headers", (req, res) => {
@@ -203,28 +208,76 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
     broadcast("open-marketplace", { type: AnimeManga });
   });
 
+  const maxConcurrentRequests = 3;
+  const requestQueue = [];
+  let activeRequestsCount = 0;
+
+  function processQueue() {
+    if (requestQueue.length === 0 || activeRequestsCount >= maxConcurrentRequests) {
+      return;
+    }
+
+    const { config, resolve, reject } = requestQueue.shift();
+    activeRequestsCount++;
+
+    const requestId = Math.random().toString(36).substring(7);
+    let isSettled = false;
+
+    const timeoutId = setTimeout(() => {
+      if (!isSettled) {
+        isSettled = true;
+        global.pendingRequests.delete(requestId);
+        activeRequestsCount--;
+        reject(new Error("Native request timed out (30s)"));
+        processQueue();
+      }
+    }, 30000);
+    
+    const cleanResolve = (val) => {
+      if (!isSettled) {
+        isSettled = true;
+        clearTimeout(timeoutId);
+        activeRequestsCount--;
+        resolve(val);
+        processQueue();
+      }
+    };
+
+    const cleanReject = (err) => {
+      if (!isSettled) {
+        isSettled = true;
+        clearTimeout(timeoutId);
+        activeRequestsCount--;
+        reject(err);
+        processQueue();
+      }
+    };
+
+    global.pendingRequests.set(requestId, { resolve: cleanResolve, reject: cleanReject });
+
+    let body = config.data;
+    if (body && typeof body === "object") {
+      body = JSON.stringify(body);
+    }
+
+    const headers =
+      typeof config.headers?.toJSON === "function"
+        ? config.headers.toJSON()
+        : { ...(config.headers || {}) };
+
+    broadcast("native-request", {
+      requestId,
+      url: config.url,
+      method: config.method || "GET",
+      headers,
+      body,
+    });
+  }
+
   global.sendNativeRequest = (config) => {
     return new Promise((resolve, reject) => {
-      const requestId = Math.random().toString(36).substring(7);
-      global.pendingRequests.set(requestId, { resolve, reject });
-
-      let body = config.data;
-      if (body && typeof body === "object") {
-        body = JSON.stringify(body);
-      }
-
-      const headers =
-        typeof config.headers?.toJSON === "function"
-          ? config.headers.toJSON()
-          : { ...(config.headers || {}) };
-
-      broadcast("native-request", {
-        requestId,
-        url: config.url,
-        method: config.method || "GET",
-        headers,
-        body,
-      });
+      requestQueue.push({ config, resolve, reject });
+      processQueue();
     });
   };
 
@@ -235,15 +288,21 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
 
   ipcMain.handle("ensure-cf-bypass", async (event, targetUrl) => {
     if (!targetUrl) return { ok: true, success: true };
-    const domain = new URL(targetUrl).hostname.replace("www.", "");
+    const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
     broadcast("cf-bypass-request", { url: targetUrl });
     for (let i = 0; i < 15; i++) {
       await new Promise((resolve) => setTimeout(resolve, 1000));
       const row = queryOne(
-        "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+        "SELECT value, expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
         [`${domain}-cf_clearance`, domain, domain],
       );
-      if (row) {
+      const now = Date.now();
+      const isCurrent =
+        row?.value &&
+        (Number(row.expirationDate) > now ||
+          (Number(row.local_saved_at) > 0 &&
+            now - Number(row.local_saved_at) < 2 * 60 * 60 * 1000));
+      if (isCurrent) {
         return { ok: true, success: true };
       }
     }
@@ -254,7 +313,7 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
     "save-cf-cookies",
     async (event, targetUrl, cookieString, userAgent, clientHints) => {
       if (!cookieString || !targetUrl) return { ok: false };
-      const domain = new URL(targetUrl).hostname.replace("www.", "");
+      const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
       const pairs = cookieString.split(";");
       let savedClearance = false;
 
@@ -358,11 +417,11 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
 
   global.cloudflarebypass = async (targetUrl, silent, referer, userAgent) => {
     if (!targetUrl) return;
-    const domain = new URL(targetUrl).hostname.replace("www.", "");
+    const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
 
     try {
       run(
-        "DELETE FROM cookie WHERE id IN (?, ?) OR ((name IN ('cf_clearance', 'cf_user_agent') OR name LIKE 'sec-ch-ua%') AND (? = domain OR ? LIKE '%.' || domain))",
+        "DELETE FROM cookie WHERE id IN (?, ?) OR ((name IN ('cf_clearance', 'cf_user_agent') OR name LIKE 'sec-ch-ua%') AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))",
         [`${domain}-cf_clearance`, `${domain}-cf-user-agent`, domain, domain],
       );
       if (global.clearCookieCache) {
@@ -382,7 +441,7 @@ function registerMobileHandlers({ appVersion, repoSlug }) {
       for (let i = 0; i < 20; i++) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const row = queryOne(
-          "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
           [`${domain}-cf_clearance`, domain, domain],
         );
         if (row?.value) {

@@ -102,11 +102,11 @@ router.delete("/api/logs", async (req, res) => {
 
 // Get proxy headers for video playback
 router.get("/api/proxy-headers", (req, res) => {
-  const { url } = req.query;
+  const { url, method = "GET" } = req.query;
   if (!url) return res.status(400).json({ error: "URL is required" });
   try {
     const { getHeaders } = require("./utils/proxyHeaders");
-    const headers = getHeaders(url);
+    const headers = getHeaders(url, method);
     res.json(headers || {});
   } catch (err) {
     res.status(500).json({ error: err.message });

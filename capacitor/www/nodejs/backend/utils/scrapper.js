@@ -165,7 +165,7 @@ async function saveClearanceCookiesForDomain(domain) {
 
 async function clearCookiesForDomain(domain) {
   run(
-    "DELETE FROM cookie WHERE id = ? OR (? = domain OR ? LIKE '%.' || domain OR domain LIKE '%.' || ?)",
+    "DELETE FROM cookie WHERE id = ? OR (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.') OR LTRIM(domain, '.') LIKE '%.' || LTRIM(?, '.'))",
     [`${domain}-cf_clearance`, domain, domain, domain],
   );
   if (global.clearCookieCache) {
@@ -395,7 +395,7 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
 
   try {
     const row = queryOne(
-      "SELECT expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+      "SELECT expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
       [`${domain}-cf_clearance`, domain, domain],
     );
     if (row && !force) {
@@ -707,6 +707,26 @@ global.axios.interceptors.request.use(
   (error) => Promise.reject(error),
 );
 
+function rebuildHeadersAfterBypass(existingHeaders, url, method) {
+  const existing =
+    typeof existingHeaders?.toJSON === "function"
+      ? existingHeaders.toJSON()
+      : { ...(existingHeaders || {}) };
+  const browserIdentityHeaders = new Set([
+    "cookie",
+    "user-agent",
+    "referer",
+    "origin",
+    "sec-ch-ua",
+    "sec-ch-ua-mobile",
+    "sec-ch-ua-platform",
+  ]);
+  for (const key of Object.keys(existing)) {
+    if (browserIdentityHeaders.has(key.toLowerCase())) delete existing[key];
+  }
+  return { ...existing, ...getHeaders(url, method) };
+}
+
 global.axios.interceptors.response.use(
   (response) => {
     const data = response.data;
@@ -728,14 +748,11 @@ global.axios.interceptors.response.use(
       return global
         .cloudflarebypass(response.config.url, true, referer)
         .then(() => {
-          const newHeaders = getHeaders(
+          response.config.headers = rebuildHeadersAfterBypass(
+            response.config.headers,
             response.config.url,
             response.config.method,
           );
-          response.config.headers = {
-            ...response.config.headers,
-            ...newHeaders,
-          };
           return global.axios(response.config);
         });
     }
@@ -762,11 +779,11 @@ global.axios.interceptors.response.use(
           (config.headers?.get && config.headers.get("referer")) ||
           "";
         await global.cloudflarebypass(config.url, true, referer);
-        const newHeaders = getHeaders(config.url, config.method);
-        config.headers = {
-          ...config.headers,
-          ...newHeaders,
-        };
+        config.headers = rebuildHeadersAfterBypass(
+          config.headers,
+          config.url,
+          config.method,
+        );
         return global.axios(config);
       } catch (bypassErr) {
         return Promise.reject(bypassErr);

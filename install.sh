@@ -106,7 +106,7 @@ else
 fi
 
 # Download Icon
-ICON_URL="https://raw.githubusercontent.com/${REPO}/main/src/assets/luffy.png"
+ICON_URL="https://raw.githubusercontent.com/${REPO}/main/electron/assets/luffy.png"
 TARGET_ICON="${ICON_DIR}/strawverse.png"
 log "Downloading application icon..."
 if curl -fsSL -o "$TARGET_ICON" "$ICON_URL"; then

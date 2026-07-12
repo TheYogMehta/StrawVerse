@@ -7,10 +7,18 @@ import android.util.Log;
 
 import com.getcapacitor.BridgeActivity;
 
+import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
+import android.webkit.WebView;
+import java.io.BufferedReader;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class MainActivity extends BridgeActivity {
 
@@ -21,10 +29,30 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(CloudflareBypassPlugin.class);
         super.onCreate(savedInstanceState);
+
+        com.getcapacitor.Bridge bridge = getBridge();
+        if (bridge != null) {
+            bridge.getWebView().setWebViewClient(new com.getcapacitor.BridgeWebViewClient(bridge) {
+                @Override
+                public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                    Uri uri = request.getUrl();
+                    String scheme = uri.getScheme();
+                    String host = uri.getHost();
+                    if (scheme != null && (scheme.equalsIgnoreCase("http") || scheme.equalsIgnoreCase("https"))) {
+                        if (host != null && !host.equals("localhost") && !host.equals("127.0.0.1")) {
+                            WebResourceResponse res = fetchNativelyWithHeaders(request);
+                            if (res != null) {
+                                return res;
+                            }
+                        }
+                    }
+                    return super.shouldInterceptRequest(view, request);
+                }
+            });
+        }
         
         new Thread(() -> {
             try {
-                com.getcapacitor.Bridge bridge = getBridge();
                 if (bridge != null) {
                     java.lang.reflect.Field pluginsField = com.getcapacitor.Bridge.class.getDeclaredField("plugins");
                     pluginsField.setAccessible(true);
@@ -35,7 +63,7 @@ public class MainActivity extends BridgeActivity {
                         String globalJS = com.getcapacitor.JSExport.getGlobalJS(this, bridge.getConfig().isLoggingEnabled(), bridge.isDevMode());
                         String bridgeJS = com.getcapacitor.JSExport.getBridgeJS(this);
                         String pluginJS = com.getcapacitor.JSExport.getPluginJS(plugins.values());
-                        String localUrlJS = "window.WEBVIEW_SERVER_URL = 'http://localhost:" + SERVER_PORT + "';";
+                        String localUrlJS = "window.WEBVIEW_SERVER_URL = 'http://127.0.0.1:" + SERVER_PORT + "';";
                         String customMobileBridgeJS = 
                             "(function() {\n" +
                             "  var esCheckInterval = setInterval(function() {\n" +
@@ -163,5 +191,109 @@ public class MainActivity extends BridgeActivity {
             }
             Log.e(TAG, "MAL callback could not be delivered to the local server");
         }).start();
+    }
+
+    private WebResourceResponse fetchNativelyWithHeaders(WebResourceRequest request) {
+        try {
+            String url = request.getUrl().toString();
+            Map<String, String> customHeaders = new HashMap<>();
+            try {
+                URL headersUrl = new URL("http://127.0.0.1:" + SERVER_PORT + "/api/proxy-headers?url=" + URLEncoder.encode(url, "UTF-8"));
+                HttpURLConnection hConn = (HttpURLConnection) headersUrl.openConnection();
+                hConn.setRequestMethod("GET");
+                hConn.setConnectTimeout(1500);
+                hConn.setReadTimeout(1500);
+                int status = hConn.getResponseCode();
+                if (status == 200) {
+                    try (InputStream is = hConn.getInputStream();
+                         BufferedReader reader = new BufferedReader(new InputStreamReader(is, "UTF-8"))) {
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            sb.append(line);
+                        }
+                        org.json.JSONObject json = new org.json.JSONObject(sb.toString());
+                        java.util.Iterator<String> keys = json.keys();
+                        while (keys.hasNext()) {
+                            String key = keys.next();
+                            customHeaders.put(key, json.getString(key));
+                        }
+                    }
+                }
+                hConn.disconnect();
+            } catch (Exception e) {
+                Log.w(TAG, "Failed to fetch custom headers from proxy: " + e.getMessage());
+            }
+
+            URL targetUrl = new URL(url);
+            HttpURLConnection conn = (HttpURLConnection) targetUrl.openConnection();
+            conn.setRequestMethod(request.getMethod());
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(15000);
+            conn.setInstanceFollowRedirects(true);
+
+            for (Map.Entry<String, String> header : request.getRequestHeaders().entrySet()) {
+                conn.setRequestProperty(header.getKey(), header.getValue());
+            }
+
+            for (Map.Entry<String, String> header : customHeaders.entrySet()) {
+                conn.setRequestProperty(header.getKey(), header.getValue());
+            }
+
+            String webViewCookie = android.webkit.CookieManager.getInstance().getCookie(url);
+            if (webViewCookie != null && !webViewCookie.isEmpty()) {
+                conn.setRequestProperty("Cookie", webViewCookie);
+            }
+            if (customHeaders.containsKey("Cookie")) {
+                conn.setRequestProperty("Cookie", customHeaders.get("Cookie"));
+            }
+
+            int responseCode = conn.getResponseCode();
+            String responseMessage = conn.getResponseMessage();
+            if (responseMessage == null || responseMessage.isEmpty()) {
+                responseMessage = "OK";
+            }
+
+            Map<String, String> responseHeaders = new HashMap<>();
+            for (Map.Entry<String, List<String>> header : conn.getHeaderFields().entrySet()) {
+                String key = header.getKey();
+                if (key != null) {
+                    List<String> values = header.getValue();
+                    StringBuilder valSb = new StringBuilder();
+                    for (int i = 0; i < values.size(); i++) {
+                        valSb.append(values.get(i));
+                        if (i < values.size() - 1) {
+                            valSb.append(", ");
+                        }
+                    }
+                    responseHeaders.put(key, valSb.toString());
+                }
+            }
+
+            responseHeaders.put("Access-Control-Allow-Origin", "*");
+            responseHeaders.put("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            responseHeaders.put("Access-Control-Allow-Headers", "*");
+
+            String contentType = conn.getContentType();
+            String mimeType = "image/jpeg";
+            String encoding = "UTF-8";
+            if (contentType != null) {
+                String[] parts = contentType.split(";");
+                mimeType = parts[0].trim();
+                for (int i = 1; i < parts.length; i++) {
+                    String part = parts[i].trim();
+                    if (part.toLowerCase().startsWith("charset=")) {
+                        encoding = part.substring(8).trim();
+                    }
+                }
+            }
+
+            InputStream responseStream = (responseCode >= 400) ? conn.getErrorStream() : conn.getInputStream();
+            Log.i(TAG, "WebView Intercept Successful: " + url + " -> Response Code: " + responseCode);
+            return new WebResourceResponse(mimeType, encoding, responseCode, responseMessage, responseHeaders, responseStream);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to natively fetch url in WebView interceptor: " + e.getMessage(), e);
+            return null;
+        }
     }
 }

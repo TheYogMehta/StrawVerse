@@ -1,5 +1,5 @@
 {
-  "name": "strawverse-mobile",
+  "name": "strawverse-capacitor",
   "version": "1.0.0",
   "private": true,
   "description": "StrawVerse Android app (Capacitor shell around the shared backend + GUI)",

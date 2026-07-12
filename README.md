@@ -158,7 +158,7 @@ Follow these steps to build application:
 2. Navigate to the project directory:
 
    ```bash
-   cd StrawVerse/src
+   cd StrawVerse/electron
    ```
 
 3. Install dependencies:
@@ -206,13 +206,13 @@ Follow these steps to build and run the application on Android:
    npm install
    ```
 
-   Go into the `mobile` folder and install its dependencies:
+   Go into the `capacitor` folder and install its dependencies:
    ```bash
-   cd mobile
+   cd capacitor
    npm install
    ```
 
-2. **Prepare the Mobile Assets**:
+2. **Prepare the Capacitor Assets**:
    
    Build the GUI, sync the backend, and download the Android ffmpeg binaries:
    ```bash

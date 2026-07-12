@@ -124,6 +124,8 @@ function getHeaders(url, method = "GET") {
 
   const headers = {
     "User-Agent": userAgent,
+    Accept: "*/*",
+    "Accept-Language": "en-US,en;q=0.9",
   };
 
   // Load Client Hints if bypassed
@@ -212,7 +214,7 @@ function getHeaders(url, method = "GET") {
     } else {
       try {
         const row = queryOne(
-          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
           [`${cookieDomain}-cf_clearance`, cookieDomain, cookieDomain],
         );
         let isValid = false;

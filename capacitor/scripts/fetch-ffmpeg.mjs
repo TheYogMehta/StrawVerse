@@ -12,15 +12,15 @@
  * android:extractNativeLibs="true" (and gradle uses legacy jniLibs
  * packaging), the binaries land uncompressed in the app's nativeLibraryDir -
  * the only executable location on modern Android. The ffmpeg-static shim in
- * mobile/nodejs/shims resolves them from there at runtime.
+ * capacitor/nodejs/shims resolves them from there at runtime.
  *
  * Requires `tar` with xz support on the build machine (standard on
  * Linux/macOS; on Windows use WSL or Git Bash with xz installed).
  *
  * Usage:
- *   node mobile/scripts/fetch-ffmpeg.mjs             # arm64 only (default)
- *   node mobile/scripts/fetch-ffmpeg.mjs --all       # all three ABIs
- *   node mobile/scripts/fetch-ffmpeg.mjs --force     # re-download
+ *   node capacitor/scripts/fetch-ffmpeg.mjs             # arm64 only (default)
+ *   node capacitor/scripts/fetch-ffmpeg.mjs --all       # all three ABIs
+ *   node capacitor/scripts/fetch-ffmpeg.mjs --force     # re-download
  */
 
 import fs from "node:fs";

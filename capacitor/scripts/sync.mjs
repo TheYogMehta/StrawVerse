@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Orchestrates all mobile sync steps in one script:
+ * Orchestrates all capacitor sync steps in one script:
  *   1. sync-backend  — copies backend source + installs deps
  *   2. bundle-backend — esbuild bundles into main.bundle.js, cleans source
  *   3. copy-missing-assets — ensures Android assets are up to date

@@ -1,5 +1,5 @@
 {
-  "name": "strawverse-mobile-backend",
+  "name": "strawverse-capacitor-backend",
   "version": "8.0.3",
   "description": "StrawVerse backend running embedded on Android via capacitor-nodejs",
   "main": "main.bundle.js",

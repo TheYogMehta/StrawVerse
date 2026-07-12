@@ -4,9 +4,9 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const mobileRoot = path.resolve(__dirname, "..");
-const srcDir = path.join(mobileRoot, "www");
-const destDir = path.join(mobileRoot, "android", "app", "src", "main", "assets", "public");
+const capacitorRoot = path.resolve(__dirname, "..");
+const srcDir = path.join(capacitorRoot, "www");
+const destDir = path.join(capacitorRoot, "android", "app", "src", "main", "assets", "public");
 
 function copyDir(from, to) {
   fs.mkdirSync(to, { recursive: true });
