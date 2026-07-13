@@ -183,7 +183,13 @@ async function boot() {
 
   try {
     const axios = require("axios");
-    const defaultAdapter = axios.defaults.adapter;
+    // axios v1 exposes defaults.adapter as a list of adapter names, not a
+    // callable function. Resolve it to a real adapter function so we can
+    // invoke it directly for requests that bypass the native bridge.
+    const defaultAdapter =
+      typeof axios.getAdapter === "function"
+        ? axios.getAdapter(axios.defaults.adapter)
+        : axios.defaults.adapter;
 
     global.pendingRequests = new Map();
     let nativeRequestCounter = 0;
@@ -238,6 +244,14 @@ async function boot() {
       });
 
     const nativeAxiosAdapter = async (config) => {
+      // Requests flagged with strawverseDirectHttp (e.g. image proxy fetches
+      // for CDN thumbnails) must NOT be routed through the WebView native
+      // bridge - fetch them directly from the Node runtime instead. This
+      // avoids clogging the bridge with binary payloads and the 30s
+      // timeout/retry loop that breaks image loading on paginated lists.
+      if (config.strawverseDirectHttp === true) {
+        return defaultAdapter(config);
+      }
       if (global.sendNativeRequest) {
         try {
           const res = await global.sendNativeRequest(config);

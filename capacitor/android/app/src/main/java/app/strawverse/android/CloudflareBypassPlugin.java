@@ -701,12 +701,18 @@ public class CloudflareBypassPlugin extends Plugin {
                         pendingCall.reject("Native request cancelled");
                     }
                 }
-            }
-            if (backgroundWebView != null) {
-                backgroundWebView.evaluateJavascript(
-                        "if(window.__strawverseAbortController){window.__strawverseAbortController.abort();}",
-                        null
-                );
+                // Abort only the WebView fetch belonging to this specific
+                // requestId. A single global abort controller used to kill
+                // whichever fetch happened to be in flight (e.g. a page-3
+                // HTML fetch aborted by a stale image request timeout).
+                if (backgroundWebView != null && !requestId.isEmpty()) {
+                    String quotedId = quoteForJavascript(requestId);
+                    backgroundWebView.evaluateJavascript(
+                            "if(window.__strawverseAbortControllers){var c=window.__strawverseAbortControllers[" + quotedId + "];"
+                                    + "if(c){c.abort();delete window.__strawverseAbortControllers[" + quotedId + "];}}",
+                            null
+                    );
+                }
             }
             call.resolve();
         });
@@ -878,7 +884,11 @@ public class CloudflareBypassPlugin extends Plugin {
                         "  var options = " + fetchOptions.toString() + ";\n" +
                         "  var reqId = " + quoteForJavascript(requestId) + ";\n" +
                         "  var controller = new AbortController();\n" +
-                        "  window.__strawverseAbortController = controller;\n" +
+                        "  window.__strawverseAbortControllers = window.__strawverseAbortControllers || {};\n" +
+                        "  window.__strawverseAbortControllers[reqId] = controller;\n" +
+                        "  var cleanup = function() {\n" +
+                        "    if (window.__strawverseAbortControllers) { delete window.__strawverseAbortControllers[reqId]; }\n" +
+                        "  };\n" +
                         "  options.signal = controller.signal;\n" +
                         "  fetch(url, options)\n" +
                         "    .then(function(res) {\n" +
@@ -889,6 +899,7 @@ public class CloudflareBypassPlugin extends Plugin {
                         "        });\n" +
                         "        var reader = new FileReader();\n" +
                         "        reader.onloadend = function() {\n" +
+                        "          cleanup();\n" +
                         "          var base64data = reader.result.split(',')[1] || '';\n" +
                         "          AndroidFetchBridge.onFetchResponse(reqId, JSON.stringify({\n" +
                         "            status: res.status,\n" +
@@ -901,6 +912,7 @@ public class CloudflareBypassPlugin extends Plugin {
                         "      });\n" +
                         "    })\n" +
                         "    .catch(function(err) {\n" +
+                        "      cleanup();\n" +
                         "      AndroidFetchBridge.onFetchResponse(reqId, JSON.stringify({ error: err.message || String(err) }));\n" +
                         "    });\n" +
                         "})()";
