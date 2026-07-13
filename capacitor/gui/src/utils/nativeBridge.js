@@ -174,7 +174,6 @@ function createPolyfill() {
   return {
     get: () => invoke("get-shared-state"),
     set: (newState) => invoke("set-shared-state", newState),
-    discordrpc: () => {},
     on: (channel, callback) => {
       ensureEventSource();
       if (!eventListeners.has(channel)) eventListeners.set(channel, new Set());

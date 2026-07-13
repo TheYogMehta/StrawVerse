@@ -405,11 +405,6 @@ const tables = {
     completed_at: "TEXT",
     hidden: "INTEGER DEFAULT 0",
   },
-  CatboxCache: {
-    original_url: "TEXT PRIMARY KEY",
-    catbox_url: "TEXT",
-    created_at: "INTEGER",
-  },
   StreamReferer: {
     domain: "TEXT PRIMARY KEY",
     referer: "TEXT",
@@ -473,14 +468,6 @@ async function initDatabase() {
     logger.error("Failed to clean up deprecated tables: " + e.message);
   }
 
-  // Drop legacy next_episodes table and stale settings
-  try {
-    await exec("DROP TABLE IF EXISTS next_episodes");
-    await run("DELETE FROM Settings WHERE key = 'last_livechart_schedule_run'");
-  } catch (e) {
-    logger.error("[db] Failed to drop next_episodes table: " + e.message);
-  }
-
   // Create unique index for SkipTimes
   try {
     await exec(
@@ -488,60 +475,6 @@ async function initDatabase() {
     );
   } catch (e) {
     logger.error("Failed to create unique index on SkipTimes: " + e.message);
-  }
-
-  // Drop unused EpisodesDataId column from Anime table
-  try {
-    const animeColumns = await queryAll("PRAGMA table_info(Anime)");
-    if (animeColumns.some((col) => col.name === "EpisodesDataId")) {
-      await exec("ALTER TABLE Anime DROP COLUMN EpisodesDataId");
-      logger.info("[db] Dropped unused EpisodesDataId column from Anime table");
-    }
-  } catch (e) {
-    logger.error("[db] Failed to drop EpisodesDataId column: " + e.message);
-  }
-
-  // Migrate legacy "config" JSON settings row to individual rows
-  try {
-    const rawConfigRow = await queryOne(
-      "SELECT value FROM Settings WHERE key = ?",
-      ["config"],
-    );
-    if (rawConfigRow && rawConfigRow.value) {
-      const parsed = JSON.parse(rawConfigRow.value);
-      if (parsed && typeof parsed === "object") {
-        const booleanKeys = new Set([
-          "developerMode",
-          "autoLoadNextChapter",
-          "enableDiscordRPC",
-          "mergeSubtitles",
-          "malDiscordProfile",
-          "autoSkipIntro",
-          "Pagination",
-        ]);
-        const ops = [];
-        for (const [k, v] of Object.entries(parsed)) {
-          let val = v;
-          if (booleanKeys.has(k)) {
-            if (v === "on") val = true;
-            else if (v === "off") val = false;
-          }
-          ops.push({
-            sql: "INSERT INTO Settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params: [k, JSON.stringify(val)],
-          });
-        }
-        if (ops.length > 0) {
-          await batchRun("main", ops);
-        }
-        await run("DELETE FROM Settings WHERE key = ?", ["config"]);
-        logger.info(
-          "[db] Successfully migrated legacy config JSON row to individual database rows",
-        );
-      }
-    }
-  } catch (migErr) {
-    logger.error("[db] Error migrating legacy settings: " + migErr.message);
   }
 
   // Clean up orphaned history records

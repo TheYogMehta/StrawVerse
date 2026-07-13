@@ -34,10 +34,8 @@ async function settingupdate({
   Mangaprovider = null,
   Pagination = null,
   autoLoadNextChapter = null,
-  enableDiscordRPC = null,
   mergeSubtitles = null,
   subtitleFormat = null,
-  malDiscordProfile = null,
   imageCacheSizeLimit = null,
   developerMode = null,
   autoSkipIntro = null,
@@ -84,20 +82,12 @@ async function settingupdate({
     Pagination = currentSettings?.Pagination ?? false;
   }
 
-  if (enableDiscordRPC === null) {
-    enableDiscordRPC = currentSettings?.enableDiscordRPC ?? false;
-  }
-
   if (mergeSubtitles === null) {
     mergeSubtitles = currentSettings?.mergeSubtitles ?? false;
   }
 
   if (subtitleFormat === null) {
     subtitleFormat = currentSettings?.subtitleFormat || "vtt";
-  }
-
-  if (malDiscordProfile === null) {
-    malDiscordProfile = currentSettings?.malDiscordProfile ?? false;
   }
 
   if (CustomDownloadLocation === null) {
@@ -152,10 +142,8 @@ async function settingupdate({
   config.Mangaprovider = Mangaprovider;
   config.Pagination = Pagination;
   config.autoLoadNextChapter = autoLoadNextChapter;
-  config.enableDiscordRPC = enableDiscordRPC;
   config.mergeSubtitles = mergeSubtitles;
   config.subtitleFormat = subtitleFormat;
-  config.malDiscordProfile = malDiscordProfile;
   config.imageCacheSizeLimit = imageCacheSizeLimit;
   config.developerMode = developerMode;
   config.autoSkipIntro = autoSkipIntro;
@@ -166,8 +154,6 @@ async function settingupdate({
   config.upscalePreset = upscalePreset;
   config.forceHighPerformanceGpu = forceHighPerformanceGpu;
 
-  // Discord RPC removed on Android
-
   await settingSave();
   return {
     quality,
@@ -177,10 +163,8 @@ async function settingupdate({
     Mangaprovider,
     Pagination,
     autoLoadNextChapter,
-    enableDiscordRPC,
     mergeSubtitles,
     subtitleFormat,
-    malDiscordProfile,
     imageCacheSizeLimit,
   };
 }
@@ -241,11 +225,6 @@ async function settingfetch() {
 
     if (!config?.hasOwnProperty("subtitleFormat")) {
       config.subtitleFormat = "vtt";
-      changes = true;
-    }
-
-    if (!config?.hasOwnProperty("malDiscordProfile")) {
-      config.malDiscordProfile = false;
       changes = true;
     }
 
@@ -312,10 +291,8 @@ async function SettingsLoad() {
             Mangaprovider: "weebcentral",
             autoLoadNextChapter: true,
             Pagination: false,
-            enableDiscordRPC: false,
             mergeSubtitles: false,
             subtitleFormat: "vtt",
-            malDiscordProfile: false,
             imageCacheSizeLimit: 5,
             developerMode: false,
             autoSkipIntro: true,
@@ -351,7 +328,7 @@ async function SettingsLoad() {
       let Tosave = await MalRefreshTokenGen(config.malToken);
       await settingupdate(Tosave);
     }
-    // Discord RPC removed on Android
+
     await settingSave();
   } catch (err) {
     logger.error("Failed To Load Config");

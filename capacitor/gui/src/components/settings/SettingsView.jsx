@@ -31,7 +31,6 @@ export default function SettingsView({
 
   // Form states
   const [downloadLocation, setDownloadLocation] = useState("");
-  const [discordRpc, setDiscordRpc] = useState(false);
   const [animeProvider, setAnimeProvider] = useState("");
   const [quality, setQuality] = useState("1080p");
   const [mangaProvider, setMangaProvider] = useState("weebcentral");
@@ -40,7 +39,6 @@ export default function SettingsView({
   const [malStatus, setMalStatus] = useState("plan_to_watch");
   const [mergeSubtitles, setMergeSubtitles] = useState(false);
   const [subtitleFormat, setSubtitleFormat] = useState("vtt");
-  const [malDiscordProfile, setMalDiscordProfile] = useState(false);
   const [malUsername, setMalUsername] = useState(null);
   const [imageCacheSizeLimit, setImageCacheSizeLimit] = useState(5);
   const [developerMode, setDeveloperMode] = useState(false);
@@ -248,7 +246,6 @@ export default function SettingsView({
         // Load values into form states
         const s = data.settings;
         setDownloadLocation(s.CustomDownloadLocation || "");
-        setDiscordRpc(s.enableDiscordRPC);
         setAnimeProvider(s.Animeprovider || "");
         setQuality(s.quality || "1080p");
         setMangaProvider(s.Mangaprovider || "weebcentral");
@@ -257,8 +254,6 @@ export default function SettingsView({
         setMalStatus(s.status || "plan_to_watch");
         setMergeSubtitles(s.mergeSubtitles);
         setSubtitleFormat(s.subtitleFormat || "vtt");
-        setMalDiscordProfile(s.malDiscordProfile);
-        setMalUsername(data.malUsername || null);
         setImageCacheSizeLimit(s.imageCacheSizeLimit || 5);
         setDeveloperMode(s.developerMode);
         setAutoSkipIntro(s.autoSkipIntro);
@@ -362,8 +357,6 @@ export default function SettingsView({
     const dirty = {};
     if (downloadLocation !== (settings.CustomDownloadLocation || ""))
       dirty.CustomDownloadLocation = downloadLocation;
-    if (discordRpc !== settings.enableDiscordRPC)
-      dirty.enableDiscordRPC = discordRpc;
     if (animeProvider !== (settings.Animeprovider || ""))
       dirty.Animeprovider = animeProvider;
     if (quality !== (settings.quality || "1080p")) dirty.quality = quality;
@@ -378,8 +371,6 @@ export default function SettingsView({
       dirty.mergeSubtitles = mergeSubtitles;
     if (subtitleFormat !== (settings.subtitleFormat || "vtt"))
       dirty.subtitleFormat = subtitleFormat;
-    if (malDiscordProfile !== settings.malDiscordProfile)
-      dirty.malDiscordProfile = malDiscordProfile;
     if (developerMode !== settings.developerMode)
       dirty.developerMode = developerMode;
     if (autoSkipIntro !== settings.autoSkipIntro)
@@ -446,7 +437,6 @@ export default function SettingsView({
 
     const changed =
       downloadLocation !== (settings.CustomDownloadLocation || "") ||
-      discordRpc !== settings.enableDiscordRPC ||
       animeProvider !== (settings.Animeprovider || "") ||
       quality !== (settings.quality || "1080p") ||
       mangaProvider !== (settings.Mangaprovider || "weebcentral") ||
@@ -455,7 +445,6 @@ export default function SettingsView({
       malStatus !== (settings.status || "plan_to_watch") ||
       mergeSubtitles !== settings.mergeSubtitles ||
       subtitleFormat !== (settings.subtitleFormat || "vtt") ||
-      malDiscordProfile !== settings.malDiscordProfile ||
       developerMode !== settings.developerMode ||
       autoSkipIntro !== settings.autoSkipIntro ||
       mangaReaderLayout !== (settings.mangaReaderLayout || "long-strip") ||
@@ -472,7 +461,6 @@ export default function SettingsView({
     }
   }, [
     downloadLocation,
-    discordRpc,
     animeProvider,
     quality,
     mangaProvider,
@@ -481,7 +469,6 @@ export default function SettingsView({
     malStatus,
     mergeSubtitles,
     subtitleFormat,
-    malDiscordProfile,
     imageCacheSizeLimit,
     developerMode,
     autoSkipIntro,
@@ -822,28 +809,6 @@ export default function SettingsView({
                     />
                   </div>
                 </div>{" "}
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Discord Rich Presence
-                    </div>
-                    <div className="settings-row-hint">
-                      Show what you are currently watching or reading on your
-                      Discord profile activity.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={String(discordRpc)}
-                      onChange={(val) => setDiscordRpc(val === "true")}
-                      options={[
-                        { value: "true", label: "Enabled" },
-                        { value: "false", label: "Disabled" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
                 <SettingsRow
                   label="Developer Mode"
                   desc="Enable advanced logs viewer tab and debug utilities."
@@ -1331,41 +1296,6 @@ export default function SettingsView({
                         />
                       </div>
                     </div>
-
-                    {discordRpc && (
-                      <div className="settings-row-item">
-                        <div className="settings-row-info">
-                          <div className="settings-row-label">
-                            Show MAL in Discord Activity
-                          </div>
-                          <div className="settings-row-hint">
-                            Embed MAL link buttons inside your Discord Rich
-                            Presence activity profile.
-                            {malUsername &&
-                              ` (Profile: myanimelist.net/profile/${malUsername})`}
-                          </div>
-                        </div>
-                        <div className="settings-row-control u-style-79">
-                          <Dropdown
-                            value={String(malDiscordProfile)}
-                            onChange={(val) =>
-                              setMalDiscordProfile(val === "true")
-                            }
-                            options={[
-                              { value: "false", label: "No" },
-                              { value: "true", label: "Yes" },
-                            ]}
-                            minWidth={200}
-                          />
-                          {!malUsername && (
-                            <span className="settings-hint u-style-80">
-                              MAL username not found — re-authenticate.
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
                     <div className="settings-row-item">
                       <div className="settings-row-info">
                         <div className="settings-row-label">

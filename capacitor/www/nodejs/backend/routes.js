@@ -83,7 +83,6 @@ const {
   mappingQueryAll,
 } = require("./utils/db");
 const ImageCacheManager = require("./utils/ImageCacheManager");
-const UpdateDiscordRPC = async () => {};
 const segmentKeyCache = {};
 
 // ===================== API routes =====================

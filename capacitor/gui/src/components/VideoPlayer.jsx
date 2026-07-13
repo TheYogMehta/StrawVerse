@@ -808,7 +808,6 @@ export default function VideoPlayer({
     return () => {
       clearInterval(interval);
       saveWatchProgress(true);
-      apiPost("/api/discord/reset").catch(() => {});
     };
   }, [id, currentEpisode, currentEpisodeObj]);
 

@@ -627,7 +627,6 @@ export default function MangaReader({
     return () => {
       clearInterval(interval);
       saveReadProgress(true);
-      apiPost("/api/discord/reset").catch(() => {});
     };
   }, [id, activeChapterInView, items]);
 
