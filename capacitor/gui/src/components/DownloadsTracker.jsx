@@ -50,7 +50,6 @@ export default function DownloadsTracker() {
   useEffect(() => {
     fetchDownloads();
 
-    // Listen to real-time Electron IPC download events
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       window.sharedStateAPI.on("download-logger", (data) => {
         if (data.totalSegments && data.totalSegments > 0) {

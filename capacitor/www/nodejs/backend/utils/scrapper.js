@@ -18,12 +18,6 @@ process.on("exit", () => {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function stripElectronBrands(value = "") {
-  return value
-    .replace(/,?\s*"Electron";v="[^"]+"/g, "")
-    .replace(/"Electron";v="[^"]+",?\s*/g, "");
-}
-
 function normalizeHostname(value) {
   return String(value || "")
     .replace(/^\./, "")
@@ -263,18 +257,6 @@ function createScrapperWindow() {
         details.requestHeaders,
         "x-proxy-referer",
       );
-
-      if (details.requestHeaders["sec-ch-ua"]) {
-        details.requestHeaders["sec-ch-ua"] = stripElectronBrands(
-          details.requestHeaders["sec-ch-ua"],
-        );
-      }
-      if (details.requestHeaders["sec-ch-ua-full-version-list"]) {
-        details.requestHeaders["sec-ch-ua-full-version-list"] =
-          stripElectronBrands(
-            details.requestHeaders["sec-ch-ua-full-version-list"],
-          );
-      }
 
       const rawReferer =
         getHeaderCaseInsensitive(details.requestHeaders, "referer") ||
@@ -560,7 +542,7 @@ async function ExitScrapperWindow() {
   }
 }
 
-async function electronNetAdapter(config) {
+async function androidNativeAdapter(config) {
   return new Promise(async (resolve, reject) => {
     try {
       const {
@@ -628,7 +610,9 @@ async function electronNetAdapter(config) {
           if (res.status >= 200 && res.status < 300) {
             resolve(response);
           } else {
-            const error = new Error(`Request failed with status code ${res.status}`);
+            const error = new Error(
+              `Request failed with status code ${res.status}`,
+            );
             error.response = response;
             error.config = config;
             reject(error);
@@ -643,16 +627,22 @@ async function electronNetAdapter(config) {
                 responseHeaders[k.toLowerCase()] = v;
               }
             }
-            const buf = Buffer.from(res.data, res.isBase64 ? "base64" : "utf-8");
+            const buf = Buffer.from(
+              res.data,
+              res.isBase64 ? "base64" : "utf-8",
+            );
             const response = {
-              data: responseType === "arraybuffer" ? buf : buf.toString("utf-8"),
+              data:
+                responseType === "arraybuffer" ? buf : buf.toString("utf-8"),
               status: res.status,
               statusText: "",
               headers: responseHeaders,
               config,
               request: null,
             };
-            const error = new Error(`Request failed with status code ${res.status}`);
+            const error = new Error(
+              `Request failed with status code ${res.status}`,
+            );
             error.response = response;
             error.config = config;
             reject(error);
@@ -754,7 +744,7 @@ async function electronNetAdapter(config) {
 axios.defaults.proxy = false;
 global.axios = axios.create({
   proxy: false,
-  adapter: electronNetAdapter,
+  adapter: androidNativeAdapter,
   timeout: 20000,
 });
 global.axios.interceptors.request.use(

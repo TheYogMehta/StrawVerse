@@ -57,7 +57,9 @@ async function getFfmpegPath() {
     return resolvedFfmpegPath;
   }
 
-  const defaultPath = ffmpeg ? ffmpeg.replace("app.asar", "app.asar.unpacked") : null;
+  const defaultPath = ffmpeg
+    ? ffmpeg.replace("app.asar", "app.asar.unpacked")
+    : null;
   if (defaultPath && fs.existsSync(defaultPath)) {
     resolvedFfmpegPath = defaultPath;
     return resolvedFfmpegPath;
@@ -248,32 +250,20 @@ class downloader {
       } catch (e) {}
     }
 
-    try {
-      const { session } = require("electron");
-      if (session && session.defaultSession) {
-        const cookies = await session.defaultSession.cookies.get({ url });
-        if (cookies && cookies.length > 0) {
-          const cookieParts = cookies.map((c) => `${c.name}=${c.value}`);
-          let existingCookie =
-            reqHeaders["Cookie"] || reqHeaders["cookie"] || "";
-          if (existingCookie) {
-            const existingParts = existingCookie
-              .split(";")
-              .map((p) => p.trim())
-              .filter(Boolean);
-            for (const part of cookieParts) {
-              const [name] = part.split("=");
-              if (!existingParts.some((ep) => ep.startsWith(`${name}=`))) {
-                existingParts.push(part);
-              }
-            }
-            reqHeaders["Cookie"] = existingParts.join("; ");
-          } else {
-            reqHeaders["Cookie"] = cookieParts.join("; ");
-          }
-        }
+    const androidCookie = resolvedHeaders.Cookie || resolvedHeaders.cookie;
+    if (androidCookie) {
+      const cookieValues = new Map();
+      const existingCookie = reqHeaders.Cookie || reqHeaders.cookie || "";
+      for (const part of `${existingCookie};${androidCookie}`.split(";")) {
+        const trimmed = part.trim();
+        if (!trimmed) continue;
+        const separator = trimmed.indexOf("=");
+        const name = separator === -1 ? trimmed : trimmed.slice(0, separator);
+        cookieValues.set(name, trimmed);
       }
-    } catch (e) {}
+      delete reqHeaders.cookie;
+      reqHeaders.Cookie = [...cookieValues.values()].join("; ");
+    }
 
     reqHeaders["accept"] = "*/*";
     reqHeaders["accept-language"] = "en-US,en;q=0.9";
