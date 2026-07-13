@@ -23,6 +23,28 @@ let config = [],
 global.Anime_providers = {};
 global.Manga_providers = {};
 
+async function reconcileActiveProvider(Type) {
+  const isAnime = Type === "Anime";
+  const settingKey = isAnime ? "Animeprovider" : "Mangaprovider";
+  const providers = isAnime
+    ? global.Anime_providers || {}
+    : global.Manga_providers || {};
+  const currentProvider = config?.[settingKey] || null;
+  const nextProvider = Object.prototype.hasOwnProperty.call(
+    providers,
+    currentProvider,
+  )
+    ? currentProvider
+    : Object.keys(providers)[0] || null;
+
+  if (config?.[settingKey] !== nextProvider) {
+    config[settingKey] = nextProvider;
+    await settingSave();
+  }
+
+  return nextProvider;
+}
+
 // update the settings
 async function settingupdate({
   quality = null,
@@ -76,7 +98,7 @@ async function settingupdate({
   if (Mangaprovider === null) {
     Mangaprovider =
       currentSettings?.Mangaprovider ||
-      Object.keys(global?.Mangaprovider)?.[0] ||
+      Object.keys(global?.Manga_providers)?.[0] ||
       null;
   }
 
@@ -292,8 +314,8 @@ async function SettingsLoad() {
             status: "plan_to_watch",
             malToken: null,
             CustomDownloadLocation: getDownloadsFolder(),
-            Animeprovider: Object.keys(global?.Anime_providers)?.[0] || null,
-            Mangaprovider: Object.keys(global?.Manga_providers)?.[0] || null,
+            Animeprovider: 0,
+            Mangaprovider: 0,
             autoLoadNextChapter: true,
             Pagination: false,
             mergeSubtitles: false,
@@ -344,36 +366,18 @@ async function SettingsLoad() {
 
 // fetch which provider
 async function providerFetch(Type = "Anime", provider) {
-  if (!provider)
-    provider = Type === "Anime" ? config?.Animeprovider : config?.Mangaprovider;
+  const providers =
+    Type === "Anime" ? global.Anime_providers : global.Manga_providers;
+  const activeProvider = await reconcileActiveProvider(Type);
+  const providerName =
+    provider && Object.prototype.hasOwnProperty.call(providers, provider)
+      ? provider
+      : activeProvider;
 
-  if (Type === "Anime") {
-    if (!provider || !global.Anime_providers[provider]) {
-      const available = Object.keys(global.Anime_providers || {});
-      if (available.length > 0) provider = available[0];
-    }
-    return {
-      provider_name:
-        provider && global.Anime_providers[provider] ? provider : null,
-      provider:
-        provider && global.Anime_providers[provider]
-          ? global.Anime_providers[provider]
-          : null,
-    };
-  } else {
-    if (!provider || !global.Manga_providers[provider]) {
-      const available = Object.keys(global.Manga_providers || {});
-      if (available.length > 0) provider = available[0];
-    }
-    return {
-      provider_name:
-        provider && global.Manga_providers[provider] ? provider : null,
-      provider:
-        provider && global.Manga_providers[provider]
-          ? global.Manga_providers[provider]
-          : null,
-    };
-  }
+  return {
+    provider_name: providerName,
+    provider: providerName ? providers[providerName] : null,
+  };
 }
 
 // sync the config with database
@@ -493,16 +497,9 @@ async function loadAllScrapers() {
       }
     }
 
-    global.win.webContents.send("extention-updated", {
-      Anime: Object.entries(global.Anime_providers || {}).map(([key, val]) => ({
-        name: key,
-        version: val.version,
-      })),
-      Manga: Object.entries(global.Manga_providers || {}).map(([key, val]) => ({
-        name: key,
-        version: val.version,
-      })),
-    });
+    await reconcileActiveProvider("Anime");
+    await reconcileActiveProvider("Manga");
+    notifyScrapersUpdated();
     global.scrapersLoaded = true;
   } catch (err) {
     logger.error(`Error in loadAllScrapers: ${err.message}`);
@@ -548,14 +545,7 @@ async function loadSingleScraper(AnimeManga, ExtensionName) {
         `Loaded/Reloaded ${AnimeManga.toLowerCase()} scraper: ${scraper.name}`,
       );
       notifyScrapersUpdated();
-
-      // update db if required
-      const settingKey =
-        AnimeManga === "Anime" ? "Animeprovider" : "Mangaprovider";
-      if (!config?.[settingKey]) {
-        config[settingKey] = Object.keys(providers)[0] || null;
-        await settingSave();
-      }
+      await reconcileActiveProvider(AnimeManga);
     } else {
       logger.warn(`Scraper missing 'name' export: ${fullPath}`);
     }
@@ -566,7 +556,7 @@ async function loadSingleScraper(AnimeManga, ExtensionName) {
   }
 }
 
-function unloadSingleScraper(AnimeManga, ExtensionName) {
+async function unloadSingleScraper(AnimeManga, ExtensionName) {
   try {
     if (AnimeManga === "Anime") {
       delete global.Anime_providers[ExtensionName];
@@ -576,6 +566,7 @@ function unloadSingleScraper(AnimeManga, ExtensionName) {
     logger.info(
       `Unloaded ${AnimeManga.toLowerCase()} scraper: ${ExtensionName}`,
     );
+    await reconcileActiveProvider(AnimeManga);
     notifyScrapersUpdated();
   } catch (err) {
     logger.error(`Failed to unload scraper ${ExtensionName}: ${err.message}`);
@@ -626,7 +617,7 @@ async function HandleExtensions(TaskType, AnimeManga, ExtensionName) {
     if (fs.existsSync(extensionPath)) {
       fs.unlinkSync(extensionPath);
 
-      unloadSingleScraper(AnimeManga, ExtensionName);
+      await unloadSingleScraper(AnimeManga, ExtensionName);
       return {
         type: "success",
         title: `Removed ${AnimeManga} Extention!`,

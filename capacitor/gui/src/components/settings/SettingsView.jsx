@@ -33,7 +33,7 @@ export default function SettingsView({
   const [downloadLocation, setDownloadLocation] = useState("");
   const [animeProvider, setAnimeProvider] = useState("");
   const [quality, setQuality] = useState("1080p");
-  const [mangaProvider, setMangaProvider] = useState("weebcentral");
+  const [mangaProvider, setMangaProvider] = useState("");
   const [autoLoadNextChapter, setAutoLoadNextChapter] = useState(true);
   const [pagination, setPagination] = useState(false);
   const [malStatus, setMalStatus] = useState("plan_to_watch");
@@ -248,7 +248,7 @@ export default function SettingsView({
         setDownloadLocation(s.CustomDownloadLocation || "");
         setAnimeProvider(s.Animeprovider || "");
         setQuality(s.quality || "1080p");
-        setMangaProvider(s.Mangaprovider || "weebcentral");
+        setMangaProvider(s.Mangaprovider || "");
         setAutoLoadNextChapter(s.autoLoadNextChapter);
         setPagination(s.Pagination);
         setMalStatus(s.status || "plan_to_watch");
@@ -360,7 +360,7 @@ export default function SettingsView({
     if (animeProvider !== (settings.Animeprovider || ""))
       dirty.Animeprovider = animeProvider;
     if (quality !== (settings.quality || "1080p")) dirty.quality = quality;
-    if (mangaProvider !== (settings.Mangaprovider || "weebcentral"))
+    if (mangaProvider !== (settings.Mangaprovider || ""))
       dirty.Mangaprovider = mangaProvider;
     if (autoLoadNextChapter !== settings.autoLoadNextChapter)
       dirty.autoLoadNextChapter = autoLoadNextChapter;
@@ -439,7 +439,7 @@ export default function SettingsView({
       downloadLocation !== (settings.CustomDownloadLocation || "") ||
       animeProvider !== (settings.Animeprovider || "") ||
       quality !== (settings.quality || "1080p") ||
-      mangaProvider !== (settings.Mangaprovider || "weebcentral") ||
+      mangaProvider !== (settings.Mangaprovider || "") ||
       autoLoadNextChapter !== settings.autoLoadNextChapter ||
       pagination !== settings.Pagination ||
       malStatus !== (settings.status || "plan_to_watch") ||
@@ -1140,13 +1140,14 @@ export default function SettingsView({
                     <Dropdown
                       value={mangaProvider || ""}
                       onChange={setMangaProvider}
-                      options={(settings?.providers?.Manga || []).map(
-                        (name) => ({
+                      options={[
+                        { value: "", label: "None selected" },
+                        ...(settings?.providers?.Manga || []).map((name) => ({
                           value: name,
                           label: name,
                           icon: getProviderIcon(name, "Manga"),
-                        }),
-                      )}
+                        })),
+                      ]}
                       minWidth={200}
                     />
                   </div>
