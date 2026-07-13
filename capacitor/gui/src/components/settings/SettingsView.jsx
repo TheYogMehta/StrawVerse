@@ -112,33 +112,16 @@ export default function SettingsView({
 
     setVerifyingWt(true);
 
-    const protocols = ["https://", "http://"];
-    let success = false;
-    let serverInfo = null;
+    let success;
 
-    for (const proto of protocols) {
-      const healthUrl = `${proto}${domain}/health`;
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-        const res = await fetch(healthUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.server === "StrawVerse Watch Together") {
-            success = true;
-            serverInfo = data;
-            break;
-          }
-        }
-      } catch (err) {
-        // Continue
-      }
+    try {
+      const result = await apiPost("/api/watch-together/verify", { domain });
+      success = result?.success === true;
+    } catch {
+      success = false;
+    } finally {
+      setVerifyingWt(false);
     }
-
-    setVerifyingWt(false);
 
     if (success) {
       Swal.fire({

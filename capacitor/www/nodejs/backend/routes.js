@@ -3070,6 +3070,60 @@ router.get("/api/history/list", async (req, res) => {
   }
 });
 
+// Verify a Watch Together server
+router.post("/api/watch-together/verify", async (req, res) => {
+  try {
+    const rawDomain = String(req.body?.domain || "").trim();
+    const domain = rawDomain
+      .replace(/^(wss?:\/\/|https?:\/\/)/i, "")
+      .replace(/\/ws$/i, "")
+      .replace(/\/health$/i, "")
+      .replace(/\/+$/, "");
+
+    if (!domain || /[\s\\]/.test(domain)) {
+      return res.status(400).json({
+        success: false,
+        error: "A valid Watch Together server domain is required.",
+      });
+    }
+
+    const healthUrls = ["https://", "http://"].map((protocol) => {
+      const url = new URL(`${protocol}${domain}/health`);
+      if (!["http:", "https:"].includes(url.protocol)) {
+        throw new Error("Unsupported server protocol");
+      }
+      return url.toString();
+    });
+
+    for (const healthUrl of healthUrls) {
+      try {
+        const response = await global.axios.get(healthUrl, {
+          timeout: 3000,
+          responseType: "json",
+          validateStatus: (status) => status >= 200 && status < 300,
+        });
+
+        if (response.data?.server === "StrawVerse Watch Together") {
+          return res.json({ success: true, serverInfo: response.data });
+        }
+      } catch {
+        // Try the next protocol.
+      }
+    }
+
+    return res.status(502).json({
+      success: false,
+      error:
+        "The address did not respond as a StrawVerse Watch Together server.",
+    });
+  } catch {
+    return res.status(400).json({
+      success: false,
+      error: "The Watch Together server address is invalid.",
+    });
+  }
+});
+
 // ===================== SPA routes =====================
 const SPA_ROUTES = [
   "/",
