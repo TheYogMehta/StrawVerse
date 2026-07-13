@@ -100,17 +100,20 @@ function getHeaders(url, method = "GET") {
   if (cookieDomain) {
     cleanDomain = cookieDomain.replace("www.", "").toLowerCase();
     if (cleanDomain.includes("animepahe")) {
-      cleanDomain = "animepahe.pw";
-      cookieDomain = "animepahe.pw";
       try {
         const activeCookieRow = queryOne(
-          "SELECT domain FROM cookie WHERE name = 'cf_clearance' AND domain LIKE '%animepahe%' LIMIT 1",
+          "SELECT domain FROM cookie WHERE name = 'cf_clearance' AND domain LIKE '%animepahe%' ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
         );
+        let tld = "pw";
         if (activeCookieRow && activeCookieRow.domain) {
           const matchedDomain = activeCookieRow.domain.replace(/^\./, "");
-          cleanDomain = matchedDomain;
-          cookieDomain = matchedDomain;
+          const domainParts = matchedDomain.split(".");
+          tld = domainParts[domainParts.length - 1] || "pw";
         }
+        const hostParts = cookieDomain.split(".");
+        hostParts[hostParts.length - 1] = tld;
+        cookieDomain = hostParts.join(".");
+        cleanDomain = cookieDomain;
       } catch (dbErr) {}
     } else if (
       cleanDomain.includes("kwik.cx") ||
