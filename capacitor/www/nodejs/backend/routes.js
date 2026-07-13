@@ -2511,11 +2511,12 @@ router.get("/api/image", async (req, res) => {
     const resolvedHeaders = getHeaders(decodedUrl);
     const options = {
       responseType: "arraybuffer",
+      strawverseDirectHttp: true,
       headers: {
         ...resolvedHeaders,
       },
     };
-    let response = await global.axios.get(decodedUrl, options);
+    const response = await global.axios.get(decodedUrl, options);
     const contentType = response.headers["content-type"] || "image/jpeg";
 
     const buf = Buffer.from(response.data);

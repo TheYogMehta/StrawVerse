@@ -25,6 +25,7 @@ const PORT = 3459;
 
 const sseClients = new Set();
 let pendingBypassRequest = null;
+const activeBypasses = new Map();
 let PageHistory = [];
 global.pendingRequests = new Map();
 
@@ -186,42 +187,61 @@ async function boot() {
 
     global.pendingRequests = new Map();
     let nativeRequestCounter = 0;
+    let activeNativeRequests = 0;
+    const nativeRequestQueue = [];
+    const MAX_NATIVE_REQUESTS = 2;
 
-    global.sendNativeRequest = (config) => {
-      return new Promise((resolve, reject) => {
-        const requestId = ++nativeRequestCounter;
-        const timeout = setTimeout(() => {
-          global.pendingRequests.delete(requestId);
-          reject(new Error(`Native request timeout for ${config.url}`));
-        }, 30000);
-
-        global.pendingRequests.set(requestId, {
-          resolve: (res) => {
-            clearTimeout(timeout);
-            resolve(res);
-          },
-          reject: (err) => {
-            clearTimeout(timeout);
-            reject(err);
-          },
-        });
-
-        broadcast("native-request", {
-          requestId,
-          url: config.url,
-          method: config.method || "GET",
-          headers: config.headers || {},
-          body: config.data || null,
-        });
-      });
+    const drainNativeRequestQueue = () => {
+      while (
+        activeNativeRequests < MAX_NATIVE_REQUESTS &&
+        nativeRequestQueue.length > 0
+      ) {
+        const startRequest = nativeRequestQueue.shift();
+        activeNativeRequests += 1;
+        startRequest();
+      }
     };
+
+    global.sendNativeRequest = (config) =>
+      new Promise((resolve, reject) => {
+        nativeRequestQueue.push(() => {
+          const requestId = ++nativeRequestCounter;
+          let settled = false;
+          const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timeout);
+            global.pendingRequests.delete(requestId);
+            activeNativeRequests -= 1;
+            callback(value);
+            drainNativeRequestQueue();
+          };
+          const timeout = setTimeout(() => {
+            finish(
+              reject,
+              new Error(`Native request timeout for ${config.url}`),
+            );
+          }, 30000);
+
+          global.pendingRequests.set(requestId, {
+            resolve: (response) => finish(resolve, response),
+            reject: (error) => finish(reject, error),
+          });
+
+          broadcast("native-request", {
+            requestId,
+            url: config.url,
+            method: config.method || "GET",
+            headers: config.headers || {},
+            body: config.data || null,
+          });
+        });
+        drainNativeRequestQueue();
+      });
 
     const nativeAxiosAdapter = async (config) => {
       if (global.sendNativeRequest) {
         try {
-          console.log(
-            `[android] Routing Axios request natively: ${config.method?.toUpperCase()} -> ${config.url}`,
-          );
           const res = await global.sendNativeRequest(config);
 
           const parsedHeaders = {};
@@ -270,6 +290,14 @@ async function boot() {
             throw error;
           }
         } catch (err) {
+          const isBridgeTimeout = String(err?.message || "").startsWith(
+            "Native request timeout",
+          );
+          const method = String(config.method || "GET").toUpperCase();
+          if (isBridgeTimeout && method === "GET" && !config._nativeRetry) {
+            config._nativeRetry = true;
+            return nativeAxiosAdapter(config);
+          }
           throw err;
         }
       }
@@ -401,39 +429,47 @@ async function boot() {
   global.cloudflarebypass = async (targetUrl, silent, referer, userAgent) => {
     if (!targetUrl) return;
     const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
+    if (activeBypasses.has(domain)) return activeBypasses.get(domain);
 
-    try {
-      await dbRun(
-        "DELETE FROM cookie WHERE id IN (?, ?) OR ((name IN ('cf_clearance', 'cf_user_agent') OR name LIKE 'sec-ch-ua%') AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))",
-        [`${domain}-cf_clearance`, `${domain}-cf-user-agent`, domain, domain],
-      );
-      if (global.clearCookieCache) {
-        global.clearCookieCache(domain);
-      }
-    } catch (e) {
-      console.error("[main] Failed to clear stale cookies:", e.message);
-    }
-
-    pendingBypassRequest = { url: targetUrl, userAgent, referer };
-    broadcast("cf-bypass-request", pendingBypassRequest);
-
-    try {
-      for (let i = 0; i < 20; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        const row = await queryOne(
-          "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-          [`${domain}-cf_clearance`, domain, domain],
+    const bypassPromise = (async () => {
+      try {
+        await dbRun(
+          "DELETE FROM cookie WHERE id IN (?, ?) OR ((name IN ('cf_clearance', 'cf_user_agent') OR name LIKE 'sec-ch-ua%') AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))",
+          [`${domain}-cf_clearance`, `${domain}-cf-user-agent`, domain, domain],
         );
-        if (row?.value) {
-          if (global.clearCookieCache) {
-            global.clearCookieCache(domain);
-          }
-          return true;
-        }
+        if (global.clearCookieCache) global.clearCookieCache(domain);
+      } catch (e) {
+        console.error("[main] Failed to clear stale cookies:", e.message);
       }
-      throw new Error("Cloudflare bypass timeout");
+
+      const request = { url: targetUrl, userAgent, referer };
+      pendingBypassRequest = request;
+      broadcast("cf-bypass-request", request);
+
+      try {
+        for (let i = 0; i < 120; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+          const row = await queryOne(
+            "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+            [`${domain}-cf_clearance`, domain, domain],
+          );
+          if (row?.value) {
+            if (global.clearCookieCache) global.clearCookieCache(domain);
+            return true;
+          }
+        }
+        throw new Error("Cloudflare bypass timeout");
+      } finally {
+        if (pendingBypassRequest === request) pendingBypassRequest = null;
+      }
+    })();
+
+    activeBypasses.set(domain, bypassPromise);
+    try {
+      return await bypassPromise;
     } finally {
-      pendingBypassRequest = null;
+      if (activeBypasses.get(domain) === bypassPromise)
+        activeBypasses.delete(domain);
     }
   };
 

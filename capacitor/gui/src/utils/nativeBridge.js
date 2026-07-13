@@ -13,7 +13,7 @@ const routeMap = {
   "get-settings": { path: "/api/settings/get", method: "POST" },
   "update-setting": { path: "/api/settings/update", method: "POST" },
   "update-settings": { path: "/api/settings/update-multiple", method: "POST" },
-  "native-response": { path: "/api/native-response", method: "POST" },
+  "native-response": { path: "/api/ipc/native-response", method: "POST" },
   "check-wt-health": { path: "/api/update/health", method: "GET" },
   "get-app-version": { path: "/api/version", method: "GET" },
 };
@@ -54,27 +54,75 @@ function invoke(channel, ...args) {
 
 let eventSource = null;
 const eventListeners = new Map(); // channel -> Set<callback>
+const activeCaptchaDialogs = new Map();
+const nativeRequestQueue = [];
+let activeNativeRequests = 0;
+const MAX_NATIVE_REQUESTS = 2;
+
+function getRequestDomain(url) {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch (_) {
+    return url;
+  }
+}
+
+function drainNativeRequestQueue() {
+  while (
+    activeNativeRequests < MAX_NATIVE_REQUESTS &&
+    nativeRequestQueue.length > 0
+  ) {
+    activeNativeRequests += 1;
+    const run = nativeRequestQueue.shift();
+    run().finally(() => {
+      activeNativeRequests -= 1;
+      drainNativeRequestQueue();
+    });
+  }
+}
+
+function queueNativeRequest(data) {
+  nativeRequestQueue.push(async () => {
+    const plugin = window.Capacitor?.Plugins?.CloudflareBypass;
+    if (!plugin) {
+      await invoke(
+        "native-response",
+        data.requestId,
+        false,
+        null,
+        "CloudflareBypass plugin is unavailable",
+      );
+      return;
+    }
+
+    try {
+      const response = await plugin.nativeRequest({
+        url: data.url,
+        method: data.method || "GET",
+        headers: data.headers || {},
+        body: data.body ?? null,
+      });
+      await invoke("native-response", data.requestId, true, response, null);
+    } catch (error) {
+      await invoke(
+        "native-response",
+        data.requestId,
+        false,
+        null,
+        error?.message || String(error),
+      );
+    }
+  });
+  drainNativeRequestQueue();
+}
 
 function ensureEventSource() {
   if (eventSource) return;
-  console.log("[nativeBridge] Initializing EventSource to /api/ipc/events");
   eventSource = new EventSource("/api/ipc/events");
-
-  eventSource.onopen = () => {
-    console.log("[nativeBridge] EventSource connection opened successfully");
-  };
 
   eventSource.onmessage = (event) => {
     try {
-      console.log(
-        "[nativeBridge] EventSource received message raw:",
-        event.data,
-      );
       const { channel, data } = JSON.parse(event.data);
-      console.log(
-        `[nativeBridge] EventSource parsed message: channel=${channel}`,
-        data,
-      );
 
       const listeners = eventListeners.get(channel);
       if (listeners) {
@@ -86,6 +134,10 @@ function ensureEventSource() {
         window.open(data.url, "_blank", "noopener");
       }
 
+      if (channel === "native-request" && data?.requestId && data?.url) {
+        queueNativeRequest(data);
+      }
+
       if (channel === "cf-bypass-request" && data?.url) {
         console.log(
           "[nativeBridge] Handling cf-bypass-request for URL:",
@@ -93,38 +145,33 @@ function ensureEventSource() {
         );
         const CloudflareBypass = window.Capacitor?.Plugins?.CloudflareBypass;
         if (CloudflareBypass) {
+          const domain = getRequestDomain(data.url);
+          if (activeCaptchaDialogs.has(domain)) return;
+
           console.log(
             "[nativeBridge] Found CloudflareBypass plugin, invoking bypass()",
           );
-          CloudflareBypass.bypass({
+          const solvePromise = CloudflareBypass.bypass({
             url: data.url,
             userAgent: data.userAgent,
             referer: data.referer,
           })
-            .then((res) => {
+            .then(async (res) => {
               console.log(
                 "[nativeBridge] CloudflareBypass resolved, cookies length:",
                 res.cookies ? res.cookies.length : 0,
               );
               if (res.cookies && res.userAgent) {
-                invoke(
+                await invoke(
                   "save-cf-cookies",
                   data.url,
                   res.cookies,
                   res.userAgent,
-                  res.clientHints,
-                )
-                  .then(() =>
-                    console.log(
-                      "[nativeBridge] cookies saved to backend successfully",
-                    ),
-                  )
-                  .catch((err) =>
-                    console.error(
-                      "[nativeBridge] Failed to save-cf-cookies:",
-                      err,
-                    ),
-                  );
+                  res.clientHints || {},
+                );
+                console.log(
+                  "[nativeBridge] cookies saved to backend successfully",
+                );
               }
             })
             .catch((err) => {
@@ -132,7 +179,13 @@ function ensureEventSource() {
                 "[nativeBridge] Cloudflare bypass plugin invocation rejected:",
                 err,
               );
+            })
+            .finally(() => {
+              if (activeCaptchaDialogs.get(domain) === solvePromise) {
+                activeCaptchaDialogs.delete(domain);
+              }
             });
+          activeCaptchaDialogs.set(domain, solvePromise);
         } else {
           console.error(
             "[nativeBridge] window.Capacitor.Plugins.CloudflareBypass is UNDEFINED!",

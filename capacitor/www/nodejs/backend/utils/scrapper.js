@@ -542,6 +542,68 @@ async function ExitScrapperWindow() {
   }
 }
 
+function shouldUseDirectHttp(config) {
+  return config?.strawverseDirectHttp === true;
+}
+
+async function directHttpRequest(config, requestHeaders) {
+  const options = {
+    method: String(config.method || "get").toUpperCase(),
+    headers: requestHeaders,
+  };
+
+  if (config.data) {
+    options.body =
+      typeof config.data === "object"
+        ? JSON.stringify(config.data)
+        : config.data;
+  }
+
+  const controller = new AbortController();
+  options.signal = controller.signal;
+  const timeoutMs = config.timeout > 0 ? config.timeout : 20000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await globalThis.fetch(config.url, options);
+    const responseHeaders = {};
+    res.headers.forEach((value, key) => {
+      responseHeaders[key.toLowerCase()] = value;
+    });
+    const responseData =
+      config.responseType === "arraybuffer"
+        ? Buffer.from(await res.arrayBuffer())
+        : await res.text();
+    const response = {
+      data: responseData,
+      status: res.status,
+      statusText: res.statusText,
+      headers: responseHeaders,
+      config,
+      request: null,
+    };
+
+    if (!res.ok) {
+      const error = new Error(`Request failed with status code ${res.status}`);
+      error.response = response;
+      error.config = config;
+      throw error;
+    }
+
+    return response;
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error(`timeout of ${timeoutMs}ms exceeded`);
+      timeoutError.code = "ECONNABORTED";
+      timeoutError.config = config;
+      throw timeoutError;
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function androidNativeAdapter(config) {
   return new Promise(async (resolve, reject) => {
     try {
@@ -561,6 +623,11 @@ async function androidNativeAdapter(config) {
         } else {
           Object.assign(requestHeaders, headers);
         }
+      }
+
+      if (shouldUseDirectHttp(config)) {
+        resolve(await directHttpRequest(config, requestHeaders));
+        return;
       }
 
       if (global.sendNativeRequest) {

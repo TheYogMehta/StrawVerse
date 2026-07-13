@@ -4,7 +4,6 @@ const crypto = require("crypto");
 const JSZip = require("jszip");
 const axios = require("axios");
 const fs = require("fs");
-const path = require("path");
 
 const HLSLogger = require("./logger");
 const { logger } = require("./AppLogger");

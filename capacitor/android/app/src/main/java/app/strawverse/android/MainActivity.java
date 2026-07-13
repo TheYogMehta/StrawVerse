@@ -139,9 +139,7 @@ public class MainActivity extends BridgeActivity {
                             "  var esCheckInterval = setInterval(function() {\n" +
                             "    if (window.sharedStateAPI && typeof window.sharedStateAPI.on === 'function') {\n" +
                             "      clearInterval(esCheckInterval);\n" +
-                            "      console.log('[nativeBridge] Injected custom mobile listeners natively!');\n" +
                             "      window.sharedStateAPI.on('native-request', function(req) {\n" +
-                            "        console.log('[nativeBridge] Handling native-request for URL via injected script:', req.url);\n" +
                             "        var CloudflareBypass = window.Capacitor?.Plugins?.CloudflareBypass;\n" +
                             "        if (CloudflareBypass) {\n" +
                             "          CloudflareBypass.nativeRequest({\n" +
@@ -150,7 +148,6 @@ public class MainActivity extends BridgeActivity {
                             "            headers: req.headers,\n" +
                             "            body: req.body\n" +
                             "          }).then(function(res) {\n" +
-                            "            console.log('[nativeBridge] nativeRequest resolved successfully for', req.url);\n" +
                             "            fetch(window.WEBVIEW_SERVER_URL + '/api/ipc/native-response', {\n" +
                             "              method: 'POST',\n" +
                             "              headers: { 'Content-Type': 'application/json' },\n" +

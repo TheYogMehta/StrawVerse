@@ -1,8 +1,8 @@
 const NodeJS = window.Capacitor?.Plugins?.CapacitorNodeJS;
 
 const PORT = 3459;
-const APP_URL = `http://localhost:${PORT}/`;
-const HEALTH_URL = `http://localhost:${PORT}/health`;
+const APP_URL = `http://127.0.0.1:${PORT}/`;
+const HEALTH_URL = `http://127.0.0.1:${PORT}/health`;
 
 const statusEl = document.getElementById("status");
 const errorEl = document.getElementById("error");
