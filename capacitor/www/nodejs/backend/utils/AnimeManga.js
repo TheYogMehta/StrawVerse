@@ -1,11 +1,13 @@
 const NodeCache = require("node-cache");
-const HLSLogger = require("./logger");
-const { logger } = require("./AppLogger");
+const path = require("path");
 const crypto = require("crypto");
 const JSZip = require("jszip");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
+
+const HLSLogger = require("./logger");
+const { logger } = require("./AppLogger");
 const { providerFetch } = require("./settings");
 const { getHeaders } = require("./proxyHeaders");
 const { queryAll } = require("./db");
@@ -329,7 +331,6 @@ async function DownloadChapters(
           if (!imageUrl.startsWith("file://") && !imageUrl.startsWith("/")) {
             fileExtension = imageUrl.split(".").pop().split(/\#|\?/)[0];
           } else {
-            const path = require("path");
             fileExtension =
               path
                 .extname(

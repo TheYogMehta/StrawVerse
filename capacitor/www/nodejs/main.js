@@ -17,14 +17,10 @@ const Module = require("module");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
-os.homedir = () =>
-  process.env.STRAWVERSE_DOWNLOADS_DIR ||
-  "/data/data/app.strawverse.android/files";
-
+os.homedir = () => "/data/data/app.strawverse.android/files";
 const cheerio = require("cheerio");
 const axios = require("axios");
 const got = require("got");
-
 const PORT = 3459;
 
 const sseClients = new Set();
@@ -135,8 +131,6 @@ async function boot() {
   applyDefaultPaths();
   process.env.PLATFORM = "android";
 
-
-
   global.__sendToNative = (channelName, data) => {
     broadcast(channelName, data);
     if (channel) channel.send(channelName, data);
@@ -164,7 +158,9 @@ async function boot() {
   }
 
   const { logger } = require("./backend/utils/AppLogger");
-  logger.info("[android] Booting StrawVerse backend (sqlite backend: native Java bridge)");
+  logger.info(
+    "[android] Booting StrawVerse backend (sqlite backend: native Java bridge)",
+  );
 
   const { initDatabase, run } = require("./backend/utils/db");
   await initDatabase();
@@ -207,7 +203,7 @@ async function boot() {
           reject: (err) => {
             clearTimeout(timeout);
             reject(err);
-          }
+          },
         });
 
         broadcast("native-request", {
@@ -215,7 +211,7 @@ async function boot() {
           url: config.url,
           method: config.method || "GET",
           headers: config.headers || {},
-          body: config.data || null
+          body: config.data || null,
         });
       });
     };
@@ -480,7 +476,9 @@ async function boot() {
     res.write(": connected\n\n");
 
     if (pendingBypassRequest) {
-      res.write(`data: ${JSON.stringify({ channel: "cf-bypass-request", data: pendingBypassRequest })}\n\n`);
+      res.write(
+        `data: ${JSON.stringify({ channel: "cf-bypass-request", data: pendingBypassRequest })}\n\n`,
+      );
     }
 
     sseClients.add(res);
@@ -497,7 +495,10 @@ async function boot() {
   });
 
   router.get("/api/version", (req, res) => {
-    res.json({ ok: true, result: process.env.STRAWVERSE_APP_VERSION || "1.0.0" });
+    res.json({
+      ok: true,
+      result: process.env.STRAWVERSE_APP_VERSION || "1.0.0",
+    });
   });
 
   router.get("/api/state/history", (req, res) => {
@@ -513,7 +514,11 @@ async function boot() {
     try {
       const [TaskType, AnimeManga, ExtentionName] = req.body.args || [];
       const { HandleExtensions } = require("./backend/utils/settings");
-      const result = await HandleExtensions(TaskType, AnimeManga, ExtentionName);
+      const result = await HandleExtensions(
+        TaskType,
+        AnimeManga,
+        ExtentionName,
+      );
       res.json({ ok: true, result });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
@@ -553,15 +558,22 @@ async function boot() {
     }
   });
 
-  router.get("/api/update/check", (req, res) => res.json({ ok: true, result: null }));
-  router.post("/api/update/download", (req, res) => res.json({ ok: true, result: null }));
-  router.post("/api/update/install", (req, res) => res.json({ ok: true, result: null }));
+  router.get("/api/update/check", (req, res) =>
+    res.json({ ok: true, result: null }),
+  );
+  router.post("/api/update/download", (req, res) =>
+    res.json({ ok: true, result: null }),
+  );
+  router.post("/api/update/install", (req, res) =>
+    res.json({ ok: true, result: null }),
+  );
 
   router.post("/api/device/user-agent", (req, res) => {
     let ua = req.body.args?.[0];
     if (ua) {
-      ua = ua.replace(/\s*;?\s*wv\b/gi, "")
-             .replace(/Version\/[0-9.]+\s+/gi, "");
+      ua = ua
+        .replace(/\s*;?\s*wv\b/gi, "")
+        .replace(/Version\/[0-9.]+\s+/gi, "");
     }
     global.deviceUserAgent = ua;
     res.json({ ok: true, result: { ok: true } });
@@ -570,8 +582,11 @@ async function boot() {
   router.post("/api/cf-bypass", async (req, res) => {
     try {
       const [targetUrl, referer, userAgent] = req.body.args || [];
-      if (!targetUrl) return res.json({ ok: true, result: { ok: true, success: true } });
-      const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
+      if (!targetUrl)
+        return res.json({ ok: true, result: { ok: true, success: true } });
+      const domain = normalizeHostname(
+        new URL(targetUrl).hostname,
+      ).toLowerCase();
       broadcast("cf-bypass-request", { url: targetUrl, referer, userAgent });
 
       for (let i = 0; i < 15; i++) {
@@ -590,7 +605,10 @@ async function boot() {
           return res.json({ ok: true, result: { ok: true, success: true } });
         }
       }
-      res.json({ ok: true, result: { ok: false, success: false, reason: "timeout" } });
+      res.json({
+        ok: true,
+        result: { ok: false, success: false, reason: "timeout" },
+      });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }
@@ -598,9 +616,13 @@ async function boot() {
 
   router.post("/api/cf-bypass/save", async (req, res) => {
     try {
-      const [targetUrl, cookieString, userAgent, clientHints] = req.body.args || [];
-      if (!cookieString || !targetUrl) return res.json({ ok: true, result: { ok: false } });
-      const domain = normalizeHostname(new URL(targetUrl).hostname).toLowerCase();
+      const [targetUrl, cookieString, userAgent, clientHints] =
+        req.body.args || [];
+      if (!cookieString || !targetUrl)
+        return res.json({ ok: true, result: { ok: false } });
+      const domain = normalizeHostname(
+        new URL(targetUrl).hostname,
+      ).toLowerCase();
       const pairs = cookieString.split(";");
       let savedClearance = false;
 
@@ -683,7 +705,9 @@ async function boot() {
       if (clientHints) {
         await dbRun(upsertSql, [
           `${domain}-client_hints`,
-          typeof clientHints === "string" ? clientHints : JSON.stringify(clientHints),
+          typeof clientHints === "string"
+            ? clientHints
+            : JSON.stringify(clientHints),
           "client_hints",
           domain,
           targetUrl,
@@ -704,15 +728,22 @@ async function boot() {
   router.post("/api/settings/get", async (req, res) => {
     try {
       const [keys] = req.body.args || [];
-      const { settingfetch, getScraperIconsPath } = require("./backend/utils/settings");
+      const {
+        settingfetch,
+        getScraperIconsPath,
+      } = require("./backend/utils/settings");
       const { MalCreateUrl } = require("./backend/utils/mal");
 
       const setting = await settingfetch();
       let settingsObj = {};
 
       const getProviders = () => ({
-        Anime: global.Anime_providers ? Object.keys(global.Anime_providers) : [],
-        Manga: global.Manga_providers ? Object.keys(global.Manga_providers) : [],
+        Anime: global.Anime_providers
+          ? Object.keys(global.Anime_providers)
+          : [],
+        Manga: global.Manga_providers
+          ? Object.keys(global.Manga_providers)
+          : [],
       });
 
       const getIconUrl = (name, valScraper) => {
@@ -779,7 +810,7 @@ async function boot() {
           url: url,
           MalLoggedIn: global.MalLoggedIn || false,
           malUsername: setting?.malUsername || global.malUsername || null,
-        }
+        },
       });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
@@ -822,7 +853,9 @@ async function boot() {
     res.json({ ok: true, result: { ok: true } });
   });
 
-  router.get("/api/update/health", (req, res) => res.json({ ok: true, result: { ok: true } }));
+  router.get("/api/update/health", (req, res) =>
+    res.json({ ok: true, result: { ok: true } }),
+  );
 
   appExpress.use(router);
   appExpress.get("/health", (_req, res) => res.json({ ok: true }));

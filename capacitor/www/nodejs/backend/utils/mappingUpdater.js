@@ -3,7 +3,19 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { logger } = require("./AppLogger");
-const { getKeyValue, setKeyValue, mappingQueryAll, mappingQueryOne, mappingRun, mappingExec, closeDb, openDb, batchRun, queryAll, run } = require("./db");
+const {
+  getKeyValue,
+  setKeyValue,
+  mappingQueryAll,
+  mappingQueryOne,
+  mappingRun,
+  mappingExec,
+  closeDb,
+  openDb,
+  batchRun,
+  queryAll,
+  run,
+} = require("./db");
 
 async function dropAllTriggers() {
   try {
@@ -100,23 +112,34 @@ async function checkForMappingUpdates() {
   let hasMappingChangelogTable = false;
   try {
     const tablesList = await mappingQueryAll(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('anime', 'animepahe', 'anikototv', 'anineko', 'manga', 'weebcentral', 'allmanga', 'next_episodes', 'mapping_changelog')"
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('anime', 'animepahe', 'anikototv', 'anineko', 'manga', 'weebcentral', 'allmanga', 'next_episodes', 'mapping_changelog')",
     );
-    const tableNames = tablesList.map(t => t.name);
-    
+    const tableNames = tablesList.map((t) => t.name);
+
     // Check if the core 8 tables exist (excluding changelog)
-    const coreTables = ['anime', 'animepahe', 'anikototv', 'anineko', 'manga', 'weebcentral', 'allmanga', 'next_episodes'];
-    missingTables = !coreTables.every(name => tableNames.includes(name));
-    
-    hasNextEpisodesTable = tableNames.includes('next_episodes');
-    hasMappingChangelogTable = tableNames.includes('mapping_changelog');
+    const coreTables = [
+      "anime",
+      "animepahe",
+      "anikototv",
+      "anineko",
+      "manga",
+      "weebcentral",
+      "allmanga",
+      "next_episodes",
+    ];
+    missingTables = !coreTables.every((name) => tableNames.includes(name));
+
+    hasNextEpisodesTable = tableNames.includes("next_episodes");
+    hasMappingChangelogTable = tableNames.includes("mapping_changelog");
   } catch (e) {
     missingTables = true;
   }
 
   let hasTriggers = false;
   try {
-    const row = await mappingQueryOne("SELECT 1 FROM sqlite_master WHERE type='trigger' LIMIT 1");
+    const row = await mappingQueryOne(
+      "SELECT 1 FROM sqlite_master WHERE type='trigger' LIMIT 1",
+    );
     if (row) {
       logger.info(
         "[mappingUpdater] Legacy triggers detected in mapping database. Forcing full sync to clean up database.",
@@ -128,7 +151,9 @@ async function checkForMappingUpdates() {
   let isNextEpisodesEmpty = false;
   if (hasNextEpisodesTable) {
     try {
-      const row = await mappingQueryOne("SELECT COUNT(*) as count FROM next_episodes");
+      const row = await mappingQueryOne(
+        "SELECT COUNT(*) as count FROM next_episodes",
+      );
       if (!row || row.count === 0) {
         isNextEpisodesEmpty = true;
       }
@@ -142,7 +167,9 @@ async function checkForMappingUpdates() {
   let lastId = 0;
   if (hasMappingChangelogTable) {
     try {
-      const row = await mappingQueryOne("SELECT MAX(id) as maxId FROM mapping_changelog");
+      const row = await mappingQueryOne(
+        "SELECT MAX(id) as maxId FROM mapping_changelog",
+      );
       if (row && typeof row.maxId === "number") {
         lastId = row.maxId;
       }
@@ -305,16 +332,22 @@ async function checkForMappingUpdates() {
         const ops = [];
 
         const stmtSqlMap = {
-          anime: "INSERT OR REPLACE INTO anime (malid, livechart_id) VALUES (?, ?)",
+          anime:
+            "INSERT OR REPLACE INTO anime (malid, livechart_id) VALUES (?, ?)",
           manga: "INSERT OR REPLACE INTO manga (malid) VALUES (?)",
-          animepahe: "INSERT OR REPLACE INTO animepahe (id, uuid, malid) VALUES (?, ?, ?)",
-          anikototv: "INSERT OR REPLACE INTO anikototv (id, malid) VALUES (?, ?)",
+          animepahe:
+            "INSERT OR REPLACE INTO animepahe (id, uuid, malid) VALUES (?, ?, ?)",
+          anikototv:
+            "INSERT OR REPLACE INTO anikototv (id, malid) VALUES (?, ?)",
           anineko: "INSERT OR REPLACE INTO anineko (id, malid) VALUES (?, ?)",
-          weebcentral: "INSERT OR REPLACE INTO weebcentral (id, malid) VALUES (?, ?)",
+          weebcentral:
+            "INSERT OR REPLACE INTO weebcentral (id, malid) VALUES (?, ?)",
           allmanga: "INSERT OR REPLACE INTO allmanga (id, malid) VALUES (?, ?)",
-          next_episodes: "INSERT OR REPLACE INTO next_episodes (livechart_id, episode, date, title, image) VALUES (?, ?, ?, ?, ?)",
+          next_episodes:
+            "INSERT OR REPLACE INTO next_episodes (livechart_id, episode, date, title, image) VALUES (?, ?, ?, ?, ?)",
         };
-        const changelogSql = "INSERT OR REPLACE INTO mapping_changelog (id, version, action, tbl, row_id, data) VALUES (?, ?, ?, ?, ?, ?)";
+        const changelogSql =
+          "INSERT OR REPLACE INTO mapping_changelog (id, version, action, tbl, row_id, data) VALUES (?, ?, ?, ?, ?, ?)";
 
         for (const update of updates) {
           const { id, action: act, tbl, row_id, data } = update;
@@ -322,36 +355,85 @@ async function checkForMappingUpdates() {
           if (act === "INSERT" || act === "UPDATE") {
             const parsedData = JSON.parse(data);
             if (tbl === "anime") {
-              ops.push({ sql: stmtSqlMap.anime, params: [parsedData.malid ?? null, parsedData.livechart_id ?? null] });
+              ops.push({
+                sql: stmtSqlMap.anime,
+                params: [
+                  parsedData.malid ?? null,
+                  parsedData.livechart_id ?? null,
+                ],
+              });
             } else if (tbl === "manga") {
-              ops.push({ sql: stmtSqlMap.manga, params: [parsedData.malid ?? null] });
+              ops.push({
+                sql: stmtSqlMap.manga,
+                params: [parsedData.malid ?? null],
+              });
             } else if (tbl === "animepahe") {
-              ops.push({ sql: stmtSqlMap.animepahe, params: [parsedData.id ?? null, parsedData.uuid ?? null, parsedData.malid ?? null] });
+              ops.push({
+                sql: stmtSqlMap.animepahe,
+                params: [
+                  parsedData.id ?? null,
+                  parsedData.uuid ?? null,
+                  parsedData.malid ?? null,
+                ],
+              });
             } else if (tbl === "anikototv") {
-              ops.push({ sql: stmtSqlMap.anikototv, params: [parsedData.id ?? null, parsedData.malid ?? null] });
+              ops.push({
+                sql: stmtSqlMap.anikototv,
+                params: [parsedData.id ?? null, parsedData.malid ?? null],
+              });
             } else if (tbl === "anineko") {
-              ops.push({ sql: stmtSqlMap.anineko, params: [parsedData.id ?? null, parsedData.malid ?? null] });
+              ops.push({
+                sql: stmtSqlMap.anineko,
+                params: [parsedData.id ?? null, parsedData.malid ?? null],
+              });
             } else if (tbl === "weebcentral") {
-              ops.push({ sql: stmtSqlMap.weebcentral, params: [parsedData.id ?? null, parsedData.malid ?? null] });
+              ops.push({
+                sql: stmtSqlMap.weebcentral,
+                params: [parsedData.id ?? null, parsedData.malid ?? null],
+              });
             } else if (tbl === "allmanga") {
-              ops.push({ sql: stmtSqlMap.allmanga, params: [parsedData.id ?? null, parsedData.malid ?? null] });
+              ops.push({
+                sql: stmtSqlMap.allmanga,
+                params: [parsedData.id ?? null, parsedData.malid ?? null],
+              });
             } else if (tbl === "next_episodes") {
-              ops.push({ sql: stmtSqlMap.next_episodes, params: [parsedData.livechart_id ?? null, parsedData.episode ?? null, parsedData.date ?? null, parsedData.title ?? null, parsedData.image ?? null] });
+              ops.push({
+                sql: stmtSqlMap.next_episodes,
+                params: [
+                  parsedData.livechart_id ?? null,
+                  parsedData.episode ?? null,
+                  parsedData.date ?? null,
+                  parsedData.title ?? null,
+                  parsedData.image ?? null,
+                ],
+              });
             }
           } else if (act === "DELETE") {
             if (tbl === "anime" || tbl === "manga") {
-              ops.push({ sql: `DELETE FROM ${tbl} WHERE malid = ?`, params: [row_id] });
+              ops.push({
+                sql: `DELETE FROM ${tbl} WHERE malid = ?`,
+                params: [row_id],
+              });
             } else if (tbl === "next_episodes") {
               const parts = row_id.split("_");
               const livechartId = parts[0];
               const episode = parseInt(parts[1], 10);
-              ops.push({ sql: "DELETE FROM next_episodes WHERE livechart_id = ? AND episode = ?", params: [livechartId ?? null, isNaN(episode) ? null : episode] });
+              ops.push({
+                sql: "DELETE FROM next_episodes WHERE livechart_id = ? AND episode = ?",
+                params: [livechartId ?? null, isNaN(episode) ? null : episode],
+              });
             } else {
-              ops.push({ sql: `DELETE FROM ${tbl} WHERE id = ?`, params: [row_id] });
+              ops.push({
+                sql: `DELETE FROM ${tbl} WHERE id = ?`,
+                params: [row_id],
+              });
             }
           }
 
-          ops.push({ sql: changelogSql, params: [id, latestVersion, act, tbl, row_id, data] });
+          ops.push({
+            sql: changelogSql,
+            params: [id, latestVersion, act, tbl, row_id, data],
+          });
         }
 
         if (ops.length > 0) {
@@ -392,7 +474,9 @@ async function checkForMappingUpdates() {
 async function syncLibraryIdsWithMapping() {
   try {
     // 1. Sync Anime
-    const localAnimeList = await queryAll("SELECT id, malid, provider FROM Anime");
+    const localAnimeList = await queryAll(
+      "SELECT id, malid, provider FROM Anime",
+    );
     for (const anime of localAnimeList) {
       if (!anime.malid) continue;
       const provider = (anime.provider || "").toLowerCase();
@@ -412,8 +496,6 @@ async function syncLibraryIdsWithMapping() {
         const query = useUuid
           ? `SELECT id, uuid FROM ${targetTable} WHERE malid = ? LIMIT 1`
           : `SELECT id FROM ${targetTable} WHERE malid = ? LIMIT 1`;
-
-        const { mappingQueryOne } = require("./db");
         const targetRow = await mappingQueryOne(query, [Number(anime.malid)]);
         if (targetRow) {
           const latestId = useUuid
@@ -442,7 +524,9 @@ async function syncLibraryIdsWithMapping() {
     }
 
     // 2. Sync Manga
-    const localMangaList = await queryAll("SELECT id, malid, provider FROM Manga");
+    const localMangaList = await queryAll(
+      "SELECT id, malid, provider FROM Manga",
+    );
     for (const manga of localMangaList) {
       if (!manga.malid) continue;
       const provider = (manga.provider || "").toLowerCase();
@@ -455,7 +539,6 @@ async function syncLibraryIdsWithMapping() {
       }
 
       if (targetTable) {
-        const { mappingQueryOne } = require("./db");
         const targetRow = await mappingQueryOne(
           `SELECT id FROM ${targetTable} WHERE malid = ? LIMIT 1`,
           [Number(manga.malid)],

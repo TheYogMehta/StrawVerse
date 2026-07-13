@@ -12,7 +12,7 @@ const {
 const { MalRefreshTokenGen } = require("./mal.js");
 const { logger } = require("./AppLogger.js");
 const userDataPath = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
-const { getKeyValue, setKeyValue } = require("./db");
+const { getKeyValue, setKeyValue, queryAll } = require("./db");
 
 const appNodeModules = path.join(__dirname, "..", "..", "node_modules");
 
@@ -67,11 +67,17 @@ async function settingupdate({
   }
 
   if (Animeprovider === null) {
-    Animeprovider = currentSettings?.Animeprovider || null;
+    Animeprovider =
+      currentSettings?.Animeprovider ||
+      Object.keys(global?.Anime_providers)?.[0] ||
+      null;
   }
 
   if (Mangaprovider === null) {
-    Mangaprovider = currentSettings?.Mangaprovider || null;
+    Mangaprovider =
+      currentSettings?.Mangaprovider ||
+      Object.keys(global?.Mangaprovider)?.[0] ||
+      null;
   }
 
   if (autoLoadNextChapter === null) {
@@ -195,7 +201,7 @@ async function settingfetch() {
       (!config?.Animeprovider ||
         !global.Anime_providers.hasOwnProperty(config?.Animeprovider))
     ) {
-      config.Animeprovider = null;
+      config.Animeprovider = Object.keys(global?.Anime_providers)?.[0] || null;
       changes = true;
     }
 
@@ -214,7 +220,7 @@ async function settingfetch() {
       (!config?.Mangaprovider ||
         !global.Manga_providers.hasOwnProperty(config?.Mangaprovider))
     ) {
-      config.Mangaprovider = "weebcentral";
+      config.Mangaprovider = Object.keys(global?.Manga_providers)?.[0] || null;
       changes = true;
     }
 
@@ -265,7 +271,6 @@ async function SettingsLoad() {
   try {
     let storedConfig = null;
     try {
-      const { queryAll } = require("./db");
       const rows = await queryAll("SELECT key, value FROM Settings");
       if (rows && rows.length > 0) {
         storedConfig = {};
@@ -287,8 +292,8 @@ async function SettingsLoad() {
             status: "plan_to_watch",
             malToken: null,
             CustomDownloadLocation: getDownloadsFolder(),
-            Animeprovider: null,
-            Mangaprovider: "weebcentral",
+            Animeprovider: Object.keys(global?.Anime_providers)?.[0] || null,
+            Mangaprovider: Object.keys(global?.Manga_providers)?.[0] || null,
             autoLoadNextChapter: true,
             Pagination: false,
             mergeSubtitles: false,
@@ -543,6 +548,14 @@ async function loadSingleScraper(AnimeManga, ExtensionName) {
         `Loaded/Reloaded ${AnimeManga.toLowerCase()} scraper: ${scraper.name}`,
       );
       notifyScrapersUpdated();
+
+      // update db if required
+      const settingKey =
+        AnimeManga === "Anime" ? "Animeprovider" : "Mangaprovider";
+      if (!config?.[settingKey]) {
+        config[settingKey] = Object.keys(providers)[0] || null;
+        await settingSave();
+      }
     } else {
       logger.warn(`Scraper missing 'name' export: ${fullPath}`);
     }
