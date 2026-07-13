@@ -14,6 +14,7 @@ const routeMap = {
   "update-setting": { path: "/api/settings/update", method: "POST" },
   "update-settings": { path: "/api/settings/update-multiple", method: "POST" },
   "native-response": { path: "/api/ipc/native-response", method: "POST" },
+  "native-cancel": { path: "/api/ipc/native-cancel", method: "POST" },
   "check-wt-health": { path: "/api/update/health", method: "GET" },
   "get-app-version": { path: "/api/version", method: "GET" },
 };
@@ -55,9 +56,8 @@ function invoke(channel, ...args) {
 let eventSource = null;
 const eventListeners = new Map(); // channel -> Set<callback>
 const activeCaptchaDialogs = new Map();
-const nativeRequestQueue = [];
-let activeNativeRequests = 0;
-const MAX_NATIVE_REQUESTS = 2;
+const inFlightNativeRequests = new Map();
+const NATIVE_REQUEST_TIMEOUT_MS = 30000;
 
 function getRequestDomain(url) {
   try {
@@ -67,53 +67,59 @@ function getRequestDomain(url) {
   }
 }
 
-function drainNativeRequestQueue() {
-  while (
-    activeNativeRequests < MAX_NATIVE_REQUESTS &&
-    nativeRequestQueue.length > 0
-  ) {
-    activeNativeRequests += 1;
-    const run = nativeRequestQueue.shift();
-    run().finally(() => {
-      activeNativeRequests -= 1;
-      drainNativeRequestQueue();
+async function dispatchNativeRequest(data) {
+  const plugin = window.Capacitor?.Plugins?.CloudflareBypass;
+  let completed = false;
+  const complete = async (success, response, error) => {
+    if (completed) return;
+    completed = true;
+    const active = inFlightNativeRequests.get(data.requestId);
+    if (active) clearTimeout(active.timeout);
+    inFlightNativeRequests.delete(data.requestId);
+    await invoke(
+      "native-response",
+      data.requestId,
+      success,
+      response,
+      error,
+    ).catch(() => {});
+  };
+
+  if (!plugin) {
+    await complete(false, null, "CloudflareBypass plugin is unavailable");
+    return;
+  }
+
+  const timeout = setTimeout(() => {
+    plugin
+      .cancelNativeRequests?.({ requestIds: [String(data.requestId)] })
+      .catch(() => {});
+    complete(false, null, `Native request timeout for ${data.url}`);
+  }, NATIVE_REQUEST_TIMEOUT_MS);
+  inFlightNativeRequests.set(data.requestId, { timeout, complete });
+
+  try {
+    const response = await plugin.nativeRequest({
+      requestId: String(data.requestId),
+      url: data.url,
+      method: data.method || "GET",
+      headers: data.headers || {},
+      body: data.body ?? null,
     });
+    await complete(true, response, null);
+  } catch (error) {
+    await complete(false, null, error?.message || String(error));
   }
 }
 
-function queueNativeRequest(data) {
-  nativeRequestQueue.push(async () => {
-    const plugin = window.Capacitor?.Plugins?.CloudflareBypass;
-    if (!plugin) {
-      await invoke(
-        "native-response",
-        data.requestId,
-        false,
-        null,
-        "CloudflareBypass plugin is unavailable",
-      );
-      return;
-    }
-
-    try {
-      const response = await plugin.nativeRequest({
-        url: data.url,
-        method: data.method || "GET",
-        headers: data.headers || {},
-        body: data.body ?? null,
-      });
-      await invoke("native-response", data.requestId, true, response, null);
-    } catch (error) {
-      await invoke(
-        "native-response",
-        data.requestId,
-        false,
-        null,
-        error?.message || String(error),
-      );
-    }
-  });
-  drainNativeRequestQueue();
+function cancelInFlightNativeRequests(requestIds = []) {
+  const ids = requestIds.map(String);
+  const plugin = window.Capacitor?.Plugins?.CloudflareBypass;
+  plugin?.cancelNativeRequests?.({ requestIds: ids }).catch(() => {});
+  for (const requestId of requestIds) {
+    const active = inFlightNativeRequests.get(requestId);
+    active?.complete(false, null, "Native request cancelled");
+  }
 }
 
 function ensureEventSource() {
@@ -135,7 +141,11 @@ function ensureEventSource() {
       }
 
       if (channel === "native-request" && data?.requestId && data?.url) {
-        queueNativeRequest(data);
+        dispatchNativeRequest(data);
+      }
+
+      if (channel === "native-cancel" && Array.isArray(data?.requestIds)) {
+        cancelInFlightNativeRequests(data.requestIds);
       }
 
       if (channel === "cf-bypass-request" && data?.url) {
@@ -251,6 +261,7 @@ function createPolyfill() {
     installUpdate: () => invoke("install-update"),
     getAppVersion: () => invoke("get-app-version"),
     checkWtHealth: (url) => invoke("check-wt-health", url),
+    cancelNativeRequests: () => invoke("native-cancel"),
   };
 }
 

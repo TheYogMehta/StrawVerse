@@ -14,7 +14,8 @@ import android.webkit.WebResourceResponse;
 import android.webkit.ValueCallback;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
-import com.getcapacitor.JSObject;
+ import com.getcapacitor.JSArray;
+ import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -39,7 +40,9 @@ public class CloudflareBypassPlugin extends Plugin {
     private WebView backgroundWebView = null;
     private String lastLoadedOrigin = null;
     private boolean isWebViewLoading = false;
+    private String expectedWebViewOrigin = null;
     private final List<Runnable> pendingTasks = new ArrayList<>();
+    private final List<PluginCall> pendingTaskCalls = new ArrayList<>();
     private final Map<String, PluginCall> activeFetchCalls = new java.util.concurrent.ConcurrentHashMap<>();
 
     public static String cleanUserAgent(String ua) {
@@ -621,18 +624,31 @@ public class CloudflareBypassPlugin extends Plugin {
                     @Override
                     public void onPageFinished(WebView view, String url) {
                         super.onPageFinished(view, url);
-                        Log.i("StrawVerseBypass", "Background WebView finished loading: " + url);
-                        isWebViewLoading = false;
-                        runPendingTasks();
+                        view.evaluateJavascript("window.location.origin", value -> {
+                            String actualOrigin = value == null ? "" : value.replace("\"", "");
+                            if (expectedWebViewOrigin == null || !expectedWebViewOrigin.equals(actualOrigin)) {
+                                failPendingTasks("Background WebView origin mismatch: expected "
+                                        + expectedWebViewOrigin + ", got " + actualOrigin);
+                                return;
+                            }
+                            Log.i("StrawVerseBypass", "Background WebView origin ready: " + actualOrigin);
+                            isWebViewLoading = false;
+                            runPendingTasks();
+                        });
                     }
                     
                     @Override
                     public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                        Log.e("StrawVerseBypass", "Background WebView error: " + description + " for " + failingUrl);
+                        failPendingTasks("Background WebView failed to initialize: " + description);
                     }
                 });
             }
         });
+    }
+
+    private void queuePendingTask(Runnable task, PluginCall call) {
+        pendingTasks.add(task);
+        pendingTaskCalls.add(call);
     }
 
     private void runPendingTasks() {
@@ -641,10 +657,58 @@ public class CloudflareBypassPlugin extends Plugin {
             public void run() {
                 List<Runnable> tasks = new ArrayList<>(pendingTasks);
                 pendingTasks.clear();
+                pendingTaskCalls.clear();
                 for (Runnable task : tasks) {
                     task.run();
                 }
             }
+        });
+    }
+
+    private void failPendingTasks(String message) {
+        Log.e("StrawVerseBypass", message);
+        isWebViewLoading = false;
+        lastLoadedOrigin = null;
+        expectedWebViewOrigin = null;
+        List<PluginCall> calls = new ArrayList<>(pendingTaskCalls);
+        pendingTasks.clear();
+        pendingTaskCalls.clear();
+        for (PluginCall pendingCall : calls) {
+            activeFetchCalls.remove(pendingCall.getCallbackId());
+            pendingCall.reject(message);
+        }
+    }
+
+    private static String quoteForJavascript(String value) {
+        return JSONObject.quote(value == null ? "" : value);
+    }
+
+    @PluginMethod
+    public void cancelNativeRequests(final PluginCall call) {
+        final JSArray requestIds = call.getArray("requestIds", new JSArray());
+        getActivity().runOnUiThread(() -> {
+            for (int i = 0; i < requestIds.length(); i++) {
+                String requestId = requestIds.optString(i, "");
+                PluginCall activeCall = activeFetchCalls.remove(requestId);
+                if (activeCall != null) {
+                    activeCall.reject("Native request cancelled");
+                }
+                for (int index = pendingTaskCalls.size() - 1; index >= 0; index--) {
+                    PluginCall pendingCall = pendingTaskCalls.get(index);
+                    if (requestId.equals(pendingCall.getString("requestId", pendingCall.getCallbackId()))) {
+                        pendingTaskCalls.remove(index);
+                        pendingTasks.remove(index);
+                        pendingCall.reject("Native request cancelled");
+                    }
+                }
+            }
+            if (backgroundWebView != null) {
+                backgroundWebView.evaluateJavascript(
+                        "if(window.__strawverseAbortController){window.__strawverseAbortController.abort();}",
+                        null
+                );
+            }
+            call.resolve();
         });
     }
 
@@ -761,37 +825,34 @@ public class CloudflareBypassPlugin extends Plugin {
                     }
                     
                     if (isWebViewLoading) {
-                        pendingTasks.add(this);
+                        queuePendingTask(this, call);
                         return;
                     }
                     
                     if (!finalOrigin.equals(lastLoadedOrigin)) {
-                        Map<String, String> extraHeaders = new HashMap<>();
-                        String finalRef = null;
-                        if (headers != null) {
-                            finalRef = headers.optString("Referer", headers.optString("referer", ""));
-                        }
-                        if (finalRef == null || finalRef.isEmpty()) {
-                            Map<String, String> rules = AppDatabase.getHeadersForUrl(getContext(), finalOrigin);
-                            if (rules.containsKey("Referer")) {
-                                finalRef = rules.get("Referer");
-                            }
-                        }
-                        if (finalRef != null && !finalRef.isEmpty()) {
-                            extraHeaders.put("Referer", finalRef);
-                        }
-                        Log.i("StrawVerseBypass", "Loading origin in background WebView: " + finalOrigin + " with extra headers: " + extraHeaders);
+                        String origin = uri.getScheme() + "://" + uri.getAuthority();
+                        Log.i("StrawVerseBypass", "Initializing same-origin background WebView document: " + origin);
                         isWebViewLoading = true;
                         lastLoadedOrigin = finalOrigin;
-                        backgroundWebView.loadUrl(finalOrigin, extraHeaders);
-                        pendingTasks.add(this);
+                        expectedWebViewOrigin = origin;
+                        queuePendingTask(this, call);
+                        String bootstrapHtml = "<!doctype html><html><head><meta charset=\"utf-8\"></head>"
+                                + "<body></body></html>";
+                        backgroundWebView.loadDataWithBaseURL(
+                                finalOrigin,
+                                bootstrapHtml,
+                                "text/html",
+                                "UTF-8",
+                                null
+                        );
                         return;
                     }
                     
                     Log.i("StrawVerseBypass", "Executing WebView fetch for: " + url);
                     
                     JSObject fetchOptions = new JSObject();
-                    fetchOptions.put("method", method.toUpperCase());
+                    String effectiveMethod = method == null ? "GET" : method.toUpperCase();
+                    fetchOptions.put("method", effectiveMethod);
                     
                     if (headers != null) {
                         JSObject fetchHeaders = new JSObject();
@@ -810,12 +871,15 @@ public class CloudflareBypassPlugin extends Plugin {
                         fetchOptions.put("body", body);
                     }
                     
-                    final String requestId = call.getCallbackId();
+                    final String requestId = call.getString("requestId", call.getCallbackId());
                     activeFetchCalls.put(requestId, call);
-                                      String jsCode = "(function() {\n" +
-                        "  var url = '" + url.replace("'", "\\'") + "';\n" +
+                    String jsCode = "(function() {\n" +
+                        "  var url = " + quoteForJavascript(url) + ";\n" +
                         "  var options = " + fetchOptions.toString() + ";\n" +
-                        "  var reqId = '" + requestId + "';\n" +
+                        "  var reqId = " + quoteForJavascript(requestId) + ";\n" +
+                        "  var controller = new AbortController();\n" +
+                        "  window.__strawverseAbortController = controller;\n" +
+                        "  options.signal = controller.signal;\n" +
                         "  fetch(url, options)\n" +
                         "    .then(function(res) {\n" +
                         "      return res.blob().then(function(blob) {\n" +
@@ -845,6 +909,9 @@ public class CloudflareBypassPlugin extends Plugin {
                     
                 } catch (Exception e) {
                     Log.e("StrawVerseBypass", "Error setting up WebView request", e);
+                    activeFetchCalls.remove(call.getString("requestId", call.getCallbackId()));
+                    pendingTasks.remove(this);
+                    pendingTaskCalls.remove(call);
                     call.reject("Error setting up WebView request: " + e.getMessage());
                 }
             }

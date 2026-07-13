@@ -187,56 +187,54 @@ async function boot() {
 
     global.pendingRequests = new Map();
     let nativeRequestCounter = 0;
-    let activeNativeRequests = 0;
-    const nativeRequestQueue = [];
-    const MAX_NATIVE_REQUESTS = 2;
+    const cancellationError = () => {
+      const error = new Error(
+        "Native request cancelled because the active view changed",
+      );
+      error.code = "NATIVE_REQUEST_CANCELLED";
+      return error;
+    };
 
-    const drainNativeRequestQueue = () => {
-      while (
-        activeNativeRequests < MAX_NATIVE_REQUESTS &&
-        nativeRequestQueue.length > 0
-      ) {
-        const startRequest = nativeRequestQueue.shift();
-        activeNativeRequests += 1;
-        startRequest();
+    global.cancelNativeRequests = () => {
+      const error = cancellationError();
+      const activeIds = Array.from(global.pendingRequests.keys());
+      if (activeIds.length > 0) {
+        broadcast("native-cancel", { requestIds: activeIds });
       }
+      for (const requestId of activeIds) {
+        global.pendingRequests.get(requestId)?.reject(error);
+      }
+      return activeIds.length;
     };
 
     global.sendNativeRequest = (config) =>
       new Promise((resolve, reject) => {
-        nativeRequestQueue.push(() => {
-          const requestId = ++nativeRequestCounter;
-          let settled = false;
-          const finish = (callback, value) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeout);
-            global.pendingRequests.delete(requestId);
-            activeNativeRequests -= 1;
-            callback(value);
-            drainNativeRequestQueue();
-          };
-          const timeout = setTimeout(() => {
-            finish(
-              reject,
-              new Error(`Native request timeout for ${config.url}`),
-            );
-          }, 30000);
+        const requestId = ++nativeRequestCounter;
+        let settled = false;
+        const finish = (callback, value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          global.pendingRequests.delete(requestId);
+          callback(value);
+        };
+        const timeout = setTimeout(() => {
+          broadcast("native-cancel", { requestIds: [requestId] });
+          finish(reject, new Error(`Native request timeout for ${config.url}`));
+        }, 30000);
 
-          global.pendingRequests.set(requestId, {
-            resolve: (response) => finish(resolve, response),
-            reject: (error) => finish(reject, error),
-          });
-
-          broadcast("native-request", {
-            requestId,
-            url: config.url,
-            method: config.method || "GET",
-            headers: config.headers || {},
-            body: config.data || null,
-          });
+        global.pendingRequests.set(requestId, {
+          resolve: (response) => finish(resolve, response),
+          reject: (error) => finish(reject, error),
         });
-        drainNativeRequestQueue();
+
+        broadcast("native-request", {
+          requestId,
+          url: config.url,
+          method: config.method || "GET",
+          headers: config.headers || {},
+          body: config.data || null,
+        });
       });
 
     const nativeAxiosAdapter = async (config) => {
@@ -879,7 +877,6 @@ async function boot() {
     const [requestId, success, response, error] = req.body.args || [];
     const pending = global.pendingRequests.get(requestId);
     if (pending) {
-      global.pendingRequests.delete(requestId);
       if (success) {
         pending.resolve(response);
       } else {
@@ -887,6 +884,11 @@ async function boot() {
       }
     }
     res.json({ ok: true, result: { ok: true } });
+  });
+
+  router.post("/api/ipc/native-cancel", (_req, res) => {
+    const cancelled = global.cancelNativeRequests?.() || 0;
+    res.json({ ok: true, result: { cancelled } });
   });
 
   router.get("/api/update/health", (req, res) =>

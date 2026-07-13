@@ -53,12 +53,18 @@ export default function App() {
     params: {},
   };
 
+  const cancelObsoleteNativeRequests = () => {
+    window.sharedStateAPI?.cancelNativeRequests?.().catch(() => {});
+  };
+
   const navigateTo = (view, params = {}) => {
+    cancelObsoleteNativeRequests();
     setHistory((prev) => [...prev, { view, params }]);
   };
 
   const navigateBack = () => {
     if (history.length > 1) {
+      cancelObsoleteNativeRequests();
       setHistory((prev) => prev.slice(0, prev.length - 1));
     }
   };
@@ -483,6 +489,7 @@ export default function App() {
       <Sidebar
         currentView={current.view}
         setView={(view) => {
+          cancelObsoleteNativeRequests();
           if (window.catalogCache) {
             if (view === "home") {
               delete window.catalogCache[`Anime_local`];
