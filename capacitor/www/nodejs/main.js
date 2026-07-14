@@ -249,7 +249,15 @@ async function boot() {
       // bridge - fetch them directly from the Node runtime instead. This
       // avoids clogging the bridge with binary payloads and the 30s
       // timeout/retry loop that breaks image loading on paginated lists.
-      if (config.strawverseDirectHttp === true) {
+      // EXCEPTION: _forceNativeBridge overrides this for Cloudflare-protected
+      // hosts (e.g. i.animepahe.pw). Cloudflare binds cf_clearance to the TLS
+      // fingerprint of the browser that solved the challenge, so Node's HTTP
+      // stack gets a perpetual 403 even with a valid cookie. Those requests
+      // must go through the WebView, which has the matching fingerprint.
+      if (
+        config.strawverseDirectHttp === true &&
+        config._forceNativeBridge !== true
+      ) {
         return defaultAdapter(config);
       }
       if (global.sendNativeRequest) {
@@ -446,8 +454,8 @@ async function boot() {
     const bypassPromise = (async () => {
       try {
         await dbRun(
-          "DELETE FROM cookie WHERE id IN (?, ?) OR ((name IN ('cf_clearance', 'cf_user_agent') OR name LIKE 'sec-ch-ua%') AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))",
-          [`${domain}-cf_clearance`, `${domain}-cf-user-agent`, domain, domain],
+          "DELETE FROM cookie WHERE id IN (?, ?) OR ((name IN ('cf_clearance', 'cf_user_agent') OR name LIKE 'sec-ch-ua%') AND LTRIM(?, '.') = LTRIM(domain, '.'))",
+          [`${domain}-cf_clearance`, `${domain}-cf-user-agent`, domain],
         );
         if (global.clearCookieCache) global.clearCookieCache(domain);
       } catch (e) {
@@ -462,8 +470,8 @@ async function boot() {
         for (let i = 0; i < 120; i++) {
           await new Promise((resolve) => setTimeout(resolve, 1000));
           const row = await queryOne(
-            "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-            [`${domain}-cf_clearance`, domain, domain],
+            "SELECT value FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND LTRIM(?, '.') = LTRIM(domain, '.')) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+            [`${domain}-cf_clearance`, domain],
           );
           if (row?.value) {
             if (global.clearCookieCache) global.clearCookieCache(domain);
@@ -640,8 +648,8 @@ async function boot() {
       for (let i = 0; i < 15; i++) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         const row = await queryOne(
-          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-          [`${domain}-cf_clearance`, domain, domain],
+          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND LTRIM(?, '.') = LTRIM(domain, '.')) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          [`${domain}-cf_clearance`, domain],
         );
         const now = Date.now();
         const isCurrent =

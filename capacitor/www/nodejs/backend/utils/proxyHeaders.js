@@ -252,9 +252,10 @@ function getHeaders(url, method = "GET") {
     } else {
       try {
         const row = queryOne(
-          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))) ORDER BY (CASE WHEN LTRIM(?, '.') = LTRIM(domain, '.') THEN 0 ELSE 1 END), LENGTH(domain) DESC, CAST(expirationDate AS REAL) DESC LIMIT 1",
           [
             `${targetCookieDomain}-cf_clearance`,
+            targetCookieDomain,
             targetCookieDomain,
             targetCookieDomain,
           ],

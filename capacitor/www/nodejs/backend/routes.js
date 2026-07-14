@@ -2509,9 +2509,17 @@ router.get("/api/image", async (req, res) => {
     }
 
     const resolvedHeaders = getHeaders(decodedUrl);
+    // Cloudflare binds cf_clearance to the TLS fingerprint of the browser
+    // that solved the challenge. Node's HTTP stack has a different
+    // fingerprint, so direct fetches to Cloudflare-protected image hosts
+    // (i.animepahe.pw) always 403 even with a valid cookie. Route those
+    // through the WebView native bridge instead, and rely on the disk cache
+    // so each image only crosses the bridge once.
+    const isCfProtectedImage = decodedUrl.includes("animepahe");
     const options = {
       responseType: "arraybuffer",
       strawverseDirectHttp: true,
+      _forceNativeBridge: isCfProtectedImage,
       headers: {
         ...resolvedHeaders,
       },
@@ -2523,6 +2531,16 @@ router.get("/api/image", async (req, res) => {
     console.log(
       `[api/image] Proxying ${decodedUrl} -> Status: ${response.status}, Content-Type: ${contentType}, Data Length: ${buf.length}, Magic: ${buf.slice(0, 8).toString("hex")}`,
     );
+
+    // Persist to the image cache so subsequent loads never hit the bridge.
+    if (isCfProtectedImage && buf.length > 0) {
+      try {
+        await ImageCacheManager.cacheImage(decodedUrl, buf);
+      } catch (cacheWriteErr) {
+        logger.error("Failed to cache bridged image: " + cacheWriteErr.message);
+      }
+    }
+
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=86400");
     return res.send(buf);

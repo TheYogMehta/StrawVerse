@@ -157,10 +157,10 @@ async function saveClearanceCookiesForDomain(domain) {
 }
 
 async function clearCookiesForDomain(domain) {
-  run(
-    "DELETE FROM cookie WHERE id = ? OR (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.') OR LTRIM(domain, '.') LIKE '%.' || LTRIM(?, '.'))",
-    [`${domain}-cf_clearance`, domain, domain, domain],
-  );
+  run("DELETE FROM cookie WHERE id = ? OR LTRIM(?, '.') = LTRIM(domain, '.')", [
+    `${domain}-cf_clearance`,
+    domain,
+  ]);
   if (global.clearCookieCache) {
     global.clearCookieCache(domain);
   }
@@ -376,8 +376,8 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
 
   try {
     const row = queryOne(
-      "SELECT expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.'))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-      [`${domain}-cf_clearance`, domain, domain],
+      "SELECT expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND LTRIM(?, '.') = LTRIM(domain, '.')) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+      [`${domain}-cf_clearance`, domain],
     );
     if (row && !force) {
       const exp = Number(row.expirationDate);
