@@ -2,6 +2,8 @@ const { queryOne, run } = require("./db");
 
 const cookieCache = {};
 const refererCache = {};
+const uaCache = {};
+const hintsCache = {};
 
 function normalizeDomain(domain) {
   if (!domain) return null;
@@ -65,19 +67,6 @@ function getStoredStreamReferer(domain) {
   for (const candidate of candidates) {
     if (refererCache[candidate]) return refererCache[candidate];
   }
-
-  for (const candidate of candidates) {
-    try {
-      const row = queryOne(
-        "SELECT referer FROM StreamReferer WHERE domain = ? LIMIT 1",
-        [candidate],
-      );
-      if (row?.referer) {
-        refererCache[candidate] = row.referer;
-        return row.referer;
-      }
-    } catch (e) {}
-  }
   return null;
 }
 
@@ -90,31 +79,109 @@ global.setFallbackReferer = (referer) => {
   saveStreamReferer("__fallback__", referer);
 };
 
+async function initCache() {
+  try {
+    const { queryAll } = require("./db");
+    
+    // Load referers
+    const referers = await queryAll("SELECT domain, referer FROM StreamReferer");
+    for (const ref of referers) {
+      if (ref.domain && ref.referer) {
+        refererCache[ref.domain] = ref.referer;
+      }
+    }
+    
+    // Load cookies, UAs, hints
+    const rows = await queryAll("SELECT id, name, domain, value, expirationDate, local_saved_at FROM cookie");
+    for (const row of rows) {
+      const id = row.id;
+      const name = row.name;
+      const value = row.value;
+      const domain = row.domain || (id.endsWith("-user_agent") ? id.substring(0, id.length - 11) : id.substring(0, id.length - 13));
+      
+      if (name === "user_agent") {
+        uaCache[domain] = value;
+      } else if (name === "client_hints") {
+        try {
+          hintsCache[domain] = JSON.parse(value);
+        } catch (e) {}
+      } else if (name === "cf_clearance") {
+        const exp = Number(row.expirationDate);
+        const savedAt = Number(row.local_saved_at);
+        const now = Date.now();
+        let isValid = false;
+        let expiryTime = now + 10 * 60 * 1000;
+        if (exp > now) {
+          isValid = true;
+          expiryTime = exp;
+        } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
+          isValid = true;
+          expiryTime = savedAt + 2 * 60 * 60 * 1000;
+        }
+        if (isValid) {
+          cookieCache[domain] = { value, expiry: expiryTime };
+        }
+      }
+    }
+  } catch (e) {
+    console.error("[proxyHeaders] Failed to init memory cache:", e.message);
+  }
+}
+
+function updateCache(domain, name, value, expirationDate, local_saved_at) {
+  if (!domain) return;
+  const cleanDom = domain.replace("www.", "").toLowerCase();
+  console.log(`[proxyHeaders] updateCache called: domain=${domain}, cleanDom=${cleanDom}, name=${name}, hasValue=${!!value}`);
+  
+  if (name === "user_agent") {
+    uaCache[cleanDom] = value;
+  } else if (name === "client_hints") {
+    try {
+      hintsCache[cleanDom] = typeof value === "string" ? JSON.parse(value) : value;
+    } catch (e) {}
+  } else if (name === "cf_clearance") {
+    const exp = Number(expirationDate);
+    const savedAt = Number(local_saved_at);
+    const now = Date.now();
+    let isValid = false;
+    let expiryTime = now + 10 * 60 * 1000;
+    if (exp > now) {
+      isValid = true;
+      expiryTime = exp;
+    } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
+      isValid = true;
+      expiryTime = savedAt + 2 * 60 * 60 * 1000;
+    }
+    if (isValid) {
+      cookieCache[cleanDom] = { value, expiry: expiryTime };
+    }
+  }
+}
+
 function getHeaders(url, method = "GET") {
   let cookieDomain = "";
   try {
     cookieDomain = new URL(url).hostname;
   } catch (e) {}
+  console.log(`[proxyHeaders] getHeaders called for: ${url}, method=${method}, cookieCacheKeys=${Object.keys(cookieCache)}`);
 
   let cleanDomain = "";
   if (cookieDomain) {
     cleanDomain = cookieDomain.replace("www.", "").toLowerCase();
     if (cleanDomain.includes("animepahe")) {
-      try {
-        const activeCookieRow = queryOne(
-          "SELECT domain FROM cookie WHERE name = 'cf_clearance' AND domain LIKE '%animepahe%' ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-        );
-        let tld = "pw";
-        if (activeCookieRow && activeCookieRow.domain) {
-          const matchedDomain = activeCookieRow.domain.replace(/^\./, "");
+      let tld = "pw";
+      for (const cachedDomain of Object.keys(cookieCache)) {
+        if (cachedDomain.includes("animepahe")) {
+          const matchedDomain = cachedDomain.replace(/^\./, "");
           const domainParts = matchedDomain.split(".");
           tld = domainParts[domainParts.length - 1] || "pw";
+          break;
         }
-        const hostParts = cookieDomain.split(".");
-        hostParts[hostParts.length - 1] = tld;
-        cookieDomain = hostParts.join(".");
-        cleanDomain = cookieDomain;
-      } catch (dbErr) {}
+      }
+      const hostParts = cookieDomain.split(".");
+      hostParts[hostParts.length - 1] = tld;
+      cookieDomain = hostParts.join(".");
+      cleanDomain = cookieDomain;
     } else if (
       cleanDomain.includes("kwik.cx") ||
       cleanDomain.includes("owocdn.top") ||
@@ -133,21 +200,24 @@ function getHeaders(url, method = "GET") {
     } else if (process.platform === "darwin") {
       userAgent = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Safari/537.36`;
     } else {
-      // Android / generic fallback (matches sec-ch-ua-platform Android)
       userAgent = `Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVer} Mobile Safari/537.36`;
     }
   }
 
   // Load custom User-Agent if bypassed
   if (cookieDomain) {
-    try {
-      const uaRow = queryOne("SELECT value FROM cookie WHERE id = ? LIMIT 1", [
-        `${cleanDomain}-user_agent`,
-      ]);
-      if (uaRow && uaRow.value) {
-        userAgent = uaRow.value;
+    const normTarget = cleanDomain.replace(/^\./, "").toLowerCase();
+    let matchedUA = null;
+    for (const [dom, uaVal] of Object.entries(uaCache)) {
+      const normDom = dom.replace(/^\./, "").toLowerCase();
+      if (normTarget === normDom || normTarget.endsWith("." + normDom)) {
+        matchedUA = uaVal;
+        break;
       }
-    } catch (e) {}
+    }
+    if (matchedUA) {
+      userAgent = matchedUA;
+    }
   }
 
   const headers = {
@@ -158,18 +228,20 @@ function getHeaders(url, method = "GET") {
 
   // Load Client Hints if bypassed
   if (cookieDomain) {
-    try {
-      const hintsRow = queryOne(
-        "SELECT value FROM cookie WHERE id = ? LIMIT 1",
-        [`${cleanDomain}-client_hints`],
-      );
-      if (hintsRow && hintsRow.value) {
-        const hints = JSON.parse(hintsRow.value);
-        for (const [k, v] of Object.entries(hints)) {
-          headers[k] = v;
-        }
+    const normTarget = cleanDomain.replace(/^\./, "").toLowerCase();
+    let matchedHints = null;
+    for (const [dom, hintsVal] of Object.entries(hintsCache)) {
+      const normDom = dom.replace(/^\./, "").toLowerCase();
+      if (normTarget === normDom || normTarget.endsWith("." + normDom)) {
+        matchedHints = hintsVal;
+        break;
       }
-    } catch (e) {}
+    }
+    if (matchedHints) {
+      for (const [k, v] of Object.entries(matchedHints)) {
+        headers[k] = v;
+      }
+    }
   }
 
   // kwik - animepahe
@@ -213,24 +285,8 @@ function getHeaders(url, method = "GET") {
   if (!headers.Referer) {
     if (refererCache["__fallback__"]) {
       headers.Referer = refererCache["__fallback__"];
-    } else {
-      try {
-        const hostname = new URL(url).hostname;
-        if (!hostname.includes("localhost")) {
-          const row = queryOne(
-            "SELECT referer FROM StreamReferer WHERE domain = ? LIMIT 1",
-            ["__fallback__"],
-          );
-          if (row?.referer) {
-            refererCache["__fallback__"] = row.referer;
-            headers.Referer = row.referer;
-          }
-        }
-      } catch (e) {}
     }
   }
-
-  // cookieDomain is resolved at the top of the function
 
   let targetCookieDomain = cookieDomain;
   if (targetCookieDomain) {
@@ -244,53 +300,18 @@ function getHeaders(url, method = "GET") {
   }
 
   if (targetCookieDomain) {
-    const cached = cookieCache[targetCookieDomain];
+    const normTarget = targetCookieDomain.replace(/^\./, "").toLowerCase();
+    let cached = null;
+    for (const [dom, cacheVal] of Object.entries(cookieCache)) {
+      const normDom = dom.replace(/^\./, "").toLowerCase();
+      if (normTarget === normDom || normTarget.endsWith("." + normDom)) {
+        cached = cacheVal;
+        break;
+      }
+    }
     if (cached && cached.expiry > Date.now()) {
       if (cached.value) {
         headers.Cookie = `cf_clearance=${cached.value};`;
-      }
-    } else {
-      try {
-        const row = queryOne(
-          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')))) ORDER BY (CASE WHEN LTRIM(?, '.') = LTRIM(domain, '.') THEN 0 ELSE 1 END), LENGTH(domain) DESC, CAST(expirationDate AS REAL) DESC LIMIT 1",
-          [
-            `${targetCookieDomain}-cf_clearance`,
-            targetCookieDomain,
-            targetCookieDomain,
-            targetCookieDomain,
-          ],
-        );
-        let isValid = false;
-        let expiryTime = Date.now() + 10 * 60 * 1000;
-
-        if (row && row.value) {
-          const exp = Number(row.expirationDate);
-          const savedAt = Number(row.local_saved_at);
-          const now = Date.now();
-
-          if (exp > now) {
-            isValid = true;
-            expiryTime = exp;
-          } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
-            isValid = true;
-            expiryTime = savedAt + 2 * 60 * 60 * 1000;
-          }
-        }
-
-        if (row && row.value && isValid) {
-          headers.Cookie = `cf_clearance=${row.value};`;
-          cookieCache[targetCookieDomain] = {
-            value: row.value,
-            expiry: expiryTime,
-          };
-        } else {
-          cookieCache[targetCookieDomain] = {
-            value: null,
-            expiry: Date.now() + 30 * 1000,
-          };
-        }
-      } catch (e) {
-        // ignore
       }
     }
   }
@@ -321,8 +342,30 @@ global.clearCookieCache = (domain) => {
       delete cookieCache[key];
     }
   }
+  for (const key of Object.keys(uaCache)) {
+    const normKey = key.replace(/^www\./, "").toLowerCase();
+    if (
+      normKey === normalized ||
+      normKey.endsWith("." + normalized) ||
+      normalized.endsWith("." + normKey)
+    ) {
+      delete uaCache[key];
+    }
+  }
+  for (const key of Object.keys(hintsCache)) {
+    const normKey = key.replace(/^www\./, "").toLowerCase();
+    if (
+      normKey === normalized ||
+      normKey.endsWith("." + normalized) ||
+      normalized.endsWith("." + normKey)
+    ) {
+      delete hintsCache[key];
+    }
+  }
 };
 
 module.exports = {
   getHeaders,
+  initCache,
+  updateCache,
 };

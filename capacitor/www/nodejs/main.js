@@ -182,6 +182,16 @@ async function boot() {
   }
 
   try {
+    const proxyHeaders = require("./backend/utils/proxyHeaders");
+    await proxyHeaders.initCache();
+  } catch (cacheInitErr) {
+    logger.error(
+      "[android] Failed to initialize proxy headers cache: " +
+        cacheInitErr.message,
+    );
+  }
+
+  try {
     const axios = require("axios");
     // axios v1 exposes defaults.adapter as a list of adapter names, not a
     // callable function. Resolve it to a real adapter function so we can
@@ -242,6 +252,21 @@ async function boot() {
           body: config.data || null,
         });
       });
+
+    if (channel) {
+      channel.addListener("native-response", (data) => {
+        if (!data || typeof data.requestId === "undefined") return;
+        const reqIdNum = Number(data.requestId);
+        const pending = global.pendingRequests.get(data.requestId) || global.pendingRequests.get(reqIdNum);
+        if (pending) {
+          if (data.success) {
+            pending.resolve(data.response);
+          } else {
+            pending.reject(new Error(data.error || "Unknown bridge error"));
+          }
+        }
+      });
+    }
 
     const nativeAxiosAdapter = async (config) => {
       // Requests flagged with strawverseDirectHttp (e.g. image proxy fetches
@@ -712,6 +737,10 @@ async function boot() {
             Date.now().toString(),
           ]);
           savedClearance = true;
+          try {
+            const proxyHeaders = require("./backend/utils/proxyHeaders");
+            proxyHeaders.updateCache(domain, "cf_clearance", value, expiry.toString(), Date.now().toString());
+          } catch (e) {}
         }
         if (name === "cf_user_agent" || name === "user_agent") {
           await dbRun(upsertSql, [
@@ -756,6 +785,10 @@ async function boot() {
           expiry.toString(),
           Date.now().toString(),
         ]);
+        try {
+          const proxyHeaders = require("./backend/utils/proxyHeaders");
+          proxyHeaders.updateCache(domain, "user_agent", userAgent);
+        } catch (e) {}
       }
 
       if (clientHints) {
@@ -773,6 +806,10 @@ async function boot() {
           expiry.toString(),
           Date.now().toString(),
         ]);
+        try {
+          const proxyHeaders = require("./backend/utils/proxyHeaders");
+          proxyHeaders.updateCache(domain, "client_hints", clientHints);
+        } catch (e) {}
       }
 
       res.json({ ok: true, result: { ok: savedClearance } });

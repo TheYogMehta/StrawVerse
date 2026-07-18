@@ -351,6 +351,10 @@ public class DatabaseBridge {
         }
     }
 
+    public void sendEventToNode(String eventName, JSONObject data) {
+        sendToNode(eventName, data);
+    }
+
     private void sendToNode(String eventName, JSONObject data) {
         if (bridgeSender == null) {
             Log.e(TAG, "Cannot send to Node.js: bridgeSender is null");

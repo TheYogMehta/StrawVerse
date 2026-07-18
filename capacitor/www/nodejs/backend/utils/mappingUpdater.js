@@ -103,7 +103,7 @@ function deserializeDelta(buffer) {
 async function checkForMappingUpdates() {
   const userDataPath = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
   const mappingTagKey = "mapping_release_tag";
-  const storedTag = getKeyValue("Settings", mappingTagKey);
+  const storedTag = await getKeyValue("Settings", mappingTagKey);
 
   logger.info("[mappingUpdater] Checking for mapping database updates...");
 

@@ -34,6 +34,7 @@ import java.util.HashMap;
 import org.json.JSONObject;
 import java.util.List;
 import java.util.ArrayList;
+import net.hampoelz.capacitor.nodejs.DatabaseBridge;
 
 @CapacitorPlugin(name = "CloudflareBypass")
 public class CloudflareBypassPlugin extends Plugin {
@@ -44,6 +45,25 @@ public class CloudflareBypassPlugin extends Plugin {
     private final List<Runnable> pendingTasks = new ArrayList<>();
     private final List<PluginCall> pendingTaskCalls = new ArrayList<>();
     private final Map<String, PluginCall> activeFetchCalls = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private void sendNativeResponseToNode(String requestId, boolean success, JSONObject response, String error) {
+        try {
+            JSONObject nodeResponse = new JSONObject();
+            try {
+                nodeResponse.put("requestId", Integer.parseInt(requestId));
+            } catch (NumberFormatException nfe) {
+                nodeResponse.put("requestId", requestId);
+            }
+            nodeResponse.put("success", success);
+            nodeResponse.put("response", response);
+            nodeResponse.put("error", error);
+
+            net.hampoelz.capacitor.nodejs.DatabaseBridge.getInstance()
+                .sendEventToNode("native-response", nodeResponse);
+        } catch (Exception e) {
+            Log.e("StrawVerseBypass", "Failed to send native-response event to Node: " + e.getMessage());
+        }
+    }
 
     public static String cleanUserAgent(String ua) {
         if (ua == null) return null;
@@ -87,6 +107,13 @@ public class CloudflareBypassPlugin extends Plugin {
                 }
 
                 String[] cookieStrings = {
+                    "cf_clearance=; Max-Age=0; Path=/; Domain=" + baseDomain + "; Secure; HttpOnly; SameSite=None",
+                    "cf_clearance=; Max-Age=0; Path=/; Domain=." + baseDomain + "; Secure; HttpOnly; SameSite=None",
+                    "cf_clearance=; Max-Age=0; Path=/; Secure; HttpOnly; SameSite=None",
+                    "cf_clearance=; Max-Age=0; Path=/; Domain=" + baseDomain + "; Secure; HttpOnly",
+                    "cf_clearance=; Max-Age=0; Path=/; Domain=." + baseDomain + "; Secure; HttpOnly",
+                    "cf_clearance=; Max-Age=0; Path=/; HttpOnly",
+                    "cf_clearance=; Max-Age=0; HttpOnly",
                     "cf_clearance=; Max-Age=0; Path=/; Domain=" + baseDomain + "; Secure; SameSite=None",
                     "cf_clearance=; Max-Age=0; Path=/; Domain=." + baseDomain + "; Secure; SameSite=None",
                     "cf_clearance=; Max-Age=0; Path=/; Secure; SameSite=None",
@@ -455,18 +482,8 @@ public class CloudflareBypassPlugin extends Plugin {
     public void nativeRequest(final PluginCall call) {
         String url = call.getString("url");
         if (url != null && (url.contains("animepahe") || url.contains("anikototv") || url.contains("megaplay") || url.contains("weebcentral") || url.contains("allmanga") || url.contains("anineko"))) {
-            boolean isStatic = url.contains("/uploads/") 
-                || url.endsWith(".webp") 
-                || url.endsWith(".png") 
-                || url.endsWith(".jpg") 
-                || url.endsWith(".jpeg") 
-                || url.endsWith(".gif")
-                || url.endsWith(".js")
-                || url.endsWith(".css");
-            if (!isStatic) {
-                executeWebViewRequest(url, call.getString("method"), call.getObject("headers"), call.getString("body"), call);
-                return;
-            }
+            executeWebViewRequest(url, call.getString("method"), call.getObject("headers"), call.getString("body"), call);
+            return;
         }
 
         new Thread(new Runnable() {
@@ -580,10 +597,15 @@ public class CloudflareBypassPlugin extends Plugin {
                     ret.put("isBase64", true);
                     ret.put("headers", resHeaders);
                     call.resolve(ret);
+                    String reqId = call.getString("requestId", call.getCallbackId());
+                    sendNativeResponseToNode(reqId, true, ret, null);
 
                 } catch (Exception e) {
                     Log.e("StrawVerseBypass", "nativeRequest failed for " + url, e);
-                    call.reject("Native request failed: " + e.getMessage());
+                    String errMsg = "Native request failed: " + e.getMessage();
+                    call.reject(errMsg);
+                    String reqId = call.getString("requestId", call.getCallbackId());
+                    sendNativeResponseToNode(reqId, false, null, errMsg);
                 } finally {
                     if (is != null) {
                         try {
@@ -622,6 +644,18 @@ public class CloudflareBypassPlugin extends Plugin {
                 
                 backgroundWebView.setWebViewClient(new WebViewClient() {
                     @Override
+                    public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            String reqUrl = request.getUrl().toString();
+                            if (reqUrl.contains("animepahe") || reqUrl.contains("anikototv") || reqUrl.contains("megaplay") || reqUrl.contains("weebcentral") || reqUrl.contains("allmanga") || reqUrl.contains("anineko")) {
+                                Log.i("StrawVerseBypass", "Background WebView Request: " + request.getMethod() + " -> " + reqUrl);
+                                Log.i("StrawVerseBypass", "Background WebView Request Headers: " + request.getRequestHeaders().toString());
+                            }
+                        }
+                        return super.shouldInterceptRequest(view, request);
+                    }
+
+                    @Override
                     public void onPageFinished(WebView view, String url) {
                         super.onPageFinished(view, url);
                         view.evaluateJavascript("window.location.origin", value -> {
@@ -629,19 +663,19 @@ public class CloudflareBypassPlugin extends Plugin {
                             if (expectedWebViewOrigin == null || !expectedWebViewOrigin.equals(actualOrigin)) {
                                 failPendingTasks("Background WebView origin mismatch: expected "
                                         + expectedWebViewOrigin + ", got " + actualOrigin);
-                                return;
-                            }
-                            Log.i("StrawVerseBypass", "Background WebView origin ready: " + actualOrigin);
-                            isWebViewLoading = false;
-                            runPendingTasks();
-                        });
-                    }
+                                    return;
+                                }
+                                Log.i("StrawVerseBypass", "Background WebView origin ready: " + actualOrigin);
+                                isWebViewLoading = false;
+                                runPendingTasks();
+                            });
+                        }
                     
-                    @Override
-                    public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                        failPendingTasks("Background WebView failed to initialize: " + description);
-                    }
-                });
+                        @Override
+                        public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                            failPendingTasks("Background WebView failed to initialize: " + description);
+                        }
+                    });
             }
         });
     }
@@ -735,7 +769,9 @@ public class CloudflareBypassPlugin extends Plugin {
             
             JSONObject responseObj = new JSONObject(value);
             if (responseObj.has("error")) {
-                call.reject(responseObj.getString("error"));
+                String errMsg = responseObj.getString("error");
+                call.reject(errMsg);
+                sendNativeResponseToNode(requestId, false, null, errMsg);
                 return;
             }
             
@@ -768,10 +804,13 @@ public class CloudflareBypassPlugin extends Plugin {
             
             Log.i("StrawVerseBypass", "WebView fetch completed asynchronously: status " + status);
             call.resolve(ret);
+            sendNativeResponseToNode(requestId, true, ret, null);
             
         } catch (Exception e) {
             Log.e("StrawVerseBypass", "Failed to parse WebView fetch output in interface", e);
-            call.reject("Failed to parse WebView fetch output: " + e.getMessage());
+            String errMsg = "Failed to parse WebView fetch output: " + e.getMessage();
+            call.reject(errMsg);
+            sendNativeResponseToNode(requestId, false, null, errMsg);
         }
     }
 
@@ -821,8 +860,10 @@ public class CloudflareBypassPlugin extends Plugin {
                             for (String pair : cookieVal.split(";")) {
                                 String cleanPair = pair.trim();
                                 if (!cleanPair.isEmpty()) {
-                                    String cookieString = cleanPair + "; Domain=" + host + "; Path=/; Secure; HttpOnly";
-                                    CookieManager.getInstance().setCookie(finalOrigin, cookieString);
+                                    String cookieString1 = cleanPair + "; Domain=" + host + "; Path=/; Secure; HttpOnly; SameSite=None";
+                                    CookieManager.getInstance().setCookie(finalOrigin, cookieString1);
+                                    String cookieString2 = cleanPair + "; Domain=." + host + "; Path=/; Secure; HttpOnly; SameSite=None";
+                                    CookieManager.getInstance().setCookie(finalOrigin, cookieString2);
                                 }
                             }
                             CookieManager.getInstance().flush();
@@ -859,6 +900,7 @@ public class CloudflareBypassPlugin extends Plugin {
                     JSObject fetchOptions = new JSObject();
                     String effectiveMethod = method == null ? "GET" : method.toUpperCase();
                     fetchOptions.put("method", effectiveMethod);
+                    fetchOptions.put("credentials", "include");
                     
                     if (headers != null) {
                         JSObject fetchHeaders = new JSObject();
@@ -921,10 +963,13 @@ public class CloudflareBypassPlugin extends Plugin {
                     
                 } catch (Exception e) {
                     Log.e("StrawVerseBypass", "Error setting up WebView request", e);
-                    activeFetchCalls.remove(call.getString("requestId", call.getCallbackId()));
+                    String reqId = call.getString("requestId", call.getCallbackId());
+                    activeFetchCalls.remove(reqId);
                     pendingTasks.remove(this);
                     pendingTaskCalls.remove(call);
-                    call.reject("Error setting up WebView request: " + e.getMessage());
+                    String errMsg = "Error setting up WebView request: " + e.getMessage();
+                    call.reject(errMsg);
+                    sendNativeResponseToNode(reqId, false, null, errMsg);
                 }
             }
         });
