@@ -2,34 +2,34 @@ const { logger } = require("./AppLogger");
 const axios = require("axios");
 const { MalEpMap, MalMangaMap } = require("./Metadata");
 const verifyChallenge = require("./pkce");
-const { getKeyValue, setKeyValue } = require("./db");
+const { getKeyValue, setKeyValue, queryOne } = require("./db");
 
 const MalAppID = "d0b22d129a541dac4d28207f77b15b5f";
 let MalAcount = null;
 global.MalLoggedIn = false;
 
-function clearMalSession() {
+async function clearMalSession() {
   global.MalLoggedIn = false;
   global.malUsername = null;
   MalAcount = null;
   try {
-    const config = getKeyValue("Settings", "config") || {};
-    setKeyValue("Settings", "malToken", null);
-    setKeyValue("Settings", "malUsername", null);
-    setKeyValue("Settings", "malLastSync", null);
-    setKeyValue("Settings", "malMangaLastSync", null);
-    logger.warn("⚠️ Cleared expired or invalid MAL session.");
+    const config = (await getKeyValue("Settings", "config")) || {};
+    await setKeyValue("Settings", "malToken", null);
+    await setKeyValue("Settings", "malUsername", null);
+    await setKeyValue("Settings", "malLastSync", null);
+    await setKeyValue("Settings", "malMangaLastSync", null);
+    logger.warn("Cleared expired or invalid MAL session.");
   } catch (_) {}
 }
 
 // Create Authorization URL
 async function MalCreateUrl() {
   try {
-    let currentPkce = getKeyValue("Settings", "malPkce");
+    let currentPkce = await getKeyValue("Settings", "malPkce");
     if (!currentPkce) {
       const generatedPkce = await verifyChallenge(128);
       currentPkce = generatedPkce.code_challenge;
-      setKeyValue("Settings", "malPkce", currentPkce);
+      await setKeyValue("Settings", "malPkce", currentPkce);
     }
 
     return `https://myanimelist.net/v1/oauth2/authorize?response_type=code&client_id=${MalAppID}&code_challenge_method=plain&code_challenge=${currentPkce}`;
@@ -42,7 +42,7 @@ async function MalCreateUrl() {
 // Verify OAuth Code & Exchange Token
 async function MalVerifyToken(code) {
   try {
-    const storedPkce = getKeyValue("Settings", "malPkce");
+    const storedPkce = await getKeyValue("Settings", "malPkce");
 
     if (!storedPkce) {
       throw new Error(
@@ -66,7 +66,7 @@ async function MalVerifyToken(code) {
     );
 
     // Clear used PKCE
-    setKeyValue("Settings", "malPkce", null);
+    await setKeyValue("Settings", "malPkce", null);
 
     const now = Date.now();
     const tokenData = {
@@ -77,11 +77,12 @@ async function MalVerifyToken(code) {
 
     MalAcount = tokenData;
     let tokenStr = JSON.stringify(tokenData);
-    setKeyValue("Settings", "malToken", tokenStr);
+    await setKeyValue("Settings", "malToken", tokenStr);
 
     global.MalLoggedIn = true;
 
     MalGetUsername(data.access_token).catch(() => {});
+    MalFetchListAll(true).catch(() => {});
 
     return {
       mal_on_off: true,
@@ -89,7 +90,7 @@ async function MalVerifyToken(code) {
     };
   } catch (err) {
     logger.error(`Error getting MAL token: ${err.message}`);
-    clearMalSession();
+    await clearMalSession();
 
     return {
       mal_on_off: false,
@@ -159,10 +160,10 @@ async function MalRefreshTokenGen(json) {
       global.MalLoggedIn = true;
 
       try {
-        setKeyValue("Settings", "malToken", tokenStr);
+        await setKeyValue("Settings", "malToken", tokenStr);
       } catch (_) {}
 
-      logger.info("✅ MAL Token refreshed successfully!");
+      logger.info("MAL Token refreshed successfully!");
       MalFetchListAll();
       MalGetUsername(updatedToken.access_token).catch(() => {});
 
@@ -183,7 +184,7 @@ async function MalRefreshTokenGen(json) {
     };
   } catch (err) {
     logger.error(`Failed to refresh MAL token: ${err.message}`);
-    clearMalSession();
+    await clearMalSession();
 
     return {
       mal_on_off: false,
@@ -198,8 +199,8 @@ async function execMalApi(apiCallFn) {
     return await apiCallFn();
   } catch (err) {
     if (err.response?.status === 401) {
-      logger.info("🔑 MAL API returned HTTP 401. Attempting token refresh...");
-      const malToken = getKeyValue("Settings", "malToken");
+      logger.info("MAL API returned HTTP 401. Attempting token refresh...");
+      const malToken = await getKeyValue("Settings", "malToken");
       if (malToken) {
         let tokenObj = JSON.parse(malToken);
         tokenObj.expires_at = 0;
@@ -209,7 +210,7 @@ async function execMalApi(apiCallFn) {
           return await apiCallFn();
         }
       }
-      clearMalSession();
+      await clearMalSession();
       throw new Error("MAL session expired. Please reconnect your account.");
     }
     throw err;
@@ -222,7 +223,8 @@ async function MalGetUsername(accessToken) {
     const token =
       accessToken ||
       MalAcount?.access_token ||
-      JSON.parse(getKeyValue("Settings", "malToken") || "{}")?.access_token;
+      JSON.parse((await getKeyValue("Settings", "malToken")) || "{}")
+        ?.access_token;
     if (!token) return null;
 
     const { data } = await axios.get(
@@ -233,7 +235,7 @@ async function MalGetUsername(accessToken) {
     );
     const username = data?.name || null;
     if (username) {
-      setKeyValue("Settings", "malUsername", username);
+      await setKeyValue("Settings", "malUsername", username);
       global.malUsername = username;
     }
     return username;
@@ -292,7 +294,7 @@ async function MalSyncType(type, force = false) {
   }
 
   const syncKey = type === "anime" ? "malLastSync" : "malMangaLastSync";
-  let MalMappingDate = getKeyValue("Settings", syncKey);
+  let MalMappingDate = await getKeyValue("Settings", syncKey);
 
   let limit = MalMappingDate ? 50 : 500;
 
@@ -303,7 +305,9 @@ async function MalSyncType(type, force = false) {
   if (force || isSyncExpired || !MalMappingDate) {
     if (MalMappingDate && !force) {
       try {
-        let latestLocal = await queryOne(`SELECT id, updated_at FROM ${type === "anime" ? "MyAnimeList" : "MyMangaList"} ORDER BY updated_at DESC LIMIT 1`);
+        let latestLocal = await queryOne(
+          `SELECT id, updated_at FROM ${type === "anime" ? "MyAnimeList" : "MyMangaList"} ORDER BY updated_at DESC LIMIT 1`,
+        );
         if (latestLocal) {
           let checkData = await MalFetchList(type, 1, 1);
           if (checkData?.results?.length > 0) {
@@ -315,7 +319,7 @@ async function MalSyncType(type, force = false) {
               logger.info(
                 `[MAL-${type.toUpperCase()}-LIST] SKIPPED FETCH (Nothing changed on MAL)`,
               );
-              setKeyValue("Settings", syncKey, new Date().toISOString());
+              await setKeyValue("Settings", syncKey, new Date().toISOString());
               return;
             }
           }
@@ -346,7 +350,7 @@ async function MalSyncType(type, force = false) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
     logger.info(`[MAL-${type.toUpperCase()}-LIST] Successfully Saved`);
-    setKeyValue("Settings", syncKey, new Date().toISOString());
+    await setKeyValue("Settings", syncKey, new Date().toISOString());
   } else {
     logger.info(`[MAL-${type.toUpperCase()}-LIST] SKIPPED FETCH!`);
   }
@@ -467,18 +471,26 @@ async function autoTrackMAL(type, mediaId, number) {
 
     if (type === "Anime") {
       const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
-      localRecord = await queryOne(`
+      localRecord = await queryOne(
+        `
         SELECT MalID FROM Anime 
         WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
-      `, [mediaId,
+      `,
+        [
+          mediaId,
           `${strippedId}-sub`,
           `${strippedId}-hsub`,
           `${strippedId}-dub`,
           `${strippedId}-both`,
           mediaId,
-          strippedId,]);
+          strippedId,
+        ],
+      );
     } else {
-      localRecord = await queryOne(`SELECT MalID FROM Manga WHERE id = ? OR folder_name = ?`, [mediaId, mediaId]);
+      localRecord = await queryOne(
+        `SELECT MalID FROM Manga WHERE id = ? OR folder_name = ?`,
+        [mediaId, mediaId],
+      );
     }
 
     let malid = null;
@@ -490,26 +502,32 @@ async function autoTrackMAL(type, mediaId, number) {
       if (type === "Anime") {
         try {
           const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
-          const row = await mappingQueryOne(`
+          const row = await mappingQueryOne(
+            `
               SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
               UNION
               SELECT malid FROM anikototv WHERE id = ?
               UNION
               SELECT malid FROM anineko WHERE id = ?
               LIMIT 1
-            `, [strippedId, strippedId, strippedId, strippedId]);
+            `,
+            [strippedId, strippedId, strippedId, strippedId],
+          );
           if (row?.malid) {
             malid = parseInt(row.malid);
           }
         } catch (err) {}
       } else if (type === "Manga") {
         try {
-          const row = await mappingQueryOne(`
+          const row = await mappingQueryOne(
+            `
               SELECT malid FROM weebcentral WHERE id = ?
               UNION
               SELECT malid FROM allmanga WHERE id = ?
               LIMIT 1
-            `, [mediaId, mediaId]);
+            `,
+            [mediaId, mediaId],
+          );
           if (row?.malid) {
             malid = parseInt(row.malid);
           }
@@ -521,7 +539,10 @@ async function autoTrackMAL(type, mediaId, number) {
       const malListTable = type === "Anime" ? "MyAnimeList" : "MyMangaList";
       const totalCol = type === "Anime" ? "totalEpisodes" : "totalChapters";
       const progressCol = type === "Anime" ? "watched" : "read";
-      const malInfo = await queryOne(`SELECT status, ${progressCol}, ${totalCol} FROM ${malListTable} WHERE id = ?`, [String(malid)]);
+      const malInfo = await queryOne(
+        `SELECT status, ${progressCol}, ${totalCol} FROM ${malListTable} WHERE id = ?`,
+        [String(malid)],
+      );
 
       const currentProgress = malInfo ? parseInt(malInfo[progressCol] || 0) : 0;
       if (number <= currentProgress) {
@@ -546,11 +567,14 @@ async function autoTrackMAL(type, mediaId, number) {
 
       // Update local database cache immediately
       try {
-        await run(`
+        await run(
+          `
           UPDATE ${malListTable}
           SET ${progressCol} = ?, status = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `, [number, nextStatus, String(malid)]);
+        `,
+          [number, nextStatus, String(malid)],
+        );
       } catch (dbErr) {
         logger.error(
           `Error updating local MAL table in autoTrackMAL: ${dbErr.message}`,
@@ -560,7 +584,10 @@ async function autoTrackMAL(type, mediaId, number) {
       // Send in-app notification via IPC
       try {
         let displayTitle = type;
-        const titleRecord = await queryOne(`SELECT title FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ?`, [mediaId]);
+        const titleRecord = await queryOne(
+          `SELECT title FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ?`,
+          [mediaId],
+        );
         displayTitle = titleRecord?.title || type;
 
         if (global.win && !global.win.isDestroyed()) {

@@ -72,6 +72,23 @@ public class CloudflareBypassPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void openSystemBrowser(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null) {
+            call.reject("URL is required");
+            return;
+        }
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getActivity().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to open system browser: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void bypass(PluginCall call) {
         String url = call.getString("url");
         if (url == null) {

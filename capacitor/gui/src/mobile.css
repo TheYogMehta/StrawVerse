@@ -36,11 +36,13 @@
     height: auto;
     min-height: 0;
     flex-direction: row;
+    display: flex !important;
+    justify-content: space-around !important;
     align-items: center;
     border-right: none;
     border-top: 1px solid var(--border, #27272a);
-    padding: 0;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding: 6px 0;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
     flex-shrink: 0;
   }
 
@@ -51,22 +53,26 @@
   }
 
   html .sidebar .sidebar-nav {
-    flex: 1;
-    flex-direction: row;
-    justify-content: space-around;
-    align-items: center;
-    padding: 6px 4px;
-    gap: 0;
-    overflow-y: visible;
-    overflow-x: auto;
+    display: contents !important;
   }
 
   html .sidebar .sidebar-footer {
-    border-top: none;
-    padding: 6px 4px;
-    margin: 0;
-    flex-direction: row;
-    align-items: center;
+    display: contents !important;
+  }
+
+  /* Watch Together landing screen compact columns */
+  html .wt-landing-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+
+  html .wt-landing-box {
+    min-height: auto !important;
+    padding: 16px !important;
+  }
+
+  html .wt-landing-box-middle {
+    margin-bottom: 12px !important;
   }
 
   html .sidebar .sidebar-item {
@@ -85,9 +91,7 @@
   }
 
   html .sidebar .sidebar-item span {
-    font-size: 10px;
-    line-height: 1.2;
-    white-space: nowrap;
+    display: none;
   }
 
   /* ---------------------------------------------------------------- */
@@ -131,14 +135,14 @@
   /* Catalog (Home / Discover)                                         */
   /* ---------------------------------------------------------------- */
   html .catalog-header {
-    grid-template-columns: 1fr;
-    justify-items: stretch;
     gap: 10px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
 
-  html .catalog-header > * {
-    justify-self: center;
+  html .catalog-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
   }
 
   html .search-form {
@@ -193,10 +197,68 @@
   }
 
   /* ---------------------------------------------------------------- */
-  /* Watch Together: chat panel becomes full-width overlay             */
+  /* Watch Together: chat panel layout and top bar wrapping            */
   /* ---------------------------------------------------------------- */
-  html .wt-right-chat.expanded {
-    width: 100%;
+  html .wt-top-bar {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    height: auto !important;
+    padding: 10px 14px !important;
+    gap: 8px !important;
+    align-items: center !important;
+  }
+
+  html .wt-top-left {
+    order: 1 !important;
+    flex: 1 !important;
+  }
+
+  html .wt-top-right {
+    order: 2 !important;
+    flex: 0 0 auto !important;
+  }
+
+  html .wt-top-search-wrapper {
+    order: 3 !important;
+    flex: 1 1 100% !important;
+    max-width: 100% !important;
+  }
+
+  html .wt-main-body {
+    flex-direction: column !important;
+    overflow-y: auto !important;
+  }
+
+  html .wt-left-content {
+    margin-right: 0 !important;
+    width: 100% !important;
+    flex: 0 0 auto !important;
+    height: auto !important;
+  }
+
+  html .wt-right-chat.expanded,
+  html .wt-right-chat.collapsed {
+    position: relative !important;
+    width: 100% !important;
+    height: 400px !important;
+    top: 0 !important;
+    border-left: none !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+  }
+
+  html .wt-sidebar-tab-btn {
+    max-width: none !important;
+  }
+
+  html .wt-chat-collapse-btn,
+  html .wt-chat-collapsed-bar {
+    display: none !important;
+  }
+
+  html .wt-mobile-search-tab-scroll {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    padding: 12px !important;
   }
 
   /* ---------------------------------------------------------------- */

@@ -82,7 +82,7 @@ async function settingupdate({
     }
   }
 
-  if (status === null) status = currentSettings?.status || "plan_to_watch";
+  if (status === null) status = currentSettings?.status || "watching";
 
   if (quality === null) {
     quality = currentSettings.quality || "1080p";
@@ -311,7 +311,7 @@ async function SettingsLoad() {
         : {
             quality: "1080p",
             mal_on_off: false,
-            status: "plan_to_watch",
+            status: "watching",
             malToken: null,
             CustomDownloadLocation: getDownloadsFolder(),
             Animeprovider: 0,

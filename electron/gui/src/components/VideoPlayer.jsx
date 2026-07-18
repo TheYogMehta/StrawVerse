@@ -96,6 +96,7 @@ import {
   Minimize,
   ChevronLeft,
   ChevronRight,
+  ChevronsRight,
   Settings,
   Subtitles,
   PictureInPicture,
@@ -461,10 +462,6 @@ export default function VideoPlayer({
           videoRef.current.currentTime = match.interval.end_time;
           currentTimeRef.current = match.interval.end_time;
           setCurrentTime(match.interval.end_time);
-          showIndicator(
-            ChevronRight,
-            `Skipped ${match.skip_type === "op" || match.skip_type === "mixed-op" ? "Opening" : "Ending"}`,
-          );
           return;
         }
       }
@@ -1628,10 +1625,7 @@ export default function VideoPlayer({
                   }}
                   className="player-skip-button"
                 >
-                  <span>
-                    Skip {activeSkip.skip_type === "op" ? "Opening" : "Ending"}
-                  </span>
-                  <ChevronRight size={14} />
+                  <ChevronsRight size={28} />
                 </button>
               );
             })()}

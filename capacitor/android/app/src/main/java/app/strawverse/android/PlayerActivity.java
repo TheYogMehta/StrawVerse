@@ -81,7 +81,7 @@ public class PlayerActivity extends Activity {
         }
     };
 
-    private Button skipButton;
+    private android.widget.ImageButton skipButton;
 
     // Gesture variables
     private float startX = 0f;
@@ -111,6 +111,7 @@ public class PlayerActivity extends Activity {
     private String malid = "";
     private long lastReportTimeMs = 0;
     private boolean autoSkipIntro = true;
+    private boolean autoPlayNextEpisode = true;
     private double lastProgressTimeSecs = -1;
     private boolean hasSeekedToProgress = false;
 
@@ -366,26 +367,23 @@ public class PlayerActivity extends Activity {
         hudTextView.setBackground(hudBg);
         rootLayout.addView(hudTextView);
 
-        // Floating skip Intro / Outro button at the bottom-right corner
-        skipButton = new Button(this);
+        // Floating skip Intro / Outro borderless button at the right side of the screen
+        skipButton = new android.widget.ImageButton(this);
         float density = getResources().getDisplayMetrics().density;
-        FrameLayout.LayoutParams skipParams = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.WRAP_CONTENT,
-                FrameLayout.LayoutParams.WRAP_CONTENT);
-        skipParams.gravity = Gravity.BOTTOM | Gravity.RIGHT;
-        skipParams.setMargins(0, 0, (int) (48 * density), (int) (72 * density)); // Positioned safely above seekbar
+        int skipBtnSize = (int) (48 * density);
+        FrameLayout.LayoutParams skipParams = new FrameLayout.LayoutParams(skipBtnSize, skipBtnSize);
+        skipParams.gravity = Gravity.CENTER_VERTICAL | Gravity.RIGHT;
+        skipParams.setMargins(0, 0, (int) (24 * density), 0);
         skipButton.setLayoutParams(skipParams);
-        skipButton.setTextColor(0xFFFFFFFF);
-        skipButton.setTextSize(14);
-        int paddingLR = (int) (20 * density);
-        int paddingTB = (int) (10 * density);
-        skipButton.setPadding(paddingLR, paddingTB, paddingLR, paddingTB);
-        skipButton.setVisibility(View.GONE);
         
-        GradientDrawable skipBg = new GradientDrawable();
-        skipBg.setColor(0xFF3B82F6); // modern vibrant blue
-        skipBg.setCornerRadius(8 * density);
-        skipButton.setBackground(skipBg);
+        // Borderless transparent background
+        skipButton.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+        
+        // Load sharp custom vector skip icon
+        skipButton.setImageResource(R.drawable.ic_skip);
+        skipButton.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        skipButton.setColorFilter(0xFFFFFFFF);
+        skipButton.setVisibility(View.GONE);
         rootLayout.addView(skipButton);
 
         setContentView(rootLayout);
@@ -816,6 +814,15 @@ public class PlayerActivity extends Activity {
                             break;
                         case androidx.media3.common.Player.STATE_ENDED:
                             stateString = "STATE_ENDED";
+                            if (autoPlayNextEpisode && nextEpisode != null) {
+                                Log.i("PlayerActivity", "Auto-play next episode triggered: EP " + nextEpisode.optDouble("number", 0.0));
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        loadNewEpisode(nextEpisode);
+                                    }
+                                });
+                            }
                             break;
                         default:
                             stateString = "UNKNOWN";
@@ -949,15 +956,9 @@ public class PlayerActivity extends Activity {
                             if (player != null) {
                                 player.seekTo((long) (skipTarget * 1000));
                                 skipButton.setVisibility(View.GONE);
-                                showHudOverlay("Skipped " + ("ed".equalsIgnoreCase(skipType) ? "Outro" : "Intro"));
                                 return;
                             }
                         }
-                        String btnText = "Skip Intro";
-                        if ("ed".equalsIgnoreCase(skipType)) {
-                            btnText = "Skip Outro";
-                        }
-                        skipButton.setText(btnText);
                         skipButton.setVisibility(View.VISIBLE);
                         skipButton.setOnClickListener(new View.OnClickListener() {
                             @Override
@@ -1710,6 +1711,7 @@ public class PlayerActivity extends Activity {
                             JSONObject settings = result.optJSONObject("settings");
                             if (settings != null) {
                                 autoSkipIntro = settings.optBoolean("autoSkipIntro", true);
+                                autoPlayNextEpisode = settings.optBoolean("autoPlayNextEpisode", true);
                             }
                         }
                     }

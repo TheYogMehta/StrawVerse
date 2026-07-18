@@ -108,6 +108,7 @@ export default function DownloadsTracker() {
       <header className="tracker-header">
         <h1 className="tracker-title">Download Queue</h1>
         <div className="tracker-actions">
+          {queue.length > 0 && (
           <button
             onClick={handleTogglePause}
             className={`btn-pause-queue ${isPaused ? "paused" : ""}`}
@@ -116,6 +117,7 @@ export default function DownloadsTracker() {
             {isPaused ? <Play size={16} /> : <Pause size={16} />}
             <span>{isPaused ? "Start Queue" : "Pause Queue"}</span>
           </button>
+          )}
 
           <button
             onClick={fetchDownloads}

@@ -458,3 +458,32 @@
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
 }
+
+/* Floating Skip borderless button on the right side of the screen */
+.player-skip-button {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 100;
+  opacity: 0.8;
+}
+
+.player-skip-button:hover {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.2);
+}
+
+.player-skip-button:active {
+  transform: translateY(-50%) scale(0.95);
+}

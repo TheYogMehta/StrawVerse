@@ -291,6 +291,62 @@ export default function Catalog({
     setDragOverIndex(null);
   };
 
+  const handleTouchStart = (e, index) => {
+    if (provider !== "local") return;
+    setDraggedIndex(index);
+  };
+
+  const handleTouchMove = (e) => {
+    if (draggedIndex === null || provider !== "local") return;
+    const touch = e.touches[0];
+    const element = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (!element) return;
+    const card = element.closest(".media-card");
+    if (card) {
+      const indexAttr = card.getAttribute("data-index");
+      if (indexAttr !== null) {
+        const index = parseInt(indexAttr, 10);
+        if (dragOverIndex !== index) {
+          setDragOverIndex(index);
+        }
+      }
+    }
+  };
+
+  const handleTouchEnd = async (e) => {
+    if (draggedIndex === null || provider !== "local") return;
+    const dropIndex = dragOverIndex;
+    if (dropIndex !== null && draggedIndex !== dropIndex && data?.results) {
+      const updated = [...data.results];
+      const [movedItem] = updated.splice(draggedIndex, 1);
+      updated.splice(dropIndex, 0, movedItem);
+
+      setData((prev) => ({
+        ...prev,
+        results: updated,
+      }));
+
+      const orderIds = updated.map((item) => item.id);
+      const key = getCustomOrderKey();
+
+      try {
+        localStorage.setItem(`custom_order_${key}`, JSON.stringify(orderIds));
+      } catch (_) {}
+
+      try {
+        await fetch("/api/local/reorder", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key, order: orderIds }),
+        });
+      } catch (err) {
+        console.error("Failed to persist title reorder:", err);
+      }
+    }
+    setDraggedIndex(null);
+    setDragOverIndex(null);
+  };
+
   // Define supported filter maps matching index.js
   const siteFilterDefs = {
     // legacy for now..
@@ -1167,76 +1223,74 @@ export default function Catalog({
 
   return (
     <div ref={wrapperRef} onScroll={handleScroll} className="catalog-wrapper">
-      <header className="catalog-header u-style-9">
-        <div className="u-style-10">
-          <h1 className="catalog-title u-style-11">
+      <header className="catalog-header">
+        <div className="catalog-header-row">
+          <h1 className="catalog-title">
             {provider === "local"
               ? "Home"
               : provider === "mal"
                 ? `MyAnimeList`
                 : "Discover"}
           </h1>
-          {provider === "provider" && type === "Anime" && (
-            <div className="discover-sub-tabs u-style-12">
-              <button
-                onClick={() => {
-                  setDiscoverTab("latest");
-                  sessionStorage.setItem("discover_tab", "latest");
-                }}
-                className={`discover-sub-tab ${discoverTab === "latest" ? "active" : ""}`}
-              >
-                Latest
+          <div className="market-tabs-wrapper">
+            <button
+              type="button"
+              onClick={() => onTypeChange && onTypeChange("Anime")}
+              className={`market-tab-btn ${type === "Anime" ? "active" : ""}`}
+            >
+              Anime
+            </button>
+            <button
+              type="button"
+              onClick={() => onTypeChange && onTypeChange("Manga")}
+              className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
+            >
+              Manga
+            </button>
+          </div>
+        </div>
+
+        {provider === "provider" && type === "Anime" && (
+          <div className="discover-sub-tabs">
+            <button
+              onClick={() => {
+                setDiscoverTab("latest");
+                sessionStorage.setItem("discover_tab", "latest");
+              }}
+              className={`discover-sub-tab ${discoverTab === "latest" ? "active" : ""}`}
+            >
+              Latest
+            </button>
+            <button
+              onClick={() => {
+                setDiscoverTab("calendar");
+                sessionStorage.setItem("discover_tab", "calendar");
+              }}
+              className={`discover-sub-tab ${discoverTab === "calendar" ? "active" : ""}`}
+            >
+              Airing Calendar
+            </button>
+          </div>
+        )}
+
+        {((provider !== "local" && provider !== "mal") || linkingMalItem) &&
+          discoverTab !== "calendar" && (
+            <form
+              onSubmit={handleSearchSubmit}
+              className="search-form"
+            >
+              <input
+                type="text"
+                placeholder={`Search ${type}...`}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="search-input"
+              />
+              <button type="submit" className="btn-search">
+                <Search size={18} />
               </button>
-              <button
-                onClick={() => {
-                  setDiscoverTab("calendar");
-                  sessionStorage.setItem("discover_tab", "calendar");
-                }}
-                className={`discover-sub-tab ${discoverTab === "calendar" ? "active" : ""}`}
-              >
-                Airing Calendar
-              </button>
-            </div>
+            </form>
           )}
-        </div>
-
-        <div className="search-middle-container u-style-13">
-          {((provider !== "local" && provider !== "mal") || linkingMalItem) &&
-            discoverTab !== "calendar" && (
-              <form
-                onSubmit={handleSearchSubmit}
-                className="search-form u-style-14"
-              >
-                <input
-                  type="text"
-                  placeholder={`Search ${type}...`}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="search-input"
-                />
-                <button type="submit" className="btn-search">
-                  <Search size={18} />
-                </button>
-              </form>
-            )}
-        </div>
-
-        <div className="market-tabs-wrapper u-style-15">
-          <button
-            type="button"
-            onClick={() => onTypeChange && onTypeChange("Anime")}
-            className={`market-tab-btn ${type === "Anime" ? "active" : ""}`}
-          >
-            Anime
-          </button>
-          <button
-            type="button"
-            onClick={() => onTypeChange && onTypeChange("Manga")}
-            className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
-          >
-            Manga
-          </button>
-        </div>
       </header>
 
       {/* Local Library Stats Dashboard */}
@@ -1244,52 +1298,39 @@ export default function Catalog({
         <div className="library-stats-container">
           <div className="library-stat-card glass-panel">
             <div className="stat-icon-wrapper purple-glow">
-              <Clock size={20} className="stat-icon" />
+              <Clock size={16} className="stat-icon" />
             </div>
-            <div className="stat-content">
-              <span className="stat-label">Total Time Spent</span>
-              <span className="stat-value">
-                {type === "Anime"
-                  ? `${stats.watchHours || 0} hrs`
-                  : `${stats.readHours || 0} hrs`}
-              </span>
-            </div>
+            <span className="stat-value">
+              {type === "Anime"
+                ? `${stats.watchHours || 0} hrs`
+                : `${stats.readHours || 0} hrs`}
+            </span>
           </div>
 
           <div className="library-stat-card glass-panel">
             <div className="stat-icon-wrapper green-glow">
-              <CheckSquare size={20} className="stat-icon" />
+              <CheckSquare size={16} className="stat-icon" />
             </div>
-            <div className="stat-content">
-              <span className="stat-label">
-                {type === "Anime" ? "Episodes Watched" : "Chapters Read"}
-              </span>
-              <span className="stat-value">
-                {type === "Anime"
-                  ? `${stats.completedEpisodes || 0} eps`
-                  : `${stats.completedChapters || 0} chs`}
-              </span>
-            </div>
+            <span className="stat-value">
+              {type === "Anime"
+                ? `${stats.completedEpisodes || 0} eps`
+                : `${stats.completedChapters || 0} chs`}
+            </span>
           </div>
 
           <div className="library-stat-card glass-panel">
             <div className="stat-icon-wrapper blue-glow">
               {type === "Anime" ? (
-                <Tv size={20} className="stat-icon" />
+                <Tv size={16} className="stat-icon" />
               ) : (
-                <BookOpen size={20} className="stat-icon" />
+                <BookOpen size={16} className="stat-icon" />
               )}
             </div>
-            <div className="stat-content">
-              <span className="stat-label">
-                {type === "Anime" ? "Total Anime" : "Total Manga"}
-              </span>
-              <span className="stat-value">
-                {type === "Anime"
-                  ? `${stats.distinctAnime || 0} titles`
-                  : `${stats.distinctManga || 0} titles`}
-              </span>
-            </div>
+            <span className="stat-value">
+              {type === "Anime"
+                ? `${stats.distinctAnime || 0} Anime`
+                : `${stats.distinctManga || 0} Manga`}
+            </span>
           </div>
         </div>
       )}
@@ -1744,11 +1785,15 @@ export default function Catalog({
               <div
                 key={item.id}
                 draggable
+                data-index={index}
                 onDragStart={(e) => handleDragStart(e, index)}
                 onDragOver={(e) => handleDragOver(e, index)}
                 onDragLeave={(e) => handleDragLeave(e, index)}
                 onDrop={(e) => handleDrop(e, index)}
                 onDragEnd={handleDragEnd}
+                onTouchStart={(e) => handleTouchStart(e, index)}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
                 onClick={() => handleMediaClick(item)}
                 className={`media-card glass-panel ${draggedIndex === index ? "is-dragging" : ""} ${dragOverIndex === index ? "is-drag-over" : ""}`}
                 title="Hold & drag to reorder title"

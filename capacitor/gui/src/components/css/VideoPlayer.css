@@ -458,3 +458,384 @@
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
 }
+
+/* Floating Skip borderless button on the right side of the screen */
+.player-skip-button {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 48px;
+  height: 48px;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  z-index: 100;
+  opacity: 0.8;
+}
+
+.player-skip-button:hover {
+  opacity: 1;
+  transform: translateY(-50%) scale(1.2);
+}
+
+.player-skip-button:active {
+  transform: translateY(-50%) scale(0.95);
+}
+
+/* Watch Together In-Player Panel Styles */
+.player-wt-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 320px;
+  height: 100%;
+  background: rgba(10, 10, 10, 0.85);
+  backdrop-filter: blur(16px);
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  z-index: 150;
+  animation: slideInWT 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: auto;
+}
+
+@keyframes slideInWT {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.player-wt-tabs {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 4px;
+  gap: 4px;
+}
+
+.player-wt-tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  padding: 6px 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 4px;
+  gap: 2px;
+  transition: all 0.2s ease;
+}
+
+.player-wt-tab-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.player-wt-tab-btn.active {
+  color: #a78bfa;
+  background: rgba(139, 92, 246, 0.15);
+}
+
+.player-wt-close-btn {
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.player-wt-close-btn:hover {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.player-wt-tab-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+}
+
+/* Chat container */
+.player-wt-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.player-wt-chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.player-wt-chat-msg {
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: #e5e7eb;
+  word-break: break-word;
+}
+
+.player-wt-chat-sender {
+  font-weight: 700;
+  color: #c4b5fd;
+  margin-right: 6px;
+}
+
+.player-wt-chat-text {
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+}
+
+.player-wt-chat-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.player-wt-chat-input {
+  flex: 1;
+  height: 32px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.75rem;
+  padding: 0 10px;
+  outline: none;
+}
+
+.player-wt-chat-input:focus {
+  border-color: #8b5cf6;
+}
+
+.player-wt-send-btn {
+  height: 32px;
+  padding: 0 12px;
+  background: #7c3aed;
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.player-wt-send-btn:hover {
+  background: #6d28d9;
+}
+
+/* Queue/Users lists */
+.player-wt-queue-container,
+.player-wt-users-container,
+.player-wt-episodes-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.player-wt-queue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #a78bfa;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding-bottom: 4px;
+}
+
+.player-wt-action-btn-sm {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 4px;
+  color: #f87171;
+  font-size: 0.65rem;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.player-wt-action-btn-sm:hover {
+  background: rgba(239, 68, 68, 0.2);
+}
+
+.player-wt-list {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.player-wt-list.grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  align-content: start;
+}
+
+.player-wt-item-row {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 6px 10px;
+  gap: 8px;
+}
+
+.player-wt-item-idx {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.player-wt-item-name {
+  flex: 1;
+  font-size: 0.72rem;
+  color: #e5e7eb;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-wt-item-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.player-wt-item-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  cursor: pointer;
+}
+
+.player-wt-item-btn.play {
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+}
+
+.player-wt-item-btn.delete {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
+.player-wt-user-badges {
+  display: flex;
+  gap: 4px;
+}
+
+.player-wt-badge-host {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.player-wt-badge-cohost {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.58rem;
+  font-weight: 700;
+}
+
+.player-wt-cohost-btn {
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  color: #c4b5fd;
+  border-radius: 4px;
+  font-size: 0.6rem;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.player-wt-cohost-btn:hover {
+  background: rgba(139, 92, 246, 0.3);
+}
+
+.player-wt-empty {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  padding: 20px 0;
+}
+
+.player-wt-ep-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.player-wt-ep-card:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+.player-wt-ep-card.active {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: #8b5cf6;
+}
+
+.player-wt-ep-card .ep-num {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.player-wt-ep-card .ep-title {
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  margin-top: 2px;
+}

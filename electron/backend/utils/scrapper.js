@@ -740,16 +740,31 @@ global.axios.interceptors.response.use(
         });
     }
 
+  (response) => {
     return response;
   },
   async (error) => {
+    const shouldBypassUrl = (urlStr) => {
+      if (!urlStr) return false;
+      const url = urlStr.toLowerCase();
+      return (
+        url.includes("animepahe") ||
+        url.includes("kwik.cx") ||
+        url.includes("anikoto") ||
+        url.includes("anineko") ||
+        url.includes("allmanga") ||
+        url.includes("weebcentral")
+      );
+    };
+
     const { config, response } = error;
     if (
       response &&
       (response.status === 403 || response.status === 503) &&
       config &&
       !config._retry &&
-      global?.cloudflarebypass
+      global?.cloudflarebypass &&
+      shouldBypassUrl(config.url)
     ) {
       config._retry = true;
       console.log(

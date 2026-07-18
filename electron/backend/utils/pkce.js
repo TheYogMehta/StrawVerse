@@ -1,18 +1,24 @@
-// TAKEN FROM : https://github.com/crouchcd/pkce-challenge
-
 const crypto = require("crypto");
 
 function getRandomValues(size) {
-  return crypto.webcrypto.getRandomValues(new Uint8Array(size));
+  try {
+    return crypto.randomBytes(size);
+  } catch (e) {
+    const arr = new Uint8Array(size);
+    for (let i = 0; i < size; i++) {
+      arr[i] = Math.floor(Math.random() * 256);
+    }
+    return arr;
+  }
 }
 
 function random(size) {
   const mask =
     "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-._~";
   let result = "";
-  const randomUints = getRandomValues(size);
+  const randomBytesBuffer = getRandomValues(size);
   for (let i = 0; i < size; i++) {
-    const randomIndex = randomUints[i] % mask.length;
+    const randomIndex = randomBytesBuffer[i] % mask.length;
     result += mask[randomIndex];
   }
   return result;
@@ -22,13 +28,11 @@ function generateVerifier(length) {
   return random(length);
 }
 
-async function generateChallenge(code_verifier) {
-  const buffer = await crypto.webcrypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(code_verifier),
-  );
-  return Buffer.from(buffer)
-    .toString("base64")
+function generateChallenge(code_verifier) {
+  return crypto
+    .createHash("sha256")
+    .update(code_verifier)
+    .digest("base64")
     .replace(/\//g, "_")
     .replace(/\+/g, "-")
     .replace(/=/g, "");
@@ -41,7 +45,7 @@ async function pkceChallenge(length = 43) {
     );
   }
   const verifier = generateVerifier(length);
-  const challenge = await generateChallenge(verifier);
+  const challenge = generateChallenge(verifier);
   return {
     code_verifier: verifier,
     code_challenge: challenge,

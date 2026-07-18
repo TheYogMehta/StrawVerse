@@ -122,28 +122,22 @@ export default function Marketplace({ initialType }) {
   return (
     <div className="market-wrapper">
       <header className="market-header">
-        <div>
-          <h1 className="market-title">Scraper Extensions</h1>
-          <p className="market-subtitle">
-            Install, update, or remove extensions for anime & manga content
-            streaming.
-          </p>
-        </div>
-
-        {/* Anime / Manga Tab Selectors */}
-        <div className="market-tabs-wrapper">
-          <button
-            onClick={() => setActiveType("Anime")}
-            className={`market-tab-btn ${activeType === "Anime" ? "active" : ""}`}
-          >
-            Anime Scrapers
-          </button>
-          <button
-            onClick={() => setActiveType("Manga")}
-            className={`market-tab-btn ${activeType === "Manga" ? "active" : ""}`}
-          >
-            Manga Scrapers
-          </button>
+        <div className="market-header-row">
+          <h1 className="market-title">Extensions</h1>
+          <div className="market-tabs-wrapper">
+            <button
+              onClick={() => setActiveType("Anime")}
+              className={`market-tab-btn ${activeType === "Anime" ? "active" : ""}`}
+            >
+              Anime
+            </button>
+            <button
+              onClick={() => setActiveType("Manga")}
+              className={`market-tab-btn ${activeType === "Manga" ? "active" : ""}`}
+            >
+              Manga
+            </button>
+          </div>
         </div>
       </header>
 

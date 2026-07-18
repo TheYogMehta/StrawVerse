@@ -174,6 +174,8 @@ public class AppDatabase {
             headers.put("Referer", "https://weebcentral.com/");
         } else if (url.contains("anikototv.to") || url.contains("megaplay.buzz")) {
             headers.put("Referer", "https://anikototv.to/");
+        } else if (url.contains("watching.onl") || url.contains("nekostream.site")) {
+            headers.put("Referer", "https://megaplay.buzz/");
         } else if (url.contains("allmanga.to") || url.contains("allanime.day") || url.contains("youtube-anime.com")) {
             headers.put("Referer", "https://allmanga.to/");
         }

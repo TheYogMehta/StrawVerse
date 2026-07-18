@@ -1,30 +1,26 @@
 .market-wrapper {
   flex: 1;
-  padding: 30px;
+  padding: 16px;
   overflow-y: auto;
   height: 100%;
   background-color: var(--bg-primary);
 }
 
 .market-header {
+  margin-bottom: 16px;
+}
+
+.market-header-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 30px;
-  flex-wrap: wrap;
-  gap: 16px;
+  gap: 12px;
 }
 
 .market-title {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.5px;
-  margin-bottom: 4px;
-}
-
-.market-subtitle {
-  font-size: 13px;
-  color: var(--text-muted);
 }
 
 .market-tabs-wrapper {

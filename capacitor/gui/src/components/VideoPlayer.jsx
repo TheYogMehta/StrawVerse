@@ -99,6 +99,10 @@ import {
   Settings,
   Subtitles,
   PictureInPicture,
+  MessageSquare,
+  ListVideo,
+  Users,
+  X,
 } from "lucide-react";
 import "./css/VideoPlayer.css";
 
@@ -117,6 +121,20 @@ export default function VideoPlayer({
   hideExit = false,
   isHost = false,
   onSkip = null,
+  // Watch together props
+  isWatchTogether = false,
+  roomCode = "",
+  chatList = [],
+  onSendChat = null,
+  queue = [],
+  users = [],
+  hasPrivileges = false,
+  onPlayFromQueue = null,
+  onAddToQueue = null,
+  onPlayEpisode = null,
+  onCoHostChange = null,
+  onClearQueue = null,
+  onRemoveQueue = null,
 }) {
   const videoRef = useRef(null);
   const hlsRef = useRef(null);
@@ -214,6 +232,19 @@ export default function VideoPlayer({
   const [errorMsg, setErrorMsg] = useState("");
 
   const [showSettings, setShowSettings] = useState(false);
+  const [showWTOverlayPanel, setShowWTOverlayPanel] = useState(false);
+  const [wtActiveTab, setWtActiveTab] = useState("chat");
+  const [wtChatMessage, setWtChatMessage] = useState("");
+
+  const handleWTSendChatSubmit = (e) => {
+    e.preventDefault();
+    if (!wtChatMessage.trim()) return;
+    if (onSendChat) {
+      onSendChat(wtChatMessage);
+    }
+    setWtChatMessage("");
+  };
+
   const [settingsActiveMenu, setSettingsActiveMenu] = useState("main");
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
@@ -536,12 +567,19 @@ export default function VideoPlayer({
     if (uiTimeoutRef.current) {
       clearTimeout(uiTimeoutRef.current);
     }
+    if (showSettings || showWTOverlayPanel) {
+      return;
+    }
     if (videoRef.current && !videoRef.current.paused) {
       uiTimeoutRef.current = setTimeout(() => {
         setShowUI(false);
       }, 3000);
     }
   };
+
+  useEffect(() => {
+    resetUITimeout();
+  }, [showSettings, showWTOverlayPanel]);
 
   const showIndicator = (icon, text) => {
     setIndicator({ visible: true, icon, text });
@@ -1906,6 +1944,17 @@ export default function VideoPlayer({
                     )}
                   </div>
 
+                  {isWatchTogether && (
+                    <button
+                      onClick={() => setShowWTOverlayPanel(!showWTOverlayPanel)}
+                      className={`player-control-btn ${showWTOverlayPanel ? "active" : ""}`}
+                      title="Watch Together Menu"
+                      aria-label="Watch Together Menu"
+                    >
+                      <Users size={16} />
+                    </button>
+                  )}
+
                   {/* Picture-in-Picture Button */}
                   {pipSupported && (
                     <button
@@ -1932,6 +1981,180 @@ export default function VideoPlayer({
                 </div>
               </div>
             </div>
+            {/* Watch Together Panel Overlay */}
+            {isWatchTogether && showWTOverlayPanel && (
+              <div className="player-wt-panel">
+                {/* Panel Tabs */}
+                <div className="player-wt-tabs">
+                  <button
+                    className={`player-wt-tab-btn ${wtActiveTab === "chat" ? "active" : ""}`}
+                    onClick={() => setWtActiveTab("chat")}
+                  >
+                    <MessageSquare size={14} />
+                    <span>Chat</span>
+                  </button>
+                  <button
+                    className={`player-wt-tab-btn ${wtActiveTab === "queue" ? "active" : ""}`}
+                    onClick={() => setWtActiveTab("queue")}
+                  >
+                    <ListVideo size={14} />
+                    <span>Queue</span>
+                  </button>
+                  <button
+                    className={`player-wt-tab-btn ${wtActiveTab === "users" ? "active" : ""}`}
+                    onClick={() => setWtActiveTab("users")}
+                  >
+                    <Users size={14} />
+                    <span>Users</span>
+                  </button>
+                  <button
+                    className={`player-wt-tab-btn ${wtActiveTab === "episodes" ? "active" : ""}`}
+                    onClick={() => setWtActiveTab("episodes")}
+                  >
+                    <Play size={14} />
+                    <span>Episodes</span>
+                  </button>
+                  <button
+                    className="player-wt-close-btn"
+                    onClick={() => setShowWTOverlayPanel(false)}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                {/* Panel Body */}
+                <div className="player-wt-tab-content">
+                  {wtActiveTab === "chat" ? (
+                    <div className="player-wt-chat-container">
+                      <div className="player-wt-chat-messages">
+                        {chatList.length === 0 ? (
+                          <div className="player-wt-empty">No messages yet.</div>
+                        ) : (
+                          chatList.map((m, idx) => (
+                            <div key={idx} className="player-wt-chat-msg">
+                              <span className="player-wt-chat-sender">{m.sender}:</span>
+                              <span className="player-wt-chat-text">{m.message}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <form
+                        className="player-wt-chat-input-row"
+                        onSubmit={handleWTSendChatSubmit}
+                      >
+                        <input
+                          type="text"
+                          className="player-wt-chat-input"
+                          placeholder="Type a message..."
+                          value={wtChatMessage}
+                          onChange={(e) => setWtChatMessage(e.target.value)}
+                        />
+                        <button type="submit" className="player-wt-send-btn">
+                          Send
+                        </button>
+                      </form>
+                    </div>
+                  ) : wtActiveTab === "queue" ? (
+                    <div className="player-wt-queue-container">
+                      <div className="player-wt-queue-header">
+                        <span>Watch Queue</span>
+                        {hasPrivileges && queue.length > 0 && (
+                          <button
+                            onClick={onClearQueue}
+                            className="player-wt-action-btn-sm"
+                          >
+                            Clear All
+                          </button>
+                        )}
+                      </div>
+                      <div className="player-wt-list">
+                        {queue.length === 0 ? (
+                          <div className="player-wt-empty">Queue is empty.</div>
+                        ) : (
+                          queue.map((item, idx) => (
+                            <div key={idx} className="player-wt-item-row">
+                              <span className="player-wt-item-idx">#{idx + 1}</span>
+                              <span className="player-wt-item-name" title={item.title || `Ep ${item.episode}`}>
+                                {item.title || `Ep ${item.episode}`}
+                              </span>
+                              {hasPrivileges && (
+                                <div className="player-wt-item-actions">
+                                  <button
+                                    className="player-wt-item-btn play"
+                                    onClick={() => {
+                                      if (onPlayFromQueue) onPlayFromQueue(item);
+                                    }}
+                                  >
+                                    <Play size={10} />
+                                  </button>
+                                  <button
+                                    className="player-wt-item-btn delete"
+                                    onClick={() => {
+                                      if (onRemoveQueue) onRemoveQueue(idx);
+                                    }}
+                                  >
+                                    <X size={10} />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  ) : wtActiveTab === "users" ? (
+                    <div className="player-wt-users-container">
+                      <div className="player-wt-list">
+                        {users.map((u, idx) => (
+                          <div key={idx} className="player-wt-item-row">
+                            <span className="player-wt-item-name">{u.username}</span>
+                            <div className="player-wt-user-badges">
+                              {u.isHost && (
+                                <span className="player-wt-badge-host">HOST</span>
+                              )}
+                              {u.isCoHost && (
+                                <span className="player-wt-badge-cohost">CO-HOST</span>
+                              )}
+                            </div>
+                            {isHost && u.id !== watchTogetherClient.userID && (
+                              <button
+                                className="player-wt-cohost-btn"
+                                onClick={() => {
+                                  if (onCoHostChange) onCoHostChange(u.id, !u.isCoHost);
+                                }}
+                              >
+                                {u.isCoHost ? "Demote" : "Co-Host"}
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    /* Episodes Tab */
+                    <div className="player-wt-episodes-container">
+                      <div className="player-wt-list grid">
+                        {episodesList.map((ep, idx) => {
+                          const isCurrent = ep.number === currentEpisode || ep.id === currentEpisode;
+                          return (
+                            <button
+                              key={idx}
+                              className={`player-wt-ep-card ${isCurrent ? "active" : ""}`}
+                              onClick={() => {
+                                if (onPlayEpisode) onPlayEpisode(ep);
+                              }}
+                            >
+                              <span className="ep-num">Ep {ep.number || idx + 1}</span>
+                              {ep.title && <span className="ep-title" title={ep.title}>{ep.title}</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>

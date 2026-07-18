@@ -1286,8 +1286,8 @@ export default function Catalog({
               </span>
               <span className="stat-value">
                 {type === "Anime"
-                  ? `${stats.distinctAnime || 0} titles`
-                  : `${stats.distinctManga || 0} titles`}
+                  ? `${stats.distinctAnime || 0} Anime`
+                  : `${stats.distinctManga || 0} Manga`}
               </span>
             </div>
           </div>

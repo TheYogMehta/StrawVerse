@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import Sidebar from "./components/Sidebar";
 import Catalog from "./components/Catalog";
 import InfoView from "./components/InfoView";
@@ -143,6 +143,17 @@ export default function App() {
           <a
             key={`link-${matchIndex}`}
             href={match[2]}
+            onClick={(e) => {
+              e.preventDefault();
+              const targetUrl = match[2];
+              if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.CloudflareBypass) {
+                window.Capacitor.Plugins.CloudflareBypass.openSystemBrowser({ url: targetUrl }).catch(() => {
+                  window.open(targetUrl, "_blank");
+                });
+              } else {
+                window.open(targetUrl, "_blank");
+              }
+            }}
             target="_blank"
             rel="noopener noreferrer"
             className="u-style-5"
@@ -291,6 +302,59 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [whatsNewData]);
+
+  // Android hardware back button handling
+  const historyRef = useRef(history);
+  const lastBackPressRef = useRef(0);
+  const activePlayerRef = useRef(activePlayerParams);
+
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+
+  useEffect(() => {
+    activePlayerRef.current = activePlayerParams;
+  }, [activePlayerParams]);
+
+  useEffect(() => {
+    let backListener = null;
+
+    const setupBackButton = async () => {
+      try {
+        const { App: CapApp } = await import("@capacitor/app");
+        backListener = await CapApp.addListener("backButton", () => {
+          // If video player is open, close it first
+          if (activePlayerRef.current) {
+            setActivePlayerParams(null);
+            return;
+          }
+
+          if (historyRef.current.length > 1) {
+            cancelObsoleteNativeRequests();
+            setHistory((prev) => prev.slice(0, prev.length - 1));
+          } else {
+            const now = Date.now();
+            if (now - lastBackPressRef.current < 2000) {
+              CapApp.exitApp();
+            } else {
+              lastBackPressRef.current = now;
+              showToast("Exit", "Press back again to exit");
+            }
+          }
+        });
+      } catch (err) {
+        console.error("Failed to setup back button handler:", err);
+      }
+    };
+
+    setupBackButton();
+
+    return () => {
+      if (backListener) {
+        backListener.remove();
+      }
+    };
+  }, []);
 
   const renderActiveView = () => {
     switch (current.view) {

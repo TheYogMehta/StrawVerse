@@ -391,6 +391,19 @@ async function boot() {
       (error) => Promise.reject(error),
     );
 
+    const shouldBypassUrl = (urlStr) => {
+      if (!urlStr) return false;
+      const url = urlStr.toLowerCase();
+      return (
+        url.includes("animepahe") ||
+        url.includes("kwik.cx") ||
+        url.includes("anikoto") ||
+        url.includes("anineko") ||
+        url.includes("allmanga") ||
+        url.includes("weebcentral")
+      );
+    };
+
     global.axios.interceptors.response.use(
       (response) => response,
       async (error) => {
@@ -400,7 +413,8 @@ async function boot() {
           (response.status === 403 || response.status === 503) &&
           config &&
           !config._retry &&
-          global?.cloudflarebypass
+          global?.cloudflarebypass &&
+          shouldBypassUrl(config.url)
         ) {
           config._retry = true;
           console.log(

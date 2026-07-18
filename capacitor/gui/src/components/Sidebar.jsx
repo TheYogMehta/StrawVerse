@@ -83,10 +83,9 @@ export default function Sidebar({
                 }
               }}
               className={`sidebar-item ${isActive ? "active" : ""}`}
-              title={isCollapsed ? item.label : undefined}
+              title={item.label}
             >
-              <Icon size={20} color={isActive ? "#a78bfa" : "#9ca3af"} />
-              {!isCollapsed && <span>{item.label}</span>}
+              <Icon size={22} color={isActive ? "#a78bfa" : "#9ca3af"} />
             </button>
           );
         })}
@@ -101,10 +100,9 @@ export default function Sidebar({
               <button
                 onClick={() => setView(settingsItem.id)}
                 className={`sidebar-item ${isActive ? "active" : ""}`}
-                title={isCollapsed ? settingsItem.label : undefined}
+                title={settingsItem.label}
               >
-                <Icon size={20} color={isActive ? "#a78bfa" : "#9ca3af"} />
-                {!isCollapsed && <span>{settingsItem.label}</span>}
+                <Icon size={22} color={isActive ? "#a78bfa" : "#9ca3af"} />
               </button>
             </div>
           );

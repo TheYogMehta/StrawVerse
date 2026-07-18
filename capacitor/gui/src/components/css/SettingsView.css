@@ -1,6 +1,6 @@
 .settings-wrapper {
   flex: 1;
-  padding: 30px;
+  padding: 16px;
   overflow-y: auto;
   height: 100%;
   background-color: var(--bg-primary);
@@ -10,11 +10,11 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 30px;
+  margin-bottom: 16px;
 }
 
 .settings-title {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.5px;
 }
@@ -22,14 +22,14 @@
 .settings-form {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
 }
 
 .settings-row {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   align-items: stretch;
-  gap: 24px;
+  gap: 16px;
 }
 
 .settings-row .settings-panel {
@@ -37,10 +37,10 @@
 }
 
 .settings-panel {
-  padding: 24px;
+  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .settings-panel-title {
@@ -187,23 +187,36 @@
 
 .settings-tabs-row {
   display: flex;
-  gap: 12px;
-  margin-bottom: 24px;
+  gap: 8px;
+  margin-bottom: 16px;
   border-bottom: 1px solid var(--border);
-  padding-bottom: 12px;
+  padding-bottom: 10px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background-color: var(--bg-primary);
+  -webkit-overflow-scrolling: touch;
+}
+
+.settings-tabs-row::-webkit-scrollbar {
+  display: none;
 }
 
 .settings-tab-btn {
   background-color: transparent;
   border: none;
   color: var(--text-muted);
-  padding: 8px 16px;
+  padding: 6px 12px;
   border-radius: 6px;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: var(--transition);
   outline: none;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .settings-tab-btn.active {

@@ -1,23 +1,30 @@
 .catalog-wrapper {
   flex: 1;
-  padding: 30px;
+  padding: 16px;
   overflow-y: auto;
   height: 100%;
   background-color: var(--bg-primary);
 }
 
 .catalog-header {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.catalog-header-row {
+  display: flex;
   align-items: center;
-  margin-bottom: 24px;
-  gap: 16px;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .catalog-title {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: 800;
   letter-spacing: -0.5px;
+  white-space: nowrap;
 }
 
 .search-form {
@@ -27,7 +34,7 @@
   border-radius: 8px;
   border: 1px solid var(--border);
   overflow: hidden;
-  width: 320px;
+  width: 100%;
 }
 
 .search-input {
@@ -419,26 +426,32 @@
 
 .library-stats-container {
   display: flex;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 30px;
+  flex-wrap: nowrap;
+  gap: 10px;
+  margin-bottom: 20px;
   width: 100%;
+  overflow-x: auto;
+}
+
+.library-stats-container::-webkit-scrollbar {
+  display: none;
 }
 
 .library-stat-card {
   display: flex;
   align-items: center;
-  padding: 16px 20px;
+  padding: 10px 14px;
   flex: 1;
-  min-width: 220px;
-  border-radius: 12px;
+  min-width: 0;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--glass);
+  gap: 10px;
 }
 
 .stat-icon-wrapper {
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -447,8 +460,8 @@
 }
 
 .stat-icon {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
 }
 
 .purple-glow {
@@ -473,24 +486,29 @@
 }
 
 .stat-content {
-  margin-left: 16px;
+  margin-left: 0;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
 .stat-label {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  color: #e5e7eb;
+  color: #9ca3af;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .stat-value {
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 800;
   color: #ffffff;
-  margin-top: 2px;
+  margin-top: 1px;
+  white-space: nowrap;
 }
 
 /* Continue Shelf */

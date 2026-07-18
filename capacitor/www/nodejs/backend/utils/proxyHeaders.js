@@ -277,6 +277,8 @@ function getHeaders(url, method = "GET") {
   // megaplay - anikoto
   else if (url.includes("anikototv.to") || url.includes("megaplay.buzz")) {
     headers.Referer = "https://anikototv.to/";
+  } else if (url.includes("watching.onl") || url.includes("nekostream.site")) {
+    headers.Referer = "https://megaplay.buzz/";
   }
   // all manga
   else if (

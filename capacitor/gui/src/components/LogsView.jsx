@@ -57,7 +57,7 @@ export default function LogsView() {
   return (
     <div className="logs-wrapper">
       <header className="logs-header">
-        <h1 className="logs-title">Application Logs</h1>
+        <h1 className="logs-title">Logs</h1>
         <div className="logs-actions">
           <button
             onClick={fetchLogs}
@@ -72,7 +72,6 @@ export default function LogsView() {
             title="Copy to Clipboard"
           >
             <Copy size={16} />
-            <span>Copy Logs</span>
           </button>
         </div>
       </header>

@@ -37,7 +37,7 @@ export default function SettingsView({
   const [mangaProvider, setMangaProvider] = useState("");
   const [autoLoadNextChapter, setAutoLoadNextChapter] = useState(true);
   const [pagination, setPagination] = useState(false);
-  const [malStatus, setMalStatus] = useState("plan_to_watch");
+  const [malStatus, setMalStatus] = useState("watching");
   const [mergeSubtitles, setMergeSubtitles] = useState(false);
   const [subtitleFormat, setSubtitleFormat] = useState("vtt");
   const [malDiscordProfile, setMalDiscordProfile] = useState(false);
@@ -254,7 +254,7 @@ export default function SettingsView({
         setMangaProvider(s.Mangaprovider || "");
         setAutoLoadNextChapter(s.autoLoadNextChapter);
         setPagination(s.Pagination);
-        setMalStatus(s.status || "plan_to_watch");
+        setMalStatus(s.status || "watching");
         setMergeSubtitles(s.mergeSubtitles);
         setSubtitleFormat(s.subtitleFormat || "vtt");
         setMalDiscordProfile(s.malDiscordProfile);
@@ -372,7 +372,7 @@ export default function SettingsView({
     if (autoLoadNextChapter !== settings.autoLoadNextChapter)
       dirty.autoLoadNextChapter = autoLoadNextChapter;
     if (pagination !== settings.Pagination) dirty.Pagination = pagination;
-    if (malStatus !== (settings.status || "plan_to_watch"))
+    if (malStatus !== (settings.status || "watching"))
       dirty.status = malStatus;
     if (mergeSubtitles !== settings.mergeSubtitles)
       dirty.mergeSubtitles = mergeSubtitles;
@@ -452,7 +452,7 @@ export default function SettingsView({
       mangaProvider !== (settings.Mangaprovider || "") ||
       autoLoadNextChapter !== settings.autoLoadNextChapter ||
       pagination !== settings.Pagination ||
-      malStatus !== (settings.status || "plan_to_watch") ||
+      malStatus !== (settings.status || "watching") ||
       mergeSubtitles !== settings.mergeSubtitles ||
       subtitleFormat !== (settings.subtitleFormat || "vtt") ||
       malDiscordProfile !== settings.malDiscordProfile ||
@@ -1441,7 +1441,7 @@ export default function SettingsView({
                       </h3>
                       <p className="settings-stat-card-sub">
                         {stats?.completedEpisodes || 0} episodes watched (
-                        {stats?.distinctAnime || 0} titles)
+                        {stats?.distinctAnime || 0} Anime)
                       </p>
                     </div>
                     <div className="settings-stat-card glass-panel">
@@ -1454,7 +1454,7 @@ export default function SettingsView({
                       </h3>
                       <p className="settings-stat-card-sub">
                         {stats?.completedChapters || 0} chapters completed (
-                        {stats?.distinctManga || 0} titles)
+                        {stats?.distinctManga || 0} Manga)
                       </p>
                     </div>
                   </div>

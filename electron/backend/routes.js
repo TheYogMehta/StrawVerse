@@ -1227,7 +1227,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             .get(String(data.malid));
           if (MalInfo) {
             data.watched = MalInfo.watched ?? 0;
-            data.malStatus = MalInfo.status ?? "plan_to_watch";
+            data.malStatus = MalInfo.status ?? "watching";
             if (MalInfo.totalEpisodes > 0) {
               data.totalEpisodes = MalInfo.totalEpisodes;
             }
