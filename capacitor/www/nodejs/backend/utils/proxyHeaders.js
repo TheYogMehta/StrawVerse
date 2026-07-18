@@ -1,9 +1,10 @@
 const { queryOne, run } = require("./db");
 
-const cookieCache = {};
-const refererCache = {};
-const uaCache = {};
-const hintsCache = {};
+const cookieCache = global.proxyCookieCache || (global.proxyCookieCache = {});
+const refererCache =
+  global.proxyRefererCache || (global.proxyRefererCache = {});
+const uaCache = global.proxyUaCache || (global.proxyUaCache = {});
+const hintsCache = global.proxyHintsCache || (global.proxyHintsCache = {});
 
 function normalizeDomain(domain) {
   if (!domain) return null;
@@ -82,23 +83,31 @@ global.setFallbackReferer = (referer) => {
 async function initCache() {
   try {
     const { queryAll } = require("./db");
-    
+
     // Load referers
-    const referers = await queryAll("SELECT domain, referer FROM StreamReferer");
+    const referers = await queryAll(
+      "SELECT domain, referer FROM StreamReferer",
+    );
     for (const ref of referers) {
       if (ref.domain && ref.referer) {
         refererCache[ref.domain] = ref.referer;
       }
     }
-    
+
     // Load cookies, UAs, hints
-    const rows = await queryAll("SELECT id, name, domain, value, expirationDate, local_saved_at FROM cookie");
+    const rows = await queryAll(
+      "SELECT id, name, domain, value, expirationDate, local_saved_at FROM cookie",
+    );
     for (const row of rows) {
       const id = row.id;
       const name = row.name;
       const value = row.value;
-      const domain = row.domain || (id.endsWith("-user_agent") ? id.substring(0, id.length - 11) : id.substring(0, id.length - 13));
-      
+      const domain =
+        row.domain ||
+        (id.endsWith("-user_agent")
+          ? id.substring(0, id.length - 11)
+          : id.substring(0, id.length - 13));
+
       if (name === "user_agent") {
         uaCache[domain] = value;
       } else if (name === "client_hints") {
@@ -131,13 +140,16 @@ async function initCache() {
 function updateCache(domain, name, value, expirationDate, local_saved_at) {
   if (!domain) return;
   const cleanDom = domain.replace("www.", "").toLowerCase();
-  console.log(`[proxyHeaders] updateCache called: domain=${domain}, cleanDom=${cleanDom}, name=${name}, hasValue=${!!value}`);
-  
+  console.log(
+    `[proxyHeaders] updateCache called: domain=${domain}, cleanDom=${cleanDom}, name=${name}, hasValue=${!!value}`,
+  );
+
   if (name === "user_agent") {
     uaCache[cleanDom] = value;
   } else if (name === "client_hints") {
     try {
-      hintsCache[cleanDom] = typeof value === "string" ? JSON.parse(value) : value;
+      hintsCache[cleanDom] =
+        typeof value === "string" ? JSON.parse(value) : value;
     } catch (e) {}
   } else if (name === "cf_clearance") {
     const exp = Number(expirationDate);
@@ -163,7 +175,9 @@ function getHeaders(url, method = "GET") {
   try {
     cookieDomain = new URL(url).hostname;
   } catch (e) {}
-  console.log(`[proxyHeaders] getHeaders called for: ${url}, method=${method}, cookieCacheKeys=${Object.keys(cookieCache)}`);
+  console.log(
+    `[proxyHeaders] getHeaders called for: ${url}, method=${method}, cookieCacheKeys=${Object.keys(cookieCache)}`,
+  );
 
   let cleanDomain = "";
   if (cookieDomain) {
@@ -187,8 +201,7 @@ function getHeaders(url, method = "GET") {
       cleanDomain.includes("owocdn.top") ||
       cleanDomain.includes("uwucdn.top")
     ) {
-      cleanDomain = "kwik.cx";
-      cookieDomain = "kwik.cx";
+      cleanDomain = "animepahe.pw";
     }
   }
 
@@ -288,16 +301,7 @@ function getHeaders(url, method = "GET") {
     }
   }
 
-  let targetCookieDomain = cookieDomain;
-  if (targetCookieDomain) {
-    if (
-      cleanDomain.includes("kwik.cx") ||
-      cleanDomain.includes("owocdn.top") ||
-      cleanDomain.includes("uwucdn.top")
-    ) {
-      targetCookieDomain = "kwik.cx";
-    }
-  }
+  const targetCookieDomain = cookieDomain;
 
   if (targetCookieDomain) {
     const normTarget = targetCookieDomain.replace(/^\./, "").toLowerCase();
