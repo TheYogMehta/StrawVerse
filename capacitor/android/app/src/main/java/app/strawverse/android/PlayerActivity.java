@@ -19,7 +19,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -36,6 +35,7 @@ import android.widget.Toast;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
+import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.ResolvingDataSource;
 import androidx.media3.datasource.cronet.CronetDataSource;
@@ -84,7 +84,10 @@ public class PlayerActivity extends Activity {
     private float startY = 0f;
     private float startVal = 0f;
     private boolean isLeft = false;
-    private boolean isDragging = false;
+    private boolean isDragging = false;       // vertical drag (volume/brightness)
+    private boolean isHorizontalDrag = false; // horizontal drag (seek)
+    private long seekStartPositionMs = 0;
+    private int accumulatedSeekSecs = 0;
     private static final int TOUCH_SLOP = 30; // Min drag pixels to initiate gesture
 
     // Dynamic player states
@@ -476,7 +479,37 @@ public class PlayerActivity extends Activity {
                 player.release();
             }
 
+            Log.d("PlayerActivity", "initializePlayer: videoUrl=" + videoUrl + ", headers=" + headers.toString());
             player = new ExoPlayer.Builder(this).build();
+            player.addListener(new androidx.media3.common.Player.Listener() {
+                @Override
+                public void onPlaybackStateChanged(int playbackState) {
+                    String stateString;
+                    switch (playbackState) {
+                        case androidx.media3.common.Player.STATE_IDLE:
+                            stateString = "STATE_IDLE";
+                            break;
+                        case androidx.media3.common.Player.STATE_BUFFERING:
+                            stateString = "STATE_BUFFERING";
+                            break;
+                        case androidx.media3.common.Player.STATE_READY:
+                            stateString = "STATE_READY";
+                            break;
+                        case androidx.media3.common.Player.STATE_ENDED:
+                            stateString = "STATE_ENDED";
+                            break;
+                        default:
+                            stateString = "UNKNOWN";
+                            break;
+                    }
+                    Log.d("PlayerActivity", "ExoPlayer playback state changed: " + stateString);
+                }
+
+                @Override
+                public void onPlayerError(androidx.media3.common.PlaybackException error) {
+                    Log.e("PlayerActivity", "ExoPlayer playback error: " + error.getMessage(), error);
+                }
+            });
             player.setTrackSelectionParameters(
                     player.getTrackSelectionParameters()
                             .buildUpon()
@@ -506,14 +539,19 @@ public class PlayerActivity extends Activity {
                                 @Override
                                 public DataSpec resolveDataSpec(DataSpec dataSpec) {
                                     if (!headers.isEmpty()) {
+                                        Map<String, String> mergedHeaders = new java.util.HashMap<>(dataSpec.httpRequestHeaders);
+                                        mergedHeaders.putAll(headers);
                                         return dataSpec.buildUpon()
-                                                .setHttpRequestHeaders(headers)
+                                                .setHttpRequestHeaders(mergedHeaders)
                                                 .build();
                                     }
                                     return dataSpec;
                                 }
                             }
                     );
+
+            // Wrap with KwikDataSource to strip PNG headers from obfuscated segments
+            DataSource.Factory kwikFactory = () -> new KwikDataSource(resolvingFactory.createDataSource());
 
             // Load subtitle tracks if available
             List<MediaItem.SubtitleConfiguration> subtitleConfigurations = getSubtitleConfigurations();
@@ -523,7 +561,7 @@ public class PlayerActivity extends Activity {
                     .setSubtitleConfigurations(subtitleConfigurations)
                     .build();
 
-            MediaSource mediaSource = new DefaultMediaSourceFactory(resolvingFactory)
+            MediaSource mediaSource = new DefaultMediaSourceFactory(kwikFactory)
                     .createMediaSource(mediaItem);
 
             player.setMediaSource(mediaSource);
@@ -726,14 +764,19 @@ public class PlayerActivity extends Activity {
                                 @Override
                                 public DataSpec resolveDataSpec(DataSpec dataSpec) {
                                     if (!finalHeaders.isEmpty()) {
+                                        Map<String, String> mergedHeaders = new java.util.HashMap<>(dataSpec.httpRequestHeaders);
+                                        mergedHeaders.putAll(finalHeaders);
                                         return dataSpec.buildUpon()
-                                                .setHttpRequestHeaders(finalHeaders)
+                                                .setHttpRequestHeaders(mergedHeaders)
                                                 .build();
                                     }
                                     return dataSpec;
                                 }
                             }
                     );
+
+            // Wrap with KwikDataSource to strip PNG headers from obfuscated segments
+            DataSource.Factory kwikFactory = () -> new KwikDataSource(resolvingFactory.createDataSource());
 
             List<MediaItem.SubtitleConfiguration> subtitleConfigurations = getSubtitleConfigurations();
 
@@ -742,7 +785,7 @@ public class PlayerActivity extends Activity {
                     .setSubtitleConfigurations(subtitleConfigurations)
                     .build();
 
-            MediaSource mediaSource = new DefaultMediaSourceFactory(resolvingFactory)
+            MediaSource mediaSource = new DefaultMediaSourceFactory(kwikFactory)
                     .createMediaSource(mediaItem);
 
             player.setMediaSource(mediaSource);
@@ -824,7 +867,7 @@ public class PlayerActivity extends Activity {
         }
     }
 
-    // Touch volume & brightness swipe overrides
+    // Touch volume & brightness (vertical) and seek (horizontal) swipe overrides
     @Override
     public boolean dispatchTouchEvent(MotionEvent event) {
         int width = getResources().getDisplayMetrics().widthPixels;
@@ -835,29 +878,40 @@ public class PlayerActivity extends Activity {
                 startX = event.getX();
                 startY = event.getY();
                 isDragging = false;
+                isHorizontalDrag = false;
+                accumulatedSeekSecs = 0;
                 isLeft = startX < (width / 2f);
+                if (player != null) {
+                    seekStartPositionMs = player.getCurrentPosition();
+                }
                 break;
 
             case MotionEvent.ACTION_MOVE:
                 float dx = Math.abs(event.getX() - startX);
                 float dy = Math.abs(event.getY() - startY);
 
-                if (!isDragging && dy > TOUCH_SLOP && dy > dx) {
-                    isDragging = true;
-                    // Read initial state
-                    if (isLeft) {
-                        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
-                        startVal = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
-                    } else {
-                        float brightness = getWindow().getAttributes().screenBrightness;
-                        if (brightness < 0) {
-                            try {
-                                brightness = Settings.System.getInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS) / 255f;
-                            } catch (Exception e) {
-                                brightness = 0.5f;
+                // Determine gesture direction on first significant movement
+                if (!isDragging && !isHorizontalDrag) {
+                    if (dy > TOUCH_SLOP && dy > dx) {
+                        // Vertical drag → volume / brightness
+                        isDragging = true;
+                        if (isLeft) {
+                            AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+                            startVal = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC);
+                        } else {
+                            float brightness = getWindow().getAttributes().screenBrightness;
+                            if (brightness < 0) {
+                                try {
+                                    brightness = Settings.System.getInt(getContentResolver(), Settings.System.SCREEN_BRIGHTNESS) / 255f;
+                                } catch (Exception e) {
+                                    brightness = 0.5f;
+                                }
                             }
+                            startVal = brightness;
                         }
-                        startVal = brightness;
+                    } else if (dx > TOUCH_SLOP && dx > dy) {
+                        // Horizontal drag → seek
+                        isHorizontalDrag = true;
                     }
                 }
 
@@ -880,7 +934,32 @@ public class PlayerActivity extends Activity {
                         getWindow().setAttributes(lp);
                         showHudOverlay((int) (newBrightness * 100) + "%", R.drawable.ic_brightness);
                     }
-                    return true; // Consume event while dragging
+                    return true;
+                }
+
+                if (isHorizontalDrag && player != null) {
+                    float deltaX = event.getX() - startX;
+                    // Scale: full screen width swipe = 90 seconds of seek
+                    float seekScale = 90f;
+                    accumulatedSeekSecs = (int) ((deltaX / width) * seekScale);
+
+                    // Clamp so we don't seek past start or end
+                    long duration = player.getDuration();
+                    if (duration > 0) {
+                        long targetMs = seekStartPositionMs + (accumulatedSeekSecs * 1000L);
+                        if (targetMs < 0) {
+                            accumulatedSeekSecs = (int) (-(seekStartPositionMs / 1000));
+                        } else if (targetMs > duration) {
+                            accumulatedSeekSecs = (int) ((duration - seekStartPositionMs) / 1000);
+                        }
+                    }
+
+                    if (accumulatedSeekSecs != 0) {
+                        String prefix = accumulatedSeekSecs > 0 ? "+" : "";
+                        int icon = accumulatedSeekSecs > 0 ? R.drawable.ic_forward : R.drawable.ic_rewind;
+                        showHudOverlay(prefix + accumulatedSeekSecs + "s", icon);
+                    }
+                    return true;
                 }
                 break;
 
@@ -888,6 +967,22 @@ public class PlayerActivity extends Activity {
             case MotionEvent.ACTION_CANCEL:
                 if (isDragging) {
                     isDragging = false;
+                    hudHandler.removeCallbacks(hudRunnable);
+                    hudHandler.postDelayed(hudRunnable, 800);
+                    return true;
+                }
+                if (isHorizontalDrag) {
+                    isHorizontalDrag = false;
+                    // Apply the accumulated seek on finger lift
+                    if (player != null && accumulatedSeekSecs != 0) {
+                        long targetMs = seekStartPositionMs + (accumulatedSeekSecs * 1000L);
+                        long duration = player.getDuration();
+                        if (duration > 0) {
+                            targetMs = Math.max(0, Math.min(targetMs, duration));
+                        }
+                        player.seekTo(targetMs);
+                    }
+                    accumulatedSeekSecs = 0;
                     hudHandler.removeCallbacks(hudRunnable);
                     hudHandler.postDelayed(hudRunnable, 800);
                     return true;
@@ -1065,9 +1160,7 @@ public class PlayerActivity extends Activity {
                 (int) (12 * getResources().getDisplayMetrics().density), 0
         );
 
-        TypedValue outValue = new TypedValue();
-        getTheme().resolveAttribute(android.R.attr.selectableItemBackground, outValue, true);
-        row.setBackgroundResource(outValue.resourceId);
+        row.setBackgroundResource(R.drawable.ripple_white);
         row.setClickable(true);
         row.setFocusable(true);
 

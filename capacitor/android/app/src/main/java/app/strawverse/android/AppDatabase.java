@@ -192,6 +192,12 @@ public class AppDatabase {
             headers.put("Cookie", "cf_clearance=" + cfCookie + ";");
         }
 
+        // Dynamic user_agent from database
+        String ua = getStoredUserAgent(context, url);
+        if (ua != null && !ua.isEmpty()) {
+            headers.put("User-Agent", ua);
+        }
+
         return headers;
     }
 
