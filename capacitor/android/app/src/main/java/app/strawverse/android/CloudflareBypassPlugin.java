@@ -435,6 +435,7 @@ public class CloudflareBypassPlugin extends Plugin {
         final String animeTitle = call.getString("animeTitle", "Anime Stream");
         final String image = call.getString("image", "");
         final String malid = call.getData().optString("malid", "");
+        final String episodesList = call.getString("episodesList", "[]");
 
         getActivity().runOnUiThread(new Runnable() {
             @Override
@@ -451,6 +452,7 @@ public class CloudflareBypassPlugin extends Plugin {
                     intent.putExtra("animeTitle", animeTitle);
                     intent.putExtra("image", image);
                     intent.putExtra("malid", malid);
+                    intent.putExtra("episodesList", episodesList);
                     context.startActivity(intent);
                     call.resolve();
                 } catch (Exception e) {

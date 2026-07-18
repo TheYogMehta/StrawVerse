@@ -3,6 +3,7 @@ package app.strawverse.android;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.Dialog;
+import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
 import android.view.Window;
@@ -35,6 +36,8 @@ import android.widget.Toast;
 import androidx.media3.common.C;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
+import androidx.media3.common.Player;
+import androidx.media3.common.ForwardingPlayer;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.ResolvingDataSource;
@@ -63,7 +66,8 @@ import java.util.concurrent.Executors;
 public class PlayerActivity extends Activity {
 
     private PlayerView playerView;
-    private ExoPlayer player;
+    private Player player;
+    private ExoPlayer rawPlayer;
 
     private LinearLayout topBar;
     private TextView titleTextView;
@@ -109,6 +113,16 @@ public class PlayerActivity extends Activity {
     private boolean autoSkipIntro = true;
     private double lastProgressTimeSecs = -1;
     private boolean hasSeekedToProgress = false;
+
+    private String currentEpisodeId = "";
+    private boolean downloaded = false;
+    private String subdub = "sub";
+    private JSONArray episodesListArray = new JSONArray();
+    private ImageView prevButton;
+    private ImageView nextButton;
+    private JSONObject prevEpisode;
+    private JSONObject nextEpisode;
+    private HighlightsOverlayView highlightsOverlayView;
 
     // Timer for skip check
     private final Handler skipCheckHandler = new Handler(Looper.getMainLooper());
@@ -158,19 +172,52 @@ public class PlayerActivity extends Activity {
         Intent intent = getIntent();
         animeId = intent.getStringExtra("animeId");
         if (animeId == null) animeId = "";
-        final String episodeId = intent.getStringExtra("episodeId");
+        currentEpisodeId = intent.getStringExtra("episodeId");
+        if (currentEpisodeId == null) currentEpisodeId = "";
         episodeNumber = intent.getDoubleExtra("episodeNumber", 0.0);
-        final boolean downloaded = intent.getBooleanExtra("downloaded", false);
-        final String subdub = intent.getStringExtra("subdub");
+        downloaded = intent.getBooleanExtra("downloaded", false);
+        subdub = intent.getStringExtra("subdub");
+        if (subdub == null) subdub = "sub";
         provider = intent.getStringExtra("provider");
         if (provider == null) provider = "";
         imageUrl = intent.getStringExtra("image");
         if (imageUrl == null) imageUrl = "";
         malid = intent.getStringExtra("malid");
         if (malid == null) malid = "";
-        animeTitle = intent.getStringExtra("animeTitle");
-        if (animeTitle == null || animeTitle.isEmpty()) {
-            animeTitle = "Anime Stream";
+        final String baseAnimeTitle = intent.getStringExtra("animeTitle");
+        animeTitle = baseAnimeTitle != null ? baseAnimeTitle : "Anime Stream";
+
+        String episodesListStr = intent.getStringExtra("episodesList");
+        if (episodesListStr != null && !episodesListStr.isEmpty()) {
+            try {
+                episodesListArray = new JSONArray(episodesListStr);
+            } catch (Exception e) {
+                Log.e("PlayerActivity", "Failed to parse episodesList: " + e.getMessage());
+            }
+        }
+
+        String currentEpTitle = "";
+        if (episodesListArray != null && episodesListArray.length() > 0) {
+            for (int i = 0; i < episodesListArray.length(); i++) {
+                try {
+                    JSONObject ep = episodesListArray.getJSONObject(i);
+                    String epId = ep.optString("id", "");
+                    if (!epId.isEmpty() && epId.equals(currentEpisodeId)) {
+                        currentEpTitle = ep.optString("title", "");
+                        break;
+                    }
+                    double epNum = ep.optDouble("number", -1.0);
+                    if (Math.abs(epNum - episodeNumber) < 0.01) {
+                        currentEpTitle = ep.optString("title", "");
+                        break;
+                    }
+                } catch (Exception e) {}
+            }
+        }
+
+        String displayTitle = "EP: " + formatEpisodeNumber(episodeNumber);
+        if (!currentEpTitle.isEmpty()) {
+            displayTitle = displayTitle + " | " + currentEpTitle;
         }
 
         // Programmatic Layout construction
@@ -226,9 +273,33 @@ public class PlayerActivity extends Activity {
         });
         topBar.addView(backButton);
 
+        android.util.TypedValue outValue = new android.util.TypedValue();
+        getTheme().resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, outValue, true);
+        int btnSize = (int) (32 * getResources().getDisplayMetrics().density);
+
+        // Previous Episode Button
+        prevButton = new ImageView(this);
+        prevButton.setImageResource(R.drawable.ic_prev);
+        prevButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        prevButton.setColorFilter(0xFFFFFFFF);
+        prevButton.setBackgroundResource(outValue.resourceId);
+        LinearLayout.LayoutParams prevParams = new LinearLayout.LayoutParams(btnSize, btnSize);
+        prevParams.setMargins(15, 0, 15, 0);
+        prevButton.setLayoutParams(prevParams);
+        prevButton.setPadding(6, 6, 6, 6);
+        prevButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (prevEpisode != null) {
+                    loadNewEpisode(prevEpisode);
+                }
+            }
+        });
+        topBar.addView(prevButton);
+
         // Title
         titleTextView = new TextView(this);
-        titleTextView.setText(animeTitle);
+        titleTextView.setText(displayTitle);
         titleTextView.setTextColor(0xFFFFFFFF);
         titleTextView.setTextSize(18);
         titleTextView.setTypeface(null, Typeface.BOLD);
@@ -238,6 +309,26 @@ public class PlayerActivity extends Activity {
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f);
         titleTextView.setLayoutParams(titleParams);
         topBar.addView(titleTextView);
+
+        // Next Episode Button
+        nextButton = new ImageView(this);
+        nextButton.setImageResource(R.drawable.ic_next);
+        nextButton.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        nextButton.setColorFilter(0xFFFFFFFF);
+        nextButton.setBackgroundResource(outValue.resourceId);
+        LinearLayout.LayoutParams nextParams = new LinearLayout.LayoutParams(btnSize, btnSize);
+        nextParams.setMargins(15, 0, 15, 0);
+        nextButton.setLayoutParams(nextParams);
+        nextButton.setPadding(6, 6, 6, 6);
+        nextButton.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (nextEpisode != null) {
+                    loadNewEpisode(nextEpisode);
+                }
+            }
+        });
+        topBar.addView(nextButton);
 
         // Settings gear icon
         ImageView btnSettingsIcon = new ImageView(this);
@@ -277,24 +368,33 @@ public class PlayerActivity extends Activity {
 
         // Floating skip Intro / Outro button at the bottom-right corner
         skipButton = new Button(this);
+        float density = getResources().getDisplayMetrics().density;
         FrameLayout.LayoutParams skipParams = new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT);
         skipParams.gravity = Gravity.BOTTOM | Gravity.RIGHT;
-        skipParams.setMargins(0, 0, 80, 180); // Margin above ExoPlayer progress bar
+        skipParams.setMargins(0, 0, (int) (48 * density), (int) (72 * density)); // Positioned safely above seekbar
         skipButton.setLayoutParams(skipParams);
         skipButton.setTextColor(0xFFFFFFFF);
         skipButton.setTextSize(14);
-        skipButton.setPadding(40, 20, 40, 20);
+        int paddingLR = (int) (20 * density);
+        int paddingTB = (int) (10 * density);
+        skipButton.setPadding(paddingLR, paddingTB, paddingLR, paddingTB);
         skipButton.setVisibility(View.GONE);
         
         GradientDrawable skipBg = new GradientDrawable();
         skipBg.setColor(0xFF3B82F6); // modern vibrant blue
-        skipBg.setCornerRadius(15);
+        skipBg.setCornerRadius(8 * density);
         skipButton.setBackground(skipBg);
         rootLayout.addView(skipButton);
 
         setContentView(rootLayout);
+
+        // Initialize highlights overlay view on ExoPlayer seekbar
+        initSeekbarHighlightsOverlay();
+
+        // Update Prev and Next episode button states
+        updatePrevNextButtons();
 
         // Bind topBar visibility to ExoPlayer controls visibility
         playerView.setControllerVisibilityListener(new PlayerView.ControllerVisibilityListener() {
@@ -308,7 +408,183 @@ public class PlayerActivity extends Activity {
         fetchHistoryAndSettings();
 
         // Start background fetch to retrieve sources
-        fetchSourcesNatively(animeId, episodeId, episodeNumber, downloaded, subdub, provider);
+        fetchSourcesNatively(animeId, currentEpisodeId, episodeNumber, downloaded, subdub, provider);
+    }
+
+    private void initSeekbarHighlightsOverlay() {
+        try {
+            final View timeBarView = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
+            if (timeBarView != null && timeBarView.getParent() instanceof ViewGroup) {
+                final ViewGroup parent = (ViewGroup) timeBarView.getParent();
+                int index = parent.indexOfChild(timeBarView);
+                ViewGroup.LayoutParams originalParams = timeBarView.getLayoutParams();
+
+                parent.removeView(timeBarView);
+
+                // Subclass FrameLayout to invalidate the highlights overlay on every dispatchDraw pass.
+                // This ensures it stays perfectly in sync with the seekbar's alpha/translation animation frames.
+                FrameLayout container = new FrameLayout(this) {
+                    @Override
+                    protected void dispatchDraw(Canvas canvas) {
+                        if (highlightsOverlayView != null) {
+                            highlightsOverlayView.invalidate();
+                        }
+                        super.dispatchDraw(canvas);
+                    }
+                };
+                
+                highlightsOverlayView = new HighlightsOverlayView(this);
+                highlightsOverlayView.setClickable(false);
+                highlightsOverlayView.setFocusable(false);
+                highlightsOverlayView.setTimeBarView(timeBarView);
+
+                FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT);
+
+                container.addView(highlightsOverlayView, layoutParams);
+                container.addView(timeBarView, new FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.MATCH_PARENT));
+
+                parent.addView(container, index, originalParams);
+            }
+        } catch (Exception e) {
+            Log.e("PlayerActivity", "Failed to initialize seekbar highlights overlay: " + e.getMessage());
+        }
+    }
+
+    private void updatePrevNextButtons() {
+        prevEpisode = null;
+        nextEpisode = null;
+
+        Log.d("PlayerActivity", "updatePrevNextButtons start: currentEpisodeId=" + currentEpisodeId + ", episodeNumber=" + episodeNumber);
+
+        if (episodesListArray != null && episodesListArray.length() > 0) {
+            try {
+                int currentIndex = -1;
+                List<JSONObject> sortedList = new ArrayList<>();
+                for (int i = 0; i < episodesListArray.length(); i++) {
+                    sortedList.add(episodesListArray.getJSONObject(i));
+                }
+                
+                java.util.Collections.sort(sortedList, new java.util.Comparator<JSONObject>() {
+                    @Override
+                    public int compare(JSONObject a, JSONObject b) {
+                        double numA = a.optDouble("number", 0.0);
+                        double numB = b.optDouble("number", 0.0);
+                        return Double.compare(numA, numB);
+                    }
+                });
+
+                for (int i = 0; i < sortedList.size(); i++) {
+                    JSONObject ep = sortedList.get(i);
+                    String epId = ep.optString("id", "");
+                    if (!epId.isEmpty() && epId.equals(currentEpisodeId)) {
+                        currentIndex = i;
+                        break;
+                    }
+                    double epNum = ep.optDouble("number", -1.0);
+                    if (Math.abs(epNum - episodeNumber) < 0.01) {
+                        currentIndex = i;
+                        break;
+                    }
+                }
+
+                Log.d("PlayerActivity", "updatePrevNextButtons match result: currentIndex=" + currentIndex + ", listSize=" + sortedList.size());
+
+                if (currentIndex != -1) {
+                    if (currentIndex > 0) {
+                        prevEpisode = sortedList.get(currentIndex - 1);
+                    }
+                    if (currentIndex < sortedList.size() - 1) {
+                        nextEpisode = sortedList.get(currentIndex + 1);
+                    }
+                }
+            } catch (Exception e) {
+                Log.e("PlayerActivity", "Failed updating prev/next targets: " + e.getMessage());
+            }
+        }
+
+        Log.d("PlayerActivity", "updatePrevNextButtons outcomes: prevEpisode=" 
+            + (prevEpisode != null ? prevEpisode.optDouble("number") : "null") 
+            + ", nextEpisode=" 
+            + (nextEpisode != null ? nextEpisode.optDouble("number") : "null"));
+
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (prevButton != null) {
+                    if (prevEpisode != null) {
+                        prevButton.setAlpha(1.0f);
+                        prevButton.setEnabled(true);
+                        prevButton.setClickable(true);
+                    } else {
+                        prevButton.setAlpha(0.3f);
+                        prevButton.setEnabled(false);
+                        prevButton.setClickable(false);
+                    }
+                }
+                if (nextButton != null) {
+                    if (nextEpisode != null) {
+                        nextButton.setAlpha(1.0f);
+                        nextButton.setEnabled(true);
+                        nextButton.setClickable(true);
+                    } else {
+                        nextButton.setAlpha(0.3f);
+                        nextButton.setEnabled(false);
+                        nextButton.setClickable(false);
+                    }
+                }
+            }
+        });
+    }
+
+    private void loadNewEpisode(JSONObject ep) {
+        try {
+            if (player != null) {
+                player.stop();
+                player.release();
+                player = null;
+            }
+            
+            skipButton.setVisibility(View.GONE);
+            if (highlightsOverlayView != null) {
+                highlightsOverlayView.setSkipTimes(null, 0);
+            }
+            
+            currentEpisodeId = ep.getString("id");
+            episodeNumber = ep.optDouble("number", 0.0);
+            
+            skipTimesArray = new JSONArray();
+            hasSeekedToProgress = false;
+            lastProgressTimeSecs = -1;
+            hasFetchedSkipTimes = false;
+            isFetchingSkipTimes = false;
+            
+            String epTitle = ep.optString("title", "");
+            if (epTitle.isEmpty()) {
+                titleTextView.setText("EP: " + formatEpisodeNumber(episodeNumber));
+            } else {
+                titleTextView.setText("EP: " + formatEpisodeNumber(episodeNumber) + " | " + epTitle);
+            }
+            
+            updatePrevNextButtons();
+            fetchHistoryAndSettings();
+            fetchSourcesNatively(animeId, currentEpisodeId, episodeNumber, downloaded, subdub, provider);
+            
+        } catch (Exception e) {
+            Log.e("PlayerActivity", "Failed to load new episode: " + e.getMessage());
+            Toast.makeText(this, "Failed loading next episode: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private String formatEpisodeNumber(double epNum) {
+        if (epNum == (long) epNum) {
+            return String.format("%d", (long) epNum);
+        } else {
+            return String.format("%s", epNum);
+        }
     }
 
     private void fetchSourcesNatively(final String animeId, final String ep, final double epNum, final boolean downloaded, final String subdub, final String provider) {
@@ -480,7 +756,50 @@ public class PlayerActivity extends Activity {
             }
 
             Log.d("PlayerActivity", "initializePlayer: videoUrl=" + videoUrl + ", headers=" + headers.toString());
-            player = new ExoPlayer.Builder(this).build();
+            rawPlayer = new ExoPlayer.Builder(this).build();
+            player = new ForwardingPlayer(rawPlayer) {
+                @Override
+                public Player.Commands getAvailableCommands() {
+                    Player.Commands commands = super.getAvailableCommands();
+                    Player.Commands.Builder builder = commands.buildUpon();
+                    if (nextEpisode != null) {
+                        builder.add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM);
+                    } else {
+                        builder.remove(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM);
+                    }
+                    if (prevEpisode != null) {
+                        builder.add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM);
+                    } else {
+                        builder.remove(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM);
+                    }
+                    return builder.build();
+                }
+
+                @Override
+                public boolean isCommandAvailable(int command) {
+                    if (command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM) {
+                        return nextEpisode != null;
+                    }
+                    if (command == Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM) {
+                        return prevEpisode != null;
+                    }
+                    return super.isCommandAvailable(command);
+                }
+
+                @Override
+                public void seekToNextMediaItem() {
+                    if (nextEpisode != null) {
+                        loadNewEpisode(nextEpisode);
+                    }
+                }
+
+                @Override
+                public void seekToPreviousMediaItem() {
+                    if (prevEpisode != null) {
+                        loadNewEpisode(prevEpisode);
+                    }
+                }
+            };
             player.addListener(new androidx.media3.common.Player.Listener() {
                 @Override
                 public void onPlaybackStateChanged(int playbackState) {
@@ -564,7 +883,7 @@ public class PlayerActivity extends Activity {
             MediaSource mediaSource = new DefaultMediaSourceFactory(kwikFactory)
                     .createMediaSource(mediaItem);
 
-            player.setMediaSource(mediaSource);
+            rawPlayer.setMediaSource(mediaSource);
             applyResumePosition();
             player.prepare();
             player.play();
@@ -606,32 +925,8 @@ public class PlayerActivity extends Activity {
     }
 
     private void setupSeekbarHighlights() {
-        if (skipTimesArray == null || skipTimesArray.length() == 0) return;
-        try {
-            long[] skipPointsMs = new long[skipTimesArray.length() * 2];
-            boolean[] played = new boolean[skipTimesArray.length() * 2];
-            for (int i = 0; i < skipTimesArray.length(); i++) {
-                JSONObject st = skipTimesArray.getJSONObject(i);
-                JSONObject interval = st.optJSONObject("interval");
-                if (interval != null) {
-                    double start = interval.optDouble("start_time", 0.0);
-                    double end = interval.optDouble("end_time", 0.0);
-                    skipPointsMs[i * 2] = (long) (start * 1000);
-                    played[i * 2] = false;
-                    skipPointsMs[i * 2 + 1] = (long) (end * 1000);
-                    played[i * 2 + 1] = false;
-                }
-            }
-
-            View timeBarView = playerView.findViewById(androidx.media3.ui.R.id.exo_progress);
-            if (timeBarView instanceof androidx.media3.ui.DefaultTimeBar) {
-                androidx.media3.ui.DefaultTimeBar defaultTimeBar = (androidx.media3.ui.DefaultTimeBar) timeBarView;
-                defaultTimeBar.setAdMarkerColor(0x8C3B82F6);
-                defaultTimeBar.setPlayedAdMarkerColor(0x8C3B82F6);
-            }
-            playerView.setExtraAdGroupMarkers(skipPointsMs, played);
-        } catch (Exception e) {
-            Log.e("PlayerActivity", "Failed mapping progress highlights: " + e.getMessage());
+        if (highlightsOverlayView != null && player != null) {
+            highlightsOverlayView.setSkipTimes(skipTimesArray, player.getDuration());
         }
     }
 
@@ -788,7 +1083,7 @@ public class PlayerActivity extends Activity {
             MediaSource mediaSource = new DefaultMediaSourceFactory(kwikFactory)
                     .createMediaSource(mediaItem);
 
-            player.setMediaSource(mediaSource);
+            rawPlayer.setMediaSource(mediaSource);
             player.prepare();
             player.seekTo(currentPosition);
             player.play();

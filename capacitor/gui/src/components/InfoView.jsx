@@ -85,6 +85,7 @@ export default function InfoView({
         animeTitle: animeTitle,
         malid: String(details?.malid || details?.MalID || ""),
         image: details?.image || "",
+        episodesList: JSON.stringify(episodesOrChapters || []),
       }).catch((err) => {
         console.error("Failed to start native player:", err);
       });

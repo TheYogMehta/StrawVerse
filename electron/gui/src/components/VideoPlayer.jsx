@@ -1448,9 +1448,8 @@ export default function VideoPlayer({
             </button>
           )}
           <span className="player-episode-title">
-            Playing Episode{" "}
-            {currentEpisodeObj ? currentEpisodeObj.number : "Stream"} (
-            {(subdub || "sub").toUpperCase()})
+            EP: {currentEpisodeObj ? currentEpisodeObj.number : "Stream"}
+            {currentEpisodeObj?.title ? ` | ${currentEpisodeObj.title}` : ""}
           </span>
           <span
             className={`player-header-badge ${isCurrentDownloaded ? "local" : "online"}`}
