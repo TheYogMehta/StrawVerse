@@ -69,12 +69,7 @@ const {
 } = require("./utils/Metadata");
 const { updateHistory } = require("./utils/history");
 const { getHeaders } = require("./utils/proxyHeaders");
-const {
-  getKeyValue,
-  setKeyValue,
-  queryOne,
-  run,
-} = require("./utils/db");
+const { getKeyValue, setKeyValue, queryOne, run } = require("./utils/db");
 const ImageCacheManager = require("./utils/ImageCacheManager");
 const { UpdateDiscordRPC } = require("./utils/discord");
 const segmentKeyCache = {};
@@ -402,8 +397,18 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
 
 router.get("/api/schedule/weekly", async (req, res) => {
   try {
-    const now = Math.floor(Date.now() / 1000);
-    const oneWeekLater = now + 7 * 24 * 3600;
+    const localToday = new Date();
+    const todayStart =
+      new Date(
+        localToday.getFullYear(),
+        localToday.getMonth(),
+        localToday.getDate(),
+        0,
+        0,
+        0,
+      ).getTime() / 1000;
+    const yesterdayStart = todayStart - 24 * 3600;
+    const limitEnd = todayStart + 7 * 24 * 3600;
 
     const episodes = global.mappingDb
       .prepare(
@@ -413,11 +418,15 @@ router.get("/api/schedule/weekly", async (req, res) => {
         ORDER BY date ASC
       `,
       )
-      .all(now, oneWeekLater);
+      .all(yesterdayStart, limitEnd);
 
     const enriched = [];
+    const seen = new Set();
 
     for (const ep of episodes) {
+      if (seen.has(ep.livechart_id)) continue;
+      seen.add(ep.livechart_id);
+
       let malid = null;
       if (global.mappingDb) {
         try {
@@ -425,7 +434,21 @@ router.get("/api/schedule/weekly", async (req, res) => {
             .prepare("SELECT malid FROM anime WHERE livechart_id = ?")
             .get(ep.livechart_id);
           if (row && row.malid) {
-            malid = row.malid;
+            const mapped = global.mappingDb
+              .prepare(
+                `
+                SELECT 1 FROM animepahe WHERE malid = ?
+                UNION ALL
+                SELECT 1 FROM anikototv WHERE malid = ?
+                UNION ALL
+                SELECT 1 FROM anineko WHERE malid = ?
+                LIMIT 1
+              `,
+              )
+              .get(row.malid, row.malid, row.malid);
+            if (mapped) {
+              malid = row.malid;
+            }
           }
         } catch (dbErr) {
           console.error("Database error in schedule mapping lookup:", dbErr);
@@ -1184,7 +1207,42 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               if (mappingRow.livechart_id) {
                 const livechartId = mappingRow.livechart_id;
                 const now = Math.floor(Date.now() / 1000);
-                const nextEp = global.mappingDb
+
+                let watchedEpisodes = 0;
+                try {
+                  const watchedRow = global.db
+                    .prepare(
+                      "SELECT watched_episodes FROM WatchHistory WHERE anime_id = ? OR anime_id LIKE ?",
+                    )
+                    .get(id, `${id?.replace(/-(sub|dub|hsub|both)$/, "")}-%`);
+                  if (watchedRow && watchedRow.watched_episodes) {
+                    watchedEpisodes = watchedRow.watched_episodes;
+                  }
+                } catch (_) {}
+
+                const localToday = new Date();
+                const localTodayStart =
+                  new Date(
+                    localToday.getFullYear(),
+                    localToday.getMonth(),
+                    localToday.getDate(),
+                    0,
+                    0,
+                    0,
+                  ).getTime() / 1000;
+                const localYesterdayStart = localTodayStart - 24 * 3600;
+
+                const airedEp = global.mappingDb
+                  .prepare(
+                    `
+                    SELECT episode, date FROM next_episodes 
+                    WHERE livechart_id = ? AND date <= ? 
+                    ORDER BY date DESC LIMIT 1
+                  `,
+                  )
+                  .get(livechartId, now);
+
+                const upcomingEp = global.mappingDb
                   .prepare(
                     `
                     SELECT episode, date FROM next_episodes 
@@ -1194,20 +1252,35 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                   )
                   .get(livechartId, now);
 
-                if (nextEp) {
-                  const diff = nextEp.date - now;
-                  const minutes = Math.ceil(diff / 60);
-                  const hours = Math.ceil(diff / 3600);
-                  const days = Math.ceil(diff / (24 * 3600));
+                let nextEp = upcomingEp;
+                let showAired = false;
+                if (
+                  airedEp &&
+                  airedEp.date >= localYesterdayStart &&
+                  watchedEpisodes < airedEp.episode
+                ) {
+                  nextEp = airedEp;
+                  showAired = true;
+                }
 
-                  if (days > 0) {
-                    data.nextEpisodeIn = `Ep ${nextEp.episode}: ${days} day${days > 1 ? "s" : ""}`;
-                  } else if (hours > 0) {
-                    data.nextEpisodeIn = `Ep ${nextEp.episode}: ${hours} hr${hours > 1 ? "s" : ""}`;
-                  } else if (minutes > 0) {
-                    data.nextEpisodeIn = `Ep ${nextEp.episode}: ${minutes} min${minutes > 1 ? "s" : ""}`;
+                if (nextEp) {
+                  if (showAired) {
+                    data.nextEpisodeIn = `Ep ${nextEp.episode}: Aired`;
                   } else {
-                    data.nextEpisodeIn = `Ep ${nextEp.episode}: soon`;
+                    const diff = nextEp.date - now;
+                    const minutes = Math.ceil(diff / 60);
+                    const hours = Math.ceil(diff / 3600);
+                    const days = Math.ceil(diff / (24 * 3600));
+
+                    if (days > 0) {
+                      data.nextEpisodeIn = `Ep ${nextEp.episode}: ${days} day${days > 1 ? "s" : ""}`;
+                    } else if (hours > 0) {
+                      data.nextEpisodeIn = `Ep ${nextEp.episode}: ${hours} hr${hours > 1 ? "s" : ""}`;
+                    } else if (minutes > 0) {
+                      data.nextEpisodeIn = `Ep ${nextEp.episode}: ${minutes} min${minutes > 1 ? "s" : ""}`;
+                    } else {
+                      data.nextEpisodeIn = `Ep ${nextEp.episode}: soon`;
+                    }
                   }
                 }
               }

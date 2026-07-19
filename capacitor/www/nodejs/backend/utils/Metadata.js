@@ -690,9 +690,22 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
     const upcomingMap = {};
     const maxAiredMap = {};
+    const recentlyAiredMap = {};
     if (type === "Anime") {
       try {
         const now = Math.floor(Date.now() / 1000);
+        const localToday = new Date();
+        const localTodayStart =
+          new Date(
+            localToday.getFullYear(),
+            localToday.getMonth(),
+            localToday.getDate(),
+            0,
+            0,
+            0,
+          ).getTime() / 1000;
+        const localYesterdayStart = localTodayStart - 24 * 3600;
+
         const upcomingRows = await mappingQueryAll(
           `
           SELECT livechart_id, episode, date 
@@ -707,6 +720,26 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
             upcomingMap[r.livechart_id].date > r.date
           ) {
             upcomingMap[r.livechart_id] = { episode: r.episode, date: r.date };
+          }
+        });
+
+        const recentlyAiredRows = await mappingQueryAll(
+          `
+          SELECT livechart_id, episode, date 
+          FROM next_episodes 
+          WHERE date <= ? AND date >= ?
+        `,
+          [now, localYesterdayStart],
+        );
+        recentlyAiredRows.forEach((r) => {
+          if (
+            !recentlyAiredMap[r.livechart_id] ||
+            recentlyAiredMap[r.livechart_id].date < r.date
+          ) {
+            recentlyAiredMap[r.livechart_id] = {
+              episode: r.episode,
+              date: r.date,
+            };
           }
         });
 
@@ -759,23 +792,37 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
             maxAired = maxAiredMap[livechartId];
           }
 
-          if (upcomingMap[livechartId]) {
-            const nextEp = upcomingMap[livechartId];
-            if (watchedEpisodes >= nextEp.episode - 1) {
-              const now = Math.floor(Date.now() / 1000);
-              const diff = nextEp.date - now;
-              const minutes = Math.ceil(diff / 60);
-              const hours = Math.ceil(diff / 3600);
-              const days = Math.ceil(diff / (24 * 3600));
+          let nextEp = upcomingMap[livechartId];
+          let showAired = false;
 
-              if (days > 0) {
-                nextEpisodeIn = `Ep ${nextEp.episode}: ${days} day${days > 1 ? "s" : ""}`;
-              } else if (hours > 0) {
-                nextEpisodeIn = `Ep ${nextEp.episode}: ${hours} hr${hours > 1 ? "s" : ""}`;
-              } else if (minutes > 0) {
-                nextEpisodeIn = `Ep ${nextEp.episode}: ${minutes} min${minutes > 1 ? "s" : ""}`;
+          if (recentlyAiredMap[livechartId]) {
+            const airedEp = recentlyAiredMap[livechartId];
+            if (watchedEpisodes < airedEp.episode) {
+              nextEp = airedEp;
+              showAired = true;
+            }
+          }
+
+          if (nextEp) {
+            if (watchedEpisodes >= nextEp.episode - 1) {
+              if (showAired) {
+                nextEpisodeIn = `Ep ${nextEp.episode}: Aired`;
               } else {
-                nextEpisodeIn = `Ep ${nextEp.episode}: soon`;
+                const now = Math.floor(Date.now() / 1000);
+                const diff = nextEp.date - now;
+                const minutes = Math.ceil(diff / 60);
+                const hours = Math.ceil(diff / 3600);
+                const days = Math.ceil(diff / (24 * 3600));
+
+                if (days > 0) {
+                  nextEpisodeIn = `Ep ${nextEp.episode}: ${days} day${days > 1 ? "s" : ""}`;
+                } else if (hours > 0) {
+                  nextEpisodeIn = `Ep ${nextEp.episode}: ${hours} hr${hours > 1 ? "s" : ""}`;
+                } else if (minutes > 0) {
+                  nextEpisodeIn = `Ep ${nextEp.episode}: ${minutes} min${minutes > 1 ? "s" : ""}`;
+                } else {
+                  nextEpisodeIn = `Ep ${nextEp.episode}: soon`;
+                }
               }
             }
           }

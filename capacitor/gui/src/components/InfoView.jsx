@@ -1877,6 +1877,12 @@ export default function InfoView({
 
   return (
     <div className="info-wrapper">
+      {details?.image && (
+        <div
+          className="info-blur-bg"
+          style={{ backgroundImage: `url(${details.image})` }}
+        />
+      )}
       {/* Back Header */}
       <div className="back-header">
         <button onClick={onBack} className="btn-back">

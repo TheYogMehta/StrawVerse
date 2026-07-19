@@ -96,6 +96,7 @@ const {
   patchModulePaths,
   loadAllScrapers,
   disableWhatsNew,
+  settingupdate,
 } = require("./backend/utils/settings");
 const { loadQueue, continuousExecution } = require("./backend/utils/queue");
 const { StopDiscordRPC } = require("./backend/utils/discord");
@@ -106,6 +107,7 @@ const {
 const { getHeaders } = require("./backend/utils/proxyHeaders");
 const { registerSharedStateHandlers } = require("./backend/sharedState");
 const { checkForMappingUpdates } = require("./backend/utils/mappingUpdater");
+const { MalRefreshTokenGen } = require("./backend/utils/mal");
 
 // Express Server
 const routes = require("./backend/routes");
@@ -464,8 +466,6 @@ const createWindow = () => {
     Menu.setApplicationMenu(menu);
   }
 
-
-
   global.updatePowerSaveBlocker();
 };
 
@@ -528,6 +528,22 @@ app.whenReady().then(async () => {
       `[databaseUpdater] Error during startup database updates: ${err.message}`,
     );
   });
+
+  const malToken = getKeyValue("Settings", "malToken");
+  if (malToken) {
+    logger.info("[Main] Refreshing MAL token in the background...");
+    MalRefreshTokenGen(malToken)
+      .then((toSave) => {
+        if (toSave) {
+          settingupdate(toSave).catch(() => {});
+        }
+      })
+      .catch((err) => {
+        logger.error(
+          `[Main] Background MAL token refresh failed: ${err.message}`,
+        );
+      });
+  }
 
   await loadAllScrapers();
   globalShortcut.register("CommandOrControl+Shift+I", () => {});
@@ -674,7 +690,9 @@ ipcMain.handle("control-mpv", (event, command, args) => {
       global.activeMpvClient.write(payload);
       return { success: true };
     } catch (err) {
-      logger.error(`[MPV Control IPC] Failed to write command ${command}: ${err.message}`);
+      logger.error(
+        `[MPV Control IPC] Failed to write command ${command}: ${err.message}`,
+      );
       return { success: false, error: err.message };
     }
   }

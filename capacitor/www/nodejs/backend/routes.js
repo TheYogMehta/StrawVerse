@@ -429,8 +429,18 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
 
 router.get("/api/schedule/weekly", async (req, res) => {
   try {
-    const now = Math.floor(Date.now() / 1000);
-    const oneWeekLater = now + 7 * 24 * 3600;
+    const localToday = new Date();
+    const todayStart =
+      new Date(
+        localToday.getFullYear(),
+        localToday.getMonth(),
+        localToday.getDate(),
+        0,
+        0,
+        0,
+      ).getTime() / 1000;
+    const yesterdayStart = todayStart - 24 * 3600;
+    const limitEnd = todayStart + 7 * 24 * 3600;
 
     const episodes = await mappingQueryAll(
       `
@@ -438,12 +448,16 @@ router.get("/api/schedule/weekly", async (req, res) => {
         WHERE date >= ? AND date <= ?
         ORDER BY date ASC
       `,
-      [now, oneWeekLater],
+      [yesterdayStart, limitEnd],
     );
 
     const enriched = [];
+    const seen = new Set();
 
     for (const ep of episodes) {
+      if (seen.has(ep.livechart_id)) continue;
+      seen.add(ep.livechart_id);
+
       let malid = null;
       if (global.mappingDb) {
         try {
@@ -452,7 +466,20 @@ router.get("/api/schedule/weekly", async (req, res) => {
             [ep.livechart_id],
           );
           if (row && row.malid) {
-            malid = row.malid;
+            const mapped = await mappingQueryOne(
+              `
+              SELECT 1 AS is_mapped FROM animepahe WHERE malid = ?
+              UNION ALL
+              SELECT 1 AS is_mapped FROM anikototv WHERE malid = ?
+              UNION ALL
+              SELECT 1 AS is_mapped FROM anineko WHERE malid = ?
+              LIMIT 1
+            `,
+              [row.malid, row.malid, row.malid],
+            );
+            if (mapped) {
+              malid = row.malid;
+            }
           }
         } catch (dbErr) {
           console.error("Database error in schedule mapping lookup:", dbErr);
@@ -481,7 +508,7 @@ router.get("/api/schedule/weekly", async (req, res) => {
 router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
   const { AnimeManga } = req.params;
   let { LocalMalProvider } = req.params;
-  let { id } = req.body;
+  let { id, malId } = req.body;
   if (id !== undefined && id !== null) {
     id = String(id);
   }
@@ -494,6 +521,26 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
   const setting = await settingfetch();
 
   try {
+    if (!id && malId) {
+      const targetProvider =
+        LocalMalProvider === "local" ? "anikoto" : LocalMalProvider;
+      let targetTable = "anikototv";
+      if (targetProvider === "pahe") targetTable = "animepahe";
+      else if (targetProvider === "anineko") targetTable = "anineko";
+
+      try {
+        const targetRow = await mappingQueryOne(
+          `SELECT id, ${targetProvider === "pahe" ? "uuid" : "id"} AS targetId FROM ${targetTable} WHERE malid = ? LIMIT 1`,
+          [Number(malId)],
+        );
+        if (targetRow) {
+          id = targetRow.targetId || targetRow.id;
+        }
+      } catch (err) {
+        console.error("Failed to map malId to provider slug:", err);
+      }
+    }
+
     if (!id) throw new Error("ID IS Missing");
 
     // load local metadata
@@ -1203,7 +1250,40 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               if (mappingRow.livechart_id) {
                 const livechartId = mappingRow.livechart_id;
                 const now = Math.floor(Date.now() / 1000);
-                const nextEp = await mappingQueryOne(
+
+                let watchedEpisodes = 0;
+                try {
+                  const watchedRow = await queryOne(
+                    "SELECT watched_episodes FROM WatchHistory WHERE anime_id = ? OR anime_id LIKE ?",
+                    [id, `${id?.replace(/-(sub|dub|hsub|both)$/, "")}-%`],
+                  );
+                  if (watchedRow && watchedRow.watched_episodes) {
+                    watchedEpisodes = watchedRow.watched_episodes;
+                  }
+                } catch (_) {}
+
+                const localToday = new Date();
+                const localTodayStart =
+                  new Date(
+                    localToday.getFullYear(),
+                    localToday.getMonth(),
+                    localToday.getDate(),
+                    0,
+                    0,
+                    0,
+                  ).getTime() / 1000;
+                const localYesterdayStart = localTodayStart - 24 * 3600;
+
+                const airedEp = await mappingQueryOne(
+                  `
+                    SELECT episode, date FROM next_episodes 
+                    WHERE livechart_id = ? AND date <= ? 
+                    ORDER BY date DESC LIMIT 1
+                  `,
+                  [livechartId, now],
+                );
+
+                const upcomingEp = await mappingQueryOne(
                   `
                     SELECT episode, date FROM next_episodes 
                     WHERE livechart_id = ? AND date > ? 
@@ -1212,20 +1292,35 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                   [livechartId, now],
                 );
 
-                if (nextEp) {
-                  const diff = nextEp.date - now;
-                  const minutes = Math.ceil(diff / 60);
-                  const hours = Math.ceil(diff / 3600);
-                  const days = Math.ceil(diff / (24 * 3600));
+                let nextEp = upcomingEp;
+                let showAired = false;
+                if (
+                  airedEp &&
+                  airedEp.date >= localYesterdayStart &&
+                  watchedEpisodes < airedEp.episode
+                ) {
+                  nextEp = airedEp;
+                  showAired = true;
+                }
 
-                  if (days > 0) {
-                    data.nextEpisodeIn = `Ep ${nextEp.episode}: ${days} day${days > 1 ? "s" : ""}`;
-                  } else if (hours > 0) {
-                    data.nextEpisodeIn = `Ep ${nextEp.episode}: ${hours} hr${hours > 1 ? "s" : ""}`;
-                  } else if (minutes > 0) {
-                    data.nextEpisodeIn = `Ep ${nextEp.episode}: ${minutes} min${minutes > 1 ? "s" : ""}`;
+                if (nextEp) {
+                  if (showAired) {
+                    data.nextEpisodeIn = `Ep ${nextEp.episode}: Aired`;
                   } else {
-                    data.nextEpisodeIn = `Ep ${nextEp.episode}: soon`;
+                    const diff = nextEp.date - now;
+                    const minutes = Math.ceil(diff / 60);
+                    const hours = Math.ceil(diff / 3600);
+                    const days = Math.ceil(diff / (24 * 3600));
+
+                    if (days > 0) {
+                      data.nextEpisodeIn = `Ep ${nextEp.episode}: ${days} day${days > 1 ? "s" : ""}`;
+                    } else if (hours > 0) {
+                      data.nextEpisodeIn = `Ep ${nextEp.episode}: ${hours} hr${hours > 1 ? "s" : ""}`;
+                    } else if (minutes > 0) {
+                      data.nextEpisodeIn = `Ep ${nextEp.episode}: ${minutes} min${minutes > 1 ? "s" : ""}`;
+                    } else {
+                      data.nextEpisodeIn = `Ep ${nextEp.episode}: soon`;
+                    }
                   }
                 }
               }

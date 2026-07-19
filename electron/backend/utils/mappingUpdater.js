@@ -7,6 +7,8 @@ const { logger } = require("./AppLogger");
 const { getKeyValue, setKeyValue } = require("./db");
 const { DatabaseSync } = require("node:sqlite");
 
+const userDataPath = app.getPath("userData");
+
 function dropAllTriggers(dbInstance) {
   if (!dbInstance) return;
   try {
@@ -92,7 +94,6 @@ function deserializeDelta(buffer) {
 }
 
 async function checkForMappingUpdates() {
-  const userDataPath = app.getPath("userData");
   const mappingTagKey = "mapping_release_tag";
   const storedTag = getKeyValue("Settings", mappingTagKey);
 
@@ -220,9 +221,14 @@ async function checkForMappingUpdates() {
       const gzippedData = Buffer.from(response.data);
 
       logger.info("[mappingUpdater] Decompressing mapping database...");
-      const decompressedData = zlib.gunzipSync(gzippedData);
+      const decompressedData = await new Promise((resolve, reject) => {
+        zlib.gunzip(gzippedData, (err, result) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
+      });
 
-      fs.writeFileSync(tempDbPath, decompressedData);
+      await fs.promises.writeFile(tempDbPath, decompressedData);
 
       logger.info("[mappingUpdater] Replacing mapping database file...");
 
@@ -236,10 +242,13 @@ async function checkForMappingUpdates() {
         }
       }
 
-      fs.copyFileSync(tempDbPath, mappingDbPath);
-      fs.unlinkSync(tempDbPath);
+      await fs.promises.copyFile(tempDbPath, mappingDbPath);
+      await fs.promises.unlink(tempDbPath);
 
       global.mappingDb = new DatabaseSync(mappingDbPath);
+      try {
+        global.mappingDb.prepare("PRAGMA journal_mode = WAL").run();
+      } catch (e) {}
       dropAllTriggers(global.mappingDb);
 
       try {
@@ -582,4 +591,6 @@ function syncLibraryIdsWithMapping() {
 
 module.exports = {
   checkForMappingUpdates,
+  dropAllTriggers,
+  syncLibraryIdsWithMapping,
 };

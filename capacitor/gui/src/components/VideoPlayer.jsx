@@ -1012,7 +1012,7 @@ export default function VideoPlayer({
   useEffect(() => {
     if (!selectedSource) return;
 
-    if (window.Capacitor?.Plugins?.CloudflareBypass) {
+    if (window.Capacitor?.Plugins?.CloudflareBypass && !isWatchTogether) {
       const url = sourceUrl;
       const subtitleList = processedSubtitles || [];
       const sourcesList = sources.map((src, idx) => ({
@@ -2028,12 +2028,18 @@ export default function VideoPlayer({
                     <div className="player-wt-chat-container">
                       <div className="player-wt-chat-messages">
                         {chatList.length === 0 ? (
-                          <div className="player-wt-empty">No messages yet.</div>
+                          <div className="player-wt-empty">
+                            No messages yet.
+                          </div>
                         ) : (
                           chatList.map((m, idx) => (
                             <div key={idx} className="player-wt-chat-msg">
-                              <span className="player-wt-chat-sender">{m.sender}:</span>
-                              <span className="player-wt-chat-text">{m.message}</span>
+                              <span className="player-wt-chat-sender">
+                                {m.sender}:
+                              </span>
+                              <span className="player-wt-chat-text">
+                                {m.message}
+                              </span>
                             </div>
                           ))
                         )}
@@ -2073,8 +2079,13 @@ export default function VideoPlayer({
                         ) : (
                           queue.map((item, idx) => (
                             <div key={idx} className="player-wt-item-row">
-                              <span className="player-wt-item-idx">#{idx + 1}</span>
-                              <span className="player-wt-item-name" title={item.title || `Ep ${item.episode}`}>
+                              <span className="player-wt-item-idx">
+                                #{idx + 1}
+                              </span>
+                              <span
+                                className="player-wt-item-name"
+                                title={item.title || `Ep ${item.episode}`}
+                              >
                                 {item.title || `Ep ${item.episode}`}
                               </span>
                               {hasPrivileges && (
@@ -2082,7 +2093,8 @@ export default function VideoPlayer({
                                   <button
                                     className="player-wt-item-btn play"
                                     onClick={() => {
-                                      if (onPlayFromQueue) onPlayFromQueue(item);
+                                      if (onPlayFromQueue)
+                                        onPlayFromQueue(item);
                                     }}
                                   >
                                     <Play size={10} />
@@ -2107,20 +2119,27 @@ export default function VideoPlayer({
                       <div className="player-wt-list">
                         {users.map((u, idx) => (
                           <div key={idx} className="player-wt-item-row">
-                            <span className="player-wt-item-name">{u.username}</span>
+                            <span className="player-wt-item-name">
+                              {u.username}
+                            </span>
                             <div className="player-wt-user-badges">
                               {u.isHost && (
-                                <span className="player-wt-badge-host">HOST</span>
+                                <span className="player-wt-badge-host">
+                                  HOST
+                                </span>
                               )}
                               {u.isCoHost && (
-                                <span className="player-wt-badge-cohost">CO-HOST</span>
+                                <span className="player-wt-badge-cohost">
+                                  CO-HOST
+                                </span>
                               )}
                             </div>
                             {isHost && u.id !== watchTogetherClient.userID && (
                               <button
                                 className="player-wt-cohost-btn"
                                 onClick={() => {
-                                  if (onCoHostChange) onCoHostChange(u.id, !u.isCoHost);
+                                  if (onCoHostChange)
+                                    onCoHostChange(u.id, !u.isCoHost);
                                 }}
                               >
                                 {u.isCoHost ? "Demote" : "Co-Host"}
@@ -2135,7 +2154,9 @@ export default function VideoPlayer({
                     <div className="player-wt-episodes-container">
                       <div className="player-wt-list grid">
                         {episodesList.map((ep, idx) => {
-                          const isCurrent = ep.number === currentEpisode || ep.id === currentEpisode;
+                          const isCurrent =
+                            ep.number === currentEpisode ||
+                            ep.id === currentEpisode;
                           return (
                             <button
                               key={idx}
@@ -2144,8 +2165,14 @@ export default function VideoPlayer({
                                 if (onPlayEpisode) onPlayEpisode(ep);
                               }}
                             >
-                              <span className="ep-num">Ep {ep.number || idx + 1}</span>
-                              {ep.title && <span className="ep-title" title={ep.title}>{ep.title}</span>}
+                              <span className="ep-num">
+                                Ep {ep.number || idx + 1}
+                              </span>
+                              {ep.title && (
+                                <span className="ep-title" title={ep.title}>
+                                  {ep.title}
+                                </span>
+                              )}
                             </button>
                           );
                         })}

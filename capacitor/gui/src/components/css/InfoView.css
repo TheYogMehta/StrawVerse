@@ -1,16 +1,24 @@
 .info-wrapper {
   flex: 1;
-  padding: 30px;
+  padding: 0;
   overflow-y: auto;
   height: 100%;
   background-color: var(--bg-primary);
+  position: relative;
 }
 
 .back-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
+  padding: 16px 30px;
+  background-color: rgba(10, 10, 12, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .btn-back {
@@ -170,6 +178,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
 }
 
 .input-label {
@@ -382,6 +391,7 @@
 
 .items-section {
   margin-top: 40px;
+  padding: 0 30px 30px 30px;
 }
 
 .section-header {
@@ -1030,4 +1040,150 @@
 
 .pulse-highlight {
   animation: dropdownPulseHighlight 1.5s ease-out;
+}
+
+/* Dynamic Info Blur Background */
+.info-blur-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 380px;
+  background-size: cover;
+  background-position: center;
+  filter: blur(28px) brightness(0.35);
+  opacity: 0.7;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* Ensure other wrapper content stays on top of background blur */
+.details-grid {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 768px) {
+  .info-wrapper {
+    padding: 0;
+  }
+
+  .back-header {
+    padding: 12px 16px;
+  }
+
+  .items-section {
+    padding: 0 16px 16px 16px;
+  }
+
+  .details-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+    padding: 16px;
+    margin: 0 16px 20px 16px;
+    border-radius: 16px;
+    width: auto;
+  }
+
+  .cover-wrapper {
+    max-width: 180px;
+    margin: 0 auto;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+    border-radius: 12px;
+  }
+
+  .info-content {
+    align-items: center;
+    text-align: center;
+  }
+
+  .tag-list {
+    justify-content: center;
+  }
+
+  .info-title {
+    font-size: 24px;
+    font-weight: 800;
+  }
+
+  .actions-row {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .quick-actions-wrapper {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+    margin-top: 10px;
+  }
+
+  .btn-continue {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .tracking-group {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    width: 100%;
+  }
+
+  .tracking-group > :only-child {
+    grid-column: span 2;
+  }
+
+  .mal-box {
+    width: 100%;
+    padding: 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .mal-row {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+
+  .mal-row .input-group {
+    width: 100% !important;
+  }
+
+  .mal-row .btn-sync {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  /* Compact Episodes/Chapters List Item Cards */
+  .item-card {
+    padding: 10px 14px;
+    border-radius: 10px;
+    gap: 10px;
+  }
+
+  .item-card input[type="checkbox"] {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  .item-num {
+    font-size: 13px;
+  }
+
+  .btn-play {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
 }

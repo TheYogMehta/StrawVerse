@@ -8,7 +8,18 @@ const { logger } = require("./AppLogger");
 const userDataPath = app.getPath("userData");
 
 global.db = new DatabaseSync(path.join(userDataPath, "database.db"));
+try {
+  global.db.prepare("PRAGMA journal_mode = WAL").run();
+} catch (e) {
+  logger.error(`Failed to set WAL mode on database.db: ${e.message}`);
+}
+
 global.mappingDb = new DatabaseSync(path.join(userDataPath, "mapping.db"));
+try {
+  global.mappingDb.prepare("PRAGMA journal_mode = WAL").run();
+} catch (e) {
+  logger.error(`Failed to set WAL mode on mapping.db: ${e.message}`);
+}
 
 const tables = {
   Anime: {

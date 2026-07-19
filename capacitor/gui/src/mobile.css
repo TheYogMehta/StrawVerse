@@ -206,6 +206,8 @@
     padding: 10px 14px !important;
     gap: 8px !important;
     align-items: center !important;
+    position: relative !important;
+    z-index: 100 !important;
   }
 
   html .wt-top-left {
@@ -225,8 +227,11 @@
   }
 
   html .wt-main-body {
+    display: flex !important;
     flex-direction: column !important;
-    overflow-y: auto !important;
+    flex: 1 !important;
+    height: 0 !important;
+    overflow: hidden !important;
   }
 
   html .wt-left-content {
@@ -234,16 +239,72 @@
     width: 100% !important;
     flex: 0 0 auto !important;
     height: auto !important;
+    position: relative !important;
+    z-index: 50 !important;
   }
 
   html .wt-right-chat.expanded,
   html .wt-right-chat.collapsed {
     position: relative !important;
     width: 100% !important;
-    height: 400px !important;
+    flex: 1 1 auto !important;
+    height: 0 !important;
     top: 0 !important;
     border-left: none !important;
     border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  /* Compact "now playing" bar on mobile */
+  html .wt-bottom-info {
+    height: 60px !important;
+    padding: 0 4px !important;
+    border-radius: 8px !important;
+    margin: 8px 12px !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  html .wt-current-info {
+    padding: 0 8px !important;
+    gap: 10px !important;
+  }
+
+  html .wt-bottom-cover {
+    width: 32px !important;
+    height: 44px !important;
+    border-radius: 4px !important;
+  }
+
+  html .wt-bottom-details {
+    gap: 2px !important;
+  }
+
+  html .wt-bottom-title {
+    font-size: 0.85rem !important;
+  }
+
+  html .wt-bottom-ep {
+    font-size: 0.72rem !important;
+  }
+
+  html .wt-bottom-actions {
+    gap: 8px !important;
+    padding: 0 8px !important;
+    align-items: center !important;
+    display: flex !important;
+  }
+
+  html .wt-btn-provider-dropdown {
+    height: 30px !important;
+    font-size: 0.75rem !important;
+    padding: 0 10px !important;
+  }
+
+  html .wt-btn-skip {
+    height: 30px !important;
+    font-size: 0.75rem !important;
+    padding: 0 12px !important;
   }
 
   html .wt-sidebar-tab-btn {

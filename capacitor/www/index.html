@@ -26,7 +26,10 @@
       body {
         background: var(--bg);
         color: var(--fg);
-        font-family: system-ui, -apple-system, sans-serif;
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -85,9 +88,13 @@
   </head>
   <body>
     <main>
-      <img src="nodejs/gui/dist/images/logo.webp" class="app-logo-img" alt="Logo" id="logo-img" onerror="this.style.display='none'" />
       <div class="logo">Straw<span>Verse</span></div>
-      <img src="nodejs/gui/dist/images/loading.gif" class="loader-gif" alt="Loading" id="spinner" />
+      <img
+        src="nodejs/gui/dist/images/loading.gif"
+        class="loader-gif"
+        alt="Loading"
+        id="spinner"
+      />
       <p class="status" id="status">Starting engine&hellip;</p>
       <p class="error" id="error"></p>
       <button id="retry" type="button">Retry</button>

@@ -21,6 +21,7 @@ import {
   Plus,
   ArrowUpDown,
   ListVideo,
+  Tv,
 } from "lucide-react";
 
 export default function WatchTogetherView({ onNavigate }) {
@@ -73,7 +74,7 @@ export default function WatchTogetherView({ onNavigate }) {
   const [activeMedia, setActiveMedia] = useState(null);
   const [selectedAnime, setSelectedAnime] = useState(null);
   const [selectedAnimeDetails, setSelectedAnimeDetails] = useState(null);
-  const [isSynopsisCollapsed, setIsSynopsisCollapsed] = useState(false);
+  const [isSynopsisCollapsed, setIsSynopsisCollapsed] = useState(true);
   const [animeEpisodes, setAnimeEpisodes] = useState([]);
   const [loadingEpisodes, setLoadingEpisodes] = useState(false);
 
@@ -175,56 +176,123 @@ export default function WatchTogetherView({ onNavigate }) {
         }
       }
 
-      setActiveMedia((prev) => {
-        const isMatch =
-          selectedAnime &&
-          (!prev ||
-            prev.id === selectedAnime.id ||
-            prev.animeTitle === "Watch Together Session") &&
-          (!matchedQueueTitle ||
-            selectedAnime.title
-              .toLowerCase()
-              .includes(matchedQueueTitle.toLowerCase()) ||
-            matchedQueueTitle
-              .toLowerCase()
-              .includes(selectedAnime.title.toLowerCase()));
+      const providerMap = { 1: "anikoto", 2: "anineko", 3: "pahe" };
+      const targetProvider = providerMap[providerID] || "anikoto";
 
-        const titleToUse = isMatch
-          ? selectedAnime.title
-          : matchedQueueTitle ||
-            (prev?.animeTitle && prev.animeTitle !== "Watch Together Session"
-              ? prev.animeTitle
-              : "Watch Together Session");
-        const imageToUse = isMatch ? selectedAnime.image : prev?.image || "";
-        const idToUse = isMatch
-          ? selectedAnime.id
-          : prev?.id && prev.id !== "100"
-            ? prev.id
-            : String(animeID);
-        const epListToUse =
-          isMatch && animeEpisodes.length > 0
-            ? animeEpisodes
-            : prev?.episodesList || [{ id: epIdentifier, number: episode }];
+      const resolvedMalId =
+        animeID && animeID !== 100
+          ? animeID
+          : selectedAnimeDetails?.malid || selectedAnime?.malid;
 
-        if (!prev) {
+      if (resolvedMalId) {
+        fetch(`/api/info/Anime/${targetProvider}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ malId: resolvedMalId }),
+        })
+          .then((r) => r.json())
+          .then((details) => {
+            if (details && details.id) {
+              const matchedEp = details.episodes?.find(
+                (epItem) => Number(epItem.number) === Number(episode),
+              );
+              const targetEpId = matchedEp ? matchedEp.id : epIdentifier;
+
+              const mediaObj = {
+                id: details.id,
+                ep: targetEpId,
+                animeTitle:
+                  details.title ||
+                  matchedQueueTitle ||
+                  "Watch Together Session",
+                provider: targetProvider,
+                image: details.image || "",
+                episodesList: details.episodes || [
+                  { id: epIdentifier, number: episode },
+                ],
+              };
+              setActiveMedia(mediaObj);
+            }
+          })
+          .catch((err) => {
+            console.error("Error resolving remote media info by malId:", err);
+            // Fallback
+            setActiveMedia((prev) => {
+              const epList = prev?.episodesList || [];
+              const matchedEp = epList.find(
+                (epItem) => Number(epItem.number) === Number(episode),
+              );
+              const targetEpId = matchedEp ? matchedEp.id : epIdentifier;
+              return {
+                id: prev?.id && prev.id !== "100" ? prev.id : String(animeID),
+                ep: targetEpId,
+                animeTitle: matchedQueueTitle || "Watch Together Session",
+                provider: targetProvider,
+                image: prev?.image || "",
+                episodesList:
+                  epList.length > 0
+                    ? epList
+                    : [{ id: epIdentifier, number: episode }],
+              };
+            });
+          });
+      } else {
+        setActiveMedia((prev) => {
+          const isMatch =
+            selectedAnime &&
+            (!prev ||
+              prev.id === selectedAnime.id ||
+              prev.animeTitle === "Watch Together Session") &&
+            (!matchedQueueTitle ||
+              selectedAnime.title
+                .toLowerCase()
+                .includes(matchedQueueTitle.toLowerCase()) ||
+              matchedQueueTitle
+                .toLowerCase()
+                .includes(selectedAnime.title.toLowerCase()));
+
+          const titleToUse = isMatch
+            ? selectedAnime.title
+            : matchedQueueTitle ||
+              (prev?.animeTitle && prev.animeTitle !== "Watch Together Session"
+                ? prev.animeTitle
+                : "Watch Together Session");
+          const imageToUse = isMatch ? selectedAnime.image : prev?.image || "";
+          const idToUse = isMatch
+            ? selectedAnime.id
+            : prev?.id && prev.id !== "100"
+              ? prev.id
+              : String(animeID);
+          const epListToUse =
+            isMatch && animeEpisodes.length > 0
+              ? animeEpisodes
+              : prev?.episodesList || [{ id: epIdentifier, number: episode }];
+
+          const matchedEp = epListToUse.find(
+            (epItem) => Number(epItem.number) === Number(episode),
+          );
+          const targetEpId = matchedEp ? matchedEp.id : epIdentifier;
+
+          if (!prev) {
+            return {
+              id: idToUse,
+              ep: targetEpId,
+              animeTitle: titleToUse,
+              provider: targetProvider,
+              image: imageToUse,
+              episodesList: epListToUse,
+            };
+          }
           return {
+            ...prev,
             id: idToUse,
-            ep: epIdentifier,
+            ep: targetEpId,
             animeTitle: titleToUse,
-            provider: selectedProvider || "anikoto",
             image: imageToUse,
             episodesList: epListToUse,
           };
-        }
-        return {
-          ...prev,
-          id: idToUse,
-          ep: epIdentifier,
-          animeTitle: titleToUse,
-          image: imageToUse,
-          episodesList: epListToUse,
-        };
-      });
+        });
+      }
     };
 
     const handleError = (err) => {
@@ -306,7 +374,7 @@ export default function WatchTogetherView({ onNavigate }) {
     setAnimeEpisodes([]);
     setSearchDropdownVisible(false);
     if (window.innerWidth <= 768) {
-      setActiveTab("search");
+      setActiveTab("episodes");
     }
     try {
       const resInfo = await fetch(
@@ -363,7 +431,10 @@ export default function WatchTogetherView({ onNavigate }) {
           };
           setActiveMedia(mediaObj);
           if (watchTogetherClient.roomCode) {
-            watchTogetherClient.sendLoadMedia(1, 100, epNum);
+            const providerIdMap = { anikoto: 1, anineko: 2, pahe: 3 };
+            const pId = providerIdMap[selectedProvider] || 1;
+            const mId = infoData?.malid || item?.malid || 100;
+            watchTogetherClient.sendLoadMedia(pId, mId, epNum);
           }
         }
       }
@@ -389,13 +460,67 @@ export default function WatchTogetherView({ onNavigate }) {
     };
     setActiveMedia(mediaObj);
     if (roomCode) {
-      watchTogetherClient.sendLoadMedia(1, 100, epNum);
+      const providerIdMap = { anikoto: 1, anineko: 2, pahe: 3 };
+      const pId = providerIdMap[selectedProvider] || 1;
+      const mId = selectedAnimeDetails?.malid || selectedAnime?.malid || 100;
+      watchTogetherClient.sendLoadMedia(pId, mId, epNum);
     }
   };
 
-  const handlePlayFromQueue = (queueItem) => {
+  const handlePlayFromQueue = async (queueItem) => {
     const epNum = Number(queueItem.episode) || 1;
-    const match = animeEpisodes.find((ep) => Number(ep.number) === epNum);
+
+    // Determine provider name from queueItem.providerID
+    const providerIdMap = { 1: "anikoto", 2: "anineko", 3: "pahe" };
+    const targetProvider =
+      providerIdMap[queueItem.providerID] || selectedProvider || "anikoto";
+
+    let targetEpisodes = animeEpisodes;
+
+    // If animeEpisodes is empty or doesn't match the current queueItem, fetch it
+    if (
+      animeEpisodes.length === 0 ||
+      !selectedAnime ||
+      selectedAnime.malid !== queueItem.animeID
+    ) {
+      try {
+        // Fetch details by MAL ID
+        const resInfo = await fetch(`/api/info/Anime/${targetProvider}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ malId: queueItem.animeID }),
+        });
+        const details = await resInfo.json();
+
+        if (details && details.id) {
+          const resEp = await fetch("/api/info/items", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: details.dataId || details.id,
+              page: 1,
+              provider: targetProvider,
+              type: "Anime",
+            }),
+          });
+          const epData = await resEp.json();
+          const list = epData?.episodes || details.episodes || [];
+
+          setSelectedAnime({
+            id: details.id,
+            title: details.title,
+            image: details.image,
+            malid: queueItem.animeID,
+          });
+          setAnimeEpisodes(list);
+          targetEpisodes = list;
+        }
+      } catch (err) {
+        console.error("Failed to fetch episodes list for queue item:", err);
+      }
+    }
+
+    const match = targetEpisodes.find((ep) => Number(ep.number) === epNum);
     if (match) {
       handlePlayEpisode(match);
     } else {
@@ -422,7 +547,15 @@ export default function WatchTogetherView({ onNavigate }) {
     } else {
       // Auto queue next episode if possible
       if (activeMedia && activeMedia.episodesList) {
-        const currentEpNum = parseFloat(activeMedia.ep);
+        const currentEpObj = activeMedia.episodesList.find(
+          (e) => String(e.id) === String(activeMedia.ep),
+        );
+        const currentEpNum = currentEpObj
+          ? typeof currentEpObj.number === "number"
+            ? currentEpObj.number
+            : parseFloat(currentEpObj.number) || 0
+          : parseFloat(activeMedia.ep) || 0;
+
         const sorted = [...activeMedia.episodesList].sort((a, b) => {
           const aNum = parseFloat(a.number) || 0;
           const bNum = parseFloat(b.number) || 0;
@@ -450,7 +583,10 @@ export default function WatchTogetherView({ onNavigate }) {
         ? epItem.number
         : parseFloat(epItem.number) || 1;
     const title = `${selectedAnime?.title || "Anime"} - Ep ${epNum}`;
-    watchTogetherClient.sendAddQueue(1, 100, epNum, title);
+    const providerIdMap = { anikoto: 1, anineko: 2, pahe: 3 };
+    const pId = providerIdMap[selectedProvider] || 1;
+    const mId = selectedAnimeDetails?.malid || selectedAnime?.malid || 100;
+    watchTogetherClient.sendAddQueue(pId, mId, epNum, title);
   };
 
   const handleQueueRange = (limit) => {
@@ -463,6 +599,10 @@ export default function WatchTogetherView({ onNavigate }) {
       return aNum - bNum;
     });
 
+    const providerIdMap = { anikoto: 1, anineko: 2, pahe: 3 };
+    const pId = providerIdMap[selectedProvider] || 1;
+    const mId = selectedAnimeDetails?.malid || selectedAnime?.malid || 100;
+
     if (limit === "all") {
       for (const epItem of sorted) {
         const epNum =
@@ -470,7 +610,7 @@ export default function WatchTogetherView({ onNavigate }) {
             ? epItem.number
             : parseFloat(epItem.number) || 1;
         const title = `${selectedAnime?.title || "Anime"} - Ep ${epNum}`;
-        watchTogetherClient.sendAddQueue(1, 100, epNum, title);
+        watchTogetherClient.sendAddQueue(pId, mId, epNum, title);
       }
       return;
     }
@@ -512,14 +652,17 @@ export default function WatchTogetherView({ onNavigate }) {
           ? epItem.number
           : parseFloat(epItem.number) || 1;
       const title = `${selectedAnime?.title || "Anime"} - Ep ${epNum}`;
-      watchTogetherClient.sendAddQueue(1, 100, epNum, title);
+      watchTogetherClient.sendAddQueue(pId, mId, epNum, title);
     }
   };
 
   const handleAddToQueueFromDropdown = (animeItem, epItem) => {
     const epNum = parseFloat(epItem.number) || 1;
     const title = `${animeItem.title} - Ep ${epNum}`;
-    watchTogetherClient.sendAddQueue(1, 100, epNum, title);
+    const providerIdMap = { anikoto: 1, anineko: 2, pahe: 3 };
+    const pId = providerIdMap[selectedProvider] || 1;
+    const mId = animeItem.malid || 100;
+    watchTogetherClient.sendAddQueue(pId, mId, epNum, title);
   };
 
   const handlePlayFromDropdown = (animeItem, epItem) => {
@@ -536,7 +679,10 @@ export default function WatchTogetherView({ onNavigate }) {
     };
     setActiveMedia(mediaObj);
     if (roomCode) {
-      watchTogetherClient.sendLoadMedia(1, 100, epNum);
+      const providerIdMap = { anikoto: 1, anineko: 2, pahe: 3 };
+      const pId = providerIdMap[selectedProvider] || 1;
+      const mId = animeItem.malid || 100;
+      watchTogetherClient.sendLoadMedia(pId, mId, epNum);
     }
   };
 
@@ -754,12 +900,175 @@ export default function WatchTogetherView({ onNavigate }) {
   }
 
   const renderEpisodesSection = () => {
+    if (isMobile) {
+      return (
+        <div className="wt-mobile-episodes-section">
+          {/* Collapsed/Expanded Synopsis Header */}
+          {selectedAnime && selectedAnimeDetails?.description && (
+            <div className="wt-mobile-synopsis-box">
+              {isSynopsisCollapsed ? (
+                <div
+                  className="wt-mobile-synopsis-collapsed-row"
+                  onClick={() => setIsSynopsisCollapsed(false)}
+                >
+                  <img
+                    src={selectedAnimeDetails?.image || selectedAnime.image}
+                    alt={selectedAnime.title}
+                    className="wt-mobile-synopsis-thumb"
+                  />
+                  <div className="wt-mobile-synopsis-info">
+                    <span className="wt-mobile-synopsis-title">
+                      {selectedAnimeDetails?.title || selectedAnime.title}
+                    </span>
+                    <span className="wt-mobile-synopsis-subtitle">
+                      Tap to view synopsis & details
+                    </span>
+                  </div>
+                  <ChevronLeft
+                    size={16}
+                    style={{ transform: "rotate(-90deg)" }}
+                  />
+                </div>
+              ) : (
+                <div className="wt-mobile-synopsis-expanded-card">
+                  <div className="wt-mobile-synopsis-card-header">
+                    <img
+                      src={selectedAnimeDetails?.image || selectedAnime.image}
+                      alt={selectedAnime.title}
+                      className="wt-mobile-synopsis-poster"
+                    />
+                    <div className="wt-mobile-synopsis-card-info">
+                      <span className="wt-mobile-synopsis-title">
+                        {selectedAnimeDetails?.title || selectedAnime.title}
+                      </span>
+                      <button
+                        className="wt-mobile-synopsis-toggle-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsSynopsisCollapsed(true);
+                        }}
+                      >
+                        Hide Info
+                      </button>
+                    </div>
+                  </div>
+                  <div className="wt-mobile-synopsis-scrollable-desc">
+                    <p>{selectedAnimeDetails.description}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Sleek Toolbar for Mobile */}
+          {selectedAnime && !loadingEpisodes && animeEpisodes.length > 0 && (
+            <>
+              <div className="wt-mobile-ep-toolbar">
+                <span className="wt-mobile-ep-count">
+                  Episodes ({filteredEpisodes.length})
+                </span>
+                <div className="wt-mobile-ep-controls">
+                  <select
+                    className="wt-mobile-ep-select"
+                    value={dubSelect}
+                    onChange={(e) => setDubSelect(e.target.value)}
+                  >
+                    <option value="sub">SUB</option>
+                    <option value="dub">DUB</option>
+                    <option value="all">ALL</option>
+                  </select>
+
+                  <button
+                    className="wt-mobile-ep-sort-btn"
+                    onClick={() =>
+                      setSortOrder(sortOrder === "asc" ? "desc" : "asc")
+                    }
+                  >
+                    <ArrowUpDown size={12} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Simple Filter input */}
+              <div className="wt-mobile-filter-row">
+                <Search size={12} className="wt-mobile-filter-icon" />
+                <input
+                  type="text"
+                  className="wt-mobile-filter-input"
+                  placeholder="Search episode number..."
+                  value={episodeSearchQuery}
+                  onChange={(e) => setEpisodeSearchQuery(e.target.value)}
+                />
+                {episodeSearchQuery && (
+                  <button
+                    className="wt-mobile-filter-clear"
+                    onClick={() => setEpisodeSearchQuery("")}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Redesigned horizontal list rows for episodes */}
+              <div className="wt-mobile-ep-list">
+                {filteredEpisodes.length === 0 ? (
+                  <div className="wt-mobile-empty-ep">No episodes match.</div>
+                ) : (
+                  filteredEpisodes.map((ep, idx) => (
+                    <div key={idx} className="wt-mobile-ep-row">
+                      <div className="wt-mobile-ep-number-badge">
+                        {ep.number || idx + 1}
+                      </div>
+                      <div className="wt-mobile-ep-details">
+                        <span className="wt-mobile-ep-title" title={ep.title}>
+                          {ep.title &&
+                          ep.title.toLowerCase() !==
+                            `episode ${ep.number || idx + 1}`.toLowerCase() &&
+                          ep.title.toLowerCase() !==
+                            `ep ${ep.number || idx + 1}`.toLowerCase() &&
+                          ep.title.toLowerCase() !==
+                            `${ep.number || idx + 1}`.toLowerCase()
+                            ? ep.title
+                            : `Episode ${ep.number || idx + 1}`}
+                        </span>
+                        <span className="wt-mobile-ep-type">
+                          {dubSelect.toUpperCase()}
+                        </span>
+                      </div>
+                      {hasPrivileges && (
+                        <div className="wt-mobile-ep-actions">
+                          <button
+                            className="wt-mobile-ep-action-btn play"
+                            onClick={() => handlePlayEpisode(ep)}
+                            title="Play together"
+                          >
+                            <Play size={10} fill="currentColor" />
+                          </button>
+                          <button
+                            className="wt-mobile-ep-action-btn queue"
+                            onClick={() => handleAddToQueue(ep)}
+                            title="Add to queue"
+                          >
+                            <Plus size={10} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      );
+    }
+
     return (
       <>
         {/* Anime description section */}
         {selectedAnime &&
           selectedAnimeDetails?.description &&
-          (isSynopsisCollapsed && activeMedia ? (
+          (isSynopsisCollapsed ? (
             <div className="wt-collapsed-synopsis-bar u-style-118">
               <div className="u-style-119">
                 <img
@@ -795,14 +1104,12 @@ export default function WatchTogetherView({ onNavigate }) {
                   <span className="wt-scroll-anime-title">
                     {selectedAnimeDetails?.title || selectedAnime.title}
                   </span>
-                  {activeMedia && (
-                    <button
-                      className="wt-btn-toggle-synopsis u-style-126"
-                      onClick={() => setIsSynopsisCollapsed(true)}
-                    >
-                      Hide Info
-                    </button>
-                  )}
+                  <button
+                    className="wt-btn-toggle-synopsis u-style-126"
+                    onClick={() => setIsSynopsisCollapsed(true)}
+                  >
+                    Hide Info
+                  </button>
                 </div>
                 <p className="wt-scroll-desc-text">
                   {selectedAnimeDetails.description}
@@ -895,9 +1202,7 @@ export default function WatchTogetherView({ onNavigate }) {
             </div>
 
             {filteredEpisodes.length === 0 ? (
-              <div className="u-style-131">
-                No episodes match your filter.
-              </div>
+              <div className="u-style-131">No episodes match your filter.</div>
             ) : (
               <div className="wt-episodes-grid">
                 {filteredEpisodes.map((ep, idx) => (
@@ -1078,9 +1383,13 @@ export default function WatchTogetherView({ onNavigate }) {
                   onPlayFromQueue={handlePlayFromQueue}
                   onAddToQueue={handleAddToQueue}
                   onPlayEpisode={handlePlayEpisode}
-                  onCoHostChange={(uid, val) => watchTogetherClient.sendCoHostChange(uid, val)}
+                  onCoHostChange={(uid, val) =>
+                    watchTogetherClient.sendCoHostChange(uid, val)
+                  }
                   onClearQueue={handleClearQueue}
-                  onRemoveQueue={(idx) => watchTogetherClient.sendRemoveQueue(idx)}
+                  onRemoveQueue={(idx) =>
+                    watchTogetherClient.sendRemoveQueue(idx)
+                  }
                 />
               </>
             ) : (
@@ -1156,9 +1465,7 @@ export default function WatchTogetherView({ onNavigate }) {
           </div>
 
           {!isMobile && (
-            <div className="wt-queue-scroll">
-              {renderEpisodesSection()}
-            </div>
+            <div className="wt-queue-scroll">{renderEpisodesSection()}</div>
           )}
         </div>
 
@@ -1202,11 +1509,11 @@ export default function WatchTogetherView({ onNavigate }) {
                 </button>
                 {isMobile && (
                   <button
-                    className={`wt-sidebar-tab-btn ${activeTab === "search" ? "active" : ""}`}
-                    onClick={() => setActiveTab("search")}
-                    title="Search & Episodes"
+                    className={`wt-sidebar-tab-btn ${activeTab === "episodes" ? "active" : ""}`}
+                    onClick={() => setActiveTab("episodes")}
+                    title="Episodes & Info"
                   >
-                    <Search size={16} />
+                    <Tv size={16} />
                   </button>
                 )}
                 <button
@@ -1254,9 +1561,20 @@ export default function WatchTogetherView({ onNavigate }) {
                       </button>
                     </form>
                   </div>
-                ) : activeTab === "search" && isMobile ? (
+                ) : activeTab === "episodes" && isMobile ? (
                   <div className="wt-mobile-search-tab-scroll">
-                    {renderEpisodesSection()}
+                    {selectedAnime ? (
+                      renderEpisodesSection()
+                    ) : (
+                      <div className="wt-player-placeholder">
+                        <Tv size={48} color="#a78bfa" />
+                        <h3>No Anime Selected</h3>
+                        <p>
+                          Search and select an anime using the top search bar to
+                          view episodes and info here!
+                        </p>
+                      </div>
+                    )}
                   </div>
                 ) : activeTab === "queue" ? (
                   /* Queue View */

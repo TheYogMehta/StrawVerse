@@ -388,10 +388,6 @@ async function SettingsLoad() {
       config.lastVersion = currentVersion;
     }
 
-    if (config.malToken != null) {
-      let Tosave = await MalRefreshTokenGen(config.malToken);
-      await settingupdate(Tosave);
-    }
     if (config?.enableDiscordRPC === true) {
       try {
         await StartDiscordRPC();

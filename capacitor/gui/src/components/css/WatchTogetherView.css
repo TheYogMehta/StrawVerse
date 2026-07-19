@@ -1638,3 +1638,278 @@
 .wt-player-chat-input:focus {
   border-color: #8b5cf6;
 }
+
+/* Redesigned mobile episodes and synopsis layout */
+.wt-mobile-episodes-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.wt-mobile-synopsis-box {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.wt-mobile-synopsis-collapsed-row {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.wt-mobile-synopsis-thumb {
+  width: 32px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+
+.wt-mobile-synopsis-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wt-mobile-synopsis-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wt-mobile-synopsis-subtitle {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.wt-mobile-synopsis-expanded-card {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wt-mobile-synopsis-card-header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.wt-mobile-synopsis-poster {
+  width: 64px;
+  height: 88px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.wt-mobile-synopsis-card-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wt-mobile-synopsis-toggle-btn {
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #fff;
+  font-size: 0.68rem;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.wt-mobile-synopsis-scrollable-desc {
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.75);
+  padding-right: 4px;
+}
+
+/* Mobile Episodes Toolbar */
+.wt-mobile-ep-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.wt-mobile-ep-count {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #c4b5fd;
+}
+
+.wt-mobile-ep-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.wt-mobile-ep-select {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 6px;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+  outline: none;
+}
+
+.wt-mobile-ep-sort-btn {
+  width: 24px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* Mobile Filter Input */
+.wt-mobile-filter-row {
+  display: flex;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  height: 32px;
+  padding: 0 8px;
+  gap: 6px;
+}
+
+.wt-mobile-filter-icon {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.wt-mobile-filter-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 0.75rem;
+  outline: none;
+}
+
+.wt-mobile-filter-clear {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* Mobile Episodes List */
+.wt-mobile-ep-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.wt-mobile-ep-row {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 6px 8px;
+  gap: 8px;
+}
+
+.wt-mobile-ep-number-badge {
+  width: 24px;
+  height: 24px;
+  background: rgba(139, 92, 246, 0.12);
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #a78bfa;
+}
+
+.wt-mobile-ep-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wt-mobile-ep-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: #fff;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wt-mobile-ep-type {
+  font-size: 0.54rem;
+  color: rgba(255, 255, 255, 0.4);
+  font-weight: 700;
+}
+
+.wt-mobile-ep-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.wt-mobile-ep-action-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.wt-mobile-ep-action-btn.play {
+  background: #7c3aed;
+  color: #fff;
+}
+
+.wt-mobile-ep-action-btn.play:hover {
+  background: #6d28d9;
+}
+
+.wt-mobile-ep-action-btn.queue {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.wt-mobile-ep-action-btn.queue:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.wt-mobile-empty-ep {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  padding: 30px 0;
+}

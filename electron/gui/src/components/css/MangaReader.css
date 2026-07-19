@@ -621,3 +621,141 @@
   justify-content: center;
   align-items: center;
 }
+
+@media (max-width: 768px) {
+  .reader-header {
+    padding: 0 12px;
+    height: 56px;
+    gap: 8px;
+    background: rgba(10, 10, 12, 0.75) !important;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .btn-reader-back span {
+    display: none;
+  }
+
+  .btn-reader-back {
+    padding: 0;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .reader-size-controls {
+    display: none !important;
+  }
+
+  .chapter-title {
+    display: none !important;
+  }
+
+  .reader-navigation {
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: 6px;
+    background-color: rgba(0, 0, 0, 0.3);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .btn-nav {
+    padding: 5px 8px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  .select-nav {
+    padding: 4px 6px;
+    font-size: 12px;
+    max-width: 90px;
+    background-color: transparent;
+    border: none;
+  }
+
+  .header-badge {
+    padding: 6px;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .header-badge span {
+    display: none !important;
+  }
+
+  .header-badge svg {
+    margin: 0 !important;
+  }
+
+  /* Viewport and pages */
+  .reader-viewport {
+    padding-top: 10px;
+    padding-bottom: 20px;
+  }
+
+  .pages-container {
+    max-width: 100% !important;
+    gap: 4px;
+    padding: 0;
+  }
+
+  .page-wrapper {
+    border-radius: 0;
+    box-shadow: none;
+    min-height: auto;
+  }
+
+  .lazy-page-container {
+    min-height: auto;
+  }
+
+  /* Splash cover card */
+  .splash-card {
+    height: calc(100vh - 160px);
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    margin-bottom: 16px;
+  }
+
+  .splash-chapter-num {
+    font-size: 32px;
+  }
+
+  .splash-scroll-hint span {
+    font-size: 9px;
+  }
+
+  /* Bottom Controls Navigation */
+  .bottom-controls-panel {
+    padding: 16px;
+    margin: 16px 8px;
+    width: calc(100% - 16px);
+    border-radius: 12px;
+    background: rgba(22, 24, 31, 0.6);
+  }
+
+  .bottom-nav-row {
+    flex-direction: column;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .btn-bottom-nav,
+  .bottom-nav-select {
+    width: 100% !important;
+    justify-content: center !important;
+    text-align: center !important;
+  }
+}

@@ -740,7 +740,6 @@ global.axios.interceptors.response.use(
         });
     }
 
-  (response) => {
     return response;
   },
   async (error) => {
@@ -762,29 +761,49 @@ global.axios.interceptors.response.use(
       response &&
       (response.status === 403 || response.status === 503) &&
       config &&
-      !config._retry &&
-      global?.cloudflarebypass &&
       shouldBypassUrl(config.url)
     ) {
-      config._retry = true;
-      console.log(
-        `Cloudflare challenge detected (status: ${response.status}) for ${config.url}. Retrying with bypass...`,
-      );
-      try {
-        const referer =
-          config.headers?.Referer ||
-          config.headers?.referer ||
-          (config.headers?.get && config.headers.get("referer")) ||
-          "";
-        await global.cloudflarebypass(config.url, true, referer);
-        const newHeaders = getHeaders(config.url, config.method);
-        config.headers = {
-          ...config.headers,
-          ...newHeaders,
-        };
-        return global.axios(config);
-      } catch (bypassErr) {
-        return Promise.reject(bypassErr);
+      config._retryCount = config._retryCount || 0;
+      if (config._retryCount < 3) {
+        config._retryCount++;
+
+        const currentCookie =
+          config.headers?.Cookie || config.headers?.cookie || "";
+        const latestHeaders = getHeaders(config.url, config.method);
+        const latestCookie = latestHeaders.Cookie || "";
+
+        if (latestCookie && latestCookie !== currentCookie) {
+          console.log(
+            `[Axios Interceptor] Stale cookies detected for ${config.url}. Retrying with new cookies (try #${config._retryCount})...`,
+          );
+          config.headers = {
+            ...config.headers,
+            ...latestHeaders,
+          };
+          return global.axios(config);
+        }
+
+        if (global?.cloudflarebypass) {
+          console.log(
+            `[Axios Interceptor] Cloudflare challenge detected (status: ${response.status}) for ${config.url}. Retrying with bypass (try #${config._retryCount})...`,
+          );
+          try {
+            const referer =
+              config.headers?.Referer ||
+              config.headers?.referer ||
+              (config.headers?.get && config.headers.get("referer")) ||
+              "";
+            await global.cloudflarebypass(config.url, true, referer);
+            const newHeaders = getHeaders(config.url, config.method);
+            config.headers = {
+              ...config.headers,
+              ...newHeaders,
+            };
+            return global.axios(config);
+          } catch (bypassErr) {
+            return Promise.reject(bypassErr);
+          }
+        }
       }
     }
     return Promise.reject(error);

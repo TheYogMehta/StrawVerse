@@ -24,6 +24,7 @@ import {
   BookOpen,
   Play,
   X,
+  Calendar,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError } from "../utils/swal";
@@ -980,6 +981,11 @@ export default function Catalog({
       backText = "Back to MAL Library";
     }
 
+    if (isMalActive && (!item.allMatches || item.allMatches.length === 0)) {
+      triggerScrapeSearch(item.title);
+      return;
+    }
+
     if (isMalActive && item.allMatches && item.allMatches.length > 1) {
       const inputOptions = {};
       item.allMatches.forEach((m) => {
@@ -1275,10 +1281,7 @@ export default function Catalog({
 
         {((provider !== "local" && provider !== "mal") || linkingMalItem) &&
           discoverTab !== "calendar" && (
-            <form
-              onSubmit={handleSearchSubmit}
-              className="search-form"
-            >
+            <form onSubmit={handleSearchSubmit} className="search-form">
               <input
                 type="text"
                 placeholder={`Search ${type}...`}
@@ -1535,32 +1538,89 @@ export default function Catalog({
                   "Friday",
                   "Saturday",
                 ];
+                const dayAbbr = [
+                  "SUN",
+                  "MON",
+                  "TUE",
+                  "WED",
+                  "THU",
+                  "FRI",
+                  "SAT",
+                ];
                 const today = new Date();
-                const tabs = ["All", "Today", "Tomorrow"];
-                for (let i = 2; i < 7; i++) {
+
+                const tabs = [
+                  { id: "All", label: "ALL", dateNum: "", month: "" },
+                  {
+                    id: "Yesterday",
+                    label: "YEST",
+                    dateNum: new Date(today.getTime() - 24 * 60 * 60 * 1000)
+                      .getDate()
+                      .toString(),
+                    month: new Date(
+                      today.getTime() - 24 * 60 * 60 * 1000,
+                    ).toLocaleDateString(undefined, { month: "short" }),
+                  },
+                  {
+                    id: "Today",
+                    label: "TODAY",
+                    dateNum: today.getDate().toString(),
+                    month: today.toLocaleDateString(undefined, {
+                      month: "short",
+                    }),
+                  },
+                  {
+                    id: "Tomorrow",
+                    label: "TOMO",
+                    dateNum: new Date(today.getTime() + 24 * 60 * 60 * 1000)
+                      .getDate()
+                      .toString(),
+                    month: new Date(
+                      today.getTime() + 24 * 60 * 60 * 1000,
+                    ).toLocaleDateString(undefined, { month: "short" }),
+                  },
+                ];
+
+                for (let i = 2; i < 6; i++) {
                   const nextDate = new Date(
                     today.getTime() + i * 24 * 60 * 60 * 1000,
                   );
-                  tabs.push(daysOfWeek[nextDate.getDay()]);
+                  tabs.push({
+                    id: daysOfWeek[nextDate.getDay()],
+                    label: dayAbbr[nextDate.getDay()],
+                    dateNum: nextDate.getDate().toString(),
+                    month: nextDate.toLocaleDateString(undefined, {
+                      month: "short",
+                    }),
+                  });
                 }
 
                 return (
                   <div className="calendar-tabs-container">
-                    {tabs.map((day) => {
-                      const isActive = calendarDayFilter === day;
+                    {tabs.map((tab) => {
+                      const isActive = calendarDayFilter === tab.id;
                       return (
                         <button
-                          key={day}
-                          className={`calendar-day-tab ${isActive ? "active" : ""}`}
-                          onClick={() => setCalendarDayFilter(day)}
+                          key={tab.id}
+                          className={`calendar-day-tab ${tab.id === "Yesterday" ? "yesterday" : ""} ${isActive ? "active" : ""} ${tab.id === "All" ? "all-tab" : ""}`}
+                          onClick={() => setCalendarDayFilter(tab.id)}
                         >
-                          {day === "All"
-                            ? "ALL"
-                            : day === "Today"
-                              ? "TODAY"
-                              : day === "Tomorrow"
-                                ? "TOMORROW"
-                                : day.substring(0, 3).toUpperCase()}
+                          {tab.id === "All" ? (
+                            <div className="calendar-tab-content-all">
+                              <Calendar size={16} />
+                              <span className="tab-day-label">{tab.label}</span>
+                            </div>
+                          ) : (
+                            <div className="calendar-tab-content">
+                              <span className="tab-day-label">{tab.label}</span>
+                              <span className="tab-date-num">
+                                {tab.dateNum}
+                              </span>
+                              <span className="tab-month-label">
+                                {tab.month}
+                              </span>
+                            </div>
+                          )}
                         </button>
                       );
                     })}
@@ -1582,7 +1642,7 @@ export default function Catalog({
                   const scheduleByDay = [];
                   const today = new Date();
 
-                  for (let i = 0; i < 7; i++) {
+                  for (let i = -1; i < 6; i++) {
                     const targetDate = new Date(
                       today.getTime() + i * 24 * 60 * 60 * 1000,
                     );
@@ -1609,7 +1669,13 @@ export default function Catalog({
 
                     scheduleByDay.push({
                       dayName:
-                        i === 0 ? "Today" : i === 1 ? "Tomorrow" : dayName,
+                        i === -1
+                          ? "Yesterday"
+                          : i === 0
+                            ? "Today"
+                            : i === 1
+                              ? "Tomorrow"
+                              : dayName,
                       dateStr,
                       episodes: dayEpisodes,
                     });
@@ -1648,7 +1714,10 @@ export default function Catalog({
                     if (group.episodes.length === 0) return null;
 
                     return (
-                      <div key={group.dayName} className="schedule-day-section">
+                      <div
+                        key={group.dayName}
+                        className={`schedule-day-section ${group.dayName === "Yesterday" ? "yesterday-section" : ""}`}
+                      >
                         <div className="schedule-section-header">
                           <span className="section-day-name">
                             {group.dayName}
@@ -1701,40 +1770,50 @@ export default function Catalog({
                                     </div>
                                   )}
                                 </div>
-                                <div className="schedule-row-middle">
+                                <div className="schedule-row-info">
+                                  <div className="schedule-row-meta">
+                                    <span className="schedule-row-ep-badge">
+                                      EPISODE {ep.episode}
+                                    </span>
+                                    <span
+                                      className={`schedule-row-status-dot ${isAired ? "aired" : "airing"}`}
+                                    />
+                                  </div>
                                   <h4
-                                    className="schedule-row-title"
+                                    className="schedule-row-title-new"
                                     title={ep.title}
                                   >
                                     {ep.title}
                                   </h4>
-                                  <span className="schedule-row-num">
-                                    Episode {ep.episode}
-                                  </span>
+                                  <div className="schedule-row-badges">
+                                    <span className="schedule-row-time-badge">
+                                      <Clock size={11} />
+                                      {airTime}
+                                    </span>
+                                    <span
+                                      className={`schedule-row-countdown-badge ${isAired ? "aired" : "airing"}`}
+                                    >
+                                      {countdownStr}
+                                    </span>
+                                  </div>
                                 </div>
-                                <div className="schedule-row-right">
-                                  <span className="schedule-row-time">
-                                    <Clock size={12} className="u-style-16" />
-                                    {airTime}
-                                  </span>
-                                  <span
-                                    className={`schedule-row-countdown ${isAired ? "aired" : "airing"}`}
-                                  >
-                                    {countdownStr}
-                                  </span>
-                                  {isAired && (
+                                {isAired && (
+                                  <div className="schedule-row-actions">
                                     <button
-                                      className="schedule-row-scrape-btn"
+                                      className="schedule-row-action-btn"
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         triggerScrapeSearch(ep.title);
                                       }}
+                                      title="Find Stream"
                                     >
-                                      <Search size={12} />
-                                      <span>Find Stream</span>
+                                      <Search size={14} />
+                                      <span className="btn-text-desktop">
+                                        Find Stream
+                                      </span>
                                     </button>
-                                  )}
-                                </div>
+                                  </div>
+                                )}
                               </div>
                             );
                           })}
