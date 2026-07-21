@@ -88,7 +88,7 @@
   },
   "license": "GPL-3.0-only",
   "dependencies": {
-    "axios": "^1.17.0",
+    "axios": "^1.18.0",
     "cheerio": "^1.2.0",
     "discord-rpc": "^4.0.1",
     "electron-updater": "^6.8.3",
