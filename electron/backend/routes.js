@@ -3182,7 +3182,9 @@ router.get("/api/stream/m3u8", async (req, res) => {
   if (!url) return res.status(400).send("No URL");
   try {
     const port = global.PORT || 3000;
+    const reqHeaders = getHeaders(url);
     const { data } = await global.axios.get(url, {
+      headers: reqHeaders,
       responseType: "text",
       timeout: 15000,
     });
@@ -3222,10 +3224,29 @@ router.get("/api/stream/segment", async (req, res) => {
   const url = req.query.url;
   if (!url) return res.status(400).send("No URL");
   try {
-    const { data, headers } = await global.axios.get(url, {
-      responseType: "arraybuffer",
-      timeout: 30000,
-    });
+    const reqHeaders = getHeaders(url);
+    let attempts = 0;
+    let data, headers;
+    while (attempts < 3) {
+      try {
+        const resp = await global.axios.get(url, {
+          headers: reqHeaders,
+          responseType: "arraybuffer",
+          timeout: 30000,
+        });
+        data = resp.data;
+        headers = resp.headers;
+        break;
+      } catch (err) {
+        attempts++;
+        if (err.response?.status === 429 && attempts < 3) {
+          await new Promise((r) => setTimeout(r, 200 * attempts));
+        } else if (attempts >= 3) {
+          throw err;
+        }
+      }
+    }
+
     let buffer = Buffer.from(data);
 
     if (
