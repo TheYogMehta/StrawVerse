@@ -1051,207 +1051,24 @@ export default function VideoPlayer({
             err,
           );
         });
-      return;
-    }
-
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-
-    if (hlsRef.current) {
-      hlsRef.current.destroy();
-      hlsRef.current = null;
-    }
-    video.src = "";
-
-    durationRef.current = 0;
-    currentTimeRef.current = 0;
-    bufferedRef.current = 0;
-    setDuration(0);
-
-    const url = sourceUrl;
-
-    const isM3U8 = url.includes(".m3u8") || selectedSource?.isM3U8;
-
-    if (isM3U8) {
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          fLoader: KwikFragmentLoader,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
-          maxBufferSize: 60 * 1000 * 1000,
-          enableWorker: true,
-          lowLatencyMode: false,
-          backBufferLength: 30,
-          stretchShortVideoTrack: true,
-          maxBufferHole: 0.5,
-          highBufferWatchdogPeriod: 3,
-          nudgeOffset: 0.1,
-          nudgeMaxRetry: 5,
-          startPosition: 0.15,
-          progressive: false,
-          fragLoadingTimeOut: 20000,
-          fragLoadingMaxRetry: 5,
-          fragLoadingRetryDelay: 1000,
-          fragLoadingMaxRetryDelay: 8000,
-          manifestLoadingTimeOut: 20000,
-          manifestLoadingMaxRetry: 5,
-          manifestLoadingRetryDelay: 1000,
-          manifestLoadingMaxRetryDelay: 8000,
-          levelLoadingTimeOut: 20000,
-          levelLoadingMaxRetry: 5,
-          levelLoadingRetryDelay: 1000,
-          levelLoadingMaxRetryDelay: 8000,
-        });
-        hlsRef.current = hls;
-        hls.attachMedia(video);
-
-        if (window.sharedStateAPI?.ensureCfBypass) {
-          const referer =
-            selectedSource?.headers?.Referer ||
-            selectedSource?.headers?.referer ||
-            "";
-          window.sharedStateAPI
-            .ensureCfBypass(url, referer)
-            .then(() => {
-              if (
-                url.includes("owocdn.top") ||
-                url.includes("uwucdn.top") ||
-                url.includes("kwik.cx")
-              ) {
-                window.sharedStateAPI
-                  .ensureCfBypass("https://kwik.cx/", referer)
-                  .catch(() => {});
-              }
-            })
-            .catch((e) => {
-              console.warn("Background CF bypass check failed:", e);
-            });
-        }
-        hls.loadSource(url);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
-          console.log("[HLS MANIFEST_PARSED]", data.levels.length, "level(s)");
-          if (savedResumeTimeRef.current > 0) {
-            video.currentTime = savedResumeTimeRef.current;
-            video.play().catch(() => {});
-          } else {
-            const onBufferAppended = () => {
-              hls.off(Hls.Events.BUFFER_APPENDED, onBufferAppended);
-              if (video.buffered.length > 0 && video.buffered.start(0) > 0.01) {
-                const seekTo = video.buffered.start(0) + 0.01;
-                console.log(
-                  "[HLS] Skipping initial PTS gap, seeking to",
-                  seekTo.toFixed(3),
-                );
-                video.currentTime = seekTo;
-              }
-              video.play().catch(() => {});
-            };
-            hls.on(Hls.Events.BUFFER_APPENDED, onBufferAppended);
-          }
-        });
-
-        video.addEventListener("error", () => {
-          console.error(
-            "[VIDEO ELEMENT ERROR]",
-            video.error?.code,
-            video.error?.message,
-          );
-        });
-
-        let networkErrorRetry = 0;
-        let mediaErrorRetry = 0;
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          console.log(
-            "[HLS ERROR]",
-            data.type,
-            data.details,
-            data.fatal,
-            data.reason || "",
-            data.error || "",
-          );
-          if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                if (networkErrorRetry < 6) {
-                  networkErrorRetry++;
-                  console.warn(
-                    `Network error: retrying recovery attempt ${networkErrorRetry}...`,
-                  );
-                  hls.startLoad();
-                } else {
-                  console.error("Fatal network error: retry limit reached.");
-                  setErrorMsg(
-                    "Network error: Failed to download stream segments. Try selecting a different quality or check your connection.",
-                  );
-                  hls.destroy();
-                }
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                if (mediaErrorRetry < 3) {
-                  mediaErrorRetry++;
-                  console.warn(
-                    `Media decoding warning: retrying recovery attempt ${mediaErrorRetry}...`,
-                  );
-                  if (mediaErrorRetry > 1) {
-                    console.warn(
-                      "Swapping audio codec to bypass HE-AAC decode loop...",
-                    );
-                    hls.swapAudioCodec();
-                  }
-                  hls.recoverMediaError();
-                } else {
-                  console.error("Fatal media error: recovery loop prevented.");
-                  hls.destroy();
-                  if (!useTranscodeFallback) {
-                    console.warn(
-                      "Switching to FFmpeg audio transcode fallback...",
-                    );
-                    setUseTranscodeFallback(true);
-                  } else {
-                    setErrorMsg(
-                      "Playback error: Try selecting a different quality level.",
-                    );
-                  }
-                }
-                break;
-              default:
-                hls.destroy();
-                setErrorMsg("Fatal stream playback error.");
-                break;
-            }
-          }
-        });
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = url;
-        const handleLoadedMetadata = () => {
-          if (savedResumeTimeRef.current > 0) {
-            video.currentTime = savedResumeTimeRef.current;
-          }
-          video.play().catch(() => {});
-          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-        };
-        video.addEventListener("loadedmetadata", handleLoadedMetadata);
-      } else {
-        setErrorMsg("HLS streaming is not supported in this browser.");
-      }
-    } else {
-      video.src = url;
-      const handleLoadedMetadata = () => {
-        if (savedResumeTimeRef.current > 0) {
-          video.currentTime = savedResumeTimeRef.current;
-        }
-        video.play().catch(() => {});
-        video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      };
-      video.addEventListener("loadedmetadata", handleLoadedMetadata);
     }
   }, [selectedSource, sourceUrl]);
 
   useEffect(() => {
     return () => {
       if (hlsRef.current) {
-        hlsRef.current.destroy();
+        try {
+          hlsRef.current.destroy();
+        } catch (e) {}
+        hlsRef.current = null;
+      }
+      if (videoRef.current) {
+        try {
+          const video = videoRef.current;
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        } catch (e) {}
       }
     };
   }, []);
@@ -1644,41 +1461,6 @@ export default function VideoPlayer({
           </div>
         ) : (
           <>
-            <video
-              ref={videoRef}
-              controls={false}
-              onDoubleClick={toggleFullscreen}
-              onContextMenu={(e) => e.preventDefault()}
-              className="player-video"
-              crossOrigin="anonymous"
-              onClick={togglePlay}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              onTimeUpdate={handleTimeUpdate}
-              onDurationChange={handleDurationChange}
-              onVolumeChange={handleVolumeChange}
-              onProgress={handleProgress}
-              onEnded={handleEnded}
-            >
-              {processedSubtitles.map((sub, idx) => {
-                const sourceKey =
-                  typeof selectedSource?.url === "object"
-                    ? selectedSource?.url?.url
-                    : selectedSource?.url;
-                return (
-                  <track
-                    key={`${currentEpisode}-${sourceKey || ""}-${idx}`}
-                    src={sub.url || ""}
-                    label={sub.lang || `Language ${idx + 1}`}
-                    kind="subtitles"
-                    srcLang={
-                      sub.lang ? sub.lang.slice(0, 2).toLowerCase() : "en"
-                    }
-                    default={idx === 0}
-                  />
-                );
-              })}
-            </video>
 
             {/* Custom Big Play Button Overlay */}
             {!isPlaying && !loading && !errorMsg && (
@@ -1745,25 +1527,25 @@ export default function VideoPlayer({
                       ((st.interval.end_time - st.interval.start_time) /
                         duration) *
                       100;
+                    const isOp =
+                      st.skip_type === "op" || st.skip_type === "mixed-op";
                     return (
                       <div
                         key={`skip-marker-${idx}`}
                         className="timeline-skip-marker"
-                        title={
-                          st.skip_type === "op" || st.skip_type === "mixed-op"
-                            ? "Intro"
-                            : "Outro"
-                        }
+                        title={isOp ? "Intro" : "Outro"}
                         style={{
                           position: "absolute",
                           left: `${startPct}%`,
                           width: `${widthPct}%`,
                           height: "100%",
                           top: 0,
-                          backgroundColor: "rgba(59, 130, 246, 0.55)",
+                          backgroundColor: isOp
+                            ? "rgba(245, 158, 11, 0.85)"
+                            : "rgba(168, 85, 247, 0.85)",
                           borderRadius: "2px",
                           pointerEvents: "none",
-                          zIndex: 1,
+                          zIndex: 3,
                         }}
                       />
                     );

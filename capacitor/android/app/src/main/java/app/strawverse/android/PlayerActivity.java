@@ -1839,6 +1839,40 @@ public class PlayerActivity extends Activity {
     }
 
     @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        if (player != null) {
+            try {
+                reportProgress();
+                player.stop();
+                player.release();
+                player = null;
+            } catch (Exception e) {
+                Log.e("PlayerActivity", "Error releasing player on new intent: " + e.getMessage());
+            }
+        }
+        recreate();
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (player != null) {
+            try {
+                reportProgress();
+                player.pause();
+                player.stop();
+                player.release();
+                player = null;
+            } catch (Exception e) {
+                Log.e("PlayerActivity", "Error releasing player on back press: " + e.getMessage());
+            }
+        }
+        super.onBackPressed();
+        finish();
+    }
+
+    @Override
     protected void onPause() {
         super.onPause();
         if (player != null) {
@@ -1849,12 +1883,31 @@ public class PlayerActivity extends Activity {
     }
 
     @Override
+    protected void onStop() {
+        super.onStop();
+        if (player != null) {
+            try {
+                reportProgress();
+                player.pause();
+                player.stop();
+                player.release();
+                player = null;
+            } catch (Exception e) {
+                Log.e("PlayerActivity", "Error releasing player onStop: " + e.getMessage());
+            }
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         skipCheckHandler.removeCallbacks(skipCheckRunnable);
         if (player != null) {
-            reportProgress();
-            player.release();
-            player = null;
+            try {
+                reportProgress();
+                player.stop();
+                player.release();
+                player = null;
+            } catch (Exception e) {}
         }
         super.onDestroy();
     }

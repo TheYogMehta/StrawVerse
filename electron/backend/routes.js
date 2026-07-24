@@ -1549,7 +1549,57 @@ router.post("/api/watch", async (req, res) => {
       ) {
         resolvedEp = `${resolvedEp}-${subdub}`;
       }
-      const sourcesArray = await fetchEpisodeSources(Animeprovider, resolvedEp);
+
+      let sourcesArray = null;
+      try {
+        sourcesArray = await fetchEpisodeSources(Animeprovider, resolvedEp);
+      } catch (e) {
+        sourcesArray = null;
+      }
+
+      if (
+        !sourcesArray ||
+        (!sourcesArray.sources?.length &&
+          !sourcesArray.sub?.sources?.length &&
+          !sourcesArray.dub?.sources?.length)
+      ) {
+        const animeId = req.body.animeId || req.body.mediaId || req.body.id;
+        if (
+          animeId &&
+          epNum &&
+          typeof Animeprovider?.fetchEpisode === "function"
+        ) {
+          try {
+            const epListRes = await Animeprovider.fetchEpisode(animeId);
+            const eps = Array.isArray(epListRes)
+              ? epListRes
+              : epListRes?.episodes || [];
+            const matchedEp = eps.find(
+              (item) => Number(item.number) === Number(epNum),
+            );
+            if (matchedEp && matchedEp.id) {
+              let freshEpId = matchedEp.id;
+              if (
+                subdub &&
+                !freshEpId.endsWith("-sub") &&
+                !freshEpId.endsWith("-dub") &&
+                !freshEpId.endsWith("-both")
+              ) {
+                freshEpId = `${freshEpId}-${subdub}`;
+              }
+              sourcesArray = await fetchEpisodeSources(
+                Animeprovider,
+                freshEpId,
+              );
+            }
+          } catch (fallbackErr) {
+            console.error(
+              "Fallback watch resolution failed:",
+              fallbackErr.message,
+            );
+          }
+        }
+      }
       if (provider === "pahe" && sourcesArray) {
         const allSources = [
           ...(Array.isArray(sourcesArray.sources) ? sourcesArray.sources : []),
@@ -2542,27 +2592,60 @@ router.get("/api/image", async (req, res) => {
       logger.error("Error reading from image cache: " + cacheErr.message);
     }
 
-    const resolvedHeaders = getHeaders(decodedUrl);
-    const options = {
-      responseType: "arraybuffer",
-      headers: {
-        ...(resolvedHeaders.Referer
-          ? { Referer: resolvedHeaders.Referer }
-          : {}),
-        ...(resolvedHeaders["User-Agent"]
-          ? { "User-Agent": resolvedHeaders["User-Agent"] }
-          : {}),
-        ...(resolvedHeaders.Cookie ? { Cookie: resolvedHeaders.Cookie } : {}),
-      },
-    };
-    let response = await global.axios.get(decodedUrl, options);
-    const contentType = response.headers["content-type"] || "image/jpeg";
+    let imageBuffer = null;
+    let contentType = "image/jpeg";
 
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    return res.send(response.data);
+    try {
+      const resolvedHeaders = getHeaders(decodedUrl);
+      const options = {
+        responseType: "arraybuffer",
+        headers: {
+          ...(resolvedHeaders.Referer
+            ? { Referer: resolvedHeaders.Referer }
+            : {}),
+          ...(resolvedHeaders["User-Agent"]
+            ? { "User-Agent": resolvedHeaders["User-Agent"] }
+            : {}),
+          ...(resolvedHeaders.Cookie ? { Cookie: resolvedHeaders.Cookie } : {}),
+        },
+      };
+      const response = await global.axios.get(decodedUrl, options);
+      imageBuffer = Buffer.from(response.data);
+      contentType = response.headers["content-type"] || "image/jpeg";
+    } catch (err) {
+      if (global.scrapperFetchDataUrl) {
+        try {
+          const dataUrl = await global.scrapperFetchDataUrl(decodedUrl);
+          if (dataUrl && dataUrl.startsWith("data:")) {
+            const matches = dataUrl.match(
+              /^data:(image\/[a-zA-Z0-9+-]+);base64,(.+)$/,
+            );
+            if (matches) {
+              contentType = matches[1];
+              imageBuffer = Buffer.from(matches[2], "base64");
+            }
+          }
+        } catch (scrapperErr) {
+          console.error(
+            "scrapperFetchDataUrl failed for image:",
+            scrapperErr.message,
+          );
+        }
+      }
+    }
+
+    if (imageBuffer) {
+      try {
+        ImageCacheManager.cacheImage(decodedUrl, imageBuffer).catch(() => {});
+      } catch (_) {}
+
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      return res.send(imageBuffer);
+    }
+    res.status(500).send("Failed to load image");
   } catch (err) {
-    console.error("Image proxy direct fetch failed:", err.message);
+    console.error("Image proxy fetch failed:", err.message);
     res.status(500).send("Failed to load image");
   }
 });
@@ -3093,6 +3176,90 @@ const SPA_ROUTES = [
   "/marketplace",
   "/error",
 ];
+
+router.get("/api/stream/m3u8", async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).send("No URL");
+  try {
+    const port = global.PORT || 3000;
+    const { data } = await global.axios.get(url, {
+      responseType: "text",
+      timeout: 15000,
+    });
+    const base = url.substring(0, url.lastIndexOf("/") + 1);
+    const segProxy = `http://127.0.0.1:${port}/api/stream/segment?url=`;
+    const m3u8Proxy = `http://127.0.0.1:${port}/api/stream/m3u8?url=`;
+
+    const manifest = String(data)
+      .split("\n")
+      .map((line) => {
+        const t = line.trim();
+        if (!t) return line;
+        if (t.startsWith("#")) {
+          return t.includes('URI="')
+            ? t.replace(/URI="([^"]+)"/, (_, u) => {
+                const abs = u.startsWith("http") ? u : base + u;
+                const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
+                return `URI="${proxy}${encodeURIComponent(abs)}"`;
+              })
+            : line;
+        }
+        const abs = t.startsWith("http") ? t : base + t;
+        const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
+        return `${proxy}${encodeURIComponent(abs)}`;
+      })
+      .join("\n");
+
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    res.send(manifest);
+  } catch (err) {
+    logger.error(`[StreamProxy] m3u8 error: ${err.message}`);
+    res.status(502).send(err.message);
+  }
+});
+
+router.get("/api/stream/segment", async (req, res) => {
+  const url = req.query.url;
+  if (!url) return res.status(400).send("No URL");
+  try {
+    const { data, headers } = await global.axios.get(url, {
+      responseType: "arraybuffer",
+      timeout: 30000,
+    });
+    let buffer = Buffer.from(data);
+
+    if (
+      buffer.length >= 8 &&
+      buffer[0] === 0x89 &&
+      buffer[1] === 0x50 &&
+      buffer[2] === 0x4e &&
+      buffer[3] === 0x47 &&
+      buffer[4] === 0x0d &&
+      buffer[5] === 0x0a &&
+      buffer[6] === 0x1a &&
+      buffer[7] === 0x0a
+    ) {
+      for (let i = 0; i < Math.min(buffer.length - 3, 1024); i++) {
+        if (
+          buffer[i] === 0x49 &&
+          buffer[i + 1] === 0x45 &&
+          buffer[i + 2] === 0x4e &&
+          buffer[i + 3] === 0x44
+        ) {
+          buffer = buffer.subarray(i + 8);
+          break;
+        }
+      }
+    }
+
+    const ct = headers?.["content-type"] || "application/octet-stream";
+    res.setHeader("Content-Type", ct.includes("image") ? "video/mp2t" : ct);
+    res.send(buffer);
+  } catch (err) {
+    logger.error(`[StreamProxy] segment error: ${err.message}`);
+    res.status(502).send(err.message);
+  }
+});
 
 SPA_ROUTES.forEach((route) => {
   router.get(route, (req, res) => {

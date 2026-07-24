@@ -38,9 +38,7 @@ if (channel) {
 function dbRequest(eventName, data) {
   return new Promise((resolve, reject) => {
     if (!channel) {
-      reject(
-        new Error("Bridge channel not available — cannot access database"),
-      );
+      reject(new Error("Bridge channel not available cannot access database"));
       return;
     }
     const requestId = ++requestCounter;
@@ -437,7 +435,7 @@ async function initDatabase() {
 
   // Tell Java to open both databases
   await dbRequest("db-init", { dataDir: dbPath });
-  logger.info("[db] Java bridge connected — databases opened");
+  logger.info("[db] Java bridge connected databases opened");
 
   // Create tables & update schema
   for (const [tableName, columns] of Object.entries(tables)) {

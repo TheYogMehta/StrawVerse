@@ -59,7 +59,7 @@ const getMpvConfigDir = () => {
       process.resourcesPath,
       "app.asar.unpacked",
       "mpv",
-      "config"
+      "config",
     );
     if (fs.existsSync(prodPath)) {
       return prodPath;
@@ -136,38 +136,52 @@ const resolvePathOrUrl = (rawUrl) => {
   return `http://localhost:${port}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`;
 };
 
+// Proxy external URLs through local Express → Electron's net stack (bypasses Cloudflare).
+const toProxyUrl = (url) => {
+  if (!url || !url.startsWith("http")) return url;
+  const port = global.PORT || 3000;
+  const base = `http://127.0.0.1:${port}/api/stream`;
+  if (url.includes(".m3u8")) {
+    return `${base}/m3u8?url=${encodeURIComponent(url)}`;
+  }
+  return `${base}/segment?url=${encodeURIComponent(url)}`;
+};
+
 async function playInMpv(window, options) {
   const {
     url,
-    sources = [],
+    sources,
     title,
     episode,
-    currentTime: startSeek = 0,
-    subtitles = [],
+    currentTime: startSeek,
+    subtitles,
     mediaId,
     image,
     provider,
     malid,
   } = options;
 
-  if (!url) {
-    throw new Error("No stream URL provided for MPV.");
-  }
-
-  const { settingfetch } = require("./settings");
   let autoSkipIntro = true;
   let autoPlayNextEpisode = true;
   try {
-    const config = await settingfetch();
-    if (config) {
-      autoSkipIntro = config.autoSkipIntro !== false;
-      autoPlayNextEpisode = config.autoPlayNextEpisode !== false;
+    const settingsPath = path.join(
+      require("electron").app.getPath("userData"),
+      "settings.json",
+    );
+    if (fs.existsSync(settingsPath)) {
+      const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+      if (settings.autoSkipIntro !== undefined)
+        autoSkipIntro = settings.autoSkipIntro;
+      if (settings.autoPlayNextEpisode !== undefined)
+        autoPlayNextEpisode = settings.autoPlayNextEpisode;
     }
   } catch (e) {
     logger.error("Failed to load settings in mpvPlayer: " + e.message);
   }
 
   const resolvedUrl = resolvePathOrUrl(url);
+  const isExternal = resolvedUrl.startsWith("http");
+  const playUrl = isExternal ? toProxyUrl(resolvedUrl) : resolvedUrl;
   const ipcPath = getIpcPath();
   const configDir = getMpvConfigDir();
   let shortTitle = title || "Anime";
@@ -190,32 +204,46 @@ async function playInMpv(window, options) {
     "--sub-margin-y=36",
     "--hwdec=auto-safe",
     "--force-window=yes",
-    "--osd-bar=no",
-    "--no-osd-bar",
-    "--osd-on-seek=msg"
+    "--fullscreen",
+    "--no-ytdl",
+    "--osd-on-seek=msg",
+    `--volume=${options.volume !== undefined ? Math.floor(options.volume) : 100}`,
+    `--speed=${options.speed || 1.0}`,
+    `--sub-visibility=${options.subsEnabled === false ? "no" : "yes"}`,
+    `--brightness=${options.brightness || 0}`,
   ];
 
-  const headers = getHeaders(resolvedUrl);
-  if (headers) {
-    if (headers["Referer"]) {
-      args.push(`--referrer=${headers["Referer"]}`);
-    }
-    if (headers["User-Agent"]) {
-      args.push(`--user-agent=${headers["User-Agent"]}`);
-    }
-    if (headers["Cookie"]) {
-      args.push(`--http-header-fields=Cookie: ${headers["Cookie"]}`);
+  // Headers only needed for local files — proxy handles CDN headers itself.
+  if (!isExternal) {
+    const headers = getHeaders(resolvedUrl);
+    if (headers) {
+      if (headers["Referer"]) {
+        args.push(`--referrer=${headers["Referer"]}`);
+        args.push(`--http-header-fields=Referer: ${headers["Referer"]}`);
+      }
+      if (headers["User-Agent"]) {
+        args.push(`--user-agent=${headers["User-Agent"]}`);
+        args.push(`--http-header-fields=User-Agent: ${headers["User-Agent"]}`);
+      }
+      if (headers["Cookie"]) {
+        args.push(`--http-header-fields=Cookie: ${headers["Cookie"]}`);
+      }
     }
   }
 
   const scriptOpts = [
     `osc-autoskip_intro=${autoSkipIntro ? "yes" : "no"}`,
-    `osc-autoplay_next=${autoPlayNextEpisode ? "yes" : "no"}`
+    `osc-autoplay_next=${autoPlayNextEpisode ? "yes" : "no"}`,
+    `modernx-has-next=${options.hasNext ? "yes" : "no"}`,
+    `modernx-has-prev=${options.hasPrev ? "yes" : "no"}`,
   ];
 
   if (sources && sources.length > 0) {
     const sourcesStr = sources
-      .map((s) => `${s.quality}|${resolvePathOrUrl(s.url)}`)
+      .map((s) => {
+        const sUrl = resolvePathOrUrl(s.url);
+        return `${s.quality}|${sUrl.startsWith("http") ? toProxyUrl(sUrl) : sUrl}`;
+      })
       .join("##");
     scriptOpts.push(`modernx-sources=${sourcesStr}`);
   }
@@ -226,7 +254,6 @@ async function playInMpv(window, options) {
     args.push(`--start=${Math.floor(startSeek)}`);
   }
 
-  // If there are subtitle tracks
   if (subtitles && Array.isArray(subtitles)) {
     subtitles.forEach((sub) => {
       if (sub && sub.url) {
@@ -237,7 +264,20 @@ async function playInMpv(window, options) {
     args.push(`--sub-file=${resolvePathOrUrl(subtitles)}`);
   }
 
-  args.push(resolvedUrl);
+  args.push(playUrl);
+
+  if (global.activeMpvProcess) {
+    try {
+      global.activeMpvProcess.kill("SIGKILL");
+    } catch (e) {}
+    global.activeMpvProcess = null;
+  }
+  if (global.activeMpvClient) {
+    try {
+      global.activeMpvClient.destroy();
+    } catch (e) {}
+    global.activeMpvClient = null;
+  }
 
   const mpvExe = getMpvPath();
   logger.info(
@@ -245,6 +285,7 @@ async function playInMpv(window, options) {
   );
 
   const mpvProcess = spawn(mpvExe, args);
+  global.activeMpvProcess = mpvProcess;
 
   let client = null;
   let duration = 0;
@@ -252,13 +293,13 @@ async function playInMpv(window, options) {
   let lastSyncTime = Date.now();
   let paused = false;
   let buffer = "";
+  let pendingAction = null;
 
   try {
     client = await connectIpc(ipcPath);
     global.activeMpvClient = client;
     logger.info("[MPV] Connected to JSON-RPC IPC socket successfully.");
 
-    // Observe properties
     client.write(
       JSON.stringify({ command: ["observe_property", 1, "time-pos"] }) + "\n",
     );
@@ -268,13 +309,170 @@ async function playInMpv(window, options) {
     client.write(
       JSON.stringify({ command: ["observe_property", 3, "duration"] }) + "\n",
     );
+    client.write(
+      JSON.stringify({
+        command: ["observe_property", 4, "user-data/strawverse-action"],
+      }) + "\n",
+    );
+    client.write(
+      JSON.stringify({
+        command: ["observe_property", 5, "user-data/strawverse-episode"],
+      }) + "\n",
+    );
+    client.write(
+      JSON.stringify({
+        command: ["observe_property", 6, "user-data/strawverse-title"],
+      }) + "\n",
+    );
+    client.write(
+      JSON.stringify({
+        command: ["observe_property", 7, "user-data/strawverse-mediaId"],
+      }) + "\n",
+    );
+    client.write(
+      JSON.stringify({
+        command: ["observe_property", 8, "user-data/strawverse-image"],
+      }) + "\n",
+    );
+    client.write(
+      JSON.stringify({
+        command: ["observe_property", 9, "user-data/strawverse-provider"],
+      }) + "\n",
+    );
+    client.write(
+      JSON.stringify({
+        command: ["observe_property", 10, "user-data/strawverse-malid"],
+      }) + "\n",
+    );
+    client.write(
+      JSON.stringify({ command: ["observe_property", 11, "volume"] }) + "\n",
+    );
+    client.write(
+      JSON.stringify({ command: ["observe_property", 12, "speed"] }) + "\n",
+    );
+    client.write(
+      JSON.stringify({ command: ["observe_property", 13, "sub-visibility"] }) +
+        "\n",
+    );
+    client.write(
+      JSON.stringify({ command: ["observe_property", 14, "brightness"] }) +
+        "\n",
+    );
+
+    let hasStartedSent = false;
+    const sendStarted = () => {
+      if (!hasStartedSent) {
+        window.webContents.send("mpv-started");
+        hasStartedSent = true;
+      }
+    };
 
     const handleIpcMessage = (dataStr) => {
       try {
         const msg = JSON.parse(dataStr);
+        if (msg.event === "file-loaded") {
+          sendStarted();
+        }
         if (msg.event === "property-change") {
-          if (msg.name === "time-pos" && typeof msg.data === "number") {
+          if (
+            msg.name === "user-data/strawverse-action" &&
+            typeof msg.data === "string" &&
+            msg.data !== ""
+          ) {
+            pendingAction = msg.data;
+            let actionName = pendingAction;
+            let actionUrl = undefined;
+            if (pendingAction.startsWith("change-server:")) {
+              actionName = "change-server";
+              actionUrl = pendingAction.substring("change-server:".length);
+            }
+
+            hasStartedSent = false;
+
+            const timeSpent = currentTime - startSeek;
+            updateHistory({
+              mediaId: mediaId,
+              type: "Anime",
+              title: title,
+              number: episode,
+              currentTime: currentTime,
+              duration: duration || options.duration || 0,
+              timeSpent: timeSpent > 0 ? timeSpent : 0,
+              image: image,
+              provider: provider,
+              malid: malid,
+            }).catch((err) =>
+              logger.error(`[MPV] Action history sync failed: ${err.message}`),
+            );
+            client.write(
+              JSON.stringify({
+                command: ["set_property", "user-data/strawverse-action", ""],
+              }) + "\n",
+            );
+            window.webContents.send("mpv-action", {
+              action: actionName,
+              url: actionUrl,
+            });
+          } else if (
+            msg.name === "user-data/strawverse-episode" &&
+            msg.data !== undefined
+          ) {
+            episode = msg.data;
+            startSeek = 0;
+            currentTime = 0;
+          } else if (
+            msg.name === "user-data/strawverse-title" &&
+            msg.data !== undefined
+          ) {
+            title = msg.data;
+          } else if (
+            msg.name === "user-data/strawverse-mediaId" &&
+            msg.data !== undefined
+          ) {
+            mediaId = msg.data;
+          } else if (
+            msg.name === "user-data/strawverse-image" &&
+            msg.data !== undefined
+          ) {
+            image = msg.data;
+          } else if (
+            msg.name === "user-data/strawverse-provider" &&
+            msg.data !== undefined
+          ) {
+            provider = msg.data;
+          } else if (
+            msg.name === "user-data/strawverse-malid" &&
+            msg.data !== undefined
+          ) {
+            malid = msg.data;
+          } else if (msg.name === "volume" && typeof msg.data === "number") {
+            window.webContents.send("mpv-setting-changed", {
+              name: "volume",
+              value: msg.data / 100,
+            });
+          } else if (msg.name === "speed" && typeof msg.data === "number") {
+            window.webContents.send("mpv-setting-changed", {
+              name: "speed",
+              value: msg.data,
+            });
+          } else if (msg.name === "sub-visibility" && msg.data !== undefined) {
+            const isVisible =
+              msg.data === true || msg.data === "yes" || msg.data === 1;
+            window.webContents.send("mpv-setting-changed", {
+              name: "subs-enabled",
+              value: isVisible,
+            });
+          } else if (
+            msg.name === "brightness" &&
+            typeof msg.data === "number"
+          ) {
+            window.webContents.send("mpv-setting-changed", {
+              name: "brightness",
+              value: msg.data,
+            });
+          } else if (msg.name === "time-pos" && typeof msg.data === "number") {
             currentTime = msg.data;
+            sendStarted();
             if (Date.now() - lastSyncTime > 1000) {
               window.webContents.send("mpv-progress", {
                 currentTime: currentTime,
@@ -294,9 +492,7 @@ async function playInMpv(window, options) {
             });
           }
         }
-      } catch (e) {
-        // Handle malformed JSON
-      }
+      } catch (e) {}
     };
 
     client.on("data", (chunk) => {
@@ -318,12 +514,14 @@ async function playInMpv(window, options) {
   mpvProcess.on("close", async (code) => {
     logger.info(`[MPV] Native player closed with code ${code}`);
 
+    if (global.activeMpvProcess === mpvProcess) {
+      global.activeMpvProcess = null;
+    }
     global.activeMpvClient = null;
     if (client && !client.destroyed) {
       client.destroy();
     }
 
-    // Save final watched progress to SQLite DB history
     try {
       const timeSpent = currentTime - startSeek;
       await updateHistory({
@@ -345,13 +543,19 @@ async function playInMpv(window, options) {
       logger.error(`[MPV] Failed to write history progress: ${dbErr.message}`);
     }
 
-    // Send final closed event back to frontend to remove the loading modal/overlay
-    window.webContents.send("mpv-closed", {
-      currentTime: currentTime,
-      duration: duration || options.duration || 0,
-    });
+    if (code !== 0 && code !== null) {
+      window.webContents.send("mpv-error", {
+        message: `MPV player failed to open stream (Exit Code ${code}).`,
+        action: pendingAction,
+      });
+    } else {
+      window.webContents.send("mpv-closed", {
+        currentTime: currentTime,
+        duration: duration || options.duration || 0,
+        action: pendingAction,
+      });
+    }
 
-    // Cleanup UNIX Domain Socket file if created
     if (process.platform !== "win32") {
       try {
         if (fs.existsSync(ipcPath)) {
@@ -371,4 +575,4 @@ async function playInMpv(window, options) {
   });
 }
 
-module.exports = { playInMpv };
+module.exports = { playInMpv, toProxyUrl };

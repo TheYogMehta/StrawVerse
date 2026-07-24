@@ -372,8 +372,7 @@ export default function SettingsView({
     if (autoLoadNextChapter !== settings.autoLoadNextChapter)
       dirty.autoLoadNextChapter = autoLoadNextChapter;
     if (pagination !== settings.Pagination) dirty.Pagination = pagination;
-    if (malStatus !== (settings.status || "watching"))
-      dirty.status = malStatus;
+    if (malStatus !== (settings.status || "watching")) dirty.status = malStatus;
     if (mergeSubtitles !== settings.mergeSubtitles)
       dirty.mergeSubtitles = mergeSubtitles;
     if (subtitleFormat !== (settings.subtitleFormat || "vtt"))
@@ -1360,7 +1359,7 @@ export default function SettingsView({
                           />
                           {!malUsername && (
                             <span className="settings-hint u-style-80">
-                              MAL username not found — re-authenticate.
+                              MAL username not found re-authenticate.
                             </span>
                           )}
                         </div>

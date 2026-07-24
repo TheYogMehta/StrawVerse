@@ -7,6 +7,7 @@ const { run, queryAll, queryOne } = require("./db");
 
 let isQuitting = false;
 let activeBypasses = {};
+let bypassCooldowns = {};
 let bypassQueue = [];
 let bypassBusy = false;
 
@@ -85,21 +86,36 @@ function setRefererHeaders(headers, referer, includeOrigin = false) {
   }
 }
 
-function mergeCookie(headers, cookie) {
-  if (!cookie) return;
-  const existingCookie = takeHeaderCaseInsensitive(headers, "cookie") || "";
-  if (!existingCookie) {
-    headers.Cookie = cookie;
+function mergeCookie(headers, requestCookieStr) {
+  if (!requestCookieStr) return;
+  const dbCookieStr = takeHeaderCaseInsensitive(headers, "cookie") || "";
+  if (!dbCookieStr) {
+    headers.Cookie = requestCookieStr;
     return;
   }
-  if (!existingCookie.includes("cf_clearance=")) {
-    headers.Cookie = existingCookie + "; " + cookie;
-    return;
-  }
-  headers.Cookie = existingCookie.replace(
-    /cf_clearance=[^;]+/g,
-    cookie.trim().replace(/;$/, ""),
-  );
+
+  const cookieMap = {};
+  requestCookieStr.split(";").forEach((pair) => {
+    const idx = pair.indexOf("=");
+    if (idx > 0) {
+      const key = pair.slice(0, idx).trim();
+      const val = pair.slice(idx + 1).trim();
+      if (key) cookieMap[key] = val;
+    }
+  });
+
+  dbCookieStr.split(";").forEach((pair) => {
+    const idx = pair.indexOf("=");
+    if (idx > 0) {
+      const key = pair.slice(0, idx).trim();
+      const val = pair.slice(idx + 1).trim();
+      if (key) cookieMap[key] = val;
+    }
+  });
+
+  headers.Cookie = Object.entries(cookieMap)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
 }
 
 function cookieMatchesDomain(cookieDomain, domain) {
@@ -142,22 +158,44 @@ function saveClearanceCookie(cookie) {
   ]);
 }
 
+const COOKIE_UPSERT = `
+  INSERT INTO cookie (id, name, domain, url, value, path, secure, httpOnly, expirationDate, local_saved_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET
+    value = excluded.value,
+    expirationDate = excluded.expirationDate,
+    local_saved_at = excluded.local_saved_at
+`;
+
 async function saveClearanceCookiesForDomain(domain) {
   const cookies = await global.ScrapperWindow.webContents.session.cookies.get(
     {},
   );
   for (const cookie of cookies) {
-    if (
-      cookie.name === "cf_clearance" &&
-      cookieMatchesDomain(cookie.domain, domain)
-    ) {
+    if (cookieMatchesDomain(cookie.domain, domain)) {
       try {
-        saveClearanceCookie(cookie);
+        const cookieDomain = normalizeHostname(cookie.domain);
+        const key = `${cookieDomain}-${cookie.name}`;
+        const expiry = cookie.expirationDate
+          ? cookie.expirationDate * 1000
+          : Date.now() + 1000 * 60 * 60 * 24;
+        run(COOKIE_UPSERT, [
+          key,
+          cookie.name,
+          cookieDomain,
+          cookie.path || "/",
+          cookie.value,
+          cookie.path || "/",
+          cookie.secure ? "true" : "false",
+          cookie.httpOnly ? "true" : "false",
+          expiry,
+          Date.now(),
+        ]);
         if (global.clearCookieCache) {
           global.clearCookieCache(domain);
         }
       } catch (dbErr) {
-        console.error("Failed to save cf_clearance to database:", dbErr);
+        console.error("Failed to save cookie to database:", dbErr);
       }
     }
   }
@@ -219,6 +257,49 @@ function pageLooksLikeError(title, html) {
   );
 }
 
+async function loadSavedCookiesIntoSession() {
+  try {
+    const rows = queryAll(
+      "SELECT name, value, domain, path, secure, httpOnly, expirationDate FROM cookie",
+    );
+    if (!rows || rows.length === 0) return;
+
+    const sess = global.ScrapperWindow.webContents.session;
+    const now = Date.now();
+    let restoredCount = 0;
+
+    for (const row of rows) {
+      if (!row.name || !row.value || !row.domain) continue;
+      const exp = Number(row.expirationDate);
+      if (exp && exp < now) continue;
+
+      const domain = normalizeHostname(row.domain);
+      const url = `http${row.secure === "true" ? "s" : ""}://${domain}${row.path || "/"}`;
+
+      try {
+        await sess.cookies.set({
+          url: url,
+          name: row.name,
+          value: row.value,
+          domain: "." + domain,
+          path: row.path || "/",
+          secure: row.secure === "true",
+          httpOnly: row.httpOnly === "true",
+          expirationDate: exp ? Math.floor(exp / 1000) : undefined,
+        });
+        restoredCount++;
+      } catch (e) {}
+    }
+    if (restoredCount > 0) {
+      console.log(
+        `[ScrapperWindow] Restored ${restoredCount} saved cookies from DB into session.`,
+      );
+    }
+  } catch (err) {
+    console.error("Failed to restore saved cookies into session:", err);
+  }
+}
+
 // Create Scrapping Window
 function createScrapperWindow() {
   global.LastScrapperResponseCode = 200;
@@ -232,6 +313,8 @@ function createScrapperWindow() {
       autoplayPolicy: "user-gesture-required",
     },
   });
+
+  loadSavedCookiesIntoSession();
 
   global.ScrapperWindow.webContents.session.on(
     "will-download",
@@ -286,6 +369,9 @@ function createScrapperWindow() {
         Referer: referer,
         "User-Agent": userAgent,
         Cookie: Cookie,
+        "Sec-CH-UA": secChUa,
+        "Sec-CH-UA-Mobile": secChMobile,
+        "Sec-CH-UA-Platform": secChPlatform,
       } = getHeaders(details.url);
       if (proxyReferer) {
         setRefererHeaders(details.requestHeaders, proxyReferer, true);
@@ -296,6 +382,10 @@ function createScrapperWindow() {
         takeHeaderCaseInsensitive(details.requestHeaders, "user-agent");
         details.requestHeaders["User-Agent"] = userAgent;
       }
+      if (secChUa) details.requestHeaders["sec-ch-ua"] = secChUa;
+      if (secChMobile) details.requestHeaders["sec-ch-ua-mobile"] = secChMobile;
+      if (secChPlatform)
+        details.requestHeaders["sec-ch-ua-platform"] = secChPlatform;
       mergeCookie(details.requestHeaders, Cookie);
 
       callback({ requestHeaders: details.requestHeaders });
@@ -387,6 +477,23 @@ function queueBypass(runBypass) {
   });
 }
 
+function hasValidClearance(domain) {
+  try {
+    const row = queryOne(
+      "SELECT expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
+      [`${domain}-cf_clearance`, domain, domain],
+    );
+    if (row) {
+      const exp = Number(row.expirationDate);
+      const savedAt = Number(row.local_saved_at);
+      const now = Date.now();
+      if (exp > now) return true;
+      if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
 global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
   if (!global.ScrapperWindow)
     throw new Error("Global ScrapperWindow is not initialized");
@@ -398,7 +505,7 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
       "SELECT expirationDate, local_saved_at FROM cookie WHERE id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain)) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
       [`${domain}-cf_clearance`, domain, domain],
     );
-    if (row && !force) {
+    if (row) {
       const exp = Number(row.expirationDate);
       const savedAt = Number(row.local_saved_at);
       const now = Date.now();
@@ -408,7 +515,7 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
       } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
         isValid = true;
       }
-      if (isValid) {
+      if (isValid && !force) {
         return;
       }
     }
@@ -417,6 +524,17 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
   }
 
   if (activeBypasses[domain]) return activeBypasses[domain];
+
+  if (
+    force &&
+    bypassCooldowns[domain] &&
+    Date.now() < bypassCooldowns[domain]
+  ) {
+    console.log(
+      `[Bypass] Skipping bypass for ${domain} — cooldown active (${Math.round((bypassCooldowns[domain] - Date.now()) / 1000)}s remaining)`,
+    );
+    return;
+  }
 
   activeBypasses[domain] = queueBypass(async () => {
     global.IsBypassingCloudflare = true;
@@ -434,18 +552,25 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
 
     try {
       global.LastScrapperResponseCode = 200;
+
+      let navUrl;
       try {
-        const navUrl = targetUrl;
-        if (referer) {
-          await global.ScrapperWindow.loadURL(navUrl, {
-            httpReferrer: referer,
-            timeout: 30000,
-          });
-        } else {
-          await global.ScrapperWindow.loadURL(navUrl, {
-            timeout: 30000,
-          });
-        }
+        const parsed = new URL(targetUrl);
+        navUrl = parsed.origin + "/";
+      } catch (e) {
+        navUrl = targetUrl;
+      }
+
+      if (force && !global.ScrapperWindow.isVisible()) {
+        global.ScrapperWindow.show();
+      }
+
+      try {
+        const navReferer = referer || navUrl;
+        await global.ScrapperWindow.loadURL(navUrl, {
+          httpReferrer: navReferer,
+          timeout: 30000,
+        });
       } catch (err) {}
 
       for (let i = 0; i < 60; i++) {
@@ -505,6 +630,25 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
       global.ScrapperWindow.loadURL("about:blank").catch(() => {});
 
       await saveClearanceCookiesForDomain(domain);
+
+      const finalCookies =
+        await global.ScrapperWindow.webContents.session.cookies.get({});
+      const gotClearance = finalCookies.some(
+        (c) =>
+          c.name === "cf_clearance" && cookieMatchesDomain(c.domain, domain),
+      );
+      if (!gotClearance) {
+        bypassCooldowns[domain] = Date.now() + 90 * 1000;
+        console.warn(
+          `[Bypass] Failed to solve challenge for ${domain}. Cooldown set for 90s.`,
+        );
+      } else {
+        delete bypassCooldowns[domain];
+        console.log(
+          `[Bypass] Successfully obtained cf_clearance for ${domain}`,
+        );
+      }
+
       global.ScrapperWindow.loadURL("about:blank").catch(() => {});
     } finally {
       global.IsBypassingCloudflare = false;
@@ -515,6 +659,83 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
   } finally {
     delete activeBypasses[domain];
   }
+};
+
+global.scrapperFetch = (url, options = {}) => {
+  return queueBypass(async () => {
+    if (!global.ScrapperWindow || global.ScrapperWindow.isDestroyed()) {
+      throw new Error("ScrapperWindow is not initialized");
+    }
+    try {
+      const targetOrigin = new URL(url).origin;
+      const currentUrl = global.ScrapperWindow.webContents.getURL() || "";
+      if (!currentUrl.startsWith(targetOrigin)) {
+        await global.ScrapperWindow.loadURL(targetOrigin + "/").catch(() => {});
+        await sleep(300);
+      }
+    } catch (e) {}
+
+    const js = `
+      (async () => {
+        try {
+          const res = await fetch(${JSON.stringify(url)}, ${JSON.stringify(options)});
+          return await res.text();
+        } catch (err) {
+          return null;
+        }
+      })()
+    `;
+
+    try {
+      const text =
+        await global.ScrapperWindow.webContents.executeJavaScript(js);
+      return text;
+    } catch (e) {
+      return null;
+    }
+  });
+};
+
+global.scrapperFetchDataUrl = (url) => {
+  return queueBypass(async () => {
+    if (!global.ScrapperWindow || global.ScrapperWindow.isDestroyed()) {
+      return null;
+    }
+    try {
+      const targetOrigin = new URL(url).origin;
+      const currentUrl = global.ScrapperWindow.webContents.getURL() || "";
+      if (!currentUrl.startsWith(targetOrigin)) {
+        await global.ScrapperWindow.loadURL(targetOrigin + "/").catch(() => {});
+        await sleep(300);
+      }
+    } catch (e) {}
+
+    const js = `
+      (async () => {
+        try {
+          const res = await fetch(${JSON.stringify(url)});
+          if (!res.ok) return null;
+          const blob = await res.blob();
+          return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = () => resolve(null);
+            reader.readAsDataURL(blob);
+          });
+        } catch (err) {
+          return null;
+        }
+      })()
+    `;
+
+    try {
+      const dataUrl =
+        await global.ScrapperWindow.webContents.executeJavaScript(js);
+      return dataUrl;
+    } catch (e) {
+      return null;
+    }
+  });
 };
 
 global.scrapperLoad = (url, referer = null) => {
@@ -581,6 +802,86 @@ async function electronNetAdapter(config) {
           Object.assign(requestHeaders, headers);
         }
       }
+
+      const shouldBypassUrl = (urlStr) => {
+        if (!urlStr) return false;
+        const urlLower = urlStr.toLowerCase();
+        return (
+          urlLower.includes("animepahe") ||
+          urlLower.includes("kwik.cx") ||
+          urlLower.includes("anikoto") ||
+          urlLower.includes("anineko") ||
+          urlLower.includes("allmanga") ||
+          urlLower.includes("weebcentral")
+        );
+      };
+
+      const isMediaUrl = (urlStr) => {
+        if (!urlStr) return false;
+        const urlLower = urlStr.toLowerCase();
+        return (
+          urlLower.includes(".webp") ||
+          urlLower.includes(".jpg") ||
+          urlLower.includes(".jpeg") ||
+          urlLower.includes(".png") ||
+          urlLower.includes(".gif") ||
+          urlLower.includes(".css") ||
+          urlLower.includes(".js") ||
+          urlLower.includes(".m3u8") ||
+          urlLower.includes(".ts") ||
+          urlLower.includes("/uploads/") ||
+          urlLower.includes("/snapshots/") ||
+          urlLower.includes("/posters/") ||
+          urlLower.includes("/covers/")
+        );
+      };
+
+      try {
+        const domain = new URL(url).hostname.replace("www.", "");
+        if (
+          shouldBypassUrl(url) &&
+          !isMediaUrl(url) &&
+          global.scrapperFetch &&
+          hasValidClearance(domain)
+        ) {
+          const referer =
+            requestHeaders.Referer || requestHeaders.referer || "";
+          const resultText = await global.scrapperFetch(url, {
+            headers: {
+              ...(referer ? { Referer: referer } : {}),
+              Accept: "application/json, text/plain, */*",
+            },
+          });
+          if (
+            resultText &&
+            !resultText.includes("Just a moment...") &&
+            !resultText.includes("Enable JavaScript") &&
+            !resultText.includes("cf-challenge")
+          ) {
+            let responseData = resultText;
+            if (responseType !== "arraybuffer") {
+              try {
+                responseData = JSON.parse(resultText);
+              } catch (e) {}
+            }
+            return resolve({
+              data: responseData,
+              status: 200,
+              statusText: "OK",
+              headers: {},
+              config,
+              request: null,
+            });
+          }
+        }
+      } catch (e) {}
+
+      Object.keys(requestHeaders).forEach((key) => {
+        const lower = key.toLowerCase();
+        if (lower.startsWith("sec-fetch-") || lower === "host") {
+          delete requestHeaders[key];
+        }
+      });
 
       const options = {
         method: method.toUpperCase(),
@@ -743,67 +1044,122 @@ global.axios.interceptors.response.use(
     return response;
   },
   async (error) => {
-    const shouldBypassUrl = (urlStr) => {
+    const { config, response } = error;
+
+    const isMediaUrl = (urlStr) => {
       if (!urlStr) return false;
       const url = urlStr.toLowerCase();
       return (
-        url.includes("animepahe") ||
-        url.includes("kwik.cx") ||
-        url.includes("anikoto") ||
-        url.includes("anineko") ||
-        url.includes("allmanga") ||
-        url.includes("weebcentral")
+        url.includes(".webp") ||
+        url.includes(".jpg") ||
+        url.includes(".jpeg") ||
+        url.includes(".png") ||
+        url.includes(".gif") ||
+        url.includes(".css") ||
+        url.includes(".js") ||
+        url.includes(".m3u8") ||
+        url.includes(".ts") ||
+        url.includes("/uploads/") ||
+        url.includes("/snapshots/") ||
+        url.includes("/posters/") ||
+        url.includes("/covers/")
       );
     };
 
-    const { config, response } = error;
     if (
       response &&
       (response.status === 403 || response.status === 503) &&
       config &&
-      shouldBypassUrl(config.url)
+      !config._retry &&
+      !isMediaUrl(config.url) &&
+      global?.cloudflarebypass
     ) {
-      config._retryCount = config._retryCount || 0;
-      if (config._retryCount < 3) {
-        config._retryCount++;
+      config._retry = true;
 
-        const currentCookie =
-          config.headers?.Cookie || config.headers?.cookie || "";
-        const latestHeaders = getHeaders(config.url, config.method);
-        const latestCookie = latestHeaders.Cookie || "";
+      try {
+        const domain = new URL(config.url).hostname.replace("www.", "");
+        if (global.clearCookieCache) global.clearCookieCache(domain);
+      } catch (e) {}
 
-        if (latestCookie && latestCookie !== currentCookie) {
-          console.log(
-            `[Axios Interceptor] Stale cookies detected for ${config.url}. Retrying with new cookies (try #${config._retryCount})...`,
-          );
-          config.headers = {
-            ...config.headers,
-            ...latestHeaders,
-          };
-          return global.axios(config);
-        }
+      console.log(
+        `[Axios Interceptor] Cloudflare 403 detected for ${config.url}. Checking scrapperFetch...`,
+      );
+      try {
+        const referer =
+          config.headers?.Referer ||
+          config.headers?.referer ||
+          (config.headers?.get && config.headers.get("referer")) ||
+          "";
 
-        if (global?.cloudflarebypass) {
-          console.log(
-            `[Axios Interceptor] Cloudflare challenge detected (status: ${response.status}) for ${config.url}. Retrying with bypass (try #${config._retryCount})...`,
-          );
-          try {
-            const referer =
-              config.headers?.Referer ||
-              config.headers?.referer ||
-              (config.headers?.get && config.headers.get("referer")) ||
-              "";
-            await global.cloudflarebypass(config.url, true, referer);
-            const newHeaders = getHeaders(config.url, config.method);
-            config.headers = {
-              ...config.headers,
-              ...newHeaders,
+        if (global.scrapperFetch) {
+          const resultText = await global.scrapperFetch(config.url, {
+            headers: {
+              ...(referer ? { Referer: referer } : {}),
+              Accept: "application/json, text/plain, */*",
+            },
+          });
+          if (
+            resultText &&
+            !resultText.includes("Just a moment...") &&
+            !resultText.includes("Enable JavaScript") &&
+            !resultText.includes("cf-challenge")
+          ) {
+            let parsedData = resultText;
+            try {
+              parsedData = JSON.parse(resultText);
+            } catch (e) {}
+
+            return {
+              data: parsedData,
+              status: 200,
+              statusText: "OK",
+              headers: {},
+              config: config,
+              request: null,
             };
-            return global.axios(config);
-          } catch (bypassErr) {
-            return Promise.reject(bypassErr);
           }
         }
+
+        await global.cloudflarebypass(config.url, true, referer);
+
+        if (global.scrapperFetch) {
+          const resultText = await global.scrapperFetch(config.url, {
+            headers: {
+              ...(referer ? { Referer: referer } : {}),
+              Accept: "application/json, text/plain, */*",
+            },
+          });
+          if (
+            resultText &&
+            !resultText.includes("Just a moment...") &&
+            !resultText.includes("Enable JavaScript") &&
+            !resultText.includes("cf-challenge")
+          ) {
+            let parsedData = resultText;
+            try {
+              parsedData = JSON.parse(resultText);
+            } catch (e) {}
+
+            return {
+              data: parsedData,
+              status: 200,
+              statusText: "OK",
+              headers: {},
+              config: config,
+              request: null,
+            };
+          }
+        }
+
+        takeHeaderCaseInsensitive(config.headers, "cookie");
+        const newHeaders = getHeaders(config.url, config.method);
+        config.headers = {
+          ...config.headers,
+          ...newHeaders,
+        };
+        return global.axios(config);
+      } catch (bypassErr) {
+        return Promise.reject(bypassErr);
       }
     }
     return Promise.reject(error);

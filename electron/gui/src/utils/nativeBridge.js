@@ -162,6 +162,8 @@ function createPolyfill() {
     downloadUpdate: () => invoke("download-update"),
     installUpdate: () => invoke("install-update"),
     getAppVersion: () => invoke("get-app-version"),
+    playInMpv: (options) => invoke("play-in-mpv", options),
+    controlMpv: (command, args) => invoke("control-mpv", command, args),
     checkWtHealth: (url) => invoke("check-wt-health", url),
   };
 }

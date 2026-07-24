@@ -1,47 +1,20 @@
-/* Sidebar Styles */
 .sidebar {
-  width: 240px;
+  width: 64px;
   height: 100vh;
   background-color: var(--bg-secondary);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  transition: var(--transition);
-  z-index: 100;
   flex-shrink: 0;
-}
-.sidebar.collapsed {
-  width: 70px;
+  z-index: 100;
 }
 
 .sidebar-header {
-  height: 70px;
+  height: 64px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 16px;
+  justify-content: center;
   border-bottom: 1px solid var(--border);
-  transition: var(--transition);
-}
-.sidebar.collapsed .sidebar-header {
-  height: 96px;
-  flex-direction: column;
-  justify-content: center;
-  padding: 12px 0;
-  gap: 8px;
-}
-
-.sidebar-logo-wrapper {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  overflow: hidden;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-.sidebar.collapsed .sidebar-logo-wrapper {
-  justify-content: center;
-  width: 100%;
 }
 
 .sidebar-logo-img {
@@ -49,124 +22,76 @@
   height: 32px;
   border-radius: 8px;
   object-fit: cover;
-  flex-shrink: 0;
-}
-
-.sidebar-logo-text {
-  font-family: "Outfit", sans-serif;
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  color: var(--text-main);
-}
-
-.sidebar-toggle-btn {
-  background: transparent;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: var(--transition);
-  outline: none;
-}
-.sidebar-toggle-btn:hover {
-  background-color: var(--bg-tertiary);
-  color: var(--text-main);
-}
-.sidebar.collapsed .sidebar-toggle-btn {
-  width: 32px;
-  height: 32px;
 }
 
 .sidebar-nav {
   flex: 1;
-  padding: 16px 8px;
+  padding: 12px 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  overflow-y: auto;
+  align-items: center;
+  gap: 4px;
 }
 
 .sidebar-item {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 12px;
-  width: 100%;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
-  color: var(--text-muted);
-  font-weight: 400;
-  text-align: left;
   cursor: pointer;
-  transition: var(--transition);
+  transition:
+    background 0.2s,
+    transform 0.15s;
   outline: none;
 }
 .sidebar-item:hover {
-  background-color: rgba(255, 255, 255, 0.03);
-  color: var(--text-main);
+  background-color: rgba(255, 255, 255, 0.06);
+  transform: scale(1.08);
 }
 .sidebar-item.active {
-  background: rgba(124, 58, 237, 0.15);
-  color: #f3f4f6;
-  font-weight: 600;
+  background: rgba(124, 58, 237, 0.18);
 }
 .sidebar-item.active:hover {
-  background: rgba(124, 58, 237, 0.25);
+  background: rgba(124, 58, 237, 0.28);
 }
-.sidebar.collapsed .sidebar-item {
-  justify-content: center;
+
+/* Tooltip on hover */
+.sidebar-item[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  transform: translateY(-50%) scale(0.92);
+  background: var(--bg-tertiary, #232329);
+  color: var(--text-main, #f3f4f6);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.18s,
+    transform 0.18s;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 200;
+}
+.sidebar-item[data-tooltip]:hover::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
 }
 
 .sidebar-footer {
-  padding: 16px 8px;
+  padding: 12px 0;
   border-top: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-.sidebar.collapsed .sidebar-footer {
-  padding: 16px 8px;
-}
-
-/* Cinema Mode Styles */
-.cinema-mode .sidebar {
-  width: 0px !important;
-  opacity: 0;
-  border-right: none;
-  pointer-events: none;
-}
-
-.cinema-mode-trigger {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 15px;
-  height: 100vh;
-  z-index: 150;
-  background: transparent;
-}
-
-.cinema-mode:has(.cinema-mode-trigger:hover) .sidebar,
-.cinema-mode .sidebar:hover {
-  width: 240px !important;
-  opacity: 1;
-  border-right: 1px solid var(--border);
-  position: absolute;
-  top: 0;
-  left: 0;
-  height: 100vh;
-  z-index: 200;
-  pointer-events: auto;
-  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.85);
-}
-
-.cinema-mode:has(.cinema-mode-trigger:hover) .sidebar.collapsed,
-.cinema-mode .sidebar.collapsed:hover {
-  width: 70px !important;
+  align-items: center;
+  gap: 4px;
 }

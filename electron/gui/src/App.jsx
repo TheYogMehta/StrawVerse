@@ -14,7 +14,6 @@ import WatchTogetherBar from "./components/watch-together/WatchTogetherBar";
 export default function App() {
   const [history, setHistory] = useState([{ view: "home", params: {} }]);
   const [contentType, setContentType] = useState("Anime");
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [malLoggedIn, setMalLoggedIn] = useState(false);
   const [developerMode, setDeveloperMode] = useState(false);
   const [whatsNewData, setWhatsNewData] = useState(null);
@@ -475,11 +474,8 @@ export default function App() {
     }
   };
 
-  const isCinemaMode = !!activePlayerParams;
-
   return (
-    <div className={`app-layout ${isCinemaMode ? "cinema-mode" : ""}`}>
-      {isCinemaMode && <div className="cinema-mode-trigger" />}
+    <div className="app-layout">
       <Sidebar
         currentView={current.view}
         setView={(view) => {
@@ -497,11 +493,7 @@ export default function App() {
           }
           setHistory([{ view, params: {} }]);
         }}
-        isCollapsed={isSidebarCollapsed}
-        toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-        malLoggedIn={malLoggedIn}
         developerMode={developerMode}
-        onOpenWatchTogether={() => setIsWTModalOpen(true)}
       />
       <main className="u-style-8">{renderActiveView()}</main>
 
@@ -542,9 +534,9 @@ export default function App() {
         />
       )}
 
-      {current.view !== "watch-together" && (
+      {/* {current.view !== "watch-together" && (
         <WatchTogetherBar onOpenModal={() => navigateTo("watch-together")} />
-      )}
+      )} */}
 
       {whatsNewData && (
         <div className="whats-new-overlay">

@@ -1,7 +1,12 @@
 <h6 align="right">Support Windows & Linux</h6>
 <h1 align="center">
-  <img src="https://capsule-render.vercel.app/api?type=soft&fontColor=703ee5&text=StrawVerse&height=150&fontSize=40&desc=Ridiculously%20efficient,%20fast%20and%20light-weight.&descAlignY=75&descAlign=50&color=00000000&animation=twinkling">
+  <img src="https://capsule-render.vercel.app/api?type=soft&fontColor=703ee5&text=StrawVerse&height=150&fontSize=40&desc=The%20Modern%20Anime%20%26%20Manga%20Desktop%20Experience&descAlignY=75&descAlign=50&color=00000000&animation=twinkling">
 </h1>
+
+<p align="center">
+  <b>Your Personal Anime & Manga Hub Stream, Read, Track & Sync</b><br>
+  <sub>Watch. Read. Download. Together.</sub>
+</p>
 
 <p align="center">
   <a href="https://discord.gg/PzfUBgQ2gt">
@@ -200,38 +205,40 @@ Follow these steps to build and run the application on Android:
 ## Steps to Build and Run
 
 1. **Install Dependencies**:
-   
+
    In the repository root:
+
    ```bash
    npm install
    ```
 
    Go into the `capacitor` folder and install its dependencies:
+
    ```bash
    cd capacitor
    npm install
    ```
 
 2. **Prepare the Capacitor Assets**:
-   
+
    Build the GUI, sync the backend, and download the Android ffmpeg binaries:
+
    ```bash
    npm run prepare:app
    ```
 
 3. **Sync with Capacitor**:
+
    ```bash
    npx cap sync android
    ```
 
 4. **Run the Application**:
-   
-   * **Option A**: Directly from the terminal:
+   - **Option A**: Directly from the terminal:
      ```bash
      npx cap run android
      ```
-   
-   * **Option B**: Using Android Studio:
+   - **Option B**: Using Android Studio:
      ```bash
      npx cap open android
      ```

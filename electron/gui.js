@@ -90,7 +90,7 @@ try {
 const { logger } = require("./backend/utils/AppLogger");
 const { getKeyValue, setKeyValue } = require("./backend/utils/db");
 const { runStartupCleanup } = require("./backend/utils/ImageCacheManager");
-const { playInMpv } = require("./backend/utils/mpvPlayer");
+const { playInMpv, toProxyUrl } = require("./backend/utils/mpvPlayer");
 const {
   SettingsLoad,
   patchModulePaths,
@@ -155,8 +155,8 @@ function setRefererHeaders(headers, referer) {
   }
 }
 
-function mergeCookie(headers, cookie) {
-  if (!cookie) return;
+function mergeCookie(headers, dbCookieStr) {
+  if (!dbCookieStr) return;
   let existingCookie = "";
   for (const k of Object.keys(headers)) {
     if (k.toLowerCase() === "cookie") {
@@ -165,17 +165,32 @@ function mergeCookie(headers, cookie) {
     }
   }
   if (!existingCookie) {
-    headers.Cookie = cookie;
+    headers.Cookie = dbCookieStr;
     return;
   }
-  if (!existingCookie.includes("cf_clearance=")) {
-    headers.Cookie = existingCookie + "; " + cookie;
-    return;
-  }
-  headers.Cookie = existingCookie.replace(
-    /cf_clearance=[^;]+/g,
-    cookie.trim().replace(/;$/, ""),
-  );
+
+  const cookieMap = {};
+  existingCookie.split(";").forEach((pair) => {
+    const idx = pair.indexOf("=");
+    if (idx > 0) {
+      const key = pair.slice(0, idx).trim();
+      const val = pair.slice(idx + 1).trim();
+      if (key) cookieMap[key] = val;
+    }
+  });
+
+  dbCookieStr.split(";").forEach((pair) => {
+    const idx = pair.indexOf("=");
+    if (idx > 0) {
+      const key = pair.slice(0, idx).trim();
+      const val = pair.slice(idx + 1).trim();
+      if (key) cookieMap[key] = val;
+    }
+  });
+
+  headers.Cookie = Object.entries(cookieMap)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("; ");
 }
 
 const createWindow = () => {
@@ -222,9 +237,16 @@ const createWindow = () => {
         Referer: referer,
         "User-Agent": userAgent,
         Cookie: Cookie,
+        "Sec-CH-UA": secChUa,
+        "Sec-CH-UA-Mobile": secChMobile,
+        "Sec-CH-UA-Platform": secChPlatform,
       } = getHeaders(details.url);
       setRefererHeaders(details.requestHeaders, referer);
       if (userAgent) details.requestHeaders["User-Agent"] = userAgent;
+      if (secChUa) details.requestHeaders["sec-ch-ua"] = secChUa;
+      if (secChMobile) details.requestHeaders["sec-ch-ua-mobile"] = secChMobile;
+      if (secChPlatform)
+        details.requestHeaders["sec-ch-ua-platform"] = secChPlatform;
       mergeCookie(details.requestHeaders, Cookie);
 
       if (details.requestHeaders["sec-ch-ua"]) {
@@ -686,7 +708,20 @@ ipcMain.handle("play-in-mpv", async (event, options) => {
 ipcMain.handle("control-mpv", (event, command, args) => {
   if (global.activeMpvClient && !global.activeMpvClient.destroyed) {
     try {
-      const payload = JSON.stringify({ command: [command, ...args] }) + "\n";
+      let finalArgs = [...args];
+      if (
+        command === "loadfile" &&
+        finalArgs[0] &&
+        typeof finalArgs[0] === "string" &&
+        finalArgs[0].startsWith("http")
+      ) {
+        finalArgs[0] = toProxyUrl(finalArgs[0]);
+      }
+      logger.info(
+        `[MPV Control IPC] Writing command: ${command} with args: ${JSON.stringify(finalArgs)}`,
+      );
+      const payload =
+        JSON.stringify({ command: [command, ...finalArgs] }) + "\n";
       global.activeMpvClient.write(payload);
       return { success: true };
     } catch (err) {

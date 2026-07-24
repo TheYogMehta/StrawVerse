@@ -401,7 +401,7 @@ public class DatabaseBridge {
         for (int i = 0; i < arr.length(); i++) {
             Object val = arr.opt(i);
             if (val == null || val == JSONObject.NULL) {
-                result[i] = null;
+                result[i] = "";
             } else {
                 result[i] = val.toString();
             }

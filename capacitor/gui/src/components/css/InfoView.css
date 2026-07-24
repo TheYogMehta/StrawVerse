@@ -2,6 +2,9 @@
   flex: 1;
   padding: 0;
   overflow-y: auto;
+  overflow-x: hidden;
+  width: 100%;
+  box-sizing: border-box;
   height: 100%;
   background-color: var(--bg-primary);
   position: relative;
@@ -10,12 +13,12 @@
 .back-header {
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 110;
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 16px 30px;
-  background-color: rgba(10, 10, 12, 0.6);
+  background-color: rgba(10, 10, 12, 0.85);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
@@ -409,7 +412,7 @@
   gap: 12px;
   width: 100%;
   position: sticky;
-  top: -30px;
+  top: 56px;
   z-index: 100;
   background-color: var(--bg-primary);
   padding: 16px 0;
@@ -1066,6 +1069,9 @@
 @media (max-width: 768px) {
   .info-wrapper {
     padding: 0;
+    max-width: 100vw;
+    overflow-x: hidden;
+    box-sizing: border-box;
   }
 
   .back-header {
@@ -1083,6 +1089,9 @@
     margin: 0 16px 20px 16px;
     border-radius: 16px;
     width: auto;
+    max-width: calc(100% - 32px);
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   .cover-wrapper {
@@ -1096,6 +1105,11 @@
   .info-content {
     align-items: center;
     text-align: center;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow: hidden;
   }
 
   .tag-list {
@@ -1105,10 +1119,24 @@
   .info-title {
     font-size: 24px;
     font-weight: 800;
+    word-break: break-word;
+    width: 100%;
+  }
+
+  .info-description {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    font-size: 14px;
+    text-align: left;
   }
 
   .actions-row {
     width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     flex-direction: column;
     align-items: stretch;
     gap: 16px;
@@ -1116,6 +1144,8 @@
 
   .quick-actions-wrapper {
     width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     flex-direction: column;
     align-items: stretch;
     margin-top: 10px;
@@ -1123,14 +1153,47 @@
 
   .btn-continue {
     width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     justify-content: center;
+    text-align: center;
+    white-space: normal;
+    word-break: break-word;
   }
 
   .tracking-group {
     display: grid !important;
     grid-template-columns: 1fr 1fr;
-    gap: 12px;
+    gap: 10px;
     width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .tracking-group .input-group,
+  .tracking-group .u-style-37,
+  .tracking-group .u-style-38 {
+    min-width: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box;
+  }
+
+  .custom-dropdown-trigger {
+    width: 100%;
+    box-sizing: border-box;
+    min-width: 0;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .custom-dropdown-trigger-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    font-size: 13px;
   }
 
   .tracking-group > :only-child {
@@ -1139,10 +1202,38 @@
 
   .mal-box {
     width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     padding: 14px;
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  .mal-box-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 10px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .mal-title {
+    text-align: center;
+    margin-bottom: 0;
+    word-break: break-word;
+  }
+
+  .btn-link-mal {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    white-space: normal;
   }
 
   .mal-row {

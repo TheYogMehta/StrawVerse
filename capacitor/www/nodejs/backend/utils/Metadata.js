@@ -1298,16 +1298,18 @@ async function getSourceById(type, baseDir, id, number, subdub) {
     }
 
     let skipTimes = [];
-    try {
-      const row = await queryOne(
-        "SELECT skip_times FROM SkipTimes WHERE anime_id = ? AND episode_number = ? LIMIT 1",
-        [id, Number(number)],
-      );
-      if (row && row.skip_times) {
-        skipTimes = JSON.parse(row.skip_times) || [];
+    if (id != null && number != null && !isNaN(Number(number))) {
+      try {
+        const row = await queryOne(
+          "SELECT skip_times FROM SkipTimes WHERE anime_id = ? AND episode_number = ? LIMIT 1",
+          [String(id), Number(number)],
+        );
+        if (row && row.skip_times) {
+          skipTimes = JSON.parse(row.skip_times) || [];
+        }
+      } catch (e) {
+        // ignore
       }
-    } catch (e) {
-      // ignore
     }
 
     return {

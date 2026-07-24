@@ -1025,7 +1025,7 @@
   flex-shrink: 0;
 }
 
-/* Chat input row — slim margin from screen edge */
+/* Chat input row slim margin from screen edge */
 .wt-chat-input-row {
   display: flex;
   gap: 8px;

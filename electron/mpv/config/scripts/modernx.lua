@@ -83,7 +83,14 @@ local icons = {
   minimize = '\239\133\172',
   fullscreen = '\239\133\173',  
   info = '',
-  cloud = '☁',
+  cloud = '\239\136\159',
+  speed = '\239\172\185',
+}
+
+local speed_menu = {
+    active = false,
+    selected_index = 4,
+    speeds = { 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0 }
 }
 
 -- Localization
@@ -149,16 +156,16 @@ local osc_param = { -- calculated by osc_init()
 local osc_styles = {
     TransBg = '{\\blur100\\bord150\\1c&H000000&\\3c&H000000&}',
     SeekbarBg = '{\\blur0\\bord0\\1c&H444444&}',
-    SeekbarFg = '{\\blur1\\bord1\\1c&HF6823B&}',
+    SeekbarFg = '{\\blur1\\bord0\\1c&HF6823B&}',
     VolumebarBg = '{\\blur0\\bord0\\1c&H999999&}',
-    VolumebarFg = '{\\blur1\\bord1\\1c&HFFFFFF&}',
+    VolumebarFg = '{\\blur1\\bord0\\1c&HFFFFFF&}',
     Ctrl1 = '{\\blur0\\bord0\\1c&HFFFFFF&\\3c&HFFFFFF&\\fs36\\fnMaterial-Design-Iconic-Font}',
     Ctrl2 = '{\\blur0\\bord0\\1c&HFFFFFF&\\3c&HFFFFFF&\\fs24\\fnMaterial-Design-Iconic-Font}',
     Ctrl2Flip = '{\\blur0\\bord0\\1c&HFFFFFF&\\3c&HFFFFFF&\\fs24\\fnMaterial-Design-Iconic-Font\\fry180}',
     Ctrl3 = '{\\blur0\\bord0\\1c&HFFFFFF&\\3c&HFFFFFF&\\fs24\\fnMaterial-Design-Iconic-Font}',
     Time = '{\\blur0\\bord0\\1c&HFFFFFF&\\3c&H000000&\\fs17\\fn' .. user_opts.font .. '}',
     Tooltip = '{\\blur1\\bord0.5\\1c&HFFFFFF&\\3c&H000000&\\fs18\\fn' .. user_opts.font .. '}',
-    Title = '{\\blur1\\bord0.5\\1c&HFFFFFF&\\3c&H0\\fs22\\q2\\fn' .. user_opts.font .. '}',
+    Title = '{\\blur1\\bord0.5\\1c&HFFFFFF&\\3c&H0\\fs17\\q2\\fn' .. user_opts.font .. '}',
     WinCtrl = '{\\blur1\\bord0.5\\1c&HFFFFFF&\\3c&H0\\fs20\\fnmpv-osd-symbols}',
     elementDown = '{\\1c&H999999&}',
     elementHighlight = '{\\blur1\\bord1\\1c&HFFC033&}',
@@ -199,6 +206,11 @@ local state = {
     fulltime = user_opts.timems,
     highlight_element = 'cy_audio',
     chapter_list = {},                      -- sorted by time
+    loading_active = false,
+    loading_start_time = 0,
+    resume_pos = nil,
+    has_next = "yes",
+    has_prev = "yes",
 }
 
 local thumbfast = {
@@ -240,6 +252,7 @@ function build_keyboard_controls()
     local bottom_button_line = {}
     table.insert(bottom_button_line, 'cy_audio')
     table.insert(bottom_button_line, 'cy_server')
+    table.insert(bottom_button_line, 'cy_speed')
     table.insert(bottom_button_line, 'cy_sub')
     table.insert(bottom_button_line, 'pl_prev')
     table.insert(bottom_button_line, 'skipback')
@@ -504,23 +517,24 @@ local function select_server()
     local source = server_menu.sources[server_menu.selected_index]
     if source then
         close_server_menu()
-        
-        -- Get current position to resume
-        local current_time = mp.get_property_number("time-pos", 0)
-        
-        -- Load the new URL
+        state.loading_active = true
+        state.loading_start_time = mp.get_time()
+        request_tick()
+
+        -- Save current position to resume after switch
+        state.resume_pos = mp.get_property_number("time-pos", 0)
+
+        -- Load directly in MPV (URLs are already proxied) - instant, no round-trip
         mp.commandv("loadfile", source.url, "replace")
-        
-        -- Seek to the current position on file-loaded event
-        mp.register_event("file-loaded", function()
-            mp.unregister_event("file-loaded")
-            mp.commandv("seek", current_time, "absolute", "exact")
-        end)
+
+        -- Notify frontend to re-inject subtitles and update source state
+        mp.set_property("user-data/strawverse-action", "change-server:" .. source.name)
     end
 end
 
 local function open_server_menu()
     if server_menu.active then return end
+    close_speed_menu()
     local sources = get_stream_sources()
     if not sources or #sources == 0 then
         return
@@ -582,47 +596,264 @@ local function open_server_menu()
     request_tick()
 end
 
+local function draw_loading_spinner(ass)
+    local cx = osc_param.playresx / 2
+    local cy = osc_param.playresy / 2
+    local radius = 28
+    local thickness = 4
+    local segments = 12
+    local elapsed = mp.get_time() - state.loading_start_time
+    local active_segment = math.floor(elapsed * 8) % segments
+
+    -- Semi-transparent dark backdrop
+    ass:new_event()
+    local bg = assdraw.ass_new()
+    bg:append(string.format("{\\pos(0,0)\\an7\\bord0\\1c&H000000&\\1a&H80&}"))
+    bg:draw_start()
+    bg:rect_cw(0, 0, osc_param.playresx, osc_param.playresy)
+    bg:draw_stop()
+    ass:merge(bg)
+
+    -- Draw spinner dots in a circle
+    for i = 0, segments - 1 do
+        local angle = (2 * math.pi / segments) * i - (math.pi / 2)
+        local px = cx + radius * math.cos(angle)
+        local py = cy + radius * math.sin(angle)
+
+        -- Fade: brightest at active_segment, dimmer further away
+        local dist = (i - active_segment) % segments
+        local alpha = math.floor(255 - (dist / segments) * 200)
+        if alpha < 55 then alpha = 55 end
+
+        ass:new_event()
+        local dot = assdraw.ass_new()
+        dot:append(string.format("{\\pos(%f,%f)\\an5\\bord0\\1c&HFFFFFF&\\1a&H%02X&}", px, py, 255 - alpha))
+        dot:draw_start()
+        dot:round_rect_cw(-thickness, -thickness, thickness, thickness, thickness)
+        dot:draw_stop()
+        ass:merge(dot)
+    end
+
+    -- Keep animating
+    request_tick()
+end
+
+local function close_speed_menu()
+    if not speed_menu.active then return end
+    speed_menu.active = false
+    mp.remove_key_binding("speed-menu-up")
+    mp.remove_key_binding("speed-menu-down")
+    mp.remove_key_binding("speed-menu-wheel-up")
+    mp.remove_key_binding("speed-menu-wheel-down")
+    mp.remove_key_binding("speed-menu-enter")
+    mp.remove_key_binding("speed-menu-click")
+    mp.remove_key_binding("speed-menu-esc")
+    mp.remove_key_binding("speed-menu-right-click")
+    request_tick()
+end
+
+local function select_speed()
+    if not speed_menu.active then return end
+    local speed_val = speed_menu.speeds[speed_menu.selected_index]
+    if speed_val then
+        close_speed_menu()
+        mp.set_property_number("speed", speed_val)
+        mp.osd_message(string.format("Speed: %.2fx", speed_val), 1.5)
+    end
+end
+
+local function open_speed_menu()
+    if speed_menu.active then return end
+    close_server_menu()
+    
+    speed_menu.active = true
+    local current_speed = mp.get_property_number("speed", 1.0)
+    local min_diff = 999
+    for idx, s in ipairs(speed_menu.speeds) do
+        local diff = math.abs(s - current_speed)
+        if diff < min_diff then
+            min_diff = diff
+            speed_menu.selected_index = idx
+        end
+    end
+    
+    mp.set_key_binding("UP", "speed-menu-up", function()
+        speed_menu.selected_index = speed_menu.selected_index - 1
+        if speed_menu.selected_index < 1 then
+            speed_menu.selected_index = #speed_menu.speeds
+        end
+        request_tick()
+    end)
+    mp.set_key_binding("DOWN", "speed-menu-down", function()
+        speed_menu.selected_index = speed_menu.selected_index + 1
+        if speed_menu.selected_index > #speed_menu.speeds then
+            speed_menu.selected_index = 1
+        end
+        request_tick()
+    end)
+    mp.set_key_binding("WHEEL_UP", "speed-menu-wheel-up", function()
+        speed_menu.selected_index = speed_menu.selected_index - 1
+        if speed_menu.selected_index < 1 then speed_menu.selected_index = 1 end
+        request_tick()
+    end)
+    mp.set_key_binding("WHEEL_DOWN", "speed-menu-wheel-down", function()
+        speed_menu.selected_index = speed_menu.selected_index + 1
+        if speed_menu.selected_index > #speed_menu.speeds then speed_menu.selected_index = #speed_menu.speeds end
+        request_tick()
+    end)
+    mp.set_key_binding("ENTER", "speed-menu-enter", select_speed)
+    mp.set_key_binding("MBTN_LEFT", "speed-menu-click", function()
+        local mx, my = get_virt_mouse_pos()
+        local w = 240
+        local menu_x = osc_param.playresx - w
+        if mx >= menu_x and mx <= osc_param.playresx then
+            if my >= 30 and my <= 60 then
+                close_speed_menu()
+            else
+                select_speed()
+            end
+        else
+            close_speed_menu()
+        end
+    end)
+    mp.set_key_binding("ESC", "speed-menu-esc", close_speed_menu)
+    mp.set_key_binding("MBTN_RIGHT", "speed-menu-right-click", close_speed_menu)
+    request_tick()
+end
+
+local function draw_speed_menu(ass)
+    if not speed_menu.active then return end
+    local w = 240
+    local h = osc_param.playresy
+    local menu_x = osc_param.playresx - w
+    local menu_y = 0
+    
+    ass:new_event()
+    local bg_ass = assdraw.ass_new()
+    bg_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H121212&\\1a&H00&}", menu_x, menu_y))
+    bg_ass:draw_start()
+    bg_ass:round_rect_cw(0, 0, w, h, 20)
+    bg_ass:draw_stop()
+    ass:merge(bg_ass)
+    
+    ass:new_event()
+    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs20\\fnMaterial-Design-Iconic-Font}", menu_x + 35, 45))
+    ass:append("\239\139\170")
+    
+    ass:new_event()
+    ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs18\\fn%s\\b1}", menu_x + 65, 45, user_opts.font or "sans-serif"))
+    ass:append("Speed")
+    
+    local mx, my = get_virt_mouse_pos()
+    local current_speed = mp.get_property_number("speed", 1.0)
+    
+    for idx, s in ipairs(speed_menu.speeds) do
+        local item_y = 110 + 45 * (idx - 1)
+        local is_hovered = false
+        if mx >= menu_x and mx <= menu_x + w and my >= item_y - 22 and my <= item_y + 22 then
+            is_hovered = true
+            speed_menu.selected_index = idx
+        end
+        local is_selected = (idx == speed_menu.selected_index)
+        local is_current = (math.abs(s - current_speed) < 0.01)
+        
+        if is_selected or is_hovered then
+            ass:new_event()
+            local sel_ass = assdraw.ass_new()
+            sel_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H202020&\\1a&H00&}", menu_x + 20, item_y - 18))
+            sel_ass:draw_start()
+            sel_ass:round_rect_cw(0, 0, w - 40, 36, 8)
+            sel_ass:draw_stop()
+            ass:merge(sel_ass)
+        end
+        
+        if is_current then
+            ass:new_event()
+            ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFE7D9D&\\fs16\\fnMaterial-Design-Iconic-Font}", menu_x + w - 45, item_y))
+            ass:append("\239\137\171")
+        end
+        
+        local text_color = is_current and "\\1c&HFE7D9D&" or (is_selected and "\\1c&HFFFFFF&" or "\\1c&HD0D0D0&")
+        local font_weight = (is_current or is_selected) and "\\b1" or "\\b0"
+        
+        ass:new_event()
+        ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0%s%s\\fs15\\fn%s}", menu_x + 35, item_y, text_color, font_weight, user_opts.font or "sans-serif"))
+        ass:append(string.format("%.2fx", s))
+    end
+end
+
 local function draw_server_menu(ass)
     if not server_menu.active or not server_menu.sources or #server_menu.sources == 0 then
         return
     end
     
-    local x = osc_param.playresx / 2
-    local y = osc_param.playresy / 2
+    local w = 320
+    local h = osc_param.playresy
     
-    local w = 350
-    local h = 40 + 35 * #server_menu.sources
+    local menu_x = osc_param.playresx - w
+    local menu_y = 0
     
+    -- Draw main background box using a new assdraw object with top-left alignment
     ass:new_event()
-    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\1c&H08080C&\\1a&H18&}", x, y))
-    ass:draw_start()
-    ass:round_rect_cw(-w/2, -h/2, w/2, h/2, 12)
-    ass:draw_stop()
+    local bg_ass = assdraw.ass_new()
+    bg_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H121212&\\1a&H00&}", menu_x, menu_y))
+    bg_ass:draw_start()
+    bg_ass:round_rect_cw(0, 0, w, h, 20)
+    bg_ass:draw_stop()
+    ass:merge(bg_ass)
     
+    -- Draw back arrow icon (zmdi-arrow-left)
     ass:new_event()
-    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs20\\fn%s\\b1}", x, y - h/2 + 25, user_opts.font or "sans-serif"))
-    ass:append("Select Quality / Server")
+    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs20\\fnMaterial-Design-Iconic-Font}", menu_x + 35, 45))
+    ass:append("\239\139\170")
+    
+    -- Draw header "Select Server"
+    ass:new_event()
+    ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs18\\fn%s\\b1}", menu_x + 65, 45, user_opts.font or "sans-serif"))
+    ass:append("Select Server")
+    
+    local mx, my = get_virt_mouse_pos()
     
     for idx, s in ipairs(server_menu.sources) do
-        local item_y = y - h/2 + 65 + 35 * (idx - 1)
+        local item_y = 110 + 50 * (idx - 1)
         
-        local is_selected = (idx == server_menu.selected_index)
-        local text_color = is_selected and "\\1c&HFFFFFF&" or "\\1c&HE0E0E0&"
-        local font_weight = is_selected and "\\b1" or "\\b0"
-        
-        if is_selected then
-            ass:new_event()
-            ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\1c&H7C3AED&\\1a&H20&}", x, item_y))
-            ass:draw_start()
-            ass:round_rect_cw(-w/2 + 20, -15, w/2 - 20, 15, 6)
-            ass:draw_stop()
+        -- Mouse hover detection to update selection
+        local is_hovered = false
+        if mx >= menu_x and mx <= menu_x + w and my >= item_y - 25 and my <= item_y + 25 then
+            is_hovered = true
+            server_menu.selected_index = idx
         end
         
-        ass:new_event()
-        ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0%s%s\\fs16\\fn%s}", x, item_y, text_color, font_weight, user_opts.font or "sans-serif"))
+        local is_selected = (idx == server_menu.selected_index)
         
-        local check_mark = is_selected and "●  " or "   "
-        ass:append(check_mark .. s.name)
+        -- Selection / Hover pill highlight background
+        if is_selected or is_hovered then
+            ass:new_event()
+            local sel_ass = assdraw.ass_new()
+            sel_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H202020&\\1a&H00&}", menu_x + 20, item_y - 20))
+            sel_ass:draw_start()
+            sel_ass:round_rect_cw(0, 0, w - 40, 40, 8)
+            sel_ass:draw_stop()
+            ass:merge(sel_ass)
+        end
+        
+        -- Checkmark indicator for selected item
+        local current_url = mp.get_property("stream-open-filename") or mp.get_property("path")
+        local is_currently_playing = (s.url == current_url)
+        
+        if is_currently_playing then
+            ass:new_event()
+            ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFB9BB8&\\fs16\\fnMaterial-Design-Iconic-Font}", menu_x + w - 45, item_y))
+            ass:append("\239\137\171")
+        end
+        
+        -- Text item
+        local text_color = is_currently_playing and "\\1c&HFB9BB8&" or (is_selected and "\\1c&HFFFFFF&" or "\\1c&HD0D0D0&")
+        local font_weight = (is_currently_playing or is_selected) and "\\b1" or "\\b0"
+        
+        ass:new_event()
+        ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0%s%s\\fs15\\fn%s}", menu_x + 35, item_y, text_color, font_weight, user_opts.font or "sans-serif"))
+        ass:append(s.name)
     end
 end
 
@@ -640,12 +871,28 @@ function update_tracklist()
             local type = tracktable[n].type
             local mpv_id = tonumber(tracktable[n].id)
 
-            -- by osc_id
-            table.insert(tracks_osc[type], tracktable[n])
+            local keep = true
+            if type == 'sub' then
+                local is_external = tracktable[n].external or false
+                local lang = tracktable[n].lang and tracktable[n].lang:lower() or ""
+                local title = tracktable[n].title and tracktable[n].title:lower() or ""
+                if not is_external and not (title:find("%.vtt") or title:find("%.srt") or title:find("%.ass")) then
+                    if lang ~= "" or title ~= "" then
+                        if not (lang == "eng" or lang == "en" or lang == "en-us" or lang == "en-gb" or title:find("english") or title:find("eng")) then
+                            keep = false
+                        end
+                    end
+                end
+            end
 
-            -- by mpv_id
-            tracks_mpv[type][mpv_id] = tracktable[n]
-            tracks_mpv[type][mpv_id].osc_id = #tracks_osc[type]
+            if keep then
+                -- by osc_id
+                table.insert(tracks_osc[type], tracktable[n])
+
+                -- by mpv_id
+                tracks_mpv[type][mpv_id] = tracktable[n]
+                tracks_mpv[type][mpv_id].osc_id = #tracks_osc[type]
+            end
         end
     end
 end
@@ -886,6 +1133,14 @@ function render_elements(master_ass)
             end
         end
 
+        if element.name == "cy_sub" then
+            local show = (#tracks_osc.sub > 0)
+            element.enabled = show
+            if not show then
+                render_it = false
+            end
+        end
+
         if render_it then
             local style_ass = assdraw.ass_new()
             style_ass:merge(element.style_ass)
@@ -942,17 +1197,46 @@ function render_elements(master_ass)
                 cy = 11
             end
             
-            -- Draw Seekbar Background (Grey: 444444) and markers
+            -- Draw Seekbar Background (Grey: 444444)
             if element.name == "seekbar" then
-                local dur = mp.get_property_number("duration", 0)
                 local scale_start = element.slider.min.ele_pos
                 elem_ass:new_event()
                 elem_ass:merge(element.style_ass)
                 elem_ass:append("{\\1c&H444444&\\1a&H00&}")
                 elem_ass:merge(element.static_ass)
                 elem_ass:rect_cw(scale_start, y1, element.slider.max.ele_pos, y2)
-                
+            end
+
+            -- 1. Draw Seek Ranges (Preloaded / Buffered bar)
+            if seekRanges then
+                elem_ass:draw_stop()
+                elem_ass:merge(element.style_ass)
+                ass_append_alpha(elem_ass, element.layout.alpha, user_opts.seekrangealpha)
+                elem_ass:merge(element.static_ass)
+
+                for _,range in pairs(seekRanges) do
+                    local pstart = get_slider_ele_pos_for(element, range['start'])
+                    local pend = get_slider_ele_pos_for(element, range['end'])
+                    elem_ass:rect_cw(pstart - rh, y1, pend + rh, y2)
+                end
+            end
+
+            -- 2. Draw Current Progress Bar
+            if pos then
+                xp = get_slider_ele_pos_for(element, pos)
+                if element.name == "seekbar" then
+                    elem_ass:new_event()
+                    elem_ass:merge(element.style_ass)
+                    elem_ass:merge(element.static_ass)
+                    elem_ass:rect_cw(0, y1, xp, y2)
+                end
+            end
+
+            -- 3. Draw Intro & Outro Markers (on top of preloaded bar & current progress)
+            if element.name == "seekbar" then
+                local dur = mp.get_property_number("duration", 0)
                 if dur > 0 then
+                    local scale_start = element.slider.min.ele_pos
                     local intro_start = 83
                     local intro_end = 141
                     local outro_start = 1320
@@ -989,28 +1273,14 @@ function render_elements(master_ass)
                 end
             end
 
+            -- 4. Draw Thumb Circle
             if pos then
-                xp = get_slider_ele_pos_for(element, pos)
                 if element.name == "seekbar" then
                     elem_ass:new_event()
                     elem_ass:merge(element.style_ass)
                     elem_ass:merge(element.static_ass)
                 end
-				ass_draw_cir_cw(elem_ass, xp, cy, rh)
-				elem_ass:rect_cw(0, y1, xp, y2)
-            end
-
-            if seekRanges then
-				elem_ass:draw_stop()
-				elem_ass:merge(element.style_ass)
-				ass_append_alpha(elem_ass, element.layout.alpha, user_opts.seekrangealpha)
-				elem_ass:merge(element.static_ass)
-
-                for _,range in pairs(seekRanges) do
-                    local pstart = get_slider_ele_pos_for(element, range['start'])
-                    local pend = get_slider_ele_pos_for(element, range['end'])
-					elem_ass:rect_cw(pstart - rh, y1, pend + rh, y2)
-                end
+                ass_draw_cir_cw(elem_ass, xp, cy, rh)
             end
 
             elem_ass:draw_stop()
@@ -1584,8 +1854,13 @@ layouts = function ()
     lo.visible = (osc_param.playresx >= 600)
 
     lo = add_layout('cy_server')
-    lo.geometry = {x = osc_geo.w - 137, y = refY - 49, an = 5, w = 24, h = 24}
-    lo.style = '{\\blur0\\bord0\\1c&HFFFFFF&\\3c&HFFFFFF&\\fs20\\fnsans-serif}'
+    lo.geometry = {x = osc_geo.w - 137, y = refY - 40, an = 5, w = 24, h = 24}
+    lo.style = osc_styles.Ctrl3
+    lo.visible = (osc_param.playresx >= 600)
+
+    lo = add_layout('cy_speed')
+    lo.geometry = {x = osc_geo.w - 187, y = refY - 40, an = 5, w = 24, h = 24}
+    lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 600)
 
     lo = add_layout('vol_ctrl')
@@ -1616,7 +1891,7 @@ layouts = function ()
     lo.layer = 10
     lo.visible = true
     
-    geo = { x = 25, y = refY - 132, an = 1, w = osc_geo.w - 50, h = 48 }
+    geo = { x = 50, y = refY - 132, an = 1, w = osc_geo.w - 75, h = 48 }
     lo = add_layout('title')
     lo.geometry = geo
     lo.style = string.format('%s{\\clip(%f,%f,%f,%f)}', osc_styles.Title,
@@ -1694,15 +1969,23 @@ function osc_init()
 
     local ne
 
-    -- playlist buttons
     -- prev
     ne = new_element('pl_prev', 'button')
 
     ne.content = icons.previous
-    ne.enabled = (pl_pos > 1) or (loop ~= 'no')
+    ne.enabled = (state.has_prev == "yes")
     ne.eventresponder['mbtn_left_up'] =
         function ()
-            mp.commandv('playlist-prev', 'weak')
+            if ne.enabled then
+                if pl_pos > 1 then
+                    mp.commandv('playlist-prev', 'weak')
+                else
+                    state.loading_active = true
+                    state.loading_start_time = mp.get_time()
+                    request_tick()
+                    mp.set_property("user-data/strawverse-action", "prev")
+                end
+            end
         end
     ne.eventresponder['mbtn_right_up'] =
         function () show_message(get_playlist()) end
@@ -1711,10 +1994,19 @@ function osc_init()
     ne = new_element('pl_next', 'button')
 
     ne.content = icons.next
-    ne.enabled = (have_pl and (pl_pos < pl_count)) or (loop ~= 'no')
+    ne.enabled = (state.has_next == "yes")
     ne.eventresponder['mbtn_left_up'] =
         function ()
-            mp.commandv('playlist-next', 'weak')
+            if ne.enabled then
+                if have_pl and (pl_pos < pl_count) then
+                    mp.commandv('playlist-next', 'weak')
+                else
+                    state.loading_active = true
+                    state.loading_start_time = mp.get_time()
+                    request_tick()
+                    mp.set_property("user-data/strawverse-action", "next")
+                end
+            end
         end
     ne.eventresponder['mbtn_right_up'] =
         function () show_message(get_playlist()) end
@@ -1792,42 +2084,50 @@ function osc_init()
 
     ne.softrepeat = true
     ne.content = icons.backward
-    ne.enabled = (have_ch) -- disables button when no chapters available.
+    ne.enabled = true
     ne.eventresponder['mbtn_left_down'] =
-        --function () mp.command('seek -5') end
-        --function () mp.commandv('seek', -5, 'relative', 'keyframes') end
-        function () mp.commandv("add", "chapter", -1) end
-    --ne.eventresponder['shift+mbtn_left_down'] =
-        --function () mp.commandv('frame-back-step') end
+        function ()
+            if have_ch then
+                mp.commandv("add", "chapter", -1)
+            else
+                mp.commandv("seek", -30, "relative", "keyframes")
+            end
+        end
     ne.eventresponder['mbtn_right_down'] =
         function () show_message(get_chapterlist()) end
-        --function () mp.command('seek -60') end
-        --function () mp.commandv('seek', -60, 'relative', 'keyframes') end
     ne.eventresponder['enter'] =
-        --function () mp.command('seek -5') end
-        --function () mp.commandv('seek', -5, 'relative', 'keyframes') end
-        function () mp.commandv("add", "chapter", -1) end
+        function ()
+            if have_ch then
+                mp.commandv("add", "chapter", -1)
+            else
+                mp.commandv("seek", -30, "relative", "keyframes")
+            end
+        end
 
     --skipfrwd
     ne = new_element('skipfrwd', 'button')
 
     ne.softrepeat = true
     ne.content = icons.forward
-    ne.enabled = (have_ch) -- disables button when no chapters available.
+    ne.enabled = true
     ne.eventresponder['mbtn_left_down'] =
-        --function () mp.command('seek +5') end
-        --function () mp.commandv('seek', 5, 'relative', 'keyframes') end
-        function () mp.commandv("add", "chapter", 1) end
-    --ne.eventresponder['shift+mbtn_left_down'] =
-        --function () mp.commandv('frame-step') end
+        function ()
+            if have_ch then
+                mp.commandv("add", "chapter", 1)
+            else
+                mp.commandv("seek", 30, "relative", "keyframes")
+            end
+        end
     ne.eventresponder['mbtn_right_down'] =
         function () show_message(get_chapterlist()) end
-        --function () mp.command('seek +60') end
-        --function () mp.commandv('seek', 60, 'relative', 'keyframes') end
     ne.eventresponder['enter'] =
-        --function () mp.command('seek +5') end
-        --function () mp.commandv('seek', 5, 'relative', 'keyframes') end
-        function () mp.commandv("add", "chapter", 1) end
+        function ()
+            if have_ch then
+                mp.commandv("add", "chapter", 1)
+            else
+                mp.commandv("seek", 30, "relative", "keyframes")
+            end
+        end
 
     --
     update_tracklist()
@@ -1871,24 +2171,6 @@ function osc_init()
     ne.off = (get_track('sub') == 0)
     ne.visible = (osc_param.playresx >= 600)
     ne.content = icons.sub
-    ne.tooltip_style = osc_styles.Tooltip
-    ne.tooltipF = function ()
-		local msg = texts.off
-        if not (get_track('sub') == 0) then
-            msg = (texts.subtitle .. ' [' .. get_track('sub') .. ' ∕ ' .. #tracks_osc.sub .. '] ')
-            local prop = mp.get_property('current-tracks/sub/lang')
-            if not prop then
-				prop = texts.na
-			end
-			msg = msg .. '[' .. prop .. ']'
-			prop = mp.get_property('current-tracks/sub/title')
-			if prop then
-				msg = msg .. ' ' .. prop
-			end
-			return msg
-        end
-        return msg
-    end
     ne.eventresponder['mbtn_left_up'] =
         function () set_track('sub', 1) end
     ne.eventresponder['mbtn_right_up'] =
@@ -1904,10 +2186,6 @@ function osc_init()
     ne.enabled = (sources ~= nil and #sources > 0)
     ne.visible = (osc_param.playresx >= 600)
     ne.content = icons.cloud
-    ne.tooltip_style = osc_styles.Tooltip
-    ne.tooltipF = function ()
-        return "Select Server / Quality"
-    end
     ne.eventresponder['mbtn_left_up'] = function ()
         if server_menu.active then
             close_server_menu()
@@ -1916,6 +2194,26 @@ function osc_init()
         end
     end
     
+    --cy_speed
+    ne = new_element('cy_speed', 'button')
+    ne.enabled = true
+    ne.visible = (osc_param.playresx >= 600)
+    ne.content = function ()
+        local spd = mp.get_property_number("speed", 1.0)
+        if math.abs(spd - 1.0) < 0.01 then
+            return "1x"
+        else
+            return string.format("%.2gx", spd)
+        end
+    end
+    ne.eventresponder['mbtn_left_up'] = function ()
+        if speed_menu.active then
+            close_speed_menu()
+        else
+            open_speed_menu()
+        end
+    end
+
     -- vol_ctrl
     ne = new_element('vol_ctrl', 'button')
     ne.enabled = (get_track('audio')>0)
@@ -2483,6 +2781,15 @@ function render()
     if server_menu.active then
         draw_server_menu(ass)
     end
+    if speed_menu.active then
+        draw_speed_menu(ass)
+    end
+
+    -- Loading spinner overlay
+    if state.loading_active then
+        draw_loading_spinner(ass)
+    end
+
     set_osd(osc_param.playresy * osc_param.display_aspect,
             osc_param.playresy, ass.text)
 end
@@ -2726,6 +3033,26 @@ end
 validate_user_opts()
 update_duration_watch()
 
+state.has_next = mp.get_opt("modernx-has-next") or "yes"
+state.has_prev = mp.get_opt("modernx-has-prev") or "yes"
+
+mp.observe_property('user-data/strawverse-has-next', 'string',
+    function(name, val)
+        if val then
+            state.has_next = val
+            request_init()
+        end
+    end
+)
+mp.observe_property('user-data/strawverse-has-prev', 'string',
+    function(name, val)
+        if val then
+            state.has_prev = val
+            request_init()
+        end
+    end
+)
+
 mp.register_event('shutdown', shutdown)
 mp.register_event('start-file', request_init)
 mp.observe_property('track-list', nil, request_init)
@@ -2787,6 +3114,15 @@ mp.observe_property('demuxer-cache-state', 'native', cache_state)
 mp.observe_property('vo-configured', 'bool', function(name, val)
     request_tick()
 end)
+mp.register_event('file-loaded', function()
+    state.loading_active = false
+    if state.resume_pos and state.resume_pos > 0 then
+        local pos = state.resume_pos
+        state.resume_pos = nil
+        mp.commandv("seek", pos, "absolute", "exact")
+    end
+    request_tick()
+end)
 mp.observe_property('playback-time', 'number', function(name, val)
     if val then
         -- 1. Auto Skip Intro
@@ -2808,7 +3144,14 @@ mp.observe_property('playback-time', 'number', function(name, val)
             if dur > 0 and val >= 1320 and val < dur then
                 if not state.outro_skipped then
                     state.outro_skipped = true
-                    mp.commandv("playlist-next")
+                    if have_pl and (pl_pos < pl_count) then
+                        mp.commandv("playlist-next")
+                    else
+                        state.loading_active = true
+                        state.loading_start_time = mp.get_time()
+                        request_tick()
+                        mp.set_property("user-data/strawverse-action", "next")
+                    end
                     return
                 end
             else

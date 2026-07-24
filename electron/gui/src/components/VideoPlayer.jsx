@@ -92,6 +92,7 @@ import {
   Pause,
   Volume2,
   VolumeX,
+  Sun,
   Maximize,
   Minimize,
   ChevronLeft,
@@ -100,6 +101,7 @@ import {
   Settings,
   Subtitles,
   PictureInPicture,
+  Loader2,
 } from "lucide-react";
 import "./css/VideoPlayer.css";
 
@@ -216,8 +218,18 @@ export default function VideoPlayer({
 
   const [showSettings, setShowSettings] = useState(false);
   const [settingsActiveMenu, setSettingsActiveMenu] = useState("main");
-  const [playbackSpeed, setPlaybackSpeed] = useState(1);
-  const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(-1);
+  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
+    const saved = localStorage.getItem("player-speed");
+    return saved !== null ? parseFloat(saved) : 1;
+  });
+  const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(() => {
+    const saved = localStorage.getItem("player-subs-enabled");
+    return saved === "false" ? -1 : 0;
+  });
+  const [brightness, setBrightness] = useState(() => {
+    const saved = localStorage.getItem("player-brightness");
+    return saved !== null ? parseInt(saved, 10) : 0;
+  });
 
   const [showUI, setShowUI] = useState(true);
   const [indicator, setIndicator] = useState({
@@ -245,6 +257,29 @@ export default function VideoPlayer({
       video.muted = isMuted;
     }
   }, [volume, isMuted, selectedSource]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.playbackRate = playbackSpeed;
+    }
+    localStorage.setItem("player-speed", playbackSpeed.toString());
+  }, [playbackSpeed, selectedSource]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      "player-subs-enabled",
+      selectedSubtitleIndex === -1 ? "false" : "true",
+    );
+  }, [selectedSubtitleIndex]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (video) {
+      video.style.filter = `brightness(${1 + brightness / 100})`;
+    }
+    localStorage.setItem("player-brightness", brightness.toString());
+  }, [brightness, selectedSource]);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -840,11 +875,15 @@ export default function VideoPlayer({
     abortControllerRef.current = new AbortController();
     const signal = abortControllerRef.current?.signal;
 
-    setLoading(true);
+    const isPlaying = mpvStatus === "playing";
+
+    if (!isPlaying) {
+      setLoading(true);
+      setSources([]);
+      setSubtitles([]);
+      setSelectedSource(null);
+    }
     setErrorMsg("");
-    setSources([]);
-    setSubtitles([]);
-    setSelectedSource(null);
 
     try {
       const targetEp = currentEpisodeObj
@@ -978,197 +1017,27 @@ export default function VideoPlayer({
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
-    video.src = "";
-
     durationRef.current = 0;
     currentTimeRef.current = 0;
     bufferedRef.current = 0;
     setDuration(0);
-
-    const url = sourceUrl;
-
-    const isM3U8 = url.includes(".m3u8") || selectedSource?.isM3U8;
-
-    if (isM3U8) {
-      if (Hls.isSupported()) {
-        const hls = new Hls({
-          fLoader: KwikFragmentLoader,
-          maxBufferLength: 30,
-          maxMaxBufferLength: 60,
-          maxBufferSize: 60 * 1000 * 1000,
-          enableWorker: true,
-          lowLatencyMode: false,
-          backBufferLength: 30,
-          stretchShortVideoTrack: true,
-          maxBufferHole: 0.5,
-          highBufferWatchdogPeriod: 3,
-          nudgeOffset: 0.1,
-          nudgeMaxRetry: 5,
-          startPosition: 0.15,
-          progressive: false,
-          fragLoadingTimeOut: 20000,
-          fragLoadingMaxRetry: 5,
-          fragLoadingRetryDelay: 1000,
-          fragLoadingMaxRetryDelay: 8000,
-          manifestLoadingTimeOut: 20000,
-          manifestLoadingMaxRetry: 5,
-          manifestLoadingRetryDelay: 1000,
-          manifestLoadingMaxRetryDelay: 8000,
-          levelLoadingTimeOut: 20000,
-          levelLoadingMaxRetry: 5,
-          levelLoadingRetryDelay: 1000,
-          levelLoadingMaxRetryDelay: 8000,
-        });
-        hlsRef.current = hls;
-        hls.attachMedia(video);
-
-        if (window.sharedStateAPI?.ensureCfBypass) {
-          const referer =
-            selectedSource?.headers?.Referer ||
-            selectedSource?.headers?.referer ||
-            "";
-          window.sharedStateAPI
-            .ensureCfBypass(url, referer)
-            .then(() => {
-              if (
-                url.includes("owocdn.top") ||
-                url.includes("uwucdn.top") ||
-                url.includes("kwik.cx")
-              ) {
-                window.sharedStateAPI
-                  .ensureCfBypass("https://kwik.cx/", referer)
-                  .catch(() => {});
-              }
-            })
-            .catch((e) => {
-              console.warn("Background CF bypass check failed:", e);
-            });
-        }
-        hls.loadSource(url);
-
-        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
-          console.log("[HLS MANIFEST_PARSED]", data.levels.length, "level(s)");
-          if (savedResumeTimeRef.current > 0) {
-            video.currentTime = savedResumeTimeRef.current;
-            video.play().catch(() => {});
-          } else {
-            const onBufferAppended = () => {
-              hls.off(Hls.Events.BUFFER_APPENDED, onBufferAppended);
-              if (video.buffered.length > 0 && video.buffered.start(0) > 0.01) {
-                const seekTo = video.buffered.start(0) + 0.01;
-                console.log(
-                  "[HLS] Skipping initial PTS gap, seeking to",
-                  seekTo.toFixed(3),
-                );
-                video.currentTime = seekTo;
-              }
-              video.play().catch(() => {});
-            };
-            hls.on(Hls.Events.BUFFER_APPENDED, onBufferAppended);
-          }
-        });
-
-        video.addEventListener("error", () => {
-          console.error(
-            "[VIDEO ELEMENT ERROR]",
-            video.error?.code,
-            video.error?.message,
-          );
-        });
-
-        let networkErrorRetry = 0;
-        let mediaErrorRetry = 0;
-        hls.on(Hls.Events.ERROR, (event, data) => {
-          console.log(
-            "[HLS ERROR]",
-            data.type,
-            data.details,
-            data.fatal,
-            data.reason || "",
-            data.error || "",
-          );
-          if (data.fatal) {
-            switch (data.type) {
-              case Hls.ErrorTypes.NETWORK_ERROR:
-                if (networkErrorRetry < 6) {
-                  networkErrorRetry++;
-                  console.warn(
-                    `Network error: retrying recovery attempt ${networkErrorRetry}...`,
-                  );
-                  hls.startLoad();
-                } else {
-                  console.error("Fatal network error: retry limit reached.");
-                  setErrorMsg(
-                    "Network error: Failed to download stream segments. Try selecting a different quality or check your connection.",
-                  );
-                  hls.destroy();
-                }
-                break;
-              case Hls.ErrorTypes.MEDIA_ERROR:
-                if (mediaErrorRetry < 3) {
-                  mediaErrorRetry++;
-                  console.warn(
-                    `Media decoding warning: retrying recovery attempt ${mediaErrorRetry}...`,
-                  );
-                  if (mediaErrorRetry > 1) {
-                    console.warn(
-                      "Swapping audio codec to bypass HE-AAC decode loop...",
-                    );
-                    hls.swapAudioCodec();
-                  }
-                  hls.recoverMediaError();
-                } else {
-                  console.error("Fatal media error: recovery loop prevented.");
-                  hls.destroy();
-                  if (!useTranscodeFallback) {
-                    console.warn(
-                      "Switching to FFmpeg audio transcode fallback...",
-                    );
-                    setUseTranscodeFallback(true);
-                  } else {
-                    setErrorMsg(
-                      "Playback error: Try selecting a different quality level.",
-                    );
-                  }
-                }
-                break;
-              default:
-                hls.destroy();
-                setErrorMsg("Fatal stream playback error.");
-                break;
-            }
-          }
-        });
-      } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-        video.src = url;
-        const handleLoadedMetadata = () => {
-          if (savedResumeTimeRef.current > 0) {
-            video.currentTime = savedResumeTimeRef.current;
-          }
-          video.play().catch(() => {});
-          video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-        };
-        video.addEventListener("loadedmetadata", handleLoadedMetadata);
-      } else {
-        setErrorMsg("HLS streaming is not supported in this browser.");
-      }
-    } else {
-      video.src = url;
-      const handleLoadedMetadata = () => {
-        if (savedResumeTimeRef.current > 0) {
-          video.currentTime = savedResumeTimeRef.current;
-        }
-        video.play().catch(() => {});
-        video.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      };
-      video.addEventListener("loadedmetadata", handleLoadedMetadata);
-    }
   }, [selectedSource, sourceUrl]);
 
   useEffect(() => {
     return () => {
       if (hlsRef.current) {
-        hlsRef.current.destroy();
+        try {
+          hlsRef.current.destroy();
+        } catch (e) {}
+        hlsRef.current = null;
+      }
+      if (videoRef.current) {
+        try {
+          const video = videoRef.current;
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        } catch (e) {}
       }
     };
   }, []);
@@ -1355,10 +1224,12 @@ export default function VideoPlayer({
 
         case "arrowup": {
           e.preventDefault();
-          const nextVol = Math.min(1, video.volume + 0.1);
-          video.volume = nextVol;
-          if (video.muted) {
-            video.muted = false;
+          const nextVol = Math.min(1, volume + 0.1);
+          setVolume(nextVol);
+          localStorage.setItem("player-volume", nextVol.toString());
+          if (isMuted) {
+            setIsMuted(false);
+            localStorage.setItem("player-muted", "false");
           }
           showIndicator(Volume2, `${Math.round(nextVol * 100)}%`);
           break;
@@ -1366,18 +1237,41 @@ export default function VideoPlayer({
 
         case "arrowdown": {
           e.preventDefault();
-          const prevVol = Math.max(0, video.volume - 0.1);
-          video.volume = prevVol;
+          const prevVol = Math.max(0, volume - 0.1);
+          setVolume(prevVol);
+          localStorage.setItem("player-volume", prevVol.toString());
           showIndicator(Volume2, `${Math.round(prevVol * 100)}%`);
           break;
         }
 
         case "m":
           e.preventDefault();
-          video.muted = !video.muted;
+          const nextMuted = !isMuted;
+          setIsMuted(nextMuted);
+          localStorage.setItem("player-muted", nextMuted ? "true" : "false");
           showIndicator(
-            video.muted ? VolumeX : Volume2,
-            video.muted ? "Muted" : "Unmuted",
+            nextMuted ? VolumeX : Volume2,
+            nextMuted ? "Muted" : "Unmuted",
+          );
+          break;
+
+        case "[":
+          e.preventDefault();
+          const nextBrightLess = Math.max(-100, brightness - 10);
+          setBrightness(nextBrightLess);
+          showIndicator(
+            Sun,
+            `Brightness: ${nextBrightLess > 0 ? `+${nextBrightLess}` : nextBrightLess}`,
+          );
+          break;
+
+        case "]":
+          e.preventDefault();
+          const nextBrightMore = Math.min(100, brightness + 10);
+          setBrightness(nextBrightMore);
+          showIndicator(
+            Sun,
+            `Brightness: ${nextBrightMore > 0 ? `+${nextBrightMore}` : nextBrightMore}`,
           );
           break;
 
@@ -1385,7 +1279,7 @@ export default function VideoPlayer({
         case ".":
           if (e.shiftKey) {
             e.preventDefault();
-            const speeds = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+            const speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
             const idx = speeds.indexOf(playbackSpeed);
             if (idx !== -1 && idx < speeds.length - 1) {
               const nextSpeed = speeds[idx + 1];
@@ -1399,7 +1293,7 @@ export default function VideoPlayer({
         case ",":
           if (e.shiftKey) {
             e.preventDefault();
-            const speeds = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
+            const speeds = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3];
             const idx = speeds.indexOf(playbackSpeed);
             if (idx > 0) {
               const nextSpeed = speeds[idx - 1];
@@ -1418,16 +1312,359 @@ export default function VideoPlayer({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [selectedSource, playbackSpeed]);
+  }, [selectedSource, playbackSpeed, volume, isMuted, brightness]);
+
+  const isElectronMpvAvailable =
+    typeof window !== "undefined" &&
+    window.sharedStateAPI &&
+    typeof window.sharedStateAPI.playInMpv === "function";
+
+  const [mpvStatus, setMpvStatus] = useState("idle");
+  const [mpvErrorMsg, setMpvErrorMsg] = useState("");
+
+  const nextIndexRef = useRef(nextIndex);
+  const prevIndexRef = useRef(prevIndex);
+  const internalSwitchRef = useRef(false);
+  const lastLoadedUrlRef = useRef("");
 
   useEffect(() => {
+    nextIndexRef.current = nextIndex;
+    prevIndexRef.current = prevIndex;
+  }, [nextIndex, prevIndex]);
+
+  useEffect(() => {
+    if (!selectedSource || !isElectronMpvAvailable) return;
+
+    const sourceUrl =
+      typeof selectedSource?.url === "string"
+        ? selectedSource.url
+        : selectedSource?.url?.url || "";
+
+    if (isElectronMpvAvailable) {
+      window.sharedStateAPI.controlMpv("log-debug", [
+        "lastLoaded: " + lastLoadedUrlRef.current,
+        "sourceUrl: " + sourceUrl,
+        "internalSwitch: " + internalSwitchRef.current,
+      ]);
+    }
+
+    if (lastLoadedUrlRef.current === sourceUrl) {
+      console.log(
+        "[React VideoPlayer] URL already loaded, skipping:",
+        sourceUrl,
+      );
+      return;
+    }
+
+    if (internalSwitchRef.current) {
+      console.log(
+        "[React VideoPlayer] Internal switch detected, updating ref and skipping loadfile.",
+      );
+      internalSwitchRef.current = false;
+      lastLoadedUrlRef.current = sourceUrl;
+      return;
+    }
+
+    const currentEpNumber = currentEpisodeObj
+      ? currentEpisodeObj.number
+      : currentEpisode;
+
+    if (mpvStatus === "playing") {
+      setMpvStatus("loading");
+      lastLoadedUrlRef.current = sourceUrl;
+      // Direct update of the running MPV player!
+      window.sharedStateAPI
+        .controlMpv("loadfile", [sourceUrl, "replace"])
+        .then((res) => {
+          if (res && res.success === false) {
+            setMpvStatus("idle");
+            lastLoadedUrlRef.current = "";
+            return;
+          }
+          const newTitle = `StrawVerse - ${animeTitle} - Episode ${currentEpNumber}`;
+          const newMediaTitle = `Ep ${currentEpNumber} - ${animeTitle}`;
+          window.sharedStateAPI.controlMpv("set_property", ["title", newTitle]);
+          window.sharedStateAPI.controlMpv("set_property", [
+            "force-media-title",
+            newMediaTitle,
+          ]);
+
+          window.sharedStateAPI.controlMpv("set_property", ["sub", "no"]);
+          if (subtitles && Array.isArray(subtitles)) {
+            subtitles.forEach((sub) => {
+              if (sub && sub.url) {
+                window.sharedStateAPI.controlMpv("sub-add", [
+                  sub.url,
+                  "select",
+                  sub.label || "English",
+                ]);
+              }
+            });
+          }
+
+          window.sharedStateAPI.controlMpv("set_property", [
+            "user-data/strawverse-episode",
+            currentEpNumber,
+          ]);
+          window.sharedStateAPI.controlMpv("set_property", [
+            "user-data/strawverse-title",
+            animeTitle,
+          ]);
+          window.sharedStateAPI.controlMpv("set_property", [
+            "user-data/strawverse-mediaId",
+            id,
+          ]);
+          window.sharedStateAPI.controlMpv("set_property", [
+            "user-data/strawverse-image",
+            image,
+          ]);
+          window.sharedStateAPI.controlMpv("set_property", [
+            "user-data/strawverse-provider",
+            provider,
+          ]);
+          window.sharedStateAPI.controlMpv("set_property", [
+            "user-data/strawverse-malid",
+            malid,
+          ]);
+          window.sharedStateAPI.controlMpv("set_property", [
+            "user-data/strawverse-has-next",
+            nextIndex !== -1 ? "yes" : "no",
+          ]);
+          window.sharedStateAPI.controlMpv("set_property", [
+            "user-data/strawverse-has-prev",
+            prevIndex !== -1 ? "yes" : "no",
+          ]);
+        })
+        .catch(() => {
+          setMpvStatus("idle");
+          lastLoadedUrlRef.current = "";
+        });
+      return;
+    }
+    setMpvStatus("loading");
+    setMpvErrorMsg("");
+    lastLoadedUrlRef.current = sourceUrl;
+
+    window.sharedStateAPI
+      .playInMpv({
+        url: sourceUrl,
+        sources: sources,
+        title: animeTitle,
+        episode: currentEpNumber,
+        currentTime: savedResumeTimeRef.current || 0,
+        subtitles: subtitles,
+        mediaId: id,
+        image: image,
+        provider: provider,
+        malid: malid,
+        // Persisted settings
+        volume: volume * 100, // MPV expects 0-100+
+        speed: playbackSpeed,
+        subsEnabled: selectedSubtitleIndex !== -1,
+        brightness: brightness,
+        hasNext: nextIndex !== -1,
+        hasPrev: prevIndex !== -1,
+      })
+      .then((res) => {
+        if (res && res.error) {
+          setMpvStatus("error");
+          setMpvErrorMsg(res.error);
+          lastLoadedUrlRef.current = "";
+          Swal.fire({
+            icon: "error",
+            title: "MPV Player Error",
+            text: res.error,
+            confirmButtonText: "OK",
+            background: "#18181b",
+            color: "#fff",
+          }).then(() => {
+            if (onBack) onBack();
+          });
+        }
+      })
+      .catch((err) => {
+        const msg = err.message || "Failed to launch MPV player.";
+        setMpvStatus("error");
+        setMpvErrorMsg(msg);
+        lastLoadedUrlRef.current = "";
+        Swal.fire({
+          icon: "error",
+          title: "MPV Launch Error",
+          text: msg,
+          confirmButtonText: "OK",
+          background: "#18181b",
+          color: "#fff",
+        }).then(() => {
+          if (onBack) onBack();
+        });
+      });
+
+    const removeMpvStartedListener = window.sharedStateAPI.on(
+      "mpv-started",
+      () => {
+        setMpvStatus("playing");
+      },
+    );
+
+    const removeMpvClosedListener = window.sharedStateAPI.on(
+      "mpv-closed",
+      (data) => {
+        setMpvStatus("idle");
+        lastLoadedUrlRef.current = "";
+        const action = data?.action;
+        if (action === "next" && nextIndexRef.current !== -1) {
+          handleNextEpisode();
+        } else if (action === "prev" && prevIndexRef.current !== -1) {
+          handlePrevEpisode();
+        } else {
+          if (onBack) onBack();
+        }
+      },
+    );
+
+    const removeMpvErrorListener = window.sharedStateAPI.on(
+      "mpv-error",
+      (data) => {
+        const errMsg = data?.message || "MPV player encountered an error.";
+        setMpvStatus("error");
+        setMpvErrorMsg(errMsg);
+        lastLoadedUrlRef.current = "";
+
+        const action = data?.action;
+        if (action === "next" && nextIndexRef.current !== -1) {
+          handleNextEpisode();
+        } else if (action === "prev" && prevIndexRef.current !== -1) {
+          handlePrevEpisode();
+        } else {
+          Swal.fire({
+            icon: "error",
+            title: "MPV Player Error",
+            text: errMsg,
+            confirmButtonText: "OK",
+            background: "#18181b",
+            color: "#fff",
+          }).then(() => {
+            if (onBack) onBack();
+          });
+        }
+      },
+    );
+
+    const removeMpvActionListener = window.sharedStateAPI.on(
+      "mpv-action",
+      (data) => {
+        console.log("[React VideoPlayer] Received mpv-action:", data);
+        const action = data?.action;
+        if (action === "next") {
+          if (nextIndexRef.current !== -1) {
+            handleNextEpisode();
+          } else {
+            console.log(
+              "[React VideoPlayer] No next episode available. Closing player.",
+            );
+            window.sharedStateAPI.controlMpv("quit", []);
+          }
+        } else if (action === "prev") {
+          if (prevIndexRef.current !== -1) {
+            handlePrevEpisode();
+          } else {
+            console.log(
+              "[React VideoPlayer] No previous episode available. Closing player.",
+            );
+            window.sharedStateAPI.controlMpv("quit", []);
+          }
+        } else if (action === "change-server") {
+          const newUrl = data?.url;
+          console.log(
+            "[React VideoPlayer] change-server payload:",
+            newUrl,
+            "Available sources:",
+            sources,
+          );
+          if (isElectronMpvAvailable) {
+            window.sharedStateAPI.controlMpv("log-debug", [
+              "change-server event payload: " + newUrl,
+            ]);
+          }
+          if (newUrl) {
+            const matchedSource = sources.find(
+              (s) =>
+                (typeof s.url === "string" ? s.url : s.url?.url) === newUrl ||
+                s.quality === newUrl,
+            );
+            if (isElectronMpvAvailable) {
+              window.sharedStateAPI.controlMpv("log-debug", [
+                "matchedSource found: " +
+                  (matchedSource ? matchedSource.quality : "false"),
+              ]);
+            }
+            console.log("[React VideoPlayer] Matched source:", matchedSource);
+            if (matchedSource) {
+              const matchedUrl =
+                typeof matchedSource.url === "string"
+                  ? matchedSource.url
+                  : matchedSource.url?.url || "";
+              lastLoadedUrlRef.current = matchedUrl;
+              internalSwitchRef.current = true;
+              setSelectedSource(matchedSource);
+            } else {
+              console.warn(
+                "[React VideoPlayer] No matched source found for:",
+                newUrl,
+              );
+            }
+          }
+        }
+      },
+    );
+
+    const removeMpvSettingListener = window.sharedStateAPI.on(
+      "mpv-setting-changed",
+      (data) => {
+        if (!data) return;
+        const { name, value } = data;
+        if (name === "volume") {
+          setVolume(value);
+          localStorage.setItem("player-volume", value.toString());
+        } else if (name === "speed") {
+          setPlaybackSpeed(value);
+          localStorage.setItem("player-speed", value.toString());
+        } else if (name === "subs-enabled") {
+          setSelectedSubtitleIndex(value ? 0 : -1);
+          localStorage.setItem("player-subs-enabled", value ? "true" : "false");
+        } else if (name === "brightness") {
+          setBrightness(value);
+          localStorage.setItem("player-brightness", value.toString());
+        }
+      },
+    );
+
     return () => {
-      if (uiTimeoutRef.current) clearTimeout(uiTimeoutRef.current);
-      if (indicatorTimeoutRef.current)
-        clearTimeout(indicatorTimeoutRef.current);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      lastLoadedUrlRef.current = "";
+      if (removeMpvStartedListener) removeMpvStartedListener();
+      if (removeMpvClosedListener) removeMpvClosedListener();
+      if (removeMpvErrorListener) removeMpvErrorListener();
+      if (removeMpvActionListener) removeMpvActionListener();
+      if (removeMpvSettingListener) removeMpvSettingListener();
     };
-  }, []);
+  }, [selectedSource, sources, subtitles]);
+
+  if (isElectronMpvAvailable) {
+    if (mpvStatus === "loading" || loading) {
+      return (
+        <div className="mpv-loading-overlay">
+          <div className="mpv-loading-card">
+            <div className="mpv-loading-spinner-container">
+              <Loader2 className="mpv-spin" size={40} />
+              <h3>Launching Player</h3>
+              <p>Initializing stream and opening MPV...</p>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return null;
+  }
 
   return (
     <div
@@ -1560,42 +1797,6 @@ export default function VideoPlayer({
           </div>
         ) : (
           <>
-            <video
-              ref={videoRef}
-              controls={false}
-              onDoubleClick={toggleFullscreen}
-              onContextMenu={(e) => e.preventDefault()}
-              className="player-video"
-              crossOrigin="anonymous"
-              onClick={togglePlay}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              onTimeUpdate={handleTimeUpdate}
-              onDurationChange={handleDurationChange}
-              onVolumeChange={handleVolumeChange}
-              onProgress={handleProgress}
-              onEnded={handleEnded}
-            >
-              {processedSubtitles.map((sub, idx) => {
-                const sourceKey =
-                  typeof selectedSource?.url === "object"
-                    ? selectedSource?.url?.url
-                    : selectedSource?.url;
-                return (
-                  <track
-                    key={`${currentEpisode}-${sourceKey || ""}-${idx}`}
-                    src={sub.url || ""}
-                    label={sub.lang || `Language ${idx + 1}`}
-                    kind="subtitles"
-                    srcLang={
-                      sub.lang ? sub.lang.slice(0, 2).toLowerCase() : "en"
-                    }
-                    default={idx === 0}
-                  />
-                );
-              })}
-            </video>
-
             {/* Custom Big Play Button Overlay */}
             {!isPlaying && !loading && !errorMsg && (
               <div className="player-big-play-btn" onClick={togglePlay}>
@@ -1658,25 +1859,25 @@ export default function VideoPlayer({
                       ((st.interval.end_time - st.interval.start_time) /
                         duration) *
                       100;
+                    const isOp =
+                      st.skip_type === "op" || st.skip_type === "mixed-op";
                     return (
                       <div
                         key={`skip-marker-${idx}`}
                         className="timeline-skip-marker"
-                        title={
-                          st.skip_type === "op" || st.skip_type === "mixed-op"
-                            ? "Intro"
-                            : "Outro"
-                        }
+                        title={isOp ? "Intro" : "Outro"}
                         style={{
                           position: "absolute",
                           left: `${startPct}%`,
                           width: `${widthPct}%`,
                           height: "100%",
                           top: 0,
-                          backgroundColor: "rgba(59, 130, 246, 0.55)",
+                          backgroundColor: isOp
+                            ? "rgba(245, 158, 11, 0.85)"
+                            : "rgba(168, 85, 247, 0.85)",
                           borderRadius: "2px",
                           pointerEvents: "none",
-                          zIndex: 1,
+                          zIndex: 3,
                         }}
                       />
                     );
@@ -1774,6 +1975,64 @@ export default function VideoPlayer({
                                 <ChevronRight size={14} />
                               </div>
                             </button>
+
+                            <button
+                              onClick={() =>
+                                setSettingsActiveMenu("brightness")
+                              }
+                              className="settings-menu-item"
+                            >
+                              <div className="settings-menu-item-left">
+                                <Sun size={14} />
+                                <span>Brightness</span>
+                              </div>
+                              <div className="settings-menu-item-right">
+                                <span>
+                                  {brightness === 0
+                                    ? "Normal"
+                                    : brightness > 0
+                                      ? `+${brightness}%`
+                                      : `${brightness}%`}
+                                </span>
+                                <ChevronRight size={14} />
+                              </div>
+                            </button>
+                          </div>
+                        )}
+
+                        {settingsActiveMenu === "brightness" && (
+                          <div className="settings-menu-panel">
+                            <button
+                              onClick={() => setSettingsActiveMenu("main")}
+                              className="settings-menu-header"
+                            >
+                              <ChevronLeft size={14} />
+                              <span>Brightness</span>
+                            </button>
+                            <div className="settings-menu-options">
+                              {[-40, -20, 0, 20, 40].map((val) => (
+                                <button
+                                  key={val}
+                                  onClick={() => {
+                                    setBrightness(val);
+                                    setSettingsActiveMenu("main");
+                                    setShowSettings(false);
+                                  }}
+                                  className={`settings-menu-option-item ${brightness === val ? "active" : ""}`}
+                                >
+                                  <span>
+                                    {val === 0
+                                      ? "Normal"
+                                      : val > 0
+                                        ? `+${val}%`
+                                        : `${val}%`}
+                                  </span>
+                                  {brightness === val && (
+                                    <span className="checkmark">✓</span>
+                                  )}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         )}
 
@@ -1787,26 +2046,26 @@ export default function VideoPlayer({
                               <span>Playback Speed</span>
                             </button>
                             <div className="settings-menu-options">
-                              {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(
-                                (speed) => (
-                                  <button
-                                    key={speed}
-                                    onClick={() => {
-                                      setPlaybackSpeed(speed);
-                                      setSettingsActiveMenu("main");
-                                      setShowSettings(false);
-                                    }}
-                                    className={`settings-menu-option-item ${playbackSpeed === speed ? "active" : ""}`}
-                                  >
-                                    <span>
-                                      {speed === 1 ? "Normal" : `${speed}x`}
-                                    </span>
-                                    {playbackSpeed === speed && (
-                                      <span className="checkmark">✓</span>
-                                    )}
-                                  </button>
-                                ),
-                              )}
+                              {[
+                                0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.5, 3,
+                              ].map((speed) => (
+                                <button
+                                  key={speed}
+                                  onClick={() => {
+                                    setPlaybackSpeed(speed);
+                                    setSettingsActiveMenu("main");
+                                    setShowSettings(false);
+                                  }}
+                                  className={`settings-menu-option-item ${playbackSpeed === speed ? "active" : ""}`}
+                                >
+                                  <span>
+                                    {speed === 1 ? "Normal" : `${speed}x`}
+                                  </span>
+                                  {playbackSpeed === speed && (
+                                    <span className="checkmark">✓</span>
+                                  )}
+                                </button>
+                              ))}
                             </div>
                           </div>
                         )}

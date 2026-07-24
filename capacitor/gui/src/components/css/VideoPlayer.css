@@ -282,7 +282,7 @@
   border-radius: 2.5px;
   pointer-events: none;
   opacity: 0.8;
-  z-index: 1;
+  z-index: 3;
 }
 
 .mpv-timeline-marker.op {

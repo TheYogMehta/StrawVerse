@@ -1,4 +1,4 @@
-const { queryOne, run } = require("./db");
+const { queryOne, queryAll, run } = require("./db");
 
 const cookieCache = {};
 const refererCache = {};
@@ -101,6 +101,19 @@ function getHeaders(url, method = "GET") {
 
   const headers = {
     "User-Agent": userAgent,
+    Accept: "application/json, text/plain, text/html, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-CH-UA": `"Chromium";v="${chromeVer.split(".")[0]}", "Not=A?Brand";v="24"`,
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform":
+      process.platform === "win32"
+        ? '"Windows"'
+        : process.platform === "darwin"
+          ? '"macOS"'
+          : '"Linux"',
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Dest": "empty",
   };
 
   // kwik - animepahe
@@ -170,43 +183,60 @@ function getHeaders(url, method = "GET") {
 
   if (cookieDomain) {
     const cached = cookieCache[cookieDomain];
-    if (cached && cached.expiry > Date.now()) {
-      if (cached.value) {
-        headers.Cookie = `cf_clearance=${cached.value};`;
-      }
+    if (cached && cached.expiry > Date.now() && cached.value) {
+      headers.Cookie = cached.value;
     } else {
       try {
-        const row = queryOne(
-          "SELECT value, expirationDate, local_saved_at FROM cookie WHERE (id = ? OR (name = 'cf_clearance' AND (? = domain OR ? LIKE '%.' || domain))) ORDER BY CAST(expirationDate AS REAL) DESC LIMIT 1",
-          [`${cookieDomain}-cf_clearance`, cookieDomain, cookieDomain],
+        let parentDomain = cookieDomain;
+        if (
+          cookieDomain.includes("owocdn.top") ||
+          cookieDomain.includes("uwucdn.top")
+        ) {
+          parentDomain = "kwik.cx";
+        } else if (cookieDomain.includes("animepahe")) {
+          parentDomain = "animepahe.pw";
+        }
+
+        const rows = queryAll(
+          `SELECT name, value, expirationDate, local_saved_at FROM cookie 
+           WHERE (? = domain OR ? LIKE '%.' || domain OR ? = domain OR ? LIKE '%.' || domain OR domain LIKE '%kwik.cx%' OR domain LIKE '%animepahe%')`,
+          [cookieDomain, cookieDomain, parentDomain, parentDomain],
         );
-        let isValid = false;
-        let expiryTime = Date.now() + 10 * 60 * 1000;
+        const validCookies = [];
+        const seenNames = new Set();
+        const now = Date.now();
 
-        if (row && row.value) {
-          const exp = Number(row.expirationDate);
-          const savedAt = Number(row.local_saved_at);
-          const now = Date.now();
+        if (rows && rows.length > 0) {
+          for (const row of rows) {
+            if (!row.name || !row.value || seenNames.has(row.name)) continue;
+            const exp = Number(row.expirationDate);
+            const savedAt = Number(row.local_saved_at);
+            let isValid = false;
 
-          if (exp > now) {
-            isValid = true;
-            expiryTime = exp;
-          } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
-            isValid = true;
-            expiryTime = savedAt + 2 * 60 * 60 * 1000;
+            if (exp && exp > now) {
+              isValid = true;
+            } else if (
+              savedAt &&
+              Math.abs(now - savedAt) < 4 * 60 * 60 * 1000
+            ) {
+              isValid = true;
+            } else if (!exp && !savedAt) {
+              isValid = true;
+            }
+
+            if (isValid) {
+              seenNames.add(row.name);
+              validCookies.push(`${row.name}=${row.value}`);
+            }
           }
         }
 
-        if (row && row.value && isValid) {
-          headers.Cookie = `cf_clearance=${row.value};`;
+        if (validCookies.length > 0) {
+          const cookieStr = validCookies.join("; ");
+          headers.Cookie = cookieStr;
           cookieCache[cookieDomain] = {
-            value: row.value,
-            expiry: expiryTime,
-          };
-        } else {
-          cookieCache[cookieDomain] = {
-            value: null,
-            expiry: Date.now() + 30 * 1000,
+            value: cookieStr,
+            expiry: now + 5 * 60 * 1000,
           };
         }
       } catch (e) {

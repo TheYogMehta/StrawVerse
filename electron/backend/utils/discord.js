@@ -20,7 +20,7 @@ let idle_messages = [
   "Catching up on all the latest manga 📚",
   "In anime zen mode 🧘",
   "Lost in thought (and anime) 🤔",
-  "Currently AFK — send snacks! 🍩",
+  "Currently AFK send snacks! 🍩",
   "Daydreaming about the next arc...",
 ];
 

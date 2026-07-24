@@ -675,7 +675,10 @@
   .select-nav {
     padding: 4px 6px;
     font-size: 12px;
-    max-width: 90px;
+    max-width: 130px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
     background-color: transparent;
     border: none;
   }
