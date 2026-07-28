@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, no-unused-vars */
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Loader2,
   ArrowLeft,
@@ -130,79 +130,6 @@ export default function InfoView({
         details?.DownloadedEpisodes?.dub?.length > 0
       : details?.DownloadedChapters?.length > 0;
 
-  const sortedItems = useMemo(() => {
-    if (sortOrder === "downloaded") {
-      const allDownloadedNums =
-        type === "Anime"
-          ? Array.from(
-              new Set(
-                [
-                  ...(details?.DownloadedEpisodes?.sub || []),
-                  ...(details?.DownloadedEpisodes?.dub || []),
-                ].map(Number),
-              ),
-            ).sort((a, b) => a - b)
-          : Array.from(
-              new Set((details?.DownloadedChapters || []).map(Number)),
-            ).sort((a, b) => a - b);
-
-      allDownloadedNums.sort((a, b) => a - b);
-
-      return allDownloadedNums.map((num) => {
-        const existingItem = episodesOrChapters.find(
-          (item) => Number(item.number) === num,
-        );
-        if (existingItem) return existingItem;
-
-        if (type === "Anime") {
-          const subList = details?.DownloadedEpisodes?.sub || [];
-          const dubList = details?.DownloadedEpisodes?.dub || [];
-          return {
-            id: `local-ep-${num}`,
-            number: String(num),
-            title: `Episode ${num}`,
-            hasDub: dubList.map(Number).includes(num),
-            lang:
-              subList.map(Number).includes(num) &&
-              dubList.map(Number).includes(num)
-                ? "both"
-                : dubList.map(Number).includes(num)
-                  ? "dub"
-                  : "sub",
-          };
-        } else {
-          return {
-            id: `local-ch-${num}`,
-            number: String(num),
-            title: `Chapter ${num}`,
-          };
-        }
-      });
-    }
-
-    return [...episodesOrChapters].sort((a, b) => {
-      const numA = parseFloat(a.number) || 0;
-      const numB = parseFloat(b.number) || 0;
-      return sortOrder === "asc" ? numA - numB : numB - numA;
-    });
-  }, [
-    episodesOrChapters,
-    sortOrder,
-    details?.DownloadedEpisodes,
-    details?.DownloadedChapters,
-    dubSelect,
-  ]);
-
-  const filteredItems = useMemo(() => {
-    if (!episodeSearchQuery.trim()) return sortedItems;
-    const query = episodeSearchQuery.toLowerCase().trim();
-    return sortedItems.filter((item) => {
-      const numStr = String(item.number || "");
-      const titleStr = String(item.title || "").toLowerCase();
-      return numStr.includes(query) || titleStr.includes(query);
-    });
-  }, [sortedItems, episodeSearchQuery]);
-
   // MAL Status Sync form states
   const [malSyncing, setMalSyncing] = useState(false);
   const [malStatus, setMalStatus] = useState("not_in_list");
@@ -256,6 +183,137 @@ export default function InfoView({
   const [isMalStatusDropdownOpen, setIsMalStatusDropdownOpen] = useState(false);
   const malStatusDropdownRef = useRef(null);
   const [installedExtensions, setInstalledExtensions] = useState(null);
+  const [sortDirection, setSortDirection] = useState(() =>
+    sortOrder === "desc" ? "desc" : "asc",
+  );
+
+  useEffect(() => {
+    if (sortOrder === "asc" || sortOrder === "desc") {
+      setSortDirection(sortOrder);
+    }
+  }, [sortOrder]);
+
+  const isItemWatched = useCallback(
+    (item) => {
+      const epStatus =
+        type === "Anime"
+          ? (historyProgress?.episodesStatus || []).find(
+              (h) => Number(h.number) === Number(item.number),
+            )
+          : (historyProgress?.chaptersStatus || []).find(
+              (h) => Number(h.number) === Number(item.number),
+            );
+      const isMalCompleted =
+        malWatched && Number(item.number) <= Number(malWatched);
+      return Boolean((epStatus && epStatus.isCompleted) || isMalCompleted);
+    },
+    [historyProgress, malWatched, type],
+  );
+
+  const watchedCount = useMemo(() => {
+    if (!episodesOrChapters || episodesOrChapters.length === 0) return 0;
+    return episodesOrChapters.filter((item) => isItemWatched(item)).length;
+  }, [episodesOrChapters, isItemWatched]);
+
+  const showWatchedSort =
+    watchedCount > 0 && watchedCount < (episodesOrChapters?.length || 0);
+
+  const sortedItems = useMemo(() => {
+    if (sortOrder === "downloaded") {
+      const allDownloadedNums =
+        type === "Anime"
+          ? Array.from(
+              new Set(
+                [
+                  ...(details?.DownloadedEpisodes?.sub || []),
+                  ...(details?.DownloadedEpisodes?.dub || []),
+                ].map(Number),
+              ),
+            ).sort((a, b) => a - b)
+          : Array.from(
+              new Set((details?.DownloadedChapters || []).map(Number)),
+            ).sort((a, b) => a - b);
+
+      allDownloadedNums.sort((a, b) => a - b);
+
+      return allDownloadedNums.map((num) => {
+        const existingItem = episodesOrChapters.find(
+          (item) => Number(item.number) === num,
+        );
+        if (existingItem) return existingItem;
+
+        if (type === "Anime") {
+          const subList = details?.DownloadedEpisodes?.sub || [];
+          const dubList = details?.DownloadedEpisodes?.dub || [];
+          return {
+            id: `local-ep-${num}`,
+            number: String(num),
+            title: `Episode ${num}`,
+            hasDub: dubList.map(Number).includes(num),
+            lang:
+              subList.map(Number).includes(num) &&
+              dubList.map(Number).includes(num)
+                ? "both"
+                : dubList.map(Number).includes(num)
+                  ? "dub"
+                  : "sub",
+          };
+        } else {
+          return {
+            id: `local-ch-${num}`,
+            number: String(num),
+            title: `Chapter ${num}`,
+          };
+        }
+      });
+    }
+
+    if (sortOrder === "watched") {
+      const watchedList = episodesOrChapters.filter((item) =>
+        isItemWatched(item),
+      );
+      return watchedList.sort((a, b) => {
+        const numA = parseFloat(a.number) || 0;
+        const numB = parseFloat(b.number) || 0;
+        return sortDirection === "desc" ? numB - numA : numA - numB;
+      });
+    }
+
+    if (sortOrder === "unwatched") {
+      const unwatchedList = episodesOrChapters.filter(
+        (item) => !isItemWatched(item),
+      );
+      return unwatchedList.sort((a, b) => {
+        const numA = parseFloat(a.number) || 0;
+        const numB = parseFloat(b.number) || 0;
+        return sortDirection === "desc" ? numB - numA : numA - numB;
+      });
+    }
+
+    return [...episodesOrChapters].sort((a, b) => {
+      const numA = parseFloat(a.number) || 0;
+      const numB = parseFloat(b.number) || 0;
+      return sortOrder === "asc" ? numA - numB : numB - numA;
+    });
+  }, [
+    episodesOrChapters,
+    sortOrder,
+    sortDirection,
+    details?.DownloadedEpisodes,
+    details?.DownloadedChapters,
+    dubSelect,
+    isItemWatched,
+  ]);
+
+  const filteredItems = useMemo(() => {
+    if (!episodeSearchQuery.trim()) return sortedItems;
+    const query = episodeSearchQuery.toLowerCase().trim();
+    return sortedItems.filter((item) => {
+      const numStr = String(item.number || "");
+      const titleStr = String(item.title || "").toLowerCase();
+      return numStr.includes(query) || titleStr.includes(query);
+    });
+  }, [sortedItems, episodeSearchQuery]);
 
   useEffect(() => {
     if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
@@ -2245,10 +2303,12 @@ export default function InfoView({
             </div>
             {/* Sort Selector */}
             <Dropdown
+              label="Sort:"
               value={sortOrder}
               onChange={(newOrder) => {
                 setSortOrder(newOrder);
-                if (newOrder !== "downloaded") {
+                if (newOrder === "asc" || newOrder === "desc") {
+                  setSortDirection(newOrder);
                   localStorage.setItem("info_sort_order", newOrder);
                   if (
                     window.sharedStateAPI &&
@@ -2268,10 +2328,22 @@ export default function InfoView({
                 }
               }}
               options={[
-                { value: "asc", label: "Sort: ASC" },
-                { value: "desc", label: "Sort: DESC" },
+                { value: "asc", label: "ASC" },
+                { value: "desc", label: "DESC" },
+                ...(showWatchedSort
+                  ? [
+                      {
+                        value: "watched",
+                        label: type === "Anime" ? "WATCHED" : "READ",
+                      },
+                      {
+                        value: "unwatched",
+                        label: type === "Anime" ? "UNWATCHED" : "UNREAD",
+                      },
+                    ]
+                  : []),
                 ...(hasDownloads
-                  ? [{ value: "downloaded", label: "Sort: DOWNLOADED" }]
+                  ? [{ value: "downloaded", label: "DOWNLOADED" }]
                   : []),
               ]}
               className="u-style-43"
@@ -2677,7 +2749,12 @@ export default function InfoView({
         </div>
 
         {(() => {
-          if (sortOrder === "downloaded") return null;
+          if (
+            sortOrder === "downloaded" ||
+            sortOrder === "watched" ||
+            sortOrder === "unwatched"
+          )
+            return null;
           const isAnimePahe =
             details?.provider?.toLowerCase() === "animepahe" ||
             details?.provider?.toLowerCase() === "pahe";

@@ -28,7 +28,12 @@ export default function Dropdown({
   }, []);
 
   const selectedOption = options.find((opt) => opt.value === value);
-  const displayText = selectedOption ? selectedOption.label : label;
+  const displayText =
+    label && selectedOption
+      ? `${label} ${selectedOption.label}`
+      : selectedOption
+        ? selectedOption.label
+        : label;
 
   return (
     <div
