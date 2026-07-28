@@ -129,15 +129,31 @@ function getHeaders(url, method = "GET") {
   // weebcentral
   else if (
     url.includes("temp.compsci88.com") ||
-    url.startsWith("https://temp.compsci88.com/")
+    url.startsWith("https://temp.compsci88.com/") ||
+    url.includes("weebcentral.com")
   ) {
     headers.Referer = "https://weebcentral.com/";
   }
   // megaplay - anikoto
-  else if (url.includes("anikototv.to") || url.includes("megaplay.buzz")) {
-    headers.Referer = "https://anikototv.to/";
-  } else if (url.includes("watching.onl") || url.includes("nekostream.site")) {
+  else if (
+    url.includes("anikoto.to") ||
+    url.includes("anikototv.to") ||
+    url.includes("megaplay.buzz")
+  ) {
+    headers.Referer = "https://anikoto.to/";
+  } else if (
+    url.includes("watching.onl") ||
+    url.includes("nekostream.site") ||
+    url.includes("kotocdn.site") ||
+    url.includes("livedns.my") ||
+    url.includes("sugevideo.xyz") ||
+    url.includes("trycloud.pro")
+  ) {
     headers.Referer = "https://megaplay.buzz/";
+  }
+  // anineko
+  else if (url.includes("anineko.to")) {
+    headers.Referer = "https://anineko.to/";
   }
   // all manga
   else if (
@@ -153,6 +169,15 @@ function getHeaders(url, method = "GET") {
       const domain = new URL(url).hostname.replace("www.", "");
       const ref = getStoredStreamReferer(domain);
       if (ref) headers.Referer = ref;
+    } catch (e) {}
+  }
+
+  if (!headers.Referer) {
+    try {
+      const urlObj = new URL(url);
+      if (urlObj.protocol === "http:" || urlObj.protocol === "https:") {
+        headers.Referer = urlObj.origin + "/";
+      }
     } catch (e) {}
   }
 
@@ -199,7 +224,7 @@ function getHeaders(url, method = "GET") {
 
         const rows = queryAll(
           `SELECT name, value, expirationDate, local_saved_at FROM cookie 
-           WHERE (? = domain OR ? LIKE '%.' || domain OR ? = domain OR ? LIKE '%.' || domain OR domain LIKE '%kwik.cx%' OR domain LIKE '%animepahe%')`,
+           WHERE (? = domain OR ? LIKE '%.' || domain OR ? = domain OR ? LIKE '%.' || domain)`,
           [cookieDomain, cookieDomain, parentDomain, parentDomain],
         );
         const validCookies = [];

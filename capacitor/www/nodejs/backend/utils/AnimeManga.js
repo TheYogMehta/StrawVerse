@@ -13,6 +13,15 @@ const { queryAll } = require("./db");
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
 
+function resolveSubDubId(epId, subdub) {
+  if (!epId) return epId;
+  const strId = String(epId);
+  if (subdub && !strId.match(/-(sub|dub|hsub|both)$/)) {
+    return `${strId}-${subdub}`;
+  }
+  return strId;
+}
+
 //====================================== Anime ================================
 // find popular anime
 async function latestAnime(provider, filters) {
@@ -176,14 +185,36 @@ async function fetchEpisodeSources(provider, episodeId) {
     `animeepisodesources_${provider.provider_name}_${episodeId}`,
   );
 
-  const cachedData = cache.get(cacheKey);
-
-  if (cachedData) {
-    return cachedData;
+  let sources = cache.get(cacheKey);
+  if (!sources) {
+    sources = await provider.provider.fetchEpisodeSources(episodeId);
+    if (sources) {
+      cache.set(cacheKey, sources, 60);
+    }
   }
 
-  const sources = await provider.provider.fetchEpisodeSources(episodeId);
-  cache.set(cacheKey, sources, 60);
+  if (sources && global.setDynamicReferer) {
+    const allSources = [
+      ...(Array.isArray(sources.sources) ? sources.sources : []),
+      ...(sources.sub?.sources || []),
+      ...(sources.dub?.sources || []),
+    ];
+    for (const src of allSources) {
+      if (src.url) {
+        try {
+          const cdnDomain = new URL(src.url).hostname;
+          const ref =
+            src.headers?.Referer ||
+            src.headers?.referer ||
+            (src.extra && src.extra[0]);
+          if (ref) {
+            global.setDynamicReferer(cdnDomain, ref);
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
   return sources;
 }
 
@@ -577,4 +608,5 @@ module.exports = {
   invalidateCache,
   getProviderOrThrow,
   resolveDownloadFolder,
+  resolveSubDubId,
 };

@@ -904,6 +904,8 @@ export default function VideoPlayer({
             }
           : {
               ep: targetEp,
+              epNum: targetEpNum,
+              animeId: id,
               Downloaded: false,
               subdub: playerSubDub,
               provider: provider,
@@ -1417,7 +1419,16 @@ export default function VideoPlayer({
 
           {!loading && sources.length > 0 && (
             <div className="player-quality-selector">
-              <span className="u-style-98">Source:</span>
+              <span className="u-style-98">
+                {sources.some((s) => {
+                  const q = String(s?.quality || "").toLowerCase();
+                  return (
+                    !/^\d+p$/.test(q) && !/^auto$/.test(q) && !/\d+p/.test(q)
+                  );
+                })
+                  ? "Servers:"
+                  : "Quality:"}
+              </span>
               <div className="player-qualities-wrapper">
                 {sources.map((s, idx) => (
                   <button

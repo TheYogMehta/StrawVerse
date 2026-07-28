@@ -11,5 +11,23 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, "..", "www", "nodejs", "gui", "dist"),
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (
+            id.includes("node_modules/react") ||
+            id.includes("node_modules/react-dom")
+          ) {
+            return "vendor-react";
+          }
+          if (id.includes("node_modules/lucide-react")) {
+            return "vendor-icons";
+          }
+          if (id.includes("node_modules/sweetalert2")) {
+            return "vendor-swal";
+          }
+        },
+      },
+    },
   },
 });

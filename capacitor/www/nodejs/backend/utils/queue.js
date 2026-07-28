@@ -42,7 +42,10 @@ async function resumeQueue() {
 // Add to Queue
 async function addToQueue(item) {
   try {
-    await run(`INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [item.epid,
+    await run(
+      `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        item.epid,
         item.Type,
         item.Title,
         item.EpNum || "",
@@ -55,7 +58,9 @@ async function addToQueue(item) {
         item.currentSegments || 0,
         item.caption || "",
         item.added_at || Date.now(),
-        JSON.stringify(item.config || {}),]);
+        JSON.stringify(item.config || {}),
+      ],
+    );
   } catch (err) {
     logger.error("Failed to insert item to DownloadQueue DB: " + err.message);
   }
@@ -75,7 +80,9 @@ async function addToQueue(item) {
 // load queue when the script start
 async function loadQueue() {
   try {
-    const rows = await queryAll("SELECT * FROM DownloadQueue ORDER BY added_at ASC");
+    const rows = await queryAll(
+      "SELECT * FROM DownloadQueue ORDER BY added_at ASC",
+    );
     AnimeQueue = rows.map((item) => {
       if (item.config) {
         try {
@@ -121,7 +128,10 @@ async function removeMultipleFromQueue(epids = []) {
   if (epids.length > 0) {
     try {
       const placeholders = epids.map(() => "?").join(",");
-      await run(`DELETE FROM DownloadQueue WHERE epid IN (${placeholders})`, epids);
+      await run(
+        `DELETE FROM DownloadQueue WHERE epid IN (${placeholders})`,
+        epids,
+      );
     } catch (err) {
       logger.error(
         "Failed to delete multiple from DownloadQueue DB: " + err.message,
@@ -141,7 +151,7 @@ async function SaveQueueData(QueueData) {
   AnimeQueue = QueueData;
   try {
     await run("DELETE FROM DownloadQueue");
-    const operations = QueueData.map(item => ({
+    const operations = QueueData.map((item) => ({
       sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       params: [
         item.epid,
@@ -158,7 +168,7 @@ async function SaveQueueData(QueueData) {
         item.caption || "",
         item.added_at || Date.now(),
         JSON.stringify(item.config || {}),
-      ]
+      ],
     }));
     if (operations.length > 0) {
       await batchRun("main", operations);
@@ -233,7 +243,10 @@ async function updateQueue(
 
     if (Tosave) {
       try {
-        await run("UPDATE DownloadQueue SET totalSegments = ?, currentSegments = ?, caption = ? WHERE epid = ?", [totalSegments, currentSegments, caption || "", epid]);
+        await run(
+          "UPDATE DownloadQueue SET totalSegments = ?, currentSegments = ?, caption = ? WHERE epid = ?",
+          [totalSegments, currentSegments, caption || "", epid],
+        );
       } catch (err) {
         logger.error("Failed to update DownloadQueue DB: " + err.message);
       }
@@ -259,7 +272,7 @@ async function checkEpisodeDownload(epid) {
 async function addMultipleToQueue(items) {
   if (items && items.length > 0) {
     try {
-      const operations = items.map(item => ({
+      const operations = items.map((item) => ({
         sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params: [
           item.epid,
@@ -276,7 +289,7 @@ async function addMultipleToQueue(items) {
           item.caption || "",
           item.added_at || Date.now(),
           JSON.stringify(item.config || {}),
-        ]
+        ],
       }));
       await batchRun("main", operations);
     } catch (err) {
@@ -474,19 +487,6 @@ async function downloadEpisodeByQuality(
       resolvedEpid = `${epid}-${subdub}`;
     }
     const sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
-    if (sourcesArray?.sources) {
-      for (const src of sourcesArray.sources) {
-        if (src?.url) {
-          try {
-            const cdnDomain = new URL(
-              typeof src.url === "string" ? src.url : src.url?.url || "",
-            ).hostname;
-            const ref = src.headers?.Referer || src.headers?.referer;
-            if (cdnDomain && ref) global.setDynamicReferer(cdnDomain, ref);
-          } catch (e) {}
-        }
-      }
-    }
 
     let selectedSource = sourcesArray?.sources?.find(
       (source) => source?.quality === (config?.quality ?? "1080p"),
@@ -555,7 +555,10 @@ async function downloadEpisodeByQuality(
                 }));
 
                 try {
-                  await run("INSERT OR REPLACE INTO SkipTimes (anime_id, episode_number, skip_times) VALUES (?, ?, ?)", [animeId, Number(epNum), JSON.stringify(normalized)]);
+                  await run(
+                    "INSERT OR REPLACE INTO SkipTimes (anime_id, episode_number, skip_times) VALUES (?, ?, ?)",
+                    [animeId, Number(epNum), JSON.stringify(normalized)],
+                  );
                   logger.info(
                     `[queueWorker] Saved skip times to SkipTimes DB for ${Title} EP ${epNum}`,
                   );

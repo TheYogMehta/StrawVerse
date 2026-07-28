@@ -903,6 +903,8 @@ export default function VideoPlayer({
             }
           : {
               ep: targetEp,
+              epNum: targetEpNum,
+              animeId: id,
               Downloaded: false,
               subdub: playerSubDub,
               provider: provider,
@@ -1326,11 +1328,177 @@ export default function VideoPlayer({
   const prevIndexRef = useRef(prevIndex);
   const internalSwitchRef = useRef(false);
   const lastLoadedUrlRef = useRef("");
+  const sourcesRef = useRef(sources);
+  const onBackRef = useRef(onBack);
 
   useEffect(() => {
     nextIndexRef.current = nextIndex;
     prevIndexRef.current = prevIndex;
-  }, [nextIndex, prevIndex]);
+    sourcesRef.current = sources;
+    onBackRef.current = onBack;
+  }, [nextIndex, prevIndex, sources, onBack]);
+
+  useEffect(() => {
+    if (!isElectronMpvAvailable) return;
+
+    const removeMpvStartedListener = window.sharedStateAPI.on(
+      "mpv-started",
+      () => {
+        setMpvStatus("playing");
+      },
+    );
+
+    const removeMpvClosedListener = window.sharedStateAPI.on(
+      "mpv-closed",
+      (data) => {
+        setMpvStatus("idle");
+        lastLoadedUrlRef.current = "";
+        const action = data?.action;
+        if (action === "next" && nextIndexRef.current !== -1) {
+          handleNextEpisode();
+        } else if (action === "prev" && prevIndexRef.current !== -1) {
+          handlePrevEpisode();
+        } else {
+          if (onBackRef.current) onBackRef.current();
+        }
+      },
+    );
+
+    const removeMpvErrorListener = window.sharedStateAPI.on(
+      "mpv-error",
+      (data) => {
+        const errMsg = data?.message || "MPV player encountered an error.";
+        setMpvStatus("error");
+        setMpvErrorMsg(errMsg);
+        lastLoadedUrlRef.current = "";
+
+        const action = data?.action;
+        if (action === "next" && nextIndexRef.current !== -1) {
+          handleNextEpisode();
+        } else if (action === "prev" && prevIndexRef.current !== -1) {
+          handlePrevEpisode();
+        } else {
+          Swal.fire({
+            icon: "error",
+            title: "MPV Player Error",
+            text: errMsg,
+            confirmButtonText: "OK",
+            background: "#18181b",
+            color: "#fff",
+          }).then(() => {
+            if (onBackRef.current) onBackRef.current();
+          });
+        }
+      },
+    );
+
+    const removeMpvActionListener = window.sharedStateAPI.on(
+      "mpv-action",
+      (data) => {
+        console.log("[React VideoPlayer] Received mpv-action:", data);
+        const action = data?.action;
+        if (action === "next") {
+          if (nextIndexRef.current !== -1) {
+            handleNextEpisode();
+          } else {
+            console.log(
+              "[React VideoPlayer] No next episode available. Closing player.",
+            );
+            window.sharedStateAPI.controlMpv("quit", []);
+          }
+        } else if (action === "prev") {
+          if (prevIndexRef.current !== -1) {
+            handlePrevEpisode();
+          } else {
+            console.log(
+              "[React VideoPlayer] No previous episode available. Closing player.",
+            );
+            window.sharedStateAPI.controlMpv("quit", []);
+          }
+        } else if (action === "change-server") {
+          const newUrl = data?.url;
+          console.log(
+            "[React VideoPlayer] change-server payload:",
+            newUrl,
+            "Available sources:",
+            sourcesRef.current,
+          );
+          if (isElectronMpvAvailable) {
+            window.sharedStateAPI.controlMpv("log-debug", [
+              "change-server event payload: " + newUrl,
+            ]);
+          }
+          if (newUrl) {
+            const currentSources = sourcesRef.current || [];
+            const matchedSource = currentSources.find(
+              (s) =>
+                (typeof s.url === "string" ? s.url : s.url?.url) === newUrl ||
+                s.quality === newUrl ||
+                s.name === newUrl ||
+                (s.quality &&
+                  String(s.quality).trim().toLowerCase() ===
+                    String(newUrl).trim().toLowerCase()) ||
+                (s.name &&
+                  String(s.name).trim().toLowerCase() ===
+                    String(newUrl).trim().toLowerCase()),
+            );
+            if (isElectronMpvAvailable) {
+              window.sharedStateAPI.controlMpv("log-debug", [
+                "matchedSource found: " +
+                  (matchedSource
+                    ? matchedSource.quality || matchedSource.name
+                    : "false"),
+              ]);
+            }
+            console.log("[React VideoPlayer] Matched source:", matchedSource);
+            if (matchedSource) {
+              const matchedUrl =
+                typeof matchedSource.url === "string"
+                  ? matchedSource.url
+                  : matchedSource.url?.url || "";
+              lastLoadedUrlRef.current = matchedUrl;
+              internalSwitchRef.current = true;
+              setSelectedSource(matchedSource);
+            } else {
+              console.warn(
+                "[React VideoPlayer] No matched source found for:",
+                newUrl,
+              );
+            }
+          }
+        }
+      },
+    );
+
+    const removeMpvSettingListener = window.sharedStateAPI.on(
+      "mpv-setting-changed",
+      (data) => {
+        if (!data) return;
+        const { name, value } = data;
+        if (name === "volume") {
+          setVolume(value);
+          localStorage.setItem("player-volume", value.toString());
+        } else if (name === "speed") {
+          setPlaybackSpeed(value);
+          localStorage.setItem("player-speed", value.toString());
+        } else if (name === "subs-enabled") {
+          setSelectedSubtitleIndex(value ? 0 : -1);
+          localStorage.setItem("player-subs-enabled", value ? "true" : "false");
+        } else if (name === "brightness") {
+          setBrightness(value);
+          localStorage.setItem("player-brightness", value.toString());
+        }
+      },
+    );
+
+    return () => {
+      if (removeMpvStartedListener) removeMpvStartedListener();
+      if (removeMpvClosedListener) removeMpvClosedListener();
+      if (removeMpvErrorListener) removeMpvErrorListener();
+      if (removeMpvActionListener) removeMpvActionListener();
+      if (removeMpvSettingListener) removeMpvSettingListener();
+    };
+  }, [isElectronMpvAvailable]);
 
   useEffect(() => {
     if (!selectedSource || !isElectronMpvAvailable) return;
@@ -1381,6 +1549,7 @@ export default function VideoPlayer({
             lastLoadedUrlRef.current = "";
             return;
           }
+          setMpvStatus("playing");
           const newTitle = `StrawVerse - ${animeTitle} - Episode ${currentEpNumber}`;
           const newMediaTitle = `Ep ${currentEpNumber} - ${animeTitle}`;
           window.sharedStateAPI.controlMpv("set_property", ["title", newTitle]);
@@ -1441,6 +1610,7 @@ export default function VideoPlayer({
         });
       return;
     }
+
     setMpvStatus("loading");
     setMpvErrorMsg("");
     lastLoadedUrlRef.current = sourceUrl;
@@ -1478,7 +1648,7 @@ export default function VideoPlayer({
             background: "#18181b",
             color: "#fff",
           }).then(() => {
-            if (onBack) onBack();
+            if (onBackRef.current) onBackRef.current();
           });
         }
       })
@@ -1495,158 +1665,9 @@ export default function VideoPlayer({
           background: "#18181b",
           color: "#fff",
         }).then(() => {
-          if (onBack) onBack();
+          if (onBackRef.current) onBackRef.current();
         });
       });
-
-    const removeMpvStartedListener = window.sharedStateAPI.on(
-      "mpv-started",
-      () => {
-        setMpvStatus("playing");
-      },
-    );
-
-    const removeMpvClosedListener = window.sharedStateAPI.on(
-      "mpv-closed",
-      (data) => {
-        setMpvStatus("idle");
-        lastLoadedUrlRef.current = "";
-        const action = data?.action;
-        if (action === "next" && nextIndexRef.current !== -1) {
-          handleNextEpisode();
-        } else if (action === "prev" && prevIndexRef.current !== -1) {
-          handlePrevEpisode();
-        } else {
-          if (onBack) onBack();
-        }
-      },
-    );
-
-    const removeMpvErrorListener = window.sharedStateAPI.on(
-      "mpv-error",
-      (data) => {
-        const errMsg = data?.message || "MPV player encountered an error.";
-        setMpvStatus("error");
-        setMpvErrorMsg(errMsg);
-        lastLoadedUrlRef.current = "";
-
-        const action = data?.action;
-        if (action === "next" && nextIndexRef.current !== -1) {
-          handleNextEpisode();
-        } else if (action === "prev" && prevIndexRef.current !== -1) {
-          handlePrevEpisode();
-        } else {
-          Swal.fire({
-            icon: "error",
-            title: "MPV Player Error",
-            text: errMsg,
-            confirmButtonText: "OK",
-            background: "#18181b",
-            color: "#fff",
-          }).then(() => {
-            if (onBack) onBack();
-          });
-        }
-      },
-    );
-
-    const removeMpvActionListener = window.sharedStateAPI.on(
-      "mpv-action",
-      (data) => {
-        console.log("[React VideoPlayer] Received mpv-action:", data);
-        const action = data?.action;
-        if (action === "next") {
-          if (nextIndexRef.current !== -1) {
-            handleNextEpisode();
-          } else {
-            console.log(
-              "[React VideoPlayer] No next episode available. Closing player.",
-            );
-            window.sharedStateAPI.controlMpv("quit", []);
-          }
-        } else if (action === "prev") {
-          if (prevIndexRef.current !== -1) {
-            handlePrevEpisode();
-          } else {
-            console.log(
-              "[React VideoPlayer] No previous episode available. Closing player.",
-            );
-            window.sharedStateAPI.controlMpv("quit", []);
-          }
-        } else if (action === "change-server") {
-          const newUrl = data?.url;
-          console.log(
-            "[React VideoPlayer] change-server payload:",
-            newUrl,
-            "Available sources:",
-            sources,
-          );
-          if (isElectronMpvAvailable) {
-            window.sharedStateAPI.controlMpv("log-debug", [
-              "change-server event payload: " + newUrl,
-            ]);
-          }
-          if (newUrl) {
-            const matchedSource = sources.find(
-              (s) =>
-                (typeof s.url === "string" ? s.url : s.url?.url) === newUrl ||
-                s.quality === newUrl,
-            );
-            if (isElectronMpvAvailable) {
-              window.sharedStateAPI.controlMpv("log-debug", [
-                "matchedSource found: " +
-                  (matchedSource ? matchedSource.quality : "false"),
-              ]);
-            }
-            console.log("[React VideoPlayer] Matched source:", matchedSource);
-            if (matchedSource) {
-              const matchedUrl =
-                typeof matchedSource.url === "string"
-                  ? matchedSource.url
-                  : matchedSource.url?.url || "";
-              lastLoadedUrlRef.current = matchedUrl;
-              internalSwitchRef.current = true;
-              setSelectedSource(matchedSource);
-            } else {
-              console.warn(
-                "[React VideoPlayer] No matched source found for:",
-                newUrl,
-              );
-            }
-          }
-        }
-      },
-    );
-
-    const removeMpvSettingListener = window.sharedStateAPI.on(
-      "mpv-setting-changed",
-      (data) => {
-        if (!data) return;
-        const { name, value } = data;
-        if (name === "volume") {
-          setVolume(value);
-          localStorage.setItem("player-volume", value.toString());
-        } else if (name === "speed") {
-          setPlaybackSpeed(value);
-          localStorage.setItem("player-speed", value.toString());
-        } else if (name === "subs-enabled") {
-          setSelectedSubtitleIndex(value ? 0 : -1);
-          localStorage.setItem("player-subs-enabled", value ? "true" : "false");
-        } else if (name === "brightness") {
-          setBrightness(value);
-          localStorage.setItem("player-brightness", value.toString());
-        }
-      },
-    );
-
-    return () => {
-      lastLoadedUrlRef.current = "";
-      if (removeMpvStartedListener) removeMpvStartedListener();
-      if (removeMpvClosedListener) removeMpvClosedListener();
-      if (removeMpvErrorListener) removeMpvErrorListener();
-      if (removeMpvActionListener) removeMpvActionListener();
-      if (removeMpvSettingListener) removeMpvSettingListener();
-    };
   }, [selectedSource, sources, subtitles]);
 
   if (isElectronMpvAvailable) {
@@ -1753,7 +1774,16 @@ export default function VideoPlayer({
 
           {!loading && sources.length > 0 && (
             <div className="player-quality-selector">
-              <span className="u-style-98">Source:</span>
+              <span className="u-style-98">
+                {sources.some((s) => {
+                  const q = String(s?.quality || "").toLowerCase();
+                  return (
+                    !/^\d+p$/.test(q) && !/^auto$/.test(q) && !/\d+p/.test(q)
+                  );
+                })
+                  ? "Servers:"
+                  : "Quality:"}
+              </span>
               <div className="player-qualities-wrapper">
                 {sources.map((s, idx) => (
                   <button

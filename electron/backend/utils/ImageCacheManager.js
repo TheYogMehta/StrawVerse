@@ -90,7 +90,7 @@ async function cacheImage(url, buffer = null) {
         requestHeaders["User-Agent"] = headersObj["User-Agent"];
       if (headersObj.Cookie) requestHeaders["Cookie"] = headersObj.Cookie;
 
-      const response = await axios.get(url, {
+      const response = await global.axios.get(url, {
         headers: requestHeaders,
         responseType: "arraybuffer",
         timeout: 10000,

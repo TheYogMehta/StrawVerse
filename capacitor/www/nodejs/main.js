@@ -972,7 +972,7 @@ async function boot() {
   appExpress.get("/health", (_req, res) => res.json({ ok: true }));
   appExpress.use(express.static(path.join(__dirname, "gui", "dist")));
 
-  const routes = require("./backend/routes");
+  const routes = require("./backend/routes/index");
   appExpress.use(routes);
 
   appExpress.listen(PORT, "127.0.0.1", () => {

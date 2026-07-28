@@ -111,6 +111,8 @@
   },
   "overrides": {
     "undici": "^6.27.0 || ^7.27.3",
-    "form-data": "^4.0.6"
+    "form-data": "^4.0.6",
+    "builder-util-runtime": "^9.6.1",
+    "js-yaml": "^4.2.0"
   }
 }

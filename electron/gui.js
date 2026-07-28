@@ -110,7 +110,7 @@ const { checkForMappingUpdates } = require("./backend/utils/mappingUpdater");
 const { MalRefreshTokenGen } = require("./backend/utils/mal");
 
 // Express Server
-const routes = require("./backend/routes");
+const routes = require("./backend/routes/index");
 const appExpress = express();
 appExpress.use(express.urlencoded({ extended: true }));
 appExpress.use(express.json());

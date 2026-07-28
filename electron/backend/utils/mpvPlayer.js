@@ -148,6 +148,9 @@ const toProxyUrl = (url) => {
 };
 
 async function playInMpv(window, options) {
+  global.activePlayRequestId = (global.activePlayRequestId || 0) + 1;
+  const currentRequestId = global.activePlayRequestId;
+
   const {
     url,
     sources,
@@ -294,11 +297,21 @@ async function playInMpv(window, options) {
   let paused = false;
   let buffer = "";
   let pendingAction = null;
+  let hasStartedSent = false;
+
+  const sendStarted = () => {
+    if (global.activePlayRequestId !== currentRequestId) return;
+    if (!hasStartedSent) {
+      window.webContents.send("mpv-started");
+      hasStartedSent = true;
+    }
+  };
 
   try {
     client = await connectIpc(ipcPath);
     global.activeMpvClient = client;
     logger.info("[MPV] Connected to JSON-RPC IPC socket successfully.");
+    sendStarted();
 
     client.write(
       JSON.stringify({ command: ["observe_property", 1, "time-pos"] }) + "\n",
@@ -358,14 +371,6 @@ async function playInMpv(window, options) {
       JSON.stringify({ command: ["observe_property", 14, "brightness"] }) +
         "\n",
     );
-
-    let hasStartedSent = false;
-    const sendStarted = () => {
-      if (!hasStartedSent) {
-        window.webContents.send("mpv-started");
-        hasStartedSent = true;
-      }
-    };
 
     const handleIpcMessage = (dataStr) => {
       try {
@@ -511,15 +516,26 @@ async function playInMpv(window, options) {
     );
   }
 
-  mpvProcess.on("close", async (code) => {
-    logger.info(`[MPV] Native player closed with code ${code}`);
+  mpvProcess.on("close", async (code, signal) => {
+    logger.info(
+      `[MPV] Native player closed with code ${code}${signal ? `, signal ${signal}` : ""}`,
+    );
 
     if (global.activeMpvProcess === mpvProcess) {
       global.activeMpvProcess = null;
     }
-    global.activeMpvClient = null;
+    if (global.activeMpvClient === client) {
+      global.activeMpvClient = null;
+    }
     if (client && !client.destroyed) {
       client.destroy();
+    }
+
+    if (global.activePlayRequestId !== currentRequestId) {
+      logger.info(
+        `[MPV] Player process superseded by request ${global.activePlayRequestId}, suppressing close IPC.`,
+      );
+      return;
     }
 
     try {
@@ -543,7 +559,10 @@ async function playInMpv(window, options) {
       logger.error(`[MPV] Failed to write history progress: ${dbErr.message}`);
     }
 
-    if (code !== 0 && code !== null) {
+    const isNormalExit =
+      hasStartedSent || code === 0 || code === 4 || signal !== null;
+
+    if (!isNormalExit) {
       window.webContents.send("mpv-error", {
         message: `MPV player failed to open stream (Exit Code ${code}).`,
         action: pendingAction,

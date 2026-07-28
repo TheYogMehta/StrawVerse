@@ -490,19 +490,6 @@ async function downloadEpisodeByQuality(
       resolvedEpid = `${epid}-${subdub}`;
     }
     const sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
-    if (sourcesArray?.sources) {
-      for (const src of sourcesArray.sources) {
-        if (src?.url) {
-          try {
-            const cdnDomain = new URL(
-              typeof src.url === "string" ? src.url : src.url?.url || "",
-            ).hostname;
-            const ref = src.headers?.Referer || src.headers?.referer;
-            if (cdnDomain && ref) global.setDynamicReferer(cdnDomain, ref);
-          } catch (e) {}
-        }
-      }
-    }
 
     let selectedSource = sourcesArray?.sources?.find(
       (source) => source?.quality === (config?.quality ?? "1080p"),

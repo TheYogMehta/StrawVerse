@@ -1,34 +1,16 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, no-unused-vars */
-import {
-  useState,
-  useEffect,
-  useLayoutEffect,
-  useCallback,
-  useRef,
-} from "react";
+import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import "./css/Catalog.css";
-import {
-  Search,
-  Loader2,
-  ArrowLeft,
-  ArrowRight,
-  CheckCircle,
-  Download,
-  Eye,
-  Film,
-  Plus,
-  Folder,
-  Clock,
-  CheckSquare,
-  Tv,
-  BookOpen,
-  Play,
-  X,
-  Calendar,
-} from "lucide-react";
+import { Plus } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError } from "../utils/swal";
 import { apiPost } from "../utils/common";
+
+import CatalogHeader from "./catalog/CatalogHeader";
+import LibraryStats from "./catalog/LibraryStats";
+import RecentHistory from "./catalog/RecentHistory";
+import AiringCalendar from "./catalog/AiringCalendar";
+import CatalogGrid from "./catalog/CatalogGrid";
 
 export default function Catalog({
   type,
@@ -129,7 +111,58 @@ export default function Catalog({
     if (!window.catalogCache[cacheKey]) {
       window.catalogCache[cacheKey] = {};
     }
+
+    if (discoverTab === "calendar") {
+      window.catalogCache[cacheKey].calendarScrollPosition = scrollTop;
+      return;
+    }
+
     window.catalogCache[cacheKey].scrollPosition = scrollTop;
+
+    if (scrollTop <= 10) {
+      window.catalogCache[cacheKey].lastActivePage = 1;
+      window.catalogCache[cacheKey].cardIndexInPage = 0;
+      window.catalogCache[cacheKey].cardTopOffset = 0;
+      return;
+    }
+
+    if (wrapperRef.current) {
+      const cards = wrapperRef.current.querySelectorAll(".media-card");
+      const headerEl = wrapperRef.current.querySelector(".catalog-header");
+      const headerHeight = headerEl ? headerEl.offsetHeight : 80;
+      const visibleTop = scrollTop + headerHeight;
+
+      if (cards && cards.length > 0) {
+        let topCardIdx = 0;
+        for (let i = 0; i < cards.length; i++) {
+          if (cards[i].offsetTop + cards[i].offsetHeight > visibleTop + 10) {
+            topCardIdx = i;
+            break;
+          }
+        }
+
+        let accumulated = 0;
+        let activePage = loadedPageStart;
+        let cardInPage = 0;
+
+        for (let p = loadedPageStart; p <= loadedPageEnd; p++) {
+          const pLen = fetchedPages[p]?.length || 0;
+          if (topCardIdx < accumulated + pLen) {
+            activePage = p;
+            cardInPage = topCardIdx - accumulated;
+            break;
+          }
+          accumulated += pLen;
+        }
+
+        const cardEl = cards[topCardIdx];
+        const cardOffset = cardEl ? visibleTop - cardEl.offsetTop : 0;
+
+        window.catalogCache[cacheKey].lastActivePage = activePage;
+        window.catalogCache[cacheKey].cardIndexInPage = cardInPage;
+        window.catalogCache[cacheKey].cardTopOffset = cardOffset;
+      }
+    }
   };
 
   useEffect(() => {
@@ -140,6 +173,15 @@ export default function Catalog({
       window.catalogCache = {};
     }
     const existingScroll = window.catalogCache[activeKey]?.scrollPosition || 0;
+    const existingLastActivePage =
+      window.catalogCache[activeKey]?.lastActivePage || currentPage;
+    const existingCardIndexInPage =
+      window.catalogCache[activeKey]?.cardIndexInPage || 0;
+    const existingCardTopOffset =
+      window.catalogCache[activeKey]?.cardTopOffset || 0;
+    const existingCalendarScroll =
+      window.catalogCache[activeKey]?.calendarScrollPosition || 0;
+
     window.catalogCache[activeKey] = {
       data,
       searchQuery,
@@ -153,6 +195,10 @@ export default function Catalog({
       loadedPageStart,
       loadedPageEnd,
       scrollPosition: existingScroll,
+      lastActivePage: existingLastActivePage,
+      cardIndexInPage: existingCardIndexInPage,
+      cardTopOffset: existingCardTopOffset,
+      calendarScrollPosition: existingCalendarScroll,
     };
   }, [
     data,
@@ -173,16 +219,58 @@ export default function Catalog({
     const cache = window.catalogCache[cacheKey];
     if (
       cache &&
-      cache.scrollPosition &&
       wrapperRef.current &&
       data?.results &&
       data.results.length > 0 &&
       !isRestoredRef.current
     ) {
-      wrapperRef.current.scrollTop = cache.scrollPosition;
+      if (discoverTab === "calendar") {
+        wrapperRef.current.scrollTop = cache.calendarScrollPosition || 0;
+        isRestoredRef.current = true;
+        return;
+      }
+
+      const applyScroll = () => {
+        if (!wrapperRef.current) return;
+        if (
+          (!cache.lastActivePage || cache.lastActivePage === 1) &&
+          cache.cardIndexInPage === 0 &&
+          (!cache.scrollPosition || cache.scrollPosition <= 10)
+        ) {
+          wrapperRef.current.scrollTop = 0;
+          return;
+        }
+
+        let restoredScroll = cache.scrollPosition || 0;
+        const headerEl = wrapperRef.current.querySelector(".catalog-header");
+        const headerHeight = headerEl ? headerEl.offsetHeight : 80;
+
+        if (cache.lastActivePage && cache.cardIndexInPage !== undefined) {
+          const cards = wrapperRef.current.querySelectorAll(".media-card");
+          let targetCardIdx = 0;
+          for (let p = loadedPageStart; p < cache.lastActivePage; p++) {
+            targetCardIdx += fetchedPages[p]?.length || 0;
+          }
+          targetCardIdx += cache.cardIndexInPage || 0;
+
+          if (cards && cards[targetCardIdx]) {
+            restoredScroll = Math.max(
+              0,
+              cards[targetCardIdx].offsetTop -
+                headerHeight +
+                (cache.cardTopOffset || 0),
+            );
+          }
+        }
+        wrapperRef.current.scrollTop = restoredScroll;
+      };
+
+      applyScroll();
+      const raf = requestAnimationFrame(applyScroll);
       isRestoredRef.current = true;
+      return () => cancelAnimationFrame(raf);
     }
-  }, [data?.results]);
+  }, [data?.results, discoverTab]);
 
   useLayoutEffect(() => {
     if (pendingScrollAdjustRef.current && wrapperRef.current) {
@@ -193,9 +281,7 @@ export default function Catalog({
         const { pageSize } = adjust;
         const cards = wrapperRef.current.querySelectorAll(".media-card");
         if (cards && cards[0] && cards[pageSize]) {
-          const h =
-            cards[pageSize].getBoundingClientRect().top -
-            cards[0].getBoundingClientRect().top;
+          const h = cards[pageSize].offsetTop - cards[0].offsetTop;
           wrapperRef.current.scrollTop += h;
         }
       }
@@ -348,10 +434,7 @@ export default function Catalog({
     setDragOverIndex(null);
   };
 
-  // Define supported filter maps matching index.js
-  const siteFilterDefs = {
-    // legacy for now..
-  };
+  const siteFilterDefs = {};
 
   const getApiEndpoint = (currentTag = activeFilters.tag) => {
     if (provider === "local") {
@@ -364,85 +447,70 @@ export default function Catalog({
   };
 
   const preloadPagesAround = async (targetPage, currentFilters) => {
-    const pageBelow = targetPage + 1;
-    let belowResults = [];
-    try {
-      let endpoint = getApiEndpoint(currentFilters.tag);
-      const response = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filters: { ...currentFilters, page: pageBelow },
-        }),
-      });
-      if (response.ok) {
-        if (!wrapperRef.current) return;
-        const resData = await response.json();
-        if (resData?.results) {
-          belowResults = applyCustomOrder(resData.results, currentFilters);
-          setFetchedPages((prev) => ({ ...prev, [pageBelow]: belowResults }));
-          setLoadedPageEnd(pageBelow);
-          setData((prevData) => ({
-            ...prevData,
-            results: [...(prevData?.results || []), ...belowResults],
-          }));
-        }
+    const startP = Math.max(1, targetPage - 1);
+    const endP = targetPage + 1;
+    const endpoint = getApiEndpoint(currentFilters.tag);
+
+    let updatedPages = {};
+    setFetchedPages((prev) => {
+      updatedPages = { ...prev };
+      return prev;
+    });
+
+    const pagesToFetch = [];
+    for (let p = startP; p <= endP; p++) {
+      if (!updatedPages[p]) {
+        pagesToFetch.push(p);
       }
-    } catch (e) {
-      console.error("Failed to preload page below:", e);
     }
 
-    for (let p = targetPage - 1; p >= Math.max(1, targetPage - 3); p--) {
-      try {
-        let endpoint = getApiEndpoint(currentFilters.tag);
-        const response = await fetch(endpoint, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            filters: { ...currentFilters, page: p },
-          }),
-        });
-        if (response.ok) {
-          if (!wrapperRef.current) return;
-          const resData = await response.json();
-          const sortedResults = applyCustomOrder(
-            resData?.results || [],
-            currentFilters,
-          );
-
-          if (wrapperRef.current) {
-            pendingScrollAdjustRef.current = {
-              type: "prepend",
-              pageSize: sortedResults.length,
-            };
-          }
-
-          setFetchedPages((prev) => {
-            const nextPages = { ...prev, [p]: sortedResults };
-            setLoadedPageStart(p);
-
-            const newResults = [];
-            for (let pageNum = p; pageNum <= pageBelow; pageNum++) {
-              const pageData =
-                pageNum === p ? sortedResults : nextPages[pageNum];
-              if (pageData) {
-                newResults.push(...pageData);
+    if (pagesToFetch.length > 0) {
+      await Promise.all(
+        pagesToFetch.map(async (p) => {
+          try {
+            const response = await fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                filters: { ...currentFilters, page: p },
+              }),
+            });
+            if (response.ok) {
+              const resData = await response.json();
+              if (resData?.results) {
+                updatedPages[p] = applyCustomOrder(
+                  resData.results,
+                  currentFilters,
+                );
               }
             }
+          } catch (e) {
+            console.error(`Failed to preload page ${p}:`, e);
+          }
+        }),
+      );
+    }
 
-            setData((prevData) => ({
-              ...prevData,
-              results: newResults,
-            }));
+    setFetchedPages(updatedPages);
 
-            return nextPages;
-          });
-          await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-      } catch (e) {
-        console.error(`Failed to preload page ${p}:`, e);
+    let actualEnd = endP;
+    const windowResults = [];
+    for (let p = startP; p <= endP; p++) {
+      if (updatedPages[p]) {
+        windowResults.push(...updatedPages[p]);
+      } else if (p > targetPage) {
+        actualEnd = p - 1;
       }
     }
+
+    setLoadedPageStart(startP);
+    setLoadedPageEnd(actualEnd);
+    setData((prev) => ({
+      ...prev,
+      currentPage: targetPage,
+      results: windowResults,
+    }));
+    didFetchRef.current = true;
   };
 
   const fetchData = async (
@@ -606,19 +674,54 @@ export default function Catalog({
 
     if (cache && !initialSearchQuery) {
       lastLoadedKeyRef.current = cacheKey;
-      setData(cache.data);
       setSearchQuery(cache.searchQuery);
-      setCurrentPage(cache.currentPage);
+      setCurrentPage(cache.lastActivePage || cache.currentPage || 1);
       setActiveFilters(cache.activeFilters);
       setAvailableFilters(cache.availableFilters);
       setErrorMsg(cache.errorMsg);
       setDiscoverTab(cache.discoverTab);
       setInfiniteScroll(cache.infiniteScroll);
-      setFetchedPages(cache.fetchedPages);
-      setLoadedPageStart(cache.loadedPageStart);
-      setLoadedPageEnd(cache.loadedPageEnd);
-      isRestoredRef.current = false;
-      didFetchRef.current = true;
+
+      const targetP = cache.lastActivePage || cache.currentPage || 1;
+      const startP = Math.max(1, targetP - 1);
+      const endP = targetP + 1;
+      const fp = cache.fetchedPages || {};
+
+      let hasAllPages = true;
+      for (let p = startP; p <= endP; p++) {
+        if (!fp[p]) {
+          hasAllPages = false;
+          break;
+        }
+      }
+
+      if (hasAllPages) {
+        const windowResults = [];
+        for (let p = startP; p <= endP; p++) {
+          if (fp[p]) windowResults.push(...fp[p]);
+        }
+        setFetchedPages(fp);
+        setLoadedPageStart(startP);
+        setLoadedPageEnd(endP);
+        setData({
+          ...cache.data,
+          currentPage: targetP,
+          results: windowResults,
+        });
+        isRestoredRef.current = false;
+        didFetchRef.current = true;
+      } else if (targetP > 1 && provider === "provider") {
+        setFetchedPages(fp);
+        isRestoredRef.current = false;
+        preloadPagesAround(targetP, cache.activeFilters || {});
+      } else {
+        setData(cache.data);
+        setFetchedPages(fp);
+        setLoadedPageStart(cache.loadedPageStart || 1);
+        setLoadedPageEnd(cache.loadedPageEnd || 1);
+        isRestoredRef.current = false;
+        didFetchRef.current = true;
+      }
     } else {
       if (provider !== "provider" || type !== "Anime") {
         setDiscoverTab("latest");
@@ -648,13 +751,11 @@ export default function Catalog({
         .then((tags) => setLocalTags(tags))
         .catch((err) => console.error(err));
 
-      // Fetch history stats
       fetch("/api/history/stats")
         .then((res) => res.json())
         .then((sData) => setStats(sData))
         .catch((err) => console.error("Failed to fetch history stats:", err));
 
-      // Fetch recent history
       fetch("/api/history/list?limit=15")
         .then((res) => res.json())
         .then((hData) => {
@@ -776,26 +877,10 @@ export default function Catalog({
     return () => clearInterval(ticker);
   }, []);
 
-  const getCountdownString = (airTimestamp) => {
-    const diffMs = airTimestamp * 1000 - timeTicker;
-    if (diffMs <= 0) return "Aired";
-
-    const totalMins = Math.floor(diffMs / 60000);
-    const days = Math.floor(totalMins / (24 * 60));
-    const hours = Math.floor((totalMins % (24 * 60)) / 60);
-    const mins = totalMins % 60;
-
-    const parts = [];
-    if (days > 0) parts.push(`${days}d`);
-    if (hours > 0) parts.push(`${hours}h`);
-    if (mins > 0 || parts.length === 0) parts.push(`${mins}m`);
-
-    return `In ${parts.join(" ")}`;
-  };
-
   const triggerScrapeSearch = (title) => {
     setDiscoverTab("latest");
     sessionStorage.setItem("discover_tab", "latest");
+    isRestoredRef.current = false;
     const cleanTitle = title.replace(/LiveChart\s+\d+/i, "").trim();
     setSearchQuery(cleanTitle);
     fetchData(1, activeFilters, cleanTitle);
@@ -914,7 +999,6 @@ export default function Catalog({
 
   const handleMediaClick = (item) => {
     if (linkingMalItem) {
-      // Link the clicked provider item to the MAL item!
       Swal.fire({
         title: "Link Title",
         text: `Link "${item.title}" to MyAnimeList entry "${linkingMalItem.title}"?`,
@@ -964,8 +1048,6 @@ export default function Catalog({
     }
 
     const isMalActive = provider === "mal";
-
-    // Determine what back text to display
     let backText = "Back to Collection";
     if (searchQuery.trim().length > 0) {
       backText = "Back to Search";
@@ -1114,7 +1196,6 @@ export default function Catalog({
 
         setFetchedPages((prev) => {
           const nextPages = { ...prev, [prevPage]: sortedResults };
-
           let newStart = prevPage;
           let newEnd = loadedPageEnd;
 
@@ -1229,217 +1310,37 @@ export default function Catalog({
 
   return (
     <div ref={wrapperRef} onScroll={handleScroll} className="catalog-wrapper">
-      <header className="catalog-header">
-        <div className="catalog-header-row">
-          <h1 className="catalog-title">
-            {provider === "local"
-              ? "Home"
-              : provider === "mal"
-                ? `MyAnimeList`
-                : "Discover"}
-          </h1>
-          <div className="market-tabs-wrapper">
-            <button
-              type="button"
-              onClick={() => onTypeChange && onTypeChange("Anime")}
-              className={`market-tab-btn ${type === "Anime" ? "active" : ""}`}
-            >
-              Anime
-            </button>
-            <button
-              type="button"
-              onClick={() => onTypeChange && onTypeChange("Manga")}
-              className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
-            >
-              Manga
-            </button>
-          </div>
-        </div>
+      <CatalogHeader
+        provider={provider}
+        type={type}
+        discoverTab={discoverTab}
+        onSubTabChange={(tab) => {
+          setDiscoverTab(tab);
+          sessionStorage.setItem("discover_tab", tab);
+          isRestoredRef.current = false;
+        }}
+        linkingMalItem={linkingMalItem}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        onSearchSubmit={handleSearchSubmit}
+        onTypeChange={onTypeChange}
+      />
 
-        {provider === "provider" && type === "Anime" && (
-          <div className="discover-sub-tabs">
-            <button
-              onClick={() => {
-                setDiscoverTab("latest");
-                sessionStorage.setItem("discover_tab", "latest");
-              }}
-              className={`discover-sub-tab ${discoverTab === "latest" ? "active" : ""}`}
-            >
-              Latest
-            </button>
-            <button
-              onClick={() => {
-                setDiscoverTab("calendar");
-                sessionStorage.setItem("discover_tab", "calendar");
-              }}
-              className={`discover-sub-tab ${discoverTab === "calendar" ? "active" : ""}`}
-            >
-              Airing Calendar
-            </button>
-          </div>
-        )}
+      <LibraryStats
+        type={type}
+        stats={stats}
+        provider={provider}
+        linkingMalItem={linkingMalItem}
+      />
 
-        {((provider !== "local" && provider !== "mal") || linkingMalItem) &&
-          discoverTab !== "calendar" && (
-            <form onSubmit={handleSearchSubmit} className="search-form">
-              <input
-                type="text"
-                placeholder={`Search ${type}...`}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="search-input"
-              />
-              <button type="submit" className="btn-search">
-                <Search size={18} />
-              </button>
-            </form>
-          )}
-      </header>
-
-      {/* Local Library Stats Dashboard */}
-      {provider === "local" && stats && !linkingMalItem && (
-        <div className="library-stats-container">
-          <div className="library-stat-card glass-panel">
-            <div className="stat-icon-wrapper purple-glow">
-              <Clock size={16} className="stat-icon" />
-            </div>
-            <span className="stat-value">
-              {type === "Anime"
-                ? `${stats.watchHours || 0} hrs`
-                : `${stats.readHours || 0} hrs`}
-            </span>
-          </div>
-
-          <div className="library-stat-card glass-panel">
-            <div className="stat-icon-wrapper green-glow">
-              <CheckSquare size={16} className="stat-icon" />
-            </div>
-            <span className="stat-value">
-              {type === "Anime"
-                ? `${stats.completedEpisodes || 0} eps`
-                : `${stats.completedChapters || 0} chs`}
-            </span>
-          </div>
-
-          <div className="library-stat-card glass-panel">
-            <div className="stat-icon-wrapper blue-glow">
-              {type === "Anime" ? (
-                <Tv size={16} className="stat-icon" />
-              ) : (
-                <BookOpen size={16} className="stat-icon" />
-              )}
-            </div>
-            <span className="stat-value">
-              {type === "Anime"
-                ? `${stats.distinctAnime || 0} Anime`
-                : `${stats.distinctManga || 0} Manga`}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Continue Watching / Continue Reading Shelf */}
-      {provider === "local" &&
-        !linkingMalItem &&
-        (() => {
-          const displayable = (recentHistory || []).filter((item) => {
-            if (item.is_completed === 0) return true;
-            if (
-              item.total_count === null ||
-              item.total_count === undefined ||
-              item.number < item.total_count
-            ) {
-              return true;
-            }
-            return false;
-          });
-
-          if (displayable.length === 0) return null;
-
-          return (
-            <div className="continue-shelf-container">
-              <h2 className="shelf-title">
-                {type === "Anime" ? "Continue Watching" : "Continue Reading"}
-              </h2>
-              <div className="continue-shelf-scroll">
-                {displayable.slice(0, 4).map((item) => {
-                  const isItemCompleted = item.is_completed === 1;
-                  const nextNum = isItemCompleted
-                    ? item.number + 1
-                    : item.number;
-                  const progress = isItemCompleted
-                    ? 0
-                    : item.duration > 0
-                      ? Math.min(
-                          100,
-                          Math.max(
-                            0,
-                            Math.round(
-                              (item.current_time / item.duration) * 100,
-                            ),
-                          ),
-                        )
-                      : 0;
-
-                  return (
-                    <div
-                      key={`${item.media_id}-${item.number}`}
-                      className="continue-card glass-panel"
-                      onClick={() =>
-                        onSelectMedia(
-                          item.media_id,
-                          "local",
-                          "Back to Collection",
-                          true,
-                        )
-                      }
-                    >
-                      <div className="continue-img-container">
-                        <button
-                          className="continue-dismiss-btn"
-                          title={`Hide from Continue ${type === "Anime" ? "Watching" : "Reading"}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDismissHistory(item);
-                          }}
-                        >
-                          <X size={14} />
-                        </button>
-                        <img
-                          src={item.image || "/images/image-404.png"}
-                          alt={item.title}
-                          className="continue-img"
-                          onError={(e) => {
-                            e.target.src = "/images/image-404.png";
-                          }}
-                        />
-                        <div className="continue-play-overlay">
-                          <Play size={28} className="continue-play-icon" />
-                        </div>
-                        <div className="continue-progress-container">
-                          <div
-                            className="continue-progress-bar"
-                            style={{ width: `${progress}%` }}
-                          />
-                        </div>
-                      </div>
-                      <div className="continue-info">
-                        <span className="continue-number">
-                          {type === "Anime"
-                            ? `Episode ${nextNum}`
-                            : `Chapter ${nextNum}`}
-                        </span>
-                        <h4 className="continue-title" title={item.title}>
-                          {item.title}
-                        </h4>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })()}
+      <RecentHistory
+        type={type}
+        provider={provider}
+        linkingMalItem={linkingMalItem}
+        recentHistory={recentHistory}
+        onSelectMedia={onSelectMedia}
+        onDismissHistory={handleDismissHistory}
+      />
 
       {/* Filter panel */}
       {availableFilters && (
@@ -1502,538 +1403,44 @@ export default function Catalog({
       {errorMsg && <div className="error-banner">{errorMsg}</div>}
 
       {discoverTab === "calendar" ? (
-        calendarLoading ? (
-          <div className="loading-center-panel">
-            <img
-              src="/images/loading.gif"
-              alt="loading"
-              className="u-style-17"
-            />
-            <p className="u-style-18">Loading calendar & airing schedule...</p>
-          </div>
-        ) : (
-          <div className="calendar-view-container">
-            {/* Weekly Airing Schedule Section */}
-            <div className="calendar-section">
-              <h2 className="calendar-section-title">Weekly Airing Schedule</h2>
-              {scheduleUpdating && (
-                <div className="schedule-updating-banner u-style-19">
-                  <div className="pulse-dot u-style-20" />
-                  <span className="u-style-21">
-                    Refreshing airing schedule from LiveChart...
-                  </span>
-                  <span className="u-style-22">
-                    Fresh episodes will display automatically
-                  </span>
-                </div>
-              )}
-              {/* Horizontal Day Tabs Navigation */}
-              {(() => {
-                const daysOfWeek = [
-                  "Sunday",
-                  "Monday",
-                  "Tuesday",
-                  "Wednesday",
-                  "Thursday",
-                  "Friday",
-                  "Saturday",
-                ];
-                const dayAbbr = [
-                  "SUN",
-                  "MON",
-                  "TUE",
-                  "WED",
-                  "THU",
-                  "FRI",
-                  "SAT",
-                ];
-                const today = new Date();
-
-                const tabs = [
-                  { id: "All", label: "ALL", dateNum: "", month: "" },
-                  {
-                    id: "Yesterday",
-                    label: "YEST",
-                    dateNum: new Date(today.getTime() - 24 * 60 * 60 * 1000)
-                      .getDate()
-                      .toString(),
-                    month: new Date(
-                      today.getTime() - 24 * 60 * 60 * 1000,
-                    ).toLocaleDateString(undefined, { month: "short" }),
-                  },
-                  {
-                    id: "Today",
-                    label: "TODAY",
-                    dateNum: today.getDate().toString(),
-                    month: today.toLocaleDateString(undefined, {
-                      month: "short",
-                    }),
-                  },
-                  {
-                    id: "Tomorrow",
-                    label: "TOMO",
-                    dateNum: new Date(today.getTime() + 24 * 60 * 60 * 1000)
-                      .getDate()
-                      .toString(),
-                    month: new Date(
-                      today.getTime() + 24 * 60 * 60 * 1000,
-                    ).toLocaleDateString(undefined, { month: "short" }),
-                  },
-                ];
-
-                for (let i = 2; i < 6; i++) {
-                  const nextDate = new Date(
-                    today.getTime() + i * 24 * 60 * 60 * 1000,
-                  );
-                  tabs.push({
-                    id: daysOfWeek[nextDate.getDay()],
-                    label: dayAbbr[nextDate.getDay()],
-                    dateNum: nextDate.getDate().toString(),
-                    month: nextDate.toLocaleDateString(undefined, {
-                      month: "short",
-                    }),
-                  });
-                }
-
-                return (
-                  <div className="calendar-tabs-container">
-                    {tabs.map((tab) => {
-                      const isActive = calendarDayFilter === tab.id;
-                      return (
-                        <button
-                          key={tab.id}
-                          className={`calendar-day-tab ${tab.id === "Yesterday" ? "yesterday" : ""} ${isActive ? "active" : ""} ${tab.id === "All" ? "all-tab" : ""}`}
-                          onClick={() => setCalendarDayFilter(tab.id)}
-                        >
-                          {tab.id === "All" ? (
-                            <div className="calendar-tab-content-all">
-                              <Calendar size={16} />
-                              <span className="tab-day-label">{tab.label}</span>
-                            </div>
-                          ) : (
-                            <div className="calendar-tab-content">
-                              <span className="tab-day-label">{tab.label}</span>
-                              <span className="tab-date-num">
-                                {tab.dateNum}
-                              </span>
-                              <span className="tab-month-label">
-                                {tab.month}
-                              </span>
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })()}
-
-              <div className="schedule-feed-container">
-                {(() => {
-                  const days = [
-                    "Sunday",
-                    "Monday",
-                    "Tuesday",
-                    "Wednesday",
-                    "Thursday",
-                    "Friday",
-                    "Saturday",
-                  ];
-                  const scheduleByDay = [];
-                  const today = new Date();
-
-                  for (let i = -1; i < 6; i++) {
-                    const targetDate = new Date(
-                      today.getTime() + i * 24 * 60 * 60 * 1000,
-                    );
-                    const dayName = days[targetDate.getDay()];
-                    const dateStr = targetDate.toLocaleDateString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                    });
-
-                    const dayStart =
-                      new Date(
-                        targetDate.getFullYear(),
-                        targetDate.getMonth(),
-                        targetDate.getDate(),
-                        0,
-                        0,
-                        0,
-                      ).getTime() / 1000;
-                    const dayEnd = dayStart + 24 * 3600;
-
-                    const dayEpisodes = scheduleData.filter(
-                      (ep) => ep.date >= dayStart && ep.date < dayEnd,
-                    );
-
-                    scheduleByDay.push({
-                      dayName:
-                        i === -1
-                          ? "Yesterday"
-                          : i === 0
-                            ? "Today"
-                            : i === 1
-                              ? "Tomorrow"
-                              : dayName,
-                      dateStr,
-                      episodes: dayEpisodes,
-                    });
-                  }
-
-                  const filteredGroups = scheduleByDay.filter((group) => {
-                    if (calendarDayFilter === "All") return true;
-                    return group.dayName === calendarDayFilter;
-                  });
-
-                  const totalEpisodesCount = filteredGroups.reduce(
-                    (acc, g) => acc + g.episodes.length,
-                    0,
-                  );
-
-                  if (totalEpisodesCount === 0) {
-                    return (
-                      <div className="schedule-empty-state glass-panel">
-                        <div className="empty-state-icon">
-                          <Tv size={36} className="u-style-23" />
-                        </div>
-                        <h3>
-                          No episodes airing{" "}
-                          {calendarDayFilter !== "All"
-                            ? calendarDayFilter.toLowerCase()
-                            : "this week"}
-                        </h3>
-                        <p>
-                          Check back later or view other days in the calendar.
-                        </p>
-                      </div>
-                    );
-                  }
-
-                  return filteredGroups.map((group) => {
-                    if (group.episodes.length === 0) return null;
-
-                    return (
-                      <div
-                        key={group.dayName}
-                        className={`schedule-day-section ${group.dayName === "Yesterday" ? "yesterday-section" : ""}`}
-                      >
-                        <div className="schedule-section-header">
-                          <span className="section-day-name">
-                            {group.dayName}
-                          </span>
-                          <span className="section-day-date">
-                            {group.dateStr}
-                          </span>
-                        </div>
-
-                        <div className="schedule-vertical-list">
-                          {group.episodes.map((ep) => {
-                            const airTime = new Date(
-                              ep.date * 1000,
-                            ).toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            });
-
-                            const isAired = ep.date * 1000 <= timeTicker;
-                            const countdownStr = getCountdownString(ep.date);
-
-                            return (
-                              <div
-                                key={`${ep.livechart_id}-${ep.episode}`}
-                                className="schedule-row-card glass-panel"
-                                onClick={() => {
-                                  if (ep.malid) {
-                                    onSelectMedia(
-                                      ep.malid,
-                                      "mal",
-                                      "Back to Calendar",
-                                      undefined,
-                                      ep.title,
-                                    );
-                                  } else {
-                                    triggerScrapeSearch(ep.title);
-                                  }
-                                }}
-                              >
-                                <div className="schedule-row-left">
-                                  {ep.image ? (
-                                    <img
-                                      src={ep.image}
-                                      alt={ep.title}
-                                      className="schedule-row-img"
-                                    />
-                                  ) : (
-                                    <div className="schedule-row-no-img">
-                                      <Tv size={20} />
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="schedule-row-info">
-                                  <div className="schedule-row-meta">
-                                    <span className="schedule-row-ep-badge">
-                                      EPISODE {ep.episode}
-                                    </span>
-                                    <span
-                                      className={`schedule-row-status-dot ${isAired ? "aired" : "airing"}`}
-                                    />
-                                  </div>
-                                  <h4
-                                    className="schedule-row-title-new"
-                                    title={ep.title}
-                                  >
-                                    {ep.title}
-                                  </h4>
-                                  <div className="schedule-row-badges">
-                                    <span className="schedule-row-time-badge">
-                                      <Clock size={11} />
-                                      {airTime}
-                                    </span>
-                                    <span
-                                      className={`schedule-row-countdown-badge ${isAired ? "aired" : "airing"}`}
-                                    >
-                                      {countdownStr}
-                                    </span>
-                                  </div>
-                                </div>
-                                {isAired && (
-                                  <div className="schedule-row-actions">
-                                    <button
-                                      className="schedule-row-action-btn"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        triggerScrapeSearch(ep.title);
-                                      }}
-                                      title="Find Stream"
-                                    >
-                                      <Search size={14} />
-                                      <span className="btn-text-desktop">
-                                        Find Stream
-                                      </span>
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  });
-                })()}
-              </div>
-            </div>
-          </div>
-        )
-      ) : /* Content grid */
-      loading ? (
-        <div className="loading-center-panel">
-          <img src="/images/loading.gif" alt="loading" className="u-style-17" />
-          <p className="u-style-18">Fetching collection...</p>
-        </div>
-      ) : data?.results?.length === 0 ? (
-        <div className="empty-center-panel">
-          <span className="u-style-24">🍉</span>
-          <h3>
-            {provider === "local" ? "Empty Collection" : "No results found"}
-          </h3>
-          <p className="u-style-25">
-            {provider === "local"
-              ? activeFilters.tag
-                ? `No items found tagged with "${activeFilters.tag}".`
-                : `Your local ${type.toLowerCase()} library is empty.`
-              : provider === "mal"
-                ? `No items found in your MyAnimeList ${type.toLowerCase()} library.`
-                : searchQuery.trim().length > 0
-                  ? "Try checking your spelling or using different search terms."
-                  : "Try changing your selected filters."}
-          </p>
-        </div>
-      ) : (
-        <div className="content-container">
-          {infiniteScroll && loadedPageStart > 1 && (
-            <div
-              ref={topSentinelRef}
-              className="infinite-sentinel-top"
-              style={{ height: "1px" }}
-            />
-          )}
-          <div className="content-grid">
-            {data.results.map((item, index) => (
-              <div
-                key={item.id}
-                draggable
-                data-index={index}
-                onDragStart={(e) => handleDragStart(e, index)}
-                onDragOver={(e) => handleDragOver(e, index)}
-                onDragLeave={(e) => handleDragLeave(e, index)}
-                onDrop={(e) => handleDrop(e, index)}
-                onDragEnd={handleDragEnd}
-                onTouchStart={(e) => handleTouchStart(e, index)}
-                onTouchMove={handleTouchMove}
-                onTouchEnd={handleTouchEnd}
-                onClick={() => handleMediaClick(item)}
-                className={`media-card glass-panel ${draggedIndex === index ? "is-dragging" : ""} ${dragOverIndex === index ? "is-drag-over" : ""}`}
-                title="Hold & drag to reorder title"
-              >
-                <div className="img-container">
-                  <img
-                    src={item.image || "/images/image-404.png"}
-                    alt={item.title}
-                    className="media-img"
-                    onError={(e) => {
-                      e.target.src = "/images/image-404.png";
-                    }}
-                  />
-
-                  {/* Indicator badges for downloaded or watched counts */}
-                  <div className="card-badges-container">
-                    {item.Downloaded && item.Downloaded.length > 0 && (
-                      <div className="indicator-badge">
-                        <Download size={12} className="u-style-16" />
-                        {item.Downloaded.length}{" "}
-                        {type === "Anime" ? "Eps" : "Chs"}
-                      </div>
-                    )}
-
-                    {item.nextEpisodeIn ? (
-                      <div
-                        className="indicator-badge schedule-badge"
-                        title="Next release countdown"
-                      >
-                        <Film size={12} className="u-style-16" />
-                        {item.nextEpisodeIn}
-                      </div>
-                    ) : (
-                      item.watched !== undefined &&
-                      item.watched !== null && (
-                        <div className="indicator-badge">
-                          <Eye size={12} className="u-style-16" />
-                          {item.watched}/{item.totalEpisodes || "?"}
-                        </div>
-                      )
-                    )}
-                  </div>
-                </div>
-
-                <div className="card-info">
-                  <h4 className="card-title">{item.title}</h4>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Infinite scroll sentinel */}
-          {infiniteScroll && (
-            <div ref={sentinelRef} className="infinite-sentinel">
-              {infiniteLoading && (
-                <div className="infinite-loading-indicator">
-                  <Loader2 size={22} className="infinite-spin" />
-                  <span>Loading more...</span>
-                </div>
-              )}
-              {!infiniteLoading &&
-                !data.hasNextPage &&
-                currentPage >= (data.totalPages || 1) &&
-                data.results.length > 0 && (
-                  <div className="infinite-end-label">
-                    You've reached the end ✨
-                  </div>
-                )}
-            </div>
-          )}
-
-          {/* Pagination */}
-          {!infiniteScroll &&
-            (data.totalPages > 1 || data.hasNextPage || currentPage > 1) && (
-              <div className="pagination-container">
-                <button
-                  onClick={() => handlePageChange(currentPage - 1)}
-                  disabled={currentPage <= 1}
-                  className="btn-page"
-                >
-                  <ArrowLeft size={16} />
-                </button>
-                <span className="page-info">
-                  Page {currentPage}{" "}
-                  {data.totalPages ? `of ${data.totalPages}` : ""}
-                </span>
-                <button
-                  onClick={() => handlePageChange(currentPage + 1)}
-                  disabled={
-                    !data.hasNextPage && currentPage >= (data.totalPages || 999)
-                  }
-                  className="btn-page"
-                >
-                  <ArrowRight size={16} />
-                </button>
-              </div>
-            )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Deterministic colour from provider name string
-function providerColour(name) {
-  const palette = [
-    "#7c3aed",
-    "#db2777",
-    "#d97706",
-    "#059669",
-    "#0891b2",
-    "#4f46e5",
-    "#c026d3",
-    "#dc2626",
-  ];
-  let hash = 0;
-  for (let i = 0; i < name.length; i++)
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  return palette[Math.abs(hash) % palette.length];
-}
-
-// Small provider badge rendered bottom-right of card image
-function ProviderBadge({ providerName, iconUrl }) {
-  const [imgFailed, setImgFailed] = useState(false);
-  const label =
-    providerName === "local source"
-      ? "📁"
-      : providerName.substring(0, 2).toUpperCase();
-  const colour = providerColour(providerName);
-  const friendlyName =
-    providerName === "local source" ? "Local file" : providerName;
-
-  return (
-    <div
-      title={friendlyName}
-      className="provider-badge-wrapper"
-      style={{
-        border: `1px solid ${colour}55`,
-        boxShadow: `0 0 0 1px ${colour}33`,
-      }}
-    >
-      {iconUrl && !imgFailed ? (
-        <img
-          src={iconUrl}
-          alt={providerName}
-          width={14}
-          height={14}
-          className="provider-badge-img"
-          onError={() => setImgFailed(true)}
+        <AiringCalendar
+          calendarLoading={calendarLoading}
+          scheduleUpdating={scheduleUpdating}
+          scheduleData={scheduleData}
+          calendarDayFilter={calendarDayFilter}
+          setCalendarDayFilter={setCalendarDayFilter}
+          timeTicker={timeTicker}
+          onSelectMedia={onSelectMedia}
+          triggerScrapeSearch={triggerScrapeSearch}
         />
-      ) : providerName === "local source" ? (
-        <Folder size={14} className="u-style-26" />
       ) : (
-        <span
-          className="provider-badge-text-icon"
-          style={{ backgroundColor: colour }}
-        >
-          {label.charAt(0)}
-        </span>
+        <CatalogGrid
+          loading={loading}
+          data={data}
+          type={type}
+          provider={provider}
+          activeFilters={activeFilters}
+          searchQuery={searchQuery}
+          infiniteScroll={infiniteScroll}
+          infiniteLoading={infiniteLoading}
+          currentPage={currentPage}
+          loadedPageStart={loadedPageStart}
+          topSentinelRef={topSentinelRef}
+          sentinelRef={sentinelRef}
+          draggedIndex={draggedIndex}
+          dragOverIndex={dragOverIndex}
+          handleDragStart={handleDragStart}
+          handleDragOver={handleDragOver}
+          handleDragLeave={handleDragLeave}
+          handleDrop={handleDrop}
+          handleDragEnd={handleDragEnd}
+          handleTouchStart={handleTouchStart}
+          handleTouchMove={handleTouchMove}
+          handleTouchEnd={handleTouchEnd}
+          handleMediaClick={handleMediaClick}
+          handlePageChange={handlePageChange}
+        />
       )}
-      <span className="provider-badge-label">{friendlyName}</span>
     </div>
   );
 }

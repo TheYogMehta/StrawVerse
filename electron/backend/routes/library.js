@@ -1,0 +1,892 @@
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
+const { logger } = require("../utils/AppLogger");
+const { settingfetch, providerFetch } = require("../utils/settings");
+const { animeinfo, MangaInfo, invalidateCache, resolveDownloadFolder } = require("../utils/AnimeManga");
+const { MetadataRemove, MetadataAdd } = require("../utils/Metadata");
+const { getBaseDownloadDir, cleanupEmptyDownloadFolder, wrapImagesInObject } = require("../download");
+const { updateHistory } = require("../utils/history");
+
+const router = express.Router();
+
+// View tags for Anime/Manga
+router.get("/api/local/tags/view/:type", async (req, res) => {
+  try {
+    const { type } = req.params;
+    if (type !== "Anime" && type !== "Manga") {
+      throw new Error("Invalid type parameter");
+    }
+    const defaultTags =
+      type === "Manga"
+        ? ["Reading", "Downloads", "Plan to Read"]
+        : ["Watching", "Downloads", "Plan to Watch"];
+
+    const rows = global.db
+      .prepare(
+        `SELECT CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`,
+      )
+      .all();
+    const allTagsSet = new Set(defaultTags);
+    for (const r of rows) {
+      const tag = r.CustomTag ? r.CustomTag.trim() : "";
+      if (tag) {
+        try {
+          const parsed = JSON.parse(tag);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((t) => {
+              if (t && t.trim()) allTagsSet.add(t.trim());
+            });
+          } else if (typeof parsed === "string" && parsed.trim()) {
+            allTagsSet.add(parsed.trim());
+          }
+        } catch (e) {
+          allTagsSet.add(tag);
+        }
+      }
+    }
+    res.json(Array.from(allTagsSet));
+  } catch (err) {
+    logger.error(`Error fetching tags for ${req.params.type}: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Add/Update local library tags or entry
+router.post("/api/local/tags/add", async (req, res) => {
+  try {
+    let { type, id, provider, MalID, CustomTag } = req.body;
+    if (!type || !id) {
+      throw new Error("Missing type or id");
+    }
+
+    if (provider === "provider" || provider === "local source") {
+      provider = null;
+    }
+
+    id = id.replace(/-(dub|sub|hsub|both)$/, "");
+    let resolvedMalID = MalID ? String(MalID) : null;
+
+    if (!resolvedMalID) {
+      if (global.mappingDb && id) {
+        try {
+          const rule = [
+            {
+              key: "pahe",
+              query: "SELECT malid FROM animepahe WHERE id = ? OR uuid = ?",
+              params: [id, id],
+            },
+            {
+              key: "anikoto",
+              query: "SELECT malid FROM anikototv WHERE id = ?",
+              params: [id],
+            },
+            {
+              key: "anineko",
+              query: "SELECT malid FROM anineko WHERE id = ?",
+              params: [id],
+            },
+            {
+              key: "weebcentral",
+              query: "SELECT malid FROM weebcentral WHERE id = ?",
+              params: [id],
+            },
+            {
+              key: "allmanga",
+              query: "SELECT malid FROM allmanga WHERE id = ?",
+              params: [id],
+            },
+          ].find((r) => (provider || "").toLowerCase().includes(r.key));
+          if (rule) {
+            const row = global.mappingDb
+              .prepare(rule.query)
+              .get(...rule.params);
+            if (row && row.malid) {
+              resolvedMalID = String(row.malid);
+            }
+          }
+        } catch (err) {
+          logger.error(
+            `Error resolving MAL ID from mapping DB: ${err.message}`,
+          );
+        }
+      }
+    }
+
+    let tagValue = "";
+    if (CustomTag !== undefined) {
+      tagValue = (CustomTag || "").trim();
+    }
+
+    let existing = null;
+    if (type === "Anime") {
+      const strippedId = id.replace(/-(dub|sub|hsub|both)$/, "");
+      existing = global.db
+        .prepare(
+          `SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
+        )
+        .get(
+          id,
+          `${strippedId}-sub`,
+          `${strippedId}-hsub`,
+          `${strippedId}-dub`,
+          `${strippedId}-both`,
+          id,
+          strippedId,
+        );
+    } else {
+      existing = global.db
+        .prepare(`SELECT * FROM Manga WHERE id = ? OR folder_name = ?`)
+        .get(id, id);
+    }
+
+    if (existing) {
+      const updates = [];
+      const params = [];
+      if (resolvedMalID) {
+        updates.push("MalID = ?");
+        params.push(resolvedMalID);
+      } else if (existing.MalID) {
+        resolvedMalID = existing.MalID;
+      } else if (MalID !== undefined) {
+        updates.push("MalID = ?");
+        params.push(null);
+      }
+      if (CustomTag !== undefined) {
+        updates.push("CustomTag = ?");
+        params.push(tagValue);
+      }
+      if (updates.length > 0) {
+        params.push(existing.id);
+        global.db
+          .prepare(
+            `UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+          )
+          .run(...params);
+
+        const targetMalID = resolvedMalID || existing.MalID;
+        if (CustomTag !== undefined && targetMalID && targetMalID !== "") {
+          global.db
+            .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
+            .run(tagValue, targetMalID);
+        }
+      }
+    } else {
+      let values = {
+        id,
+        provider: provider || "",
+        type,
+        MalID: resolvedMalID,
+        CustomTag: tagValue,
+      };
+
+      try {
+        const resolvedProvider = await providerFetch(type, provider);
+        const config = await settingfetch();
+        if (resolvedProvider && resolvedProvider.provider) {
+          if (type === "Anime") {
+            const lookupId =
+              resolvedProvider.provider_name === "pahe"
+                ? id
+                : id.replace(/-(dub|sub|hsub|both)$/, "");
+            const animedata = await animeinfo(
+              resolvedProvider,
+              config?.CustomDownloadLocation,
+              lookupId,
+            );
+            if (animedata) {
+              if (animedata.malid && !resolvedMalID) {
+                resolvedMalID = String(animedata.malid);
+              }
+              values = {
+                ...values,
+                title: animedata.title
+                  ? animedata.title.replace(/-(dub|sub|hsub|both)$/, "")
+                  : "",
+                provider: resolvedProvider.provider_name,
+                subOrDub: id.endsWith("dub")
+                  ? "dub"
+                  : id.endsWith("hsub")
+                    ? "hsub"
+                    : "sub",
+                type: animedata.type ?? null,
+                description: animedata.description ?? null,
+                status: animedata.status ?? null,
+                genres:
+                  animedata?.genres?.length > 0
+                    ? animedata.genres.join(",")
+                    : "",
+                aired: animedata?.aired ?? null,
+                ImageUrl: animedata?.image,
+                EpisodesDataId: animedata?.dataId,
+                MalID: resolvedMalID,
+              };
+            }
+          } else if (type === "Manga") {
+            const mangainfo = await MangaInfo(resolvedProvider, id);
+            if (mangainfo) {
+              if (mangainfo.malid && !resolvedMalID) {
+                resolvedMalID = String(mangainfo.malid);
+              }
+              values = {
+                ...values,
+                title: mangainfo.title || "",
+                provider: resolvedProvider.provider_name,
+                description: mangainfo.description ?? null,
+                genres:
+                  mangainfo?.genres?.length > 0
+                    ? mangainfo.genres.join(",")
+                    : "",
+                type: mangainfo.type ?? null,
+                author: mangainfo?.author ?? null,
+                released: mangainfo?.released ?? null,
+                ImageUrl: mangainfo?.image,
+                MalID: resolvedMalID,
+              };
+            }
+          }
+        }
+      } catch (fetchErr) {
+        logger.error(
+          `Failed to fetch online metadata in /api/local/tags/add for ${id}: ${fetchErr.message}`,
+        );
+      }
+
+      await MetadataAdd(type, values);
+      global.db
+        .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
+        .run(resolvedMalID, tagValue, id);
+
+      if (resolvedMalID && resolvedMalID !== "") {
+        global.db
+          .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
+          .run(tagValue, resolvedMalID);
+      }
+    }
+
+    const targetMalID = MalID ? String(MalID) : existing?.MalID;
+    if (
+      CustomTag !== undefined &&
+      (tagValue === "" || tagValue === "[]") &&
+      targetMalID &&
+      targetMalID !== ""
+    ) {
+      try {
+        const rowsToClean = global.db
+          .prepare(`SELECT id, folder_name FROM ${type} WHERE MalID = ?`)
+          .all(targetMalID);
+
+        const baseDir = await getBaseDownloadDir();
+
+        for (const row of rowsToClean) {
+          const folderName = row.folder_name || "";
+          const folderPath = path.join(baseDir, type, folderName);
+          const folderExists = folderName && fs.existsSync(folderPath);
+
+          if (!folderExists) {
+            global.db.prepare(`DELETE FROM ${type} WHERE id = ?`).run(row.id);
+          }
+        }
+      } catch (err) {
+        logger.error(
+          `Error cleaning up duplicate MalID entries: ${err.message}`,
+        );
+      }
+    }
+
+    try {
+      const resolvedProvider = await providerFetch(
+        type,
+        provider || existing?.provider,
+      );
+      const actualProviderName =
+        resolvedProvider?.provider_name || provider || existing?.provider;
+      invalidateCache(type, actualProviderName, id);
+    } catch (e) {
+      logger.error(`Error invalidating cache for ${type} ${id}: ${e.message}`);
+    }
+
+    return res.json({
+      error: false,
+      message: "Successfully updated library item",
+    });
+  } catch (err) {
+    logger.error(`Error in /api/local/tags/add: ${err.message}`);
+    return res.json({ error: true, message: err.message });
+  }
+});
+
+// Delete Local Tag / Library Entry
+router.post("/api/local/tags/remove", async (req, res) => {
+  try {
+    const { id, type } = req.body;
+    if (!id || !type) throw new Error("ID or Type is missing");
+
+    const baseDir = await getBaseDownloadDir();
+    let typeDir = path.join(baseDir, type, id);
+
+    let dbRecord = null;
+    try {
+      dbRecord = global.db
+        .prepare(`SELECT * FROM ${type} WHERE id = ?`)
+        .get(id);
+    } catch (e) {}
+
+    if (!fs.existsSync(typeDir) && dbRecord) {
+      const folderName =
+        dbRecord.folder_name || dbRecord.title?.replace(/[^a-zA-Z0-9]/g, "_");
+      typeDir = path.join(baseDir, type, folderName);
+    }
+
+    if (fs.existsSync(typeDir)) {
+      await fs.promises.rm(typeDir, { recursive: true, force: true });
+    }
+
+    if (
+      !(
+        dbRecord &&
+        dbRecord?.CustomTag &&
+        dbRecord?.CustomTag !== "" &&
+        dbRecord?.CustomTag !== "[]"
+      ) &&
+      !(dbRecord && dbRecord?.MalID && dbRecord?.MalID !== "")
+    ) {
+      await MetadataRemove(type, id);
+    }
+
+    return res.json({ error: false, message: "Deleted successfully" });
+  } catch (err) {
+    logger.error(`Error in /api/local/tags/remove: ${err.message}`);
+    return res.json({ error: true, message: err.message });
+  }
+});
+
+// Switch Provider Metadata Migration
+router.post("/api/metadata/switch-provider", async (req, res) => {
+  try {
+    const { type, oldId, newId, newProvider } = req.body;
+    if (!type || !oldId || !newId || !newProvider) {
+      return res.status(400).json({ error: "Missing required parameters" });
+    }
+    if (oldId === newId) {
+      return res.json({ success: true, message: "No change needed" });
+    }
+
+    const table = type === "Anime" ? "Anime" : "Manga";
+    const existing = global.db
+      .prepare(`SELECT * FROM ${table} WHERE id = ?`)
+      .get(oldId);
+
+    if (existing) {
+      global.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(oldId);
+      existing.id = newId;
+      existing.provider = newProvider;
+      existing.last_updated = new Date().toISOString();
+      const columns = Object.keys(existing);
+      const placeholders = columns.map(() => "?").join(", ");
+      const values = columns.map((col) => existing[col]);
+
+      global.db
+        .prepare(
+          `
+        INSERT OR REPLACE INTO ${table} (${columns.join(", ")})
+        VALUES (${placeholders})
+      `,
+        )
+        .run(...values);
+      if (type === "Anime") {
+        global.db
+          .prepare(`UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?`)
+          .run(newId, oldId);
+      } else {
+        global.db
+          .prepare(`UPDATE ReadHistory SET manga_id = ? WHERE manga_id = ?`)
+          .run(newId, oldId);
+      }
+      return res.json({ success: true, migrated: true });
+    }
+
+    return res.json({ success: true, migrated: false });
+  } catch (err) {
+    logger.error(`Error in /api/metadata/switch-provider: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete Local Files
+router.post("/api/local/delete", async (req, res) => {
+  try {
+    const { id, type = "Anime", numbers, subdub } = req.body;
+    if (!id || !numbers || !Array.isArray(numbers) || numbers.length === 0) {
+      throw new Error("Missing or invalid parameters");
+    }
+
+    const baseDir = await getBaseDownloadDir();
+    let typeDir = resolveDownloadFolder(type, id, subdub, baseDir);
+
+    if (!fs.existsSync(typeDir)) {
+      throw new Error(`${type} folder not found on disk`);
+    }
+
+    const files = await fs.promises.readdir(typeDir);
+    let deletedCount = 0;
+
+    for (const num of numbers) {
+      const targetNum = parseFloat(num);
+      if (isNaN(targetNum)) continue;
+
+      const filesToDelete = files.filter((file) => {
+        if (type === "Anime") {
+          const ext = path.extname(file).toLowerCase();
+          const videoExtensions = [
+            ".mp4",
+            ".mkv",
+            ".webm",
+            ".ts",
+            ".avi",
+            ".mov",
+            ".flv",
+            ".m4v",
+            ".3gp",
+          ];
+          const subExtensions = [".srt", ".vtt", ".ass", ".ssa"];
+          if (!videoExtensions.includes(ext) && !subExtensions.includes(ext)) {
+            return false;
+          }
+          const match = file.match(/^\d+(\.\d+)?/);
+          if (match) {
+            return parseFloat(match[0]) === targetNum;
+          }
+        } else {
+          if (
+            file.toLowerCase().endsWith(".cbz") &&
+            file.toLowerCase().includes("chapter")
+          ) {
+            const match = file.toLowerCase().match(/chapter\s*([\d.]+)/);
+            if (match) {
+              return parseFloat(match[1]) === targetNum;
+            }
+          }
+        }
+        return false;
+      });
+
+      for (const fileToDelete of filesToDelete) {
+        try {
+          await fs.promises.unlink(path.join(typeDir, fileToDelete));
+          deletedCount++;
+        } catch (e) {}
+      }
+    }
+
+    await cleanupEmptyDownloadFolder(typeDir, type, id);
+
+    const label = type === "Anime" ? "episode(s)" : "chapter(s)";
+    return res.json({
+      error: false,
+      message: `Successfully deleted ${deletedCount} ${label}`,
+    });
+  } catch (err) {
+    logger.error(`Error in /api/local/delete: ${err.message}`);
+    return res.json({ error: true, message: err.message });
+  }
+});
+
+// Update history progress
+router.post("/api/history/update", async (req, res) => {
+  try {
+    const { mediaId, type, number } = req.body;
+    if (!mediaId || !type || !number) {
+      throw new Error("Missing parameters for history update");
+    }
+    await updateHistory(req.body);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Clear all history records
+router.post("/api/history/clear", async (req, res) => {
+  try {
+    global.db.prepare(`DELETE FROM WatchHistory`).run();
+    global.db.prepare(`DELETE FROM ReadHistory`).run();
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete specific tracking history record
+router.delete("/api/history/:type/:id", async (req, res) => {
+  try {
+    const { type, id } = req.params;
+    const historyTable = type === "Anime" ? "WatchHistory" : "ReadHistory";
+    global.db.prepare(`DELETE FROM ${historyTable} WHERE id = ?`).run(id);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Hide tracking record from shelf
+router.post("/api/history/hide", async (req, res) => {
+  try {
+    const { mediaId, type, malId, title } = req.body;
+    if (!mediaId || !type) {
+      throw new Error("Missing parameters");
+    }
+
+    const isAnime = type === "Anime";
+    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
+    const idField = isAnime ? "anime_id" : "manga_id";
+    const titleField = isAnime ? "anime_title" : "manga_title";
+    const mainTable = isAnime ? "Anime" : "Manga";
+
+    let queryIds = [mediaId];
+
+    if (malId) {
+      const siblings = global.db
+        .prepare(`SELECT id FROM ${mainTable} WHERE MalID = ?`)
+        .all(String(malId));
+      siblings.forEach((s) => {
+        if (s.id) queryIds.push(s.id);
+      });
+    }
+
+    if (isAnime) {
+      let suffixIds = [];
+      queryIds.forEach((id) => {
+        suffixIds.push(id);
+        const stripped = id.replace(/-(dub|sub|hsub|both)$/, "");
+        suffixIds.push(
+          `${stripped}-sub`,
+          `${stripped}-hsub`,
+          `${stripped}-dub`,
+          `${stripped}-both`,
+        );
+      });
+      queryIds = Array.from(new Set(suffixIds));
+    }
+
+    const placeholders = queryIds.map(() => "?").join(",");
+    global.db
+      .prepare(
+        `UPDATE ${historyTable} SET hidden = 1 WHERE ${idField} IN (${placeholders})`,
+      )
+      .run(...queryIds);
+
+    if (title) {
+      global.db
+        .prepare(
+          `UPDATE ${historyTable} SET hidden = 1 WHERE LOWER(${titleField}) = LOWER(?)`,
+        )
+        .run(title);
+    }
+
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch progress history for specific title
+router.get("/api/history/progress", async (req, res) => {
+  try {
+    const { mediaId, type } = req.query;
+    if (!mediaId || !type) throw new Error("Missing parameters");
+
+    let suggestedNumber = null;
+    let lastProgress = null;
+    let hasBefore = false;
+    let episodesStatus = [];
+    let chaptersStatus = [];
+
+    if (type === "Anime") {
+      let queryIds = [mediaId];
+      const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
+      queryIds.push(
+        `${strippedId}-sub`,
+        `${strippedId}-hsub`,
+        `${strippedId}-dub`,
+        `${strippedId}-both`,
+      );
+
+      let resolvedTitle = null;
+      try {
+        const localRec = global.db
+          .prepare(`SELECT MalID, title FROM Anime WHERE id = ?`)
+          .get(mediaId);
+        if (localRec) {
+          if (localRec.MalID) {
+            const siblings = global.db
+              .prepare(`SELECT id FROM Anime WHERE MalID = ?`)
+              .all(localRec.MalID);
+            siblings.forEach((s) => {
+              if (s.id) queryIds.push(s.id);
+            });
+          }
+          if (localRec.title) {
+            resolvedTitle = localRec.title;
+          }
+        }
+      } catch (err) {}
+      queryIds = Array.from(new Set(queryIds));
+
+      const placeholders = queryIds.map(() => "?").join(",");
+      let sql = `SELECT * FROM WatchHistory WHERE anime_id IN (${placeholders})`;
+      let params = [...queryIds];
+      if (resolvedTitle && resolvedTitle !== "Anime") {
+        sql += ` OR LOWER(anime_title) = LOWER(?)`;
+        params.push(resolvedTitle);
+      }
+
+      const history = global.db.prepare(sql).all(...params);
+
+      history.sort(
+        (a, b) =>
+          new Date(b.last_watched).getTime() -
+          new Date(a.last_watched).getTime(),
+      );
+
+      if (history.length > 0) {
+        hasBefore = true;
+        const latest = history[0];
+        lastProgress = {
+          number: latest.episode_number,
+          currentTime: latest.current_time,
+          duration: latest.duration,
+          isCompleted: latest.is_completed === 1,
+        };
+
+        if (latest.is_completed === 1) {
+          suggestedNumber = latest.episode_number + 1;
+        } else {
+          suggestedNumber = latest.episode_number;
+        }
+      }
+
+      episodesStatus = history.map((h) => ({
+        number: h.episode_number,
+        isCompleted: h.is_completed === 1,
+        currentTime: h.current_time,
+        duration: h.duration,
+      }));
+    } else {
+      let queryIds = [mediaId];
+      let resolvedTitle = null;
+      try {
+        const localRec = global.db
+          .prepare(`SELECT MalID, title FROM Manga WHERE id = ?`)
+          .get(mediaId);
+        if (localRec) {
+          if (localRec.MalID) {
+            const siblings = global.db
+              .prepare(`SELECT id FROM Manga WHERE MalID = ?`)
+              .all(localRec.MalID);
+            siblings.forEach((s) => {
+              if (s.id) queryIds.push(s.id);
+            });
+          }
+          if (localRec.title) {
+            resolvedTitle = localRec.title;
+          }
+        }
+      } catch (err) {}
+      queryIds = Array.from(new Set(queryIds));
+
+      const placeholders = queryIds.map(() => "?").join(",");
+      let sql = `SELECT * FROM ReadHistory WHERE manga_id IN (${placeholders})`;
+      let params = [...queryIds];
+      if (resolvedTitle && resolvedTitle !== "Manga") {
+        sql += ` OR LOWER(manga_title) = LOWER(?)`;
+        params.push(resolvedTitle);
+      }
+
+      const history = global.db.prepare(sql).all(...params);
+      history.sort(
+        (a, b) =>
+          new Date(b.last_read).getTime() - new Date(a.last_read).getTime(),
+      );
+
+      if (history.length > 0) {
+        hasBefore = true;
+        const latest = history[0];
+        lastProgress = {
+          number: latest.chapter_number,
+          currentPage: latest.current_page,
+          totalPages: latest.total_pages,
+          isCompleted: latest.is_completed === 1,
+        };
+
+        if (latest.is_completed === 1) {
+          suggestedNumber = latest.chapter_number + 1;
+        } else {
+          suggestedNumber = latest.chapter_number;
+        }
+      }
+
+      chaptersStatus = history.map((h) => ({
+        number: h.chapter_number,
+        isCompleted: h.is_completed === 1,
+        currentPage: h.current_page,
+        totalPages: h.total_pages,
+      }));
+    }
+
+    res.json({
+      hasProgress: hasBefore,
+      lastProgress,
+      suggestedNumber,
+      episodesStatus,
+      chaptersStatus,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch history statistics
+router.get("/api/history/stats", async (req, res) => {
+  try {
+    const watchStats = global.db
+      .prepare(
+        `
+      SELECT 
+        COALESCE(SUM(time_spent), 0) AS total_seconds,
+        COUNT(DISTINCT anime_id) AS distinct_anime,
+        COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_episodes
+      FROM WatchHistory
+    `,
+      )
+      .get();
+
+    const readStats = global.db
+      .prepare(
+        `
+      SELECT 
+        COALESCE(SUM(time_spent), 0) AS total_seconds,
+        COUNT(DISTINCT manga_id) AS distinct_manga,
+        COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_chapters
+      FROM ReadHistory
+    `,
+      )
+      .get();
+
+    res.json({
+      watchHours: parseFloat((watchStats.total_seconds / 3600).toFixed(2)),
+      readHours: parseFloat((readStats.total_seconds / 3600).toFixed(2)),
+      completedEpisodes: watchStats.completed_episodes,
+      completedChapters: readStats.completed_chapters,
+      distinctAnime: watchStats.distinct_anime,
+      distinctManga: readStats.distinct_manga,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fetch history list
+router.get("/api/history/list", async (req, res) => {
+  try {
+    try {
+      global.db
+        .prepare(
+          "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
+        )
+        .run();
+      global.db
+        .prepare(
+          "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
+        )
+        .run();
+    } catch (e) {}
+
+    const limit = parseInt(req.query.limit || 50);
+    const includeHidden = req.query.include_hidden === "true";
+    const watchWhereClause = includeHidden
+      ? ""
+      : "WHERE (w.hidden IS NULL OR w.hidden = 0)";
+    const readWhereClause = includeHidden
+      ? ""
+      : "WHERE (r.hidden IS NULL OR r.hidden = 0)";
+
+    const watchLogs = global.db
+      .prepare(
+        `
+      SELECT 
+        w.id,
+        'Anime' AS type,
+        w.anime_id AS media_id,
+        w.anime_title AS title,
+        w.episode_number AS number,
+        w.current_time,
+        w.duration,
+        w.time_spent,
+        w.is_completed,
+        w.last_watched AS date,
+        a.image_url,
+        a.provider,
+        a.MalID AS mal_id,
+        CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
+        mal.totalEpisodes AS total_count
+      FROM WatchHistory w
+      LEFT JOIN Anime a ON a.id = w.anime_id
+      LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
+      ${watchWhereClause}
+      ORDER BY w.last_watched DESC
+      LIMIT ?
+    `,
+      )
+      .all(limit);
+
+    watchLogs.forEach((log) => {
+      log.image = log.image_url || null;
+      delete log.image_url;
+    });
+
+    const readLogs = global.db
+      .prepare(
+        `
+      SELECT 
+        r.id,
+        'Manga' AS type,
+        r.manga_id AS media_id,
+        r.manga_title AS title,
+        r.chapter_number AS number,
+        r.current_page AS current_time,
+        r.total_pages AS duration,
+        r.time_spent,
+        r.is_completed,
+        r.last_read AS date,
+        m.image_url,
+        m.provider,
+        m.MalID AS mal_id,
+        CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
+        mml.totalChapters AS total_count
+      FROM ReadHistory r
+      LEFT JOIN Manga m ON m.id = r.manga_id
+      LEFT JOIN MyMangaList mml ON mml.id = m.MalID
+      ${readWhereClause}
+      ORDER BY r.last_read DESC
+      LIMIT ?
+    `,
+      )
+      .all(limit);
+
+    readLogs.forEach((log) => {
+      log.image = log.image_url || null;
+      delete log.image_url;
+    });
+
+    const combined = [...watchLogs, ...readLogs]
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+      .slice(0, limit);
+
+    res.json(wrapImagesInObject(combined));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;

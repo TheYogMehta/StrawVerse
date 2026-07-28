@@ -22,7 +22,9 @@ function getHash(url) {
 
 async function getCacheStats() {
   try {
-    const row = await queryOne("SELECT COUNT(*) as count, SUM(file_size) as size FROM ImageCache");
+    const row = await queryOne(
+      "SELECT COUNT(*) as count, SUM(file_size) as size FROM ImageCache",
+    );
     return {
       filesCount: row?.count || 0,
       sizeInBytes: row?.size || 0,
@@ -80,7 +82,7 @@ async function cacheImage(url, buffer = null) {
     let imageBuffer = buffer;
     if (!imageBuffer) {
       const headersObj = getHeaders(url);
-      const response = await axios.get(url, {
+      const response = await global.axios.get(url, {
         headers: headersObj,
         responseType: "arraybuffer",
         timeout: 10000,
@@ -92,14 +94,17 @@ async function cacheImage(url, buffer = null) {
     const fileSize = imageBuffer.length;
 
     const now = Date.now();
-    await run(`
+    await run(
+      `
       INSERT INTO ImageCache (url, filename, file_size, last_accessed)
       VALUES (?, ?, ?, ?)
       ON CONFLICT(url) DO UPDATE SET
         filename = excluded.filename,
         file_size = excluded.file_size,
         last_accessed = excluded.last_accessed
-    `, [url, filename, fileSize, now]);
+    `,
+      [url, filename, fileSize, now],
+    );
 
     enforceLimit().catch((err) =>
       logger.error("Cache eviction error: " + err.message),
@@ -114,7 +119,7 @@ async function cacheImage(url, buffer = null) {
 
 async function enforceLimit() {
   try {
-    const limitGb = await getKeyValue("Settings", "imageCacheSizeLimit") ?? 5;
+    const limitGb = (await getKeyValue("Settings", "imageCacheSizeLimit")) ?? 5;
     const limitBytes = limitGb * 1024 * 1024 * 1024;
 
     const stats = await getCacheStats();
@@ -126,7 +131,9 @@ async function enforceLimit() {
       `Image cache size (${(stats.sizeInBytes / (1024 * 1024)).toFixed(1)} MB) exceeds limit (${limitGb} GB). Evicting oldest items...`,
     );
 
-    const items = await queryAll("SELECT url, filename, file_size FROM ImageCache ORDER BY last_accessed ASC");
+    const items = await queryAll(
+      "SELECT url, filename, file_size FROM ImageCache ORDER BY last_accessed ASC",
+    );
     let currentSize = stats.sizeInBytes;
     const cacheDir = getImageCacheDir();
 
@@ -161,7 +168,10 @@ async function runStartupCleanup() {
     const cacheDir = getImageCacheDir();
 
     const cutoff = Date.now() - 518400000;
-    const expiredItems = await queryAll("SELECT url, filename FROM ImageCache WHERE last_accessed < ?", [cutoff]);
+    const expiredItems = await queryAll(
+      "SELECT url, filename FROM ImageCache WHERE last_accessed < ?",
+      [cutoff],
+    );
 
     for (const item of expiredItems) {
       try {
@@ -180,8 +190,9 @@ async function runStartupCleanup() {
 
     const diskFiles = await fs.promises.readdir(cacheDir);
     const trackedFiles = new Set(
-      (await queryAll("SELECT filename FROM ImageCache"))
-        .map((r) => r.filename),
+      (await queryAll("SELECT filename FROM ImageCache")).map(
+        (r) => r.filename,
+      ),
     );
 
     let orphansDeleted = 0;
@@ -219,13 +230,16 @@ async function migrateDatabaseBase64Images() {
     let migratedCount = 0;
 
     for (const type of types) {
-      const cols = await queryAll(`PRAGMA table_info(${type})`)
-        .map((col) => col.name);
+      const cols = await queryAll(`PRAGMA table_info(${type})`).map(
+        (col) => col.name,
+      );
       if (!cols.includes("image")) {
         continue;
       }
 
-      const rows = await queryAll(`SELECT id, image, image_url FROM ${type} WHERE image IS NOT NULL`);
+      const rows = await queryAll(
+        `SELECT id, image, image_url FROM ${type} WHERE image IS NOT NULL`,
+      );
       if (rows.length === 0) {
         await exec(`ALTER TABLE ${type} DROP COLUMN image`);
         logger.info(`Dropped empty 'image' column from ${type} table.`);
@@ -252,7 +266,10 @@ async function migrateDatabaseBase64Images() {
               row.image.startsWith("http://") ||
               row.image.startsWith("https://")
             ) {
-              await run(`UPDATE ${type} SET image = NULL, image_url = COALESCE(image_url, ?) WHERE id = ?`, [row.image, row.id]);
+              await run(
+                `UPDATE ${type} SET image = NULL, image_url = COALESCE(image_url, ?) WHERE id = ?`,
+                [row.image, row.id],
+              );
               migratedCount++;
               continue;
             }
@@ -271,7 +288,10 @@ async function migrateDatabaseBase64Images() {
             `https://strawverse.internal/fallback-image/${type}/${row.id}`;
 
           await cacheImage(imageUrl, buffer);
-          await run(`UPDATE ${type} SET image = NULL, image_url = ? WHERE id = ?`, [imageUrl, row.id]);
+          await run(
+            `UPDATE ${type} SET image = NULL, image_url = ? WHERE id = ?`,
+            [imageUrl, row.id],
+          );
           migratedCount++;
         }
       }
@@ -297,7 +317,10 @@ async function migrateDatabaseBase64Images() {
 async function removeCachedImage(url) {
   try {
     if (!url) return;
-    const row = await queryOne("SELECT filename FROM ImageCache WHERE url = ?", [url]);
+    const row = await queryOne(
+      "SELECT filename FROM ImageCache WHERE url = ?",
+      [url],
+    );
     if (row) {
       const cacheDir = getImageCacheDir();
       const filePath = path.join(cacheDir, row.filename);

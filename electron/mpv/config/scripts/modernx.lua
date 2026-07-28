@@ -85,6 +85,7 @@ local icons = {
   info = '',
   cloud = '\239\136\159',
   speed = '\239\172\185',
+  hd = '\239\135\154',
 }
 
 local speed_menu = {
@@ -252,6 +253,7 @@ function build_keyboard_controls()
     local bottom_button_line = {}
     table.insert(bottom_button_line, 'cy_audio')
     table.insert(bottom_button_line, 'cy_server')
+    table.insert(bottom_button_line, 'cy_quality')
     table.insert(bottom_button_line, 'cy_speed')
     table.insert(bottom_button_line, 'cy_sub')
     table.insert(bottom_button_line, 'pl_prev')
@@ -484,7 +486,23 @@ local server_menu = {
     sources = nil
 }
 
-local function get_stream_sources()
+local sub_menu = {
+    active = false,
+    selected_index = 1
+}
+
+local function is_server_sources(srcs)
+    if not srcs or #srcs == 0 then return false end
+    for _, s in ipairs(srcs) do
+        local name = (s.name or ""):lower()
+        if not string.match(name, "^%d+p$") and not string.match(name, "^auto$") and not string.match(name, "^default$") and not string.match(name, "%d+p") then
+            return true
+        end
+    end
+    return false
+end
+
+local function get_all_sources()
     local sources_str = mp.get_opt("modernx-sources")
     if not sources_str or sources_str == "" then
         return nil
@@ -498,17 +516,86 @@ local function get_stream_sources()
     return #sources > 0 and sources or nil
 end
 
-local function close_server_menu()
+local function get_server_sources()
+    local all_srcs = get_all_sources()
+    if not all_srcs or #all_srcs == 0 then return nil end
+    if is_server_sources(all_srcs) then
+        return all_srcs
+    end
+    return nil
+end
+
+local function get_m3u8_quality_sources()
+    if not tracks_osc or not tracks_osc.video or #tracks_osc.video <= 1 then
+        return nil
+    end
+
+    local current_vid = mp.get_property("vid")
+    local sources = {}
+
+    table.insert(sources, {
+        name = "Auto",
+        is_m3u8 = true,
+        track_id = "auto",
+        selected = (current_vid == "auto" or current_vid == nil or current_vid == "no")
+    })
+
+    for _, tr in ipairs(tracks_osc.video) do
+        local name = ""
+        if tr.title and tr.title ~= "" and not tr.title:find("^video") then
+            name = tr.title
+        elseif tr["demux-h"] and tr["demux-h"] > 0 then
+            name = tostring(tr["demux-h"]) .. "p"
+        elseif tr["demux-w"] and tr["demux-w"] > 0 then
+            name = tostring(tr["demux-w"]) .. "x" .. tostring(tr["demux-h"])
+        else
+            name = "Track " .. tostring(tr.id)
+        end
+
+        local is_sel = (current_vid ~= "auto" and tonumber(current_vid) == tonumber(tr.id))
+
+        table.insert(sources, {
+            name = name,
+            is_m3u8 = true,
+            track_id = tostring(tr.id),
+            selected = is_sel
+        })
+    end
+
+    return #sources > 1 and sources or nil
+end
+
+local function get_quality_sources()
+    local all_srcs = get_all_sources()
+    if all_srcs and #all_srcs > 0 and not is_server_sources(all_srcs) then
+        return all_srcs
+    end
+
+    local m3u8_srcs = get_m3u8_quality_sources()
+    if m3u8_srcs and #m3u8_srcs > 0 then
+        return m3u8_srcs
+    end
+
+    return nil
+end
+
+local close_speed_menu
+local close_server_menu
+local close_sub_menu
+
+close_server_menu = function()
     if not server_menu.active then return end
+    server_menu.last_closed_time = mp.get_time()
+    server_menu.last_closed_type = server_menu.menu_type
     server_menu.active = false
     mp.remove_key_binding("server-menu-up")
     mp.remove_key_binding("server-menu-down")
     mp.remove_key_binding("server-menu-wheel-up")
     mp.remove_key_binding("server-menu-wheel-down")
     mp.remove_key_binding("server-menu-enter")
-    mp.remove_key_binding("server-menu-click")
     mp.remove_key_binding("server-menu-esc")
     mp.remove_key_binding("server-menu-right-click")
+    show_osc()
     request_tick()
 end
 
@@ -516,42 +603,65 @@ local function select_server()
     if not server_menu.active or not server_menu.sources then return end
     local source = server_menu.sources[server_menu.selected_index]
     if source then
+        server_menu.current_selected = server_menu.selected_index
         close_server_menu()
-        state.loading_active = true
-        state.loading_start_time = mp.get_time()
-        request_tick()
 
-        -- Save current position to resume after switch
-        state.resume_pos = mp.get_property_number("time-pos", 0)
+        if source.is_m3u8 then
+            mp.set_property("vid", source.track_id)
+            show_osc()
+            request_tick()
+        else
+            state.loading_active = true
+            state.loading_start_time = mp.get_time()
+            show_osc()
 
-        -- Load directly in MPV (URLs are already proxied) - instant, no round-trip
-        mp.commandv("loadfile", source.url, "replace")
-
-        -- Notify frontend to re-inject subtitles and update source state
-        mp.set_property("user-data/strawverse-action", "change-server:" .. source.name)
+            state.resume_pos = mp.get_property_number("time-pos", 0)
+            mp.commandv("loadfile", source.url, "replace")
+            mp.set_property("user-data/strawverse-action", "change-server:" .. source.name)
+        end
     end
 end
 
-local function open_server_menu()
-    if server_menu.active then return end
+local function open_server_menu(menu_type)
+    menu_type = menu_type or "servers"
+    local now = mp.get_time()
+    if server_menu.active then
+        if server_menu.menu_type == menu_type then
+            close_server_menu()
+            return
+        else
+            close_server_menu()
+        end
+    elseif server_menu.last_closed_time and (now - server_menu.last_closed_time < 0.4) and (server_menu.last_closed_type == menu_type) then
+        server_menu.last_closed_time = nil
+        return
+    end
     close_speed_menu()
-    local sources = get_stream_sources()
+    close_sub_menu()
+    show_osc()
+
+    local sources
+    if menu_type == "servers" then
+        sources = get_server_sources()
+    else
+        sources = get_quality_sources()
+    end
+
     if not sources or #sources == 0 then
         return
     end
-    
+
     server_menu.sources = sources
+    server_menu.is_servers = (menu_type == "servers")
+    server_menu.menu_type = menu_type
     server_menu.active = true
-    
-    -- Find current playing URL index if matched
+
     local current_url = mp.get_property("stream-open-filename") or mp.get_property("path")
     server_menu.selected_index = 1
-    if current_url then
-        for idx, s in ipairs(sources) do
-            if s.url == current_url then
-                server_menu.selected_index = idx
-                break
-            end
+    for idx, s in ipairs(sources) do
+        if s.selected or (current_url and s.url == current_url) then
+            server_menu.selected_index = idx
+            break
         end
     end
     
@@ -589,7 +699,6 @@ local function open_server_menu()
     end)
     
     mp.add_forced_key_binding("ENTER", "server-menu-enter", select_server)
-    mp.add_forced_key_binding("MBTN_LEFT", "server-menu-click", select_server)
     mp.add_forced_key_binding("ESC", "server-menu-esc", close_server_menu)
     mp.add_forced_key_binding("MBTN_RIGHT", "server-menu-right-click", close_server_menu)
     
@@ -638,7 +747,7 @@ local function draw_loading_spinner(ass)
     request_tick()
 end
 
-local function close_speed_menu()
+close_speed_menu = function()
     if not speed_menu.active then return end
     speed_menu.active = false
     mp.remove_key_binding("speed-menu-up")
@@ -646,9 +755,9 @@ local function close_speed_menu()
     mp.remove_key_binding("speed-menu-wheel-up")
     mp.remove_key_binding("speed-menu-wheel-down")
     mp.remove_key_binding("speed-menu-enter")
-    mp.remove_key_binding("speed-menu-click")
     mp.remove_key_binding("speed-menu-esc")
     mp.remove_key_binding("speed-menu-right-click")
+    show_osc()
     request_tick()
 end
 
@@ -659,12 +768,14 @@ local function select_speed()
         close_speed_menu()
         mp.set_property_number("speed", speed_val)
         mp.osd_message(string.format("Speed: %.2fx", speed_val), 1.5)
+        show_osc()
     end
 end
 
 local function open_speed_menu()
     if speed_menu.active then return end
     close_server_menu()
+    show_osc()
     
     speed_menu.active = true
     local current_speed = mp.get_property_number("speed", 1.0)
@@ -677,107 +788,112 @@ local function open_speed_menu()
         end
     end
     
-    mp.set_key_binding("UP", "speed-menu-up", function()
+    mp.add_forced_key_binding("UP", "speed-menu-up", function()
         speed_menu.selected_index = speed_menu.selected_index - 1
         if speed_menu.selected_index < 1 then
             speed_menu.selected_index = #speed_menu.speeds
         end
         request_tick()
     end)
-    mp.set_key_binding("DOWN", "speed-menu-down", function()
+    mp.add_forced_key_binding("DOWN", "speed-menu-down", function()
         speed_menu.selected_index = speed_menu.selected_index + 1
         if speed_menu.selected_index > #speed_menu.speeds then
             speed_menu.selected_index = 1
         end
         request_tick()
     end)
-    mp.set_key_binding("WHEEL_UP", "speed-menu-wheel-up", function()
+    mp.add_forced_key_binding("WHEEL_UP", "speed-menu-wheel-up", function()
         speed_menu.selected_index = speed_menu.selected_index - 1
         if speed_menu.selected_index < 1 then speed_menu.selected_index = 1 end
         request_tick()
     end)
-    mp.set_key_binding("WHEEL_DOWN", "speed-menu-wheel-down", function()
+    mp.add_forced_key_binding("WHEEL_DOWN", "speed-menu-wheel-down", function()
         speed_menu.selected_index = speed_menu.selected_index + 1
         if speed_menu.selected_index > #speed_menu.speeds then speed_menu.selected_index = #speed_menu.speeds end
         request_tick()
     end)
-    mp.set_key_binding("ENTER", "speed-menu-enter", select_speed)
-    mp.set_key_binding("MBTN_LEFT", "speed-menu-click", function()
-        local mx, my = get_virt_mouse_pos()
-        local w = 240
-        local menu_x = osc_param.playresx - w
-        if mx >= menu_x and mx <= osc_param.playresx then
-            if my >= 30 and my <= 60 then
-                close_speed_menu()
-            else
-                select_speed()
-            end
-        else
-            close_speed_menu()
-        end
-    end)
-    mp.set_key_binding("ESC", "speed-menu-esc", close_speed_menu)
-    mp.set_key_binding("MBTN_RIGHT", "speed-menu-right-click", close_speed_menu)
+    mp.add_forced_key_binding("ENTER", "speed-menu-enter", select_speed)
+    mp.add_forced_key_binding("ESC", "speed-menu-esc", close_speed_menu)
+    mp.add_forced_key_binding("MBTN_RIGHT", "speed-menu-right-click", close_speed_menu)
     request_tick()
 end
 
+local function step_speed(direction)
+    local current_speed = mp.get_property_number("speed", 1.0)
+    local idx = 1
+    local min_diff = 999
+    for i, s in ipairs(speed_menu.speeds) do
+        local diff = math.abs(s - current_speed)
+        if diff < min_diff then
+            min_diff = diff
+            idx = i
+        end
+    end
+    
+    local new_idx = idx + direction
+    if new_idx < 1 then new_idx = 1 end
+    if new_idx > #speed_menu.speeds then new_idx = #speed_menu.speeds end
+    
+    local new_speed = speed_menu.speeds[new_idx]
+    mp.set_property_number("speed", new_speed)
+    mp.osd_message(string.format("Speed: %.2fx", new_speed), 1.5)
+    show_osc()
+end
+
+mp.add_forced_key_binding("]", "speed-step-up", function() step_speed(1) end)
+mp.add_forced_key_binding("[", "speed-step-down", function() step_speed(-1) end)
+
 local function draw_speed_menu(ass)
     if not speed_menu.active then return end
-    local w = 240
-    local h = osc_param.playresy
-    local menu_x = osc_param.playresx - w
-    local menu_y = 0
+    local w = 120
+    local item_h = 24
+    local h = 30 + item_h * #speed_menu.speeds + 10
+    local menu_x = osc_param.playresx - w - 15
+    local menu_y = osc_param.playresy - h - 55
     
+    -- Card background box
     ass:new_event()
     local bg_ass = assdraw.ass_new()
-    bg_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H121212&\\1a&H00&}", menu_x, menu_y))
+    bg_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord1\\3c&H303030&\\1c&H161414&\\1a&H08&}", menu_x, menu_y))
     bg_ass:draw_start()
-    bg_ass:round_rect_cw(0, 0, w, h, 20)
+    bg_ass:round_rect_cw(0, 0, w, h, 10)
     bg_ass:draw_stop()
     ass:merge(bg_ass)
     
+    -- Header "Speed"
     ass:new_event()
-    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs20\\fnMaterial-Design-Iconic-Font}", menu_x + 35, 45))
-    ass:append("\239\139\170")
-    
-    ass:new_event()
-    ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs18\\fn%s\\b1}", menu_x + 65, 45, user_opts.font or "sans-serif"))
+    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HA0A0A0&\\fs12\\fn%s\\b1}", menu_x + w/2, menu_y + 16, user_opts.font or "sans-serif"))
     ass:append("Speed")
     
     local mx, my = get_virt_mouse_pos()
     local current_speed = mp.get_property_number("speed", 1.0)
     
     for idx, s in ipairs(speed_menu.speeds) do
-        local item_y = 110 + 45 * (idx - 1)
-        local is_hovered = false
-        if mx >= menu_x and mx <= menu_x + w and my >= item_y - 22 and my <= item_y + 22 then
-            is_hovered = true
-            speed_menu.selected_index = idx
-        end
-        local is_selected = (idx == speed_menu.selected_index)
+        local item_y = menu_y + 30 + item_h * (idx - 1)
+        local is_hovered = (mx >= menu_x + 6 and mx <= menu_x + w - 6 and my >= item_y and my <= item_y + item_h)
         local is_current = (math.abs(s - current_speed) < 0.01)
         
-        if is_selected or is_hovered then
+        if is_hovered or is_current then
             ass:new_event()
             local sel_ass = assdraw.ass_new()
-            sel_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H202020&\\1a&H00&}", menu_x + 20, item_y - 18))
+            sel_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H303030&\\1a&H00&}", menu_x + 6, item_y + 1))
             sel_ass:draw_start()
-            sel_ass:round_rect_cw(0, 0, w - 40, 36, 8)
+            sel_ass:round_rect_cw(0, 0, w - 12, item_h - 2, 5)
             sel_ass:draw_stop()
             ass:merge(sel_ass)
         end
         
         if is_current then
             ass:new_event()
-            ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFE7D9D&\\fs16\\fnMaterial-Design-Iconic-Font}", menu_x + w - 45, item_y))
+            ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs11\\fnMaterial-Design-Iconic-Font}", menu_x + w - 18, item_y + item_h/2))
             ass:append("\239\137\171")
         end
         
-        local text_color = is_current and "\\1c&HFE7D9D&" or (is_selected and "\\1c&HFFFFFF&" or "\\1c&HD0D0D0&")
-        local font_weight = (is_current or is_selected) and "\\b1" or "\\b0"
+        local text_color = (is_current or is_hovered) and "\\1c&HFFFFFF&" or "\\1c&HB0B0B0&"
+        local font_weight = is_current and "\\b1" or "\\b0"
         
         ass:new_event()
-        ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0%s%s\\fs15\\fn%s}", menu_x + 35, item_y, text_color, font_weight, user_opts.font or "sans-serif"))
+        ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0%s%s\\fs12\\fn%s}", menu_x + 16, item_y + item_h/2, text_color, font_weight, user_opts.font or "sans-serif"))
         ass:append(string.format("%.2fx", s))
     end
 end
@@ -787,73 +903,185 @@ local function draw_server_menu(ass)
         return
     end
     
-    local w = 320
-    local h = osc_param.playresy
+    local w = 160
+    local item_h = 28
+    local h = 30 + item_h * #server_menu.sources + 10
+    local menu_x = osc_param.playresx - w - 15
+    local menu_y = osc_param.playresy - h - 55
     
-    local menu_x = osc_param.playresx - w
-    local menu_y = 0
-    
-    -- Draw main background box using a new assdraw object with top-left alignment
+    -- Card background box
     ass:new_event()
     local bg_ass = assdraw.ass_new()
-    bg_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H121212&\\1a&H00&}", menu_x, menu_y))
+    bg_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord1\\3c&H303030&\\1c&H161414&\\1a&H08&}", menu_x, menu_y))
     bg_ass:draw_start()
-    bg_ass:round_rect_cw(0, 0, w, h, 20)
+    bg_ass:round_rect_cw(0, 0, w, h, 10)
     bg_ass:draw_stop()
     ass:merge(bg_ass)
     
-    -- Draw back arrow icon (zmdi-arrow-left)
+    -- Header "Servers" or "Quality"
+    local header_text = server_menu.is_servers and "Servers" or "Quality"
+
     ass:new_event()
-    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs20\\fnMaterial-Design-Iconic-Font}", menu_x + 35, 45))
-    ass:append("\239\139\170")
-    
-    -- Draw header "Select Server"
-    ass:new_event()
-    ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs18\\fn%s\\b1}", menu_x + 65, 45, user_opts.font or "sans-serif"))
-    ass:append("Select Server")
+    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HA0A0A0&\\fs12\\fn%s\\b1}", menu_x + w/2, menu_y + 16, user_opts.font or "sans-serif"))
+    ass:append(header_text)
     
     local mx, my = get_virt_mouse_pos()
     
     for idx, s in ipairs(server_menu.sources) do
-        local item_y = 110 + 50 * (idx - 1)
-        
-        -- Mouse hover detection to update selection
-        local is_hovered = false
-        if mx >= menu_x and mx <= menu_x + w and my >= item_y - 25 and my <= item_y + 25 then
-            is_hovered = true
-            server_menu.selected_index = idx
-        end
-        
+        local item_y = menu_y + 30 + item_h * (idx - 1)
+        local is_hovered = (mx >= menu_x + 6 and mx <= menu_x + w - 6 and my >= item_y and my <= item_y + item_h)
         local is_selected = (idx == server_menu.selected_index)
         
-        -- Selection / Hover pill highlight background
-        if is_selected or is_hovered then
+        if is_hovered or is_selected then
             ass:new_event()
             local sel_ass = assdraw.ass_new()
-            sel_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H202020&\\1a&H00&}", menu_x + 20, item_y - 20))
+            sel_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H303030&\\1a&H00&}", menu_x + 6, item_y + 1))
             sel_ass:draw_start()
-            sel_ass:round_rect_cw(0, 0, w - 40, 40, 8)
+            sel_ass:round_rect_cw(0, 0, w - 12, item_h - 2, 5)
             sel_ass:draw_stop()
             ass:merge(sel_ass)
         end
         
-        -- Checkmark indicator for selected item
-        local current_url = mp.get_property("stream-open-filename") or mp.get_property("path")
-        local is_currently_playing = (s.url == current_url)
-        
-        if is_currently_playing then
+        if is_selected then
             ass:new_event()
-            ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFB9BB8&\\fs16\\fnMaterial-Design-Iconic-Font}", menu_x + w - 45, item_y))
+            ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs12\\fnMaterial-Design-Iconic-Font}", menu_x + w - 18, item_y + item_h/2))
             ass:append("\239\137\171")
         end
         
-        -- Text item
-        local text_color = is_currently_playing and "\\1c&HFB9BB8&" or (is_selected and "\\1c&HFFFFFF&" or "\\1c&HD0D0D0&")
-        local font_weight = (is_currently_playing or is_selected) and "\\b1" or "\\b0"
+        local text_color = (is_selected or is_hovered) and "\\1c&HFFFFFF&" or "\\1c&HB0B0B0&"
+        local font_weight = is_selected and "\\b1" or "\\b0"
         
         ass:new_event()
-        ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0%s%s\\fs15\\fn%s}", menu_x + 35, item_y, text_color, font_weight, user_opts.font or "sans-serif"))
+        ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0%s%s\\fs12\\fn%s}", menu_x + 16, item_y + item_h/2, text_color, font_weight, user_opts.font or "sans-serif"))
         ass:append(s.name)
+    end
+end
+
+close_sub_menu = function()
+    if not sub_menu.active then return end
+    sub_menu.active = false
+    mp.remove_key_binding("sub-menu-up")
+    mp.remove_key_binding("sub-menu-down")
+    mp.remove_key_binding("sub-menu-enter")
+    mp.remove_key_binding("sub-menu-esc")
+    mp.remove_key_binding("sub-menu-right-click")
+    show_osc()
+    request_tick()
+end
+
+local function select_sub()
+    if not sub_menu.active then return end
+    if sub_menu.selected_index == 1 then
+        mp.set_property("sub", "no")
+    else
+        local track = tracks_osc.sub[sub_menu.selected_index - 1]
+        if track then
+            mp.set_property("sub", tostring(track.id))
+        end
+    end
+    close_sub_menu()
+    show_osc()
+end
+
+local function open_sub_menu()
+    if sub_menu.active then return end
+    close_server_menu()
+    close_speed_menu()
+    show_osc()
+    
+    update_tracklist()
+    sub_menu.active = true
+    
+    local current_sub = mp.get_property("sub")
+    sub_menu.selected_index = 1
+    if current_sub ~= "no" and current_sub ~= nil then
+        local current_id = tonumber(current_sub)
+        for idx, track in ipairs(tracks_osc.sub) do
+            if track.id == current_id then
+                sub_menu.selected_index = idx + 1
+                break
+            end
+        end
+    end
+    
+    local total_items = #tracks_osc.sub + 1
+    
+    mp.add_forced_key_binding("UP", "sub-menu-up", function()
+        sub_menu.selected_index = sub_menu.selected_index - 1
+        if sub_menu.selected_index < 1 then sub_menu.selected_index = total_items end
+        request_tick()
+    end)
+    mp.add_forced_key_binding("DOWN", "sub-menu-down", function()
+        sub_menu.selected_index = sub_menu.selected_index + 1
+        if sub_menu.selected_index > total_items then sub_menu.selected_index = 1 end
+        request_tick()
+    end)
+    mp.add_forced_key_binding("ENTER", "sub-menu-enter", select_sub)
+    mp.add_forced_key_binding("ESC", "sub-menu-esc", close_sub_menu)
+    mp.add_forced_key_binding("MBTN_RIGHT", "sub-menu-right-click", close_sub_menu)
+    request_tick()
+end
+
+local function draw_sub_menu(ass)
+    if not sub_menu.active then return end
+    update_tracklist()
+    
+    local items = { "Off" }
+    for n = 1, #tracks_osc.sub do
+        local tr = tracks_osc.sub[n]
+        local name = tr.title or tr.lang or ("Track " .. n)
+        table.insert(items, name)
+    end
+    
+    local w = 160
+    local item_h = 28
+    local h = 30 + item_h * #items + 10
+    local menu_x = osc_param.playresx - w - 15
+    local menu_y = osc_param.playresy - h - 55
+    
+    -- Card background box
+    ass:new_event()
+    local bg_ass = assdraw.ass_new()
+    bg_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord1\\3c&H303030&\\1c&H161414&\\1a&H08&}", menu_x, menu_y))
+    bg_ass:draw_start()
+    bg_ass:round_rect_cw(0, 0, w, h, 10)
+    bg_ass:draw_stop()
+    ass:merge(bg_ass)
+    
+    -- Header "Subtitles"
+    ass:new_event()
+    ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HA0A0A0&\\fs12\\fn%s\\b1}", menu_x + w/2, menu_y + 16, user_opts.font or "sans-serif"))
+    ass:append("Subtitles")
+    
+    local mx, my = get_virt_mouse_pos()
+    
+    for idx, name in ipairs(items) do
+        local item_y = menu_y + 30 + item_h * (idx - 1)
+        local is_hovered = (mx >= menu_x + 6 and mx <= menu_x + w - 6 and my >= item_y and my <= item_y + item_h)
+        local is_selected = (idx == sub_menu.selected_index)
+        
+        if is_hovered or is_selected then
+            ass:new_event()
+            local sel_ass = assdraw.ass_new()
+            sel_ass:append(string.format("{\\pos(%f,%f)\\an7\\q2\\margl0\\margr0\\margv0\\bord0\\1c&H303030&\\1a&H00&}", menu_x + 6, item_y + 1))
+            sel_ass:draw_start()
+            sel_ass:round_rect_cw(0, 0, w - 12, item_h - 2, 5)
+            sel_ass:draw_stop()
+            ass:merge(sel_ass)
+        end
+        
+        if is_selected then
+            ass:new_event()
+            ass:append(string.format("{\\pos(%f,%f)\\an5\\q2\\margl0\\margr0\\margv0\\blur0\\bord0\\1c&HFFFFFF&\\fs12\\fnMaterial-Design-Iconic-Font}", menu_x + w - 18, item_y + item_h/2))
+            ass:append("\239\137\171")
+        end
+        
+        local text_color = (is_selected or is_hovered) and "\\1c&HFFFFFF&" or "\\1c&HB0B0B0&"
+        local font_weight = is_selected and "\\b1" or "\\b0"
+        
+        ass:new_event()
+        ass:append(string.format("{\\pos(%f,%f)\\an4\\q2\\margl0\\margr0\\margv0\\blur0\\bord0%s%s\\fs12\\fn%s}", menu_x + 16, item_y + item_h/2, text_color, font_weight, user_opts.font or "sans-serif"))
+        ass:append(name)
     end
 end
 
@@ -1125,8 +1353,19 @@ function render_elements(master_ass)
         if element.name == "cy_server" then
             local path = mp.get_property("path", "")
             local is_stream = path:sub(1, 4) == "http" or path:sub(1, 4) == "ytdl" or path:sub(1, 3) == "rtp" or path:sub(1, 3) == "rtsp" or path:sub(1, 5) == "edl://"
-            local sources = get_stream_sources()
-            local show = (sources ~= nil and #sources > 0 and is_stream)
+            local srcs = get_server_sources()
+            local show = (srcs ~= nil and #srcs > 1 and is_stream)
+            element.enabled = show
+            if not show then
+                render_it = false
+            end
+        end
+
+        if element.name == "cy_quality" then
+            local path = mp.get_property("path", "")
+            local is_stream = path:sub(1, 4) == "http" or path:sub(1, 4) == "ytdl" or path:sub(1, 3) == "rtp" or path:sub(1, 3) == "rtsp" or path:sub(1, 5) == "edl://"
+            local srcs = get_quality_sources()
+            local show = (srcs ~= nil and #srcs > 0 and is_stream)
             element.enabled = show
             if not show then
                 render_it = false
@@ -1848,30 +2087,63 @@ layouts = function ()
     lo.style = osc_styles.Ctrl3
     lo.visible = false
 	
-    lo = add_layout('cy_sub')
-    lo.geometry = {x = osc_geo.w - 87, y = refY - 40, an = 5, w = 24, h = 24}
+	lo = add_layout('tog_fs')
+    lo.geometry = {x = osc_geo.w - 37, y = refY - 40, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
-    lo.visible = (osc_param.playresx >= 600)
+    lo.visible = false
 
-    lo = add_layout('cy_server')
-    lo.geometry = {x = osc_geo.w - 137, y = refY - 40, an = 5, w = 24, h = 24}
-    lo.style = osc_styles.Ctrl3
-    lo.visible = (osc_param.playresx >= 600)
+    local right_btn_x = osc_geo.w - 37
+    local has_subs = (#tracks_osc.sub > 0)
+    if has_subs then
+        lo = add_layout('cy_sub')
+        lo.geometry = {x = right_btn_x, y = refY - 40, an = 5, w = 40, h = 40}
+        lo.style = osc_styles.Ctrl3
+        lo.visible = (osc_param.playresx >= 600)
+        right_btn_x = right_btn_x - 50
+    else
+        lo = add_layout('cy_sub')
+        lo.geometry = {x = osc_geo.w - 87, y = refY - 40, an = 5, w = 40, h = 40}
+        lo.style = osc_styles.Ctrl3
+        lo.visible = false
+    end
+
+    local server_srcs = get_server_sources()
+    if server_srcs ~= nil and #server_srcs > 1 then
+        lo = add_layout('cy_server')
+        lo.geometry = {x = right_btn_x, y = refY - 40, an = 5, w = 40, h = 40}
+        lo.style = osc_styles.Ctrl3
+        lo.visible = (osc_param.playresx >= 600)
+        right_btn_x = right_btn_x - 50
+    else
+        lo = add_layout('cy_server')
+        lo.geometry = {x = osc_geo.w - 137, y = refY - 40, an = 5, w = 40, h = 40}
+        lo.style = osc_styles.Ctrl3
+        lo.visible = false
+    end
+
+    local quality_srcs = get_quality_sources()
+    if quality_srcs ~= nil and #quality_srcs > 0 then
+        lo = add_layout('cy_quality')
+        lo.geometry = {x = right_btn_x, y = refY - 40, an = 5, w = 40, h = 40}
+        lo.style = osc_styles.Ctrl3
+        lo.visible = (osc_param.playresx >= 600)
+        right_btn_x = right_btn_x - 50
+    else
+        lo = add_layout('cy_quality')
+        lo.geometry = {x = osc_geo.w - 137, y = refY - 40, an = 5, w = 40, h = 40}
+        lo.style = osc_styles.Ctrl3
+        lo.visible = false
+    end
 
     lo = add_layout('cy_speed')
-    lo.geometry = {x = osc_geo.w - 187, y = refY - 40, an = 5, w = 24, h = 24}
+    lo.geometry = {x = right_btn_x, y = refY - 40, an = 5, w = 40, h = 40}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 600)
 
     lo = add_layout('vol_ctrl')
     lo.geometry = {x = 37, y = refY - 40, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
-    lo.visible = (osc_param.playresx >= 650)
-
-	lo = add_layout('tog_fs')
-    lo.geometry = {x = osc_geo.w - 37, y = refY - 40, an = 5, w = 24, h = 24}
-    lo.style = osc_styles.Ctrl3
-    lo.visible = (osc_param.playresx >= 540)    
+    lo.visible = (osc_param.playresx >= 650)    
 
 	lo = add_layout('tog_info')
     lo.geometry = {x = 25, y = 20, an = 5, w = 24, h = 24}
@@ -2171,27 +2443,33 @@ function osc_init()
     ne.off = (get_track('sub') == 0)
     ne.visible = (osc_param.playresx >= 600)
     ne.content = icons.sub
-    ne.eventresponder['mbtn_left_up'] =
-        function () set_track('sub', 1) end
-    ne.eventresponder['mbtn_right_up'] =
-        function () set_track('sub', -1) end
-    ne.eventresponder['shift+mbtn_left_down'] =
-        function () show_message(get_tracklist('sub')) end
-    ne.eventresponder['enter'] =
-        function () set_track('sub', 1); show_message(get_tracklist('sub')) end
+    ne.eventresponder['mbtn_left_down'] = function () end
+    ne.eventresponder['mbtn_left_up'] = function ()
+        if sub_menu.active then
+            close_sub_menu()
+        else
+            open_sub_menu()
+        end
+    end
     
     --cy_server
     ne = new_element('cy_server', 'button')
-    local sources = get_stream_sources()
-    ne.enabled = (sources ~= nil and #sources > 0)
-    ne.visible = (osc_param.playresx >= 600)
     ne.content = icons.cloud
+    ne.tooltip_style = nil
+    ne.tooltipF = nil
+    ne.eventresponder['mbtn_left_down'] = function () end
     ne.eventresponder['mbtn_left_up'] = function ()
-        if server_menu.active then
-            close_server_menu()
-        else
-            open_server_menu()
-        end
+        open_server_menu("servers")
+    end
+
+    --cy_quality
+    ne = new_element('cy_quality', 'button')
+    ne.content = "[HD]"
+    ne.tooltip_style = nil
+    ne.tooltipF = nil
+    ne.eventresponder['mbtn_left_down'] = function () end
+    ne.eventresponder['mbtn_left_up'] = function ()
+        open_server_menu("quality")
     end
     
     --cy_speed
@@ -2206,6 +2484,7 @@ function osc_init()
             return string.format("%.2gx", spd)
         end
     end
+    ne.eventresponder['mbtn_left_down'] = function () end
     ne.eventresponder['mbtn_left_up'] = function ()
         if speed_menu.active then
             close_speed_menu()
@@ -2234,16 +2513,9 @@ function osc_init()
     
     --tog_fs
     ne = new_element('tog_fs', 'button')
-    ne.content = function ()
-        if (state.fullscreen) then
-            return (icons.minimize)
-        else
-            return (icons.fullscreen)
-        end
-    end
-    ne.visible = (osc_param.playresx >= 540)
-    ne.eventresponder['mbtn_left_up'] =
-        function () mp.commandv('cycle', 'fullscreen') end
+    ne.enabled = false
+    ne.visible = false
+    ne.eventresponder = {}
 
     --tog_info
     ne = new_element('tog_info', 'button')
@@ -2749,7 +3021,7 @@ function render()
     if not (state.showtime == nil) and (get_hidetimeout() >= 0) then
         local timeout = state.showtime + (get_hidetimeout()/1000) - now
         if timeout <= 0 then
-            if (state.active_element == nil) and not (mouse_over_osc) and not server_menu.active then
+            if (state.active_element == nil) and not (mouse_over_osc) and not server_menu.active and not speed_menu.active and not sub_menu.active then
                 hide_osc()
             end
         else
@@ -2784,6 +3056,9 @@ function render()
     if speed_menu.active then
         draw_speed_menu(ass)
     end
+    if sub_menu.active then
+        draw_sub_menu(ass)
+    end
 
     -- Loading spinner overlay
     if state.loading_active then
@@ -2804,6 +3079,77 @@ local function element_has_action(element, action)
 end
 
 function process_event(source, what)
+    -- Handle menu drawer clicks if server, speed, or sub menu is active
+    if (server_menu.active or speed_menu.active or sub_menu.active) and source == 'mbtn_left' and what == 'down' then
+        local mx, my = get_virt_mouse_pos()
+        if speed_menu.active then
+            local w = 120
+            local item_h = 24
+            local h = 30 + item_h * #speed_menu.speeds + 10
+            local menu_x = osc_param.playresx - w - 15
+            local menu_y = osc_param.playresy - h - 55
+            
+            if mx >= menu_x and mx <= menu_x + w and my >= menu_y and my <= menu_y + h then
+                if my >= menu_y + 25 then
+                    local idx = math.floor((my - (menu_y + 30)) / item_h) + 1
+                    if idx >= 1 and idx <= #speed_menu.speeds then
+                        speed_menu.selected_index = idx
+                        select_speed()
+                    end
+                else
+                    close_speed_menu()
+                end
+                return
+            else
+                close_speed_menu()
+            end
+        elseif server_menu.active then
+            local w = 160
+            local item_h = 28
+            local num_sources = (server_menu.sources and #server_menu.sources) or 1
+            local h = 30 + item_h * num_sources + 10
+            local menu_x = osc_param.playresx - w - 15
+            local menu_y = osc_param.playresy - h - 55
+            
+            if mx >= menu_x and mx <= menu_x + w and my >= menu_y and my <= menu_y + h then
+                if my >= menu_y + 25 then
+                    local idx = math.floor((my - (menu_y + 30)) / item_h) + 1
+                    if idx >= 1 and idx <= num_sources then
+                        server_menu.selected_index = idx
+                        select_server()
+                    end
+                else
+                    close_server_menu()
+                end
+                return
+            else
+                close_server_menu()
+            end
+        elseif sub_menu.active then
+            local w = 160
+            local item_h = 28
+            local total_items = #tracks_osc.sub + 1
+            local h = 30 + item_h * total_items + 10
+            local menu_x = osc_param.playresx - w - 15
+            local menu_y = osc_param.playresy - h - 55
+            
+            if mx >= menu_x and mx <= menu_x + w and my >= menu_y and my <= menu_y + h then
+                if my >= menu_y + 25 then
+                    local idx = math.floor((my - (menu_y + 30)) / item_h) + 1
+                    if idx >= 1 and idx <= total_items then
+                        sub_menu.selected_index = idx
+                        select_sub()
+                    end
+                else
+                    close_sub_menu()
+                end
+                return
+            else
+                close_sub_menu()
+            end
+        end
+    end
+
     -- If OSC is hidden and we got a left click, toggle play/pause immediately
     if not state.osc_visible and source == 'mbtn_left' then
         if what == 'down' then
@@ -3112,6 +3458,15 @@ mp.observe_property('idle-active', 'bool',
 mp.observe_property('pause', 'bool', pause_state)
 mp.observe_property('demuxer-cache-state', 'native', cache_state)
 mp.observe_property('vo-configured', 'bool', function(name, val)
+    request_tick()
+end)
+mp.observe_property('speed', 'number', function(name, val)
+    if not val then return end
+    if val > 3.0 then
+        mp.set_property_number('speed', 3.0)
+    elseif val < 0.25 then
+        mp.set_property_number('speed', 0.25)
+    end
     request_tick()
 end)
 mp.register_event('file-loaded', function()

@@ -487,6 +487,9 @@
   position: relative;
   overflow: hidden;
   cursor: pointer;
+  content-visibility: auto;
+  contain-intrinsic-size: 0 52px;
+  contain: layout style paint;
 }
 
 .item-card::before {

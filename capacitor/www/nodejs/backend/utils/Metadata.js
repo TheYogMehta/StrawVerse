@@ -171,17 +171,7 @@ async function MetadataAdd(type, valuesToAdd) {
           Imageurl = decodeURIComponent(Imageurl.split("/api/image?url=")[1]);
         }
         try {
-          const client = global.axios || axios;
-          const headersObj = getHeaders(Imageurl);
-          const requestHeaders = {};
-          if (headersObj.Referer)
-            requestHeaders["Referer"] = headersObj.Referer;
-          if (headersObj["User-Agent"])
-            requestHeaders["User-Agent"] = headersObj["User-Agent"];
-          if (headersObj.Cookie) requestHeaders["Cookie"] = headersObj.Cookie;
-
-          const response = await client.get(Imageurl, {
-            headers: requestHeaders,
+          const response = await global.axios.get(Imageurl, {
             responseType: "arraybuffer",
           });
 
