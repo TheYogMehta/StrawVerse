@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   ArrowRight,
   Loader2,
+  X,
 } from "lucide-react";
 
 export default function CatalogGrid({
@@ -32,6 +33,7 @@ export default function CatalogGrid({
   handleTouchEnd,
   handleMediaClick,
   handlePageChange,
+  handleRemoveFromLibrary,
 }) {
   if (loading) {
     return (
@@ -98,6 +100,19 @@ export default function CatalogGrid({
                   e.target.src = "/images/image-404.png";
                 }}
               />
+
+              {handleRemoveFromLibrary && (provider === "local" || item.CustomTag) && (
+                <button
+                  className="card-remove-btn"
+                  title="Remove from Library"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleRemoveFromLibrary(item);
+                  }}
+                >
+                  <X size={14} />
+                </button>
+              )}
 
               {/* Indicator badges for downloaded or watched counts */}
               <div className="card-badges-container">

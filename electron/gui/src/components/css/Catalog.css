@@ -1257,3 +1257,36 @@
   color: #ffffff;
   box-shadow: 0 0 8px rgba(255, 77, 77, 0.5);
 }
+
+.card-remove-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  background: rgba(15, 15, 15, 0.6);
+  border: none;
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #ff6b6b;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: all 0.2s ease;
+}
+
+.media-card:hover .card-remove-btn,
+.media-card:active .card-remove-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.card-remove-btn:hover {
+  background: #ff4d4d;
+  color: #ffffff;
+  box-shadow: 0 0 8px rgba(255, 77, 77, 0.5);
+}
+

@@ -3,7 +3,7 @@ import { useState, useEffect, useLayoutEffect, useRef } from "react";
 import "./css/Catalog.css";
 import { Plus } from "lucide-react";
 import Swal from "sweetalert2";
-import { swalSuccess, swalError } from "../utils/swal";
+import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
 import { apiPost } from "../utils/common";
 
 import CatalogHeader from "./catalog/CatalogHeader";
@@ -997,6 +997,64 @@ export default function Catalog({
     }
   };
 
+  const handleRemoveFromLibrary = async (item) => {
+    const confirmed = await swalConfirm(
+      "Remove from Library",
+      `Are you sure you want to remove "${item.title}" from your library?`,
+      "Remove",
+    );
+    if (confirmed) {
+      setData((prev) => ({
+        ...prev,
+        results: (prev?.results || []).filter((x) => x.id !== item.id),
+      }));
+      setFetchedPages((prev) => {
+        const next = { ...prev };
+        for (const page in next) {
+          if (Array.isArray(next[page])) {
+            next[page] = next[page].filter((x) => x.id !== item.id);
+          }
+        }
+        return next;
+      });
+
+      try {
+        const response = await apiPost("/api/local/tags/add", {
+          type: type,
+          id: item.id,
+          provider:
+            item.provider !== "provider" && item.provider !== "local source"
+              ? item.provider
+              : undefined,
+          MalID: item.MalID || item.malid || item.id,
+          CustomTag: "",
+        });
+        if (!response?.error) {
+          if (window.catalogCache) {
+            delete window.catalogCache[`Anime_local`];
+            delete window.catalogCache[`Manga_local`];
+          }
+          swalSuccess(
+            "Removed",
+            `"${item.title}" has been removed from your library.`,
+          );
+        } else {
+          swalError(
+            "Error",
+            response?.message || "Failed to remove item from library.",
+          );
+          fetchData(currentPage, activeFilters, searchQuery, null);
+        }
+      } catch (err) {
+        swalError(
+          "Error",
+          err.message || "Failed to remove item from library.",
+        );
+        fetchData(currentPage, activeFilters, searchQuery, null);
+      }
+    }
+  };
+
   const handleMediaClick = (item) => {
     if (linkingMalItem) {
       Swal.fire({
@@ -1439,6 +1497,7 @@ export default function Catalog({
           handleTouchEnd={handleTouchEnd}
           handleMediaClick={handleMediaClick}
           handlePageChange={handlePageChange}
+          handleRemoveFromLibrary={handleRemoveFromLibrary}
         />
       )}
     </div>

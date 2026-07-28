@@ -1059,6 +1059,52 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
       }
     }
 
+    try {
+      let tagRow = null;
+      const strippedId = id
+        ? String(id).replace(/-(dub|sub|hsub|both)$/, "")
+        : "";
+      if (AnimeManga === "Anime") {
+        tagRow = global.db
+          .prepare(
+            `SELECT CustomTag FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
+          )
+          .get(
+            id,
+            `${strippedId}-sub`,
+            `${strippedId}-hsub`,
+            `${strippedId}-dub`,
+            `${strippedId}-both`,
+            id,
+            strippedId,
+          );
+      } else {
+        tagRow = global.db
+          .prepare(
+            `SELECT CustomTag FROM Manga WHERE id = ? OR folder_name = ?`,
+          )
+          .get(id, strippedId);
+      }
+
+      const targetMalId = data?.malid || data?.MalID;
+      if (!tagRow?.CustomTag && targetMalId) {
+        const malRow = global.db
+          .prepare(
+            `SELECT CustomTag FROM ${AnimeManga} WHERE MalID = ? AND CustomTag IS NOT NULL AND CustomTag != ''`,
+          )
+          .get(String(targetMalId));
+        if (malRow && malRow.CustomTag) {
+          tagRow = malRow;
+        }
+      }
+
+      if (tagRow && tagRow.CustomTag) {
+        data.CustomTag = tagRow.CustomTag;
+      }
+    } catch (tagDbErr) {
+      logger.error(`Failed to load CustomTag for ${id}: ${tagDbErr.message}`);
+    }
+
     if (!data?.id) throw new Error(`No ${AnimeManga} Found with id '${id}'`);
     return res.json(wrapImagesInObject(data));
   } catch (err) {
