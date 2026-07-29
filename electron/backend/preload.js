@@ -54,6 +54,8 @@ contextBridge.exposeInMainWorld("sharedStateAPI", {
   downloadUpdate: () => ipcRenderer.invoke("download-update"),
   installUpdate: () => ipcRenderer.invoke("install-update"),
   getAppVersion: () => ipcRenderer.invoke("get-app-version"),
+  openLocalPath: (targetPath, openFolder) =>
+    ipcRenderer.invoke("open-local-path", targetPath, openFolder),
   playInMpv: (options) => ipcRenderer.invoke("play-in-mpv", options),
   controlMpv: (command, args) =>
     ipcRenderer.invoke("control-mpv", command, args),

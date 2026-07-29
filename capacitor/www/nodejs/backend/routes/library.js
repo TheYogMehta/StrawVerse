@@ -3,31 +3,51 @@ const fs = require("fs");
 const path = require("path");
 const { logger } = require("../utils/AppLogger");
 const { settingfetch, providerFetch } = require("../utils/settings");
-const { animeinfo, MangaInfo, invalidateCache, resolveDownloadFolder } = require("../utils/AnimeManga");
+const {
+  animeinfo,
+  MangaInfo,
+  invalidateCache,
+  resolveDownloadFolder,
+} = require("../utils/AnimeManga");
 const { MetadataRemove, MetadataAdd } = require("../utils/Metadata");
-const { getBaseDownloadDir, cleanupEmptyDownloadFolder, wrapImagesInObject } = require("../download");
+const {
+  getBaseDownloadDir,
+  cleanupEmptyDownloadFolder,
+  wrapImagesInObject,
+} = require("../download");
 const { updateHistory } = require("../utils/history");
+const { getKeyValue, setKeyValue } = require("../utils/db");
+const { exec } = require("child_process");
+const { sanitizeFolderName } = require("../utils/DirectoryMaker");
+const { sendToRenderer } = require("../utils/rendererIPC");
 
 const router = express.Router();
 
-// View tags for Anime/Manga
+function getReservedTags(type) {
+  return type === "Manga"
+    ? ["Reading", "Downloads", "Plan to Read"]
+    : ["Watching", "Downloads", "Plan to Watch"];
+}
+
+// View tags for Anime/Manga in custom user order
 router.get("/api/local/tags/view/:type", async (req, res) => {
   try {
     const { type } = req.params;
     if (type !== "Anime" && type !== "Manga") {
       throw new Error("Invalid type parameter");
     }
-    const defaultTags =
-      type === "Manga"
-        ? ["Reading", "Downloads", "Plan to Read"]
-        : ["Watching", "Downloads", "Plan to Watch"];
+    const includeHidden = req.query.includeHidden === "true";
+    const defaultTags = getReservedTags(type);
+    const savedOrder =
+      getKeyValue("Settings", `tag_order_${type}`) || defaultTags;
+    const hiddenTags = getKeyValue("Settings", `hidden_tags_${type}`) || [];
 
     const rows = global.db
       .prepare(
         `SELECT CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`,
       )
       .all();
-    const allTagsSet = new Set(defaultTags);
+    const allTagsSet = new Set([...defaultTags, ...savedOrder]);
     for (const r of rows) {
       const tag = r.CustomTag ? r.CustomTag.trim() : "";
       if (tag) {
@@ -45,10 +65,216 @@ router.get("/api/local/tags/view/:type", async (req, res) => {
         }
       }
     }
-    res.json(Array.from(allTagsSet));
+
+    const orderedList = [];
+
+    for (const tag of savedOrder) {
+      if (allTagsSet.has(tag)) {
+        orderedList.push(tag);
+        allTagsSet.delete(tag);
+      }
+    }
+
+    for (const tag of allTagsSet) {
+      orderedList.push(tag);
+    }
+
+    if (includeHidden) {
+      const tagsWithState = orderedList.map((tag) => ({
+        name: tag,
+        hidden: hiddenTags.includes(tag),
+      }));
+      return res.json({ tags: tagsWithState, hiddenTags });
+    }
+
+    const visibleTags = orderedList.filter((t) => !hiddenTags.includes(t));
+    res.json(visibleTags);
   } catch (err) {
     logger.error(`Error fetching tags for ${req.params.type}: ${err.message}`);
     res.status(500).json({ error: err.message });
+  }
+});
+
+
+
+// Create custom tag in settings
+router.post("/api/local/tags/create", async (req, res) => {
+  try {
+    const { type, tag } = req.body;
+    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+      return res.status(400).json({ error: "Invalid parameters" });
+    }
+
+    const trimmed = tag.trim();
+    if (!trimmed) {
+      return res.status(400).json({ error: "Tag name cannot be empty" });
+    }
+
+    const reservedLower = [
+      "watching",
+      "plan to watch",
+      "reading",
+      "plan to read",
+      "downloads",
+    ];
+    if (reservedLower.includes(trimmed.toLowerCase())) {
+      return res.status(400).json({
+        error: `"${trimmed}" is a reserved system tag and cannot be created manually.`,
+      });
+    }
+
+    const defaultTags = getReservedTags(type);
+    const savedOrder = getKeyValue("Settings", `tag_order_${type}`) || [
+      ...defaultTags,
+    ];
+    if (
+      savedOrder.some((t) => t.trim().toLowerCase() === trimmed.toLowerCase())
+    ) {
+      return res.status(400).json({
+        error: `A tag named "${trimmed}" already exists. Tag names must be unique.`,
+      });
+    }
+
+    savedOrder.push(trimmed);
+    setKeyValue("Settings", `tag_order_${type}`, savedOrder);
+
+    return res.json({
+      error: false,
+      message: "Tag created successfully",
+      tags: savedOrder,
+    });
+  } catch (err) {
+    logger.error(`Error in /api/local/tags/create: ${err.message}`);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Reorder tags in settings
+router.post("/api/local/tags/reorder", async (req, res) => {
+  try {
+    const { type, tags } = req.body;
+    if (
+      !type ||
+      !Array.isArray(tags) ||
+      (type !== "Anime" && type !== "Manga")
+    ) {
+      return res.status(400).json({ error: "Invalid parameters" });
+    }
+
+    setKeyValue("Settings", `tag_order_${type}`, tags);
+    return res.json({
+      error: false,
+      message: "Tag order saved successfully",
+      tags,
+    });
+  } catch (err) {
+    logger.error(`Error in /api/local/tags/reorder: ${err.message}`);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Toggle tag visibility (hide / unhide)
+router.post("/api/local/tags/toggle-visibility", async (req, res) => {
+  try {
+    const { type, tag, hidden } = req.body;
+    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+      return res.status(400).json({ error: "Invalid parameters" });
+    }
+
+    const trimmed = tag.trim();
+    let hiddenTags = getKeyValue("Settings", `hidden_tags_${type}`) || [];
+
+    if (hidden) {
+      if (!hiddenTags.includes(trimmed)) {
+        hiddenTags.push(trimmed);
+      }
+    } else {
+      hiddenTags = hiddenTags.filter((t) => t !== trimmed);
+    }
+
+    setKeyValue("Settings", `hidden_tags_${type}`, hiddenTags);
+    return res.json({
+      error: false,
+      message: `Tag "${trimmed}" ${hidden ? "hidden" : "unhidden"} successfully`,
+      hiddenTags,
+    });
+  } catch (err) {
+    logger.error(`Error in /api/local/tags/toggle-visibility: ${err.message}`);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete custom tag from settings and library items
+router.post("/api/local/tags/delete-tag", async (req, res) => {
+  try {
+    const { type, tag } = req.body;
+    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+      return res.status(400).json({ error: "Invalid parameters" });
+    }
+
+    const trimmed = tag.trim();
+    const reservedLower = [
+      "watching",
+      "plan to watch",
+      "reading",
+      "plan to read",
+      "downloads",
+    ];
+    if (reservedLower.includes(trimmed.toLowerCase())) {
+      return res
+        .status(400)
+        .json({ error: `System tag "${trimmed}" cannot be deleted.` });
+    }
+
+    // 1. Remove from saved order & hidden list
+    const defaultTags = getReservedTags(type);
+    let savedOrder =
+      getKeyValue("Settings", `tag_order_${type}`) || defaultTags;
+    savedOrder = savedOrder.filter((t) => t !== trimmed);
+    setKeyValue("Settings", `tag_order_${type}`, savedOrder);
+
+    let hiddenTags = getKeyValue("Settings", `hidden_tags_${type}`) || [];
+    if (hiddenTags.includes(trimmed)) {
+      hiddenTags = hiddenTags.filter((t) => t !== trimmed);
+      setKeyValue("Settings", `hidden_tags_${type}`, hiddenTags);
+    }
+
+    // 2. Remove from database items
+    const rows = global.db
+      .prepare(
+        `SELECT id, CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`,
+      )
+      .all();
+
+    for (const r of rows) {
+      if (!r.CustomTag) continue;
+      let tagsArr = [];
+      try {
+        const parsed = JSON.parse(r.CustomTag);
+        if (Array.isArray(parsed)) tagsArr = parsed;
+        else if (typeof parsed === "string") tagsArr = [parsed];
+      } catch (e) {
+        tagsArr = [r.CustomTag];
+      }
+
+      if (tagsArr.includes(trimmed)) {
+        const updatedTags = tagsArr.filter((t) => t !== trimmed);
+        const newCustomTag =
+          updatedTags.length > 0 ? JSON.stringify(updatedTags) : null;
+        global.db
+          .prepare(`UPDATE ${type} SET CustomTag = ? WHERE id = ?`)
+          .run(newCustomTag, r.id);
+      }
+    }
+
+    return res.json({
+      error: false,
+      message: `Tag "${trimmed}" deleted successfully`,
+      tags: savedOrder,
+    });
+  } catch (err) {
+    logger.error(`Error in /api/local/tags/delete-tag: ${err.message}`);
+    return res.status(500).json({ error: err.message });
   }
 });
 
@@ -334,7 +560,8 @@ router.post("/api/local/tags/remove", async (req, res) => {
 
     if (!fs.existsSync(typeDir) && dbRecord) {
       const folderName =
-        dbRecord.folder_name || dbRecord.title?.replace(/[^a-zA-Z0-9]/g, "_");
+        dbRecord.folder_name ||
+        (dbRecord.title ? sanitizeFolderName(dbRecord.title) : id);
       typeDir = path.join(baseDir, type, folderName);
     }
 
@@ -488,6 +715,120 @@ router.post("/api/local/delete", async (req, res) => {
     });
   } catch (err) {
     logger.error(`Error in /api/local/delete: ${err.message}`);
+    return res.json({ error: true, message: err.message });
+  }
+});
+
+async function openPathInSystem(targetPath, openFolder = false) {
+  let electron;
+  try {
+    electron = require("electron");
+  } catch (e) {}
+
+  if (electron && electron.shell) {
+    if (openFolder) {
+      const isDir =
+        fs.existsSync(targetPath) && fs.statSync(targetPath).isDirectory();
+      if (isDir) {
+        await electron.shell.openPath(targetPath);
+      } else {
+        electron.shell.showItemInFolder(targetPath);
+      }
+    } else {
+      await electron.shell.openPath(targetPath);
+    }
+    return true;
+  }
+
+  sendToRenderer("open-file", { path: targetPath, openFolder });
+
+  const isWindows = process.platform === "win32";
+  const isMac = process.platform === "darwin";
+  const isLinux = process.platform === "linux";
+
+  if (fs.existsSync(targetPath)) {
+    const isDir = fs.statSync(targetPath).isDirectory();
+    if (isWindows) {
+      if (openFolder && !isDir) {
+        exec(`explorer.exe /select,"${targetPath}"`);
+      } else {
+        exec(`start "" "${targetPath}"`);
+      }
+    } else if (isMac) {
+      if (openFolder && !isDir) {
+        exec(`open -R "${targetPath}"`);
+      } else {
+        exec(`open "${targetPath}"`);
+      }
+    } else if (isLinux) {
+      if (openFolder && !isDir) {
+        const dir = path.dirname(targetPath);
+        exec(`xdg-open "${dir}"`);
+      } else {
+        exec(`xdg-open "${targetPath}"`);
+      }
+    }
+  }
+
+  return true;
+}
+
+// Open Local File or Folder in File Explorer / OS viewer
+router.post("/api/local/open", async (req, res) => {
+  try {
+    const {
+      type = "Anime",
+      id,
+      number,
+      subdub,
+      action = "open_file",
+      customPath,
+    } = req.body;
+    let targetPath = customPath || "";
+
+    if (!targetPath) {
+      const baseDir = await getBaseDownloadDir();
+      if (!id) {
+        targetPath = baseDir;
+      } else {
+        targetPath = resolveDownloadFolder(type, id, subdub, baseDir);
+        if (number != null && fs.existsSync(targetPath)) {
+          const files = await fs.promises.readdir(targetPath);
+          const targetNum = parseFloat(number);
+          if (!isNaN(targetNum)) {
+            const matchedFile = files.find((file) => {
+              if (type === "Anime") {
+                const match = file.match(/^\d+(\.\d+)?/);
+                return match && parseFloat(match[0]) === targetNum;
+              } else {
+                const match =
+                  file.toLowerCase().match(/chapter\s*([\d.]+)/) ||
+                  file.match(/^\d+(\.\d+)?/);
+                return match && parseFloat(match[1] || match[0]) === targetNum;
+              }
+            });
+            if (matchedFile) {
+              targetPath = path.join(targetPath, matchedFile);
+            }
+          }
+        }
+      }
+    }
+
+    if (!targetPath || !fs.existsSync(targetPath)) {
+      throw new Error(
+        `File or directory does not exist: ${targetPath || "Unknown path"}`,
+      );
+    }
+
+    await openPathInSystem(targetPath, action === "open_folder");
+    return res.json({
+      error: false,
+      path: targetPath,
+      message: "Opened successfully",
+    });
+  } catch (err) {
+    logger.error(`Error in /api/local/open: ${err.message}`);
     return res.json({ error: true, message: err.message });
   }
 });

@@ -487,6 +487,14 @@ export default function InfoView({
       });
       const data = await response.json();
 
+      if (data?.DownloadedEpisodes || data?.DownloadedChapters) {
+        setDetails((prev) => ({
+          ...prev,
+          DownloadedEpisodes: data.DownloadedEpisodes || prev?.DownloadedEpisodes,
+          DownloadedChapters: data.DownloadedChapters || prev?.DownloadedChapters,
+        }));
+      }
+
       const resList = isAnime ? data?.episodes : data?.Chapters;
 
       if (resList && resList.length > 0) {

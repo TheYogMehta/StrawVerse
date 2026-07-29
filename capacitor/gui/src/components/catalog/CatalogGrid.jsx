@@ -6,6 +6,8 @@ import {
   ArrowRight,
   Loader2,
   X,
+  Bookmark,
+  Plus,
 } from "lucide-react";
 
 export default function CatalogGrid({
@@ -34,6 +36,8 @@ export default function CatalogGrid({
   handleMediaClick,
   handlePageChange,
   handleRemoveFromLibrary,
+  getItemTagInfo,
+  onOpenTagModal,
 }) {
   if (loading) {
     return (
@@ -101,18 +105,47 @@ export default function CatalogGrid({
                 }}
               />
 
-              {handleRemoveFromLibrary && (provider === "local" || item.CustomTag) && (
-                <button
-                  className="card-remove-btn"
-                  title="Remove from Library"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleRemoveFromLibrary(item);
-                  }}
-                >
-                  <X size={14} />
-                </button>
-              )}
+              <div className="card-top-actions">
+                {(() => {
+                  const tagInfo = getItemTagInfo ? getItemTagInfo(item) : null;
+                  const tags = tagInfo?.tags || [];
+                  const isTagged = tags.length > 0;
+
+                  return (
+                    <button
+                      className={`card-tag-btn ${isTagged ? "is-tagged" : ""}`}
+                      title={
+                        isTagged
+                          ? `Tagged: ${tags.join(", ")} (Click to edit tag)`
+                          : "Add tag to Library"
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (onOpenTagModal) onOpenTagModal(e, item);
+                      }}
+                    >
+                      {isTagged ? (
+                        <Bookmark size={14} className="bookmark-icon" />
+                      ) : (
+                        <Plus size={14} />
+                      )}
+                    </button>
+                  );
+                })()}
+
+                {provider === "local" && handleRemoveFromLibrary && (
+                  <button
+                    className="card-remove-btn"
+                    title="Remove from Library"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveFromLibrary(item);
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
 
               {/* Indicator badges for downloaded or watched counts */}
               <div className="card-badges-container">

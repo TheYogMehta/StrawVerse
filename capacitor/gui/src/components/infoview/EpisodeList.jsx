@@ -1,5 +1,11 @@
 import React from "react";
-import { Play, CheckCircle, Search, ArrowUpDown } from "lucide-react";
+import {
+  Play,
+  CheckCircle,
+  Search,
+  ArrowUpDown,
+  FolderOpen,
+} from "lucide-react";
 
 export default function EpisodeList({
   items,
@@ -14,6 +20,7 @@ export default function EpisodeList({
   toggleSelectItem,
   isItemFullyDownloaded,
   onWatch,
+  onOpenFile,
   episodesStatus,
 }) {
   return (
@@ -91,6 +98,18 @@ export default function EpisodeList({
                 >
                   <Play className="icon-xs" /> Play
                 </button>
+                {isDownloaded && onOpenFile && (
+                  <button
+                    className="btn-card-action"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenFile(item.number);
+                    }}
+                    title="Open Downloaded File"
+                  >
+                    <FolderOpen className="icon-xs" /> Open
+                  </button>
+                )}
               </div>
             </div>
           );

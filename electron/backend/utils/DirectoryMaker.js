@@ -3,6 +3,16 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
+function sanitizeFolderName(title) {
+  if (!title) return "Untitled";
+  const sanitized = String(title)
+    .replace(/[\\/:*?"<>|]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\.+|\.+$/g, "");
+  return sanitized || "Untitled";
+}
+
 // Anime Dir Maker
 async function directoryMaker(title, ep, customdir) {
   let destination;
@@ -19,28 +29,22 @@ async function directoryMaker(title, ep, customdir) {
     destination = getDownloadsFolder();
   }
 
-  //Anime dir Making
   const animeDirectory = path.join(destination, `./Anime`);
   try {
     await fs.promises.access(animeDirectory);
   } catch (error) {
     if (error.code === "ENOENT") {
-      await fs.promises.mkdir(animeDirectory);
-    } else {
-      throw error;
+      await fs.promises.mkdir(animeDirectory, { recursive: true });
     }
   }
 
-  //Anime Name Dir
-  const directoryName = title.replace(/[^a-zA-Z0-9]/g, "_");
+  const directoryName = sanitizeFolderName(title);
   const directoryPath = path.join(animeDirectory, directoryName);
   try {
     await fs.promises.access(directoryPath);
   } catch (error) {
     if (error.code === "ENOENT") {
-      await fs.promises.mkdir(directoryPath);
-    } else {
-      throw error;
+      await fs.promises.mkdir(directoryPath, { recursive: true });
     }
   }
 
@@ -63,28 +67,22 @@ async function GetDir(title, customdir, Type) {
     destination = getDownloadsFolder();
   }
 
-  // Type dir Making
   const Directory = path.join(destination, `./${Type}`);
   try {
     await fs.promises.access(Directory);
   } catch (error) {
     if (error.code === "ENOENT") {
-      await fs.promises.mkdir(Directory);
-    } else {
-      throw error;
+      await fs.promises.mkdir(Directory, { recursive: true });
     }
   }
 
-  // Name Dir
-  const directoryName = title.replace(/[^a-zA-Z0-9]/g, "_");
+  const directoryName = sanitizeFolderName(title);
   const directoryPath = path.join(Directory, directoryName);
   try {
     await fs.promises.access(directoryPath);
   } catch (error) {
     if (error.code === "ENOENT") {
-      await fs.promises.mkdir(directoryPath);
-    } else {
-      throw error;
+      await fs.promises.mkdir(directoryPath, { recursive: true });
     }
   }
 
@@ -115,30 +113,26 @@ async function MangaDir(title, customdir) {
       );
     }
   }
-  //Manga dir Making
+
   const MangaDirectory = path.join(destination, `./Manga`);
   try {
     await fs.promises.access(MangaDirectory);
   } catch (error) {
     if (error.code === "ENOENT") {
-      await fs.promises.mkdir(MangaDirectory);
-    } else {
-      throw error;
+      await fs.promises.mkdir(MangaDirectory, { recursive: true });
     }
   }
-  //Manga Name Dir
-  const directoryName = title.replace(/[^a-zA-Z0-9]/g, "_");
+
+  const directoryName = sanitizeFolderName(title);
   const directoryPath = path.join(MangaDirectory, directoryName);
   try {
     await fs.promises.access(directoryPath);
   } catch (error) {
     if (error.code === "ENOENT") {
-      await fs.promises.mkdir(directoryPath);
-    } else {
-      throw error;
+      await fs.promises.mkdir(directoryPath, { recursive: true });
     }
   }
-  // Chapter cbz
+
   return directoryPath;
 }
 
@@ -161,6 +155,7 @@ async function ensureDirectoryExists(directoryPath) {
 }
 
 module.exports = {
+  sanitizeFolderName,
   directoryMaker,
   directoryRemover,
   MangaDir,

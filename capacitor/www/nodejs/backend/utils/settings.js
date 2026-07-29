@@ -9,7 +9,6 @@ const {
   getDownloadsFolder,
   ensureDirectoryExists,
 } = require("./DirectoryMaker");
-const { MalRefreshTokenGen } = require("./mal.js");
 const { logger } = require("./AppLogger.js");
 const userDataPath = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
 const { getKeyValue, setKeyValue, queryAll } = require("./db");

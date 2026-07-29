@@ -624,6 +624,26 @@
   color: var(--danger);
 }
 
+.btn-action-open {
+  background-color: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-action-open:hover {
+  background-color: rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
+  transform: scale(1.05);
+}
+
 .btn-stream {
   background-color: rgba(124, 58, 237, 0.15);
   border: 1.5px solid var(--accent);

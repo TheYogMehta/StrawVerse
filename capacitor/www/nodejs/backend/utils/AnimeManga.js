@@ -9,7 +9,8 @@ const HLSLogger = require("./logger");
 const { logger } = require("./AppLogger");
 const { providerFetch } = require("./settings");
 const { getHeaders } = require("./proxyHeaders");
-const { queryAll } = require("./db");
+const { queryAll, queryOne, run } = require("./db");
+const { sanitizeFolderName, getDownloadsFolder } = require("./DirectoryMaker");
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
 
@@ -20,6 +21,84 @@ function resolveSubDubId(epId, subdub) {
     return `${strId}-${subdub}`;
   }
   return strId;
+}
+
+async function enrichWithLibraryTags(type, items) {
+  if (!items || !Array.isArray(items) || items.length === 0) return items;
+
+  try {
+    const table = type === "Anime" ? "Anime" : "Manga";
+    const ids = items.map((i) => i.id).filter(Boolean);
+    const malIds = items
+      .map((i) => String(i.malid || i.MalID || ""))
+      .filter((b) => b && b !== "undefined" && b !== "null");
+    const cleanTitles = items
+      .map((i) =>
+        i.title
+          ? i.title.toLowerCase().replace(/[^a-z0-9]/g, "")
+          : "",
+      )
+      .filter(Boolean);
+
+    if (ids.length === 0 && malIds.length === 0 && cleanTitles.length === 0) {
+      return items;
+    }
+
+    const idPlaceholders = ids.length ? ids.map(() => "?").join(",") : "NULL";
+    const malPlaceholders = malIds.length ? malIds.map(() => "?").join(",") : "NULL";
+    const titlePlaceholders = cleanTitles.length ? cleanTitles.map(() => "?").join(",") : "NULL";
+
+    const sql = `
+      SELECT id, MalID, title, folder_name, CustomTag FROM ${table} 
+      WHERE CustomTag IS NOT NULL AND CustomTag != '' AND CustomTag != '[]'
+        AND (
+          id IN (${idPlaceholders})
+          OR MalID IN (${malPlaceholders})
+          OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(title, ' ', ''), ':', ''), '-', ''), '_', '')) IN (${titlePlaceholders})
+          OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(folder_name, ' ', ''), ':', ''), '-', ''), '_', '')) IN (${titlePlaceholders})
+        )
+    `;
+
+    const params = [];
+    if (ids.length) params.push(...ids);
+    if (malIds.length) params.push(...malIds);
+    if (cleanTitles.length) params.push(...cleanTitles);
+    if (cleanTitles.length) params.push(...cleanTitles);
+
+    const matches = await queryAll(sql, params);
+
+    if (!matches || matches.length === 0) return items;
+
+    const matchById = new Map();
+    const matchByMal = new Map();
+    const matchByTitle = new Map();
+
+    for (const m of matches) {
+      if (!m.CustomTag) continue;
+      if (m.id) matchById.set(m.id, m.CustomTag);
+      if (m.MalID) matchByMal.set(String(m.MalID), m.CustomTag);
+      if (m.title) {
+        const clean = m.title.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (clean) matchByTitle.set(clean, m.CustomTag);
+      }
+      if (m.folder_name) {
+        const clean = m.folder_name.toLowerCase().replace(/[^a-z0-9]/g, "");
+        if (clean) matchByTitle.set(clean, m.CustomTag);
+      }
+    }
+
+    for (const item of items) {
+      const tag =
+        matchById.get(item.id) ||
+        matchByMal.get(String(item.malid || item.MalID || "")) ||
+        (item.title ? matchByTitle.get(item.title.toLowerCase().replace(/[^a-z0-9]/g, "")) : null);
+
+      if (tag) {
+        item.CustomTag = tag;
+      }
+    }
+  } catch (_) {}
+  return items;
 }
 
 //====================================== Anime ================================
@@ -37,10 +116,12 @@ async function latestAnime(provider, filters) {
   const cachedData = cache.get(cacheKey);
 
   if (cachedData) {
+    if (cachedData.results) await enrichWithLibraryTags("Anime", cachedData.results);
     return cachedData;
   }
 
   const data = await provider.provider.fetchRecentEpisodes(filters);
+  if (data?.results) await enrichWithLibraryTags("Anime", data.results);
   cache.set(cacheKey, data, 60);
   return data;
 }
@@ -103,6 +184,7 @@ async function findanime(provider, Anime_NAME, filters) {
   const cachedData = cache.get(cacheKey);
 
   if (cachedData) {
+    if (cachedData.data) await enrichWithLibraryTags("Anime", cachedData.data);
     return cachedData;
   }
 
@@ -111,6 +193,7 @@ async function findanime(provider, Anime_NAME, filters) {
   if (data.results.length <= 0) {
     throw new Error(`No Anime Found With This Name`);
   } else {
+    await enrichWithLibraryTags("Anime", data.results);
     cache.set(
       cacheKey,
       {
@@ -229,10 +312,14 @@ async function latestMangas(provider, Page = 1) {
   const cachedData = cache.get(cacheKey);
 
   if (cachedData) {
+    if (cachedData.results) await enrichWithLibraryTags("Manga", cachedData.results);
+    if (cachedData.data) await enrichWithLibraryTags("Manga", cachedData.data);
     return cachedData;
   }
 
   let data = await provider.provider.latestManga(Page);
+  if (data?.results) await enrichWithLibraryTags("Manga", data.results);
+  if (data?.data) await enrichWithLibraryTags("Manga", data.data);
   cache.set(cacheKey, data, 60);
   return data;
 }
@@ -247,10 +334,14 @@ async function MangaSearch(provider, MANGA_NAME, PAGE = 1) {
     const cachedData = cache.get(cacheKey);
 
     if (cachedData) {
+      if (cachedData.results) await enrichWithLibraryTags("Manga", cachedData.results);
+      if (cachedData.data) await enrichWithLibraryTags("Manga", cachedData.data);
       return cachedData;
     }
 
     const data = await provider.provider.searchManga(MANGA_NAME, PAGE);
+    if (data?.results) await enrichWithLibraryTags("Manga", data.results);
+    if (data?.data) await enrichWithLibraryTags("Manga", data.data);
     cache.set(cacheKey, data, 60);
     return data;
   } catch (err) {
@@ -508,88 +599,146 @@ async function getProviderOrThrow(type, name) {
   return pObj;
 }
 
-async function resolveDownloadFolder(type, id, subdub, baseDir) {
-  let typeDir = path.join(baseDir, type, id);
+async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
+  if (!dbRecord || (!dbRecord.title && !dbRecord.folder_name)) return;
+  baseDir = (typeof baseDir === "string" && baseDir.trim()) ? baseDir : getDownloadsFolder();
 
-  if (!fs.existsSync(typeDir)) {
-    const idStripped = id.replace(/-(dub|sub|hsub|both)$/, "");
+  const title = dbRecord.title || dbRecord.folder_name;
+  const newFolderName = sanitizeFolderName(title);
+  const legacyBase = String(title).replace(/[^a-zA-Z0-9]/g, "_");
 
-    if (type === "Anime") {
-      const downloads = await queryAll(
-        "SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?",
-        [
-          subdub ? `${idStripped}-${subdub}` : id,
-          id,
-          `${idStripped}-sub`,
-          `${idStripped}-hsub`,
-          idStripped,
-        ],
-      );
-      if (downloads && downloads.length > 0) {
-        const candidateFolders = new Set();
-        for (const d of downloads) {
-          const fn = d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
-          if (fn) {
-            candidateFolders.add(fn);
-            if (subdub) candidateFolders.add(`${fn}_${subdub}`);
-            for (const s of ["sub", "dub", "hsub"]) {
-              candidateFolders.add(`${fn}_${s}`);
-            }
-          }
-        }
-        const refTitle = downloads[0].title;
-        if (refTitle) {
-          const titleFallback = await queryAll(
-            "SELECT * FROM Anime WHERE title = ? OR title = ?",
-            [refTitle, subdub ? `${refTitle} ${subdub}` : refTitle],
-          );
-          for (const d of titleFallback || []) {
-            const fn = d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
-            if (fn) {
-              candidateFolders.add(fn);
-              if (subdub) candidateFolders.add(`${fn}_${subdub}`);
-            }
-          }
-        }
-        let foundFolder = null;
-        for (const candidate of candidateFolders) {
-          if (fs.existsSync(path.join(baseDir, "Anime", candidate))) {
-            foundFolder = candidate;
-            break;
-          }
-        }
-        if (foundFolder) {
-          typeDir = path.join(baseDir, "Anime", foundFolder);
-        } else {
-          const folderName =
-            downloads[0].folder_name ||
-            downloads[0].title?.replace(/[^a-zA-Z0-9]/g, "_");
-          typeDir = path.join(baseDir, "Anime", folderName);
-        }
-      }
-    } else {
-      const downloads = await queryAll(
-        "SELECT * FROM Manga WHERE id = ? OR id = ?",
-        [id, idStripped],
-      );
-      if (downloads && downloads.length > 0) {
-        const existingDownload = downloads.find((d) => {
-          const folderName =
-            d.folder_name || d.title?.replace(/[^a-zA-Z0-9]/g, "_");
-          return (
-            folderName && fs.existsSync(path.join(baseDir, "Manga", folderName))
-          );
-        });
-        const folderName =
-          (existingDownload || downloads[0]).folder_name ||
-          (existingDownload || downloads[0]).title?.replace(
-            /[^a-zA-Z0-9]/g,
-            "_",
-          );
-        typeDir = path.join(baseDir, "Manga", folderName);
+  const legacyCandidates = [
+    dbRecord.folder_name,
+    legacyBase,
+    `${legacyBase}_sub`,
+    `${legacyBase}_dub`,
+    `${legacyBase}_hsub`,
+    dbRecord.subOrDub ? `${legacyBase}_${dbRecord.subOrDub}` : null,
+    `${newFolderName}_sub`,
+    `${newFolderName}_dub`,
+    `${newFolderName}_hsub`,
+  ].filter(Boolean);
+
+  const newDir = path.join(baseDir, type, newFolderName);
+
+  let currentTags = [];
+  if (dbRecord.CustomTag) {
+    try {
+      const parsed = JSON.parse(dbRecord.CustomTag);
+      if (Array.isArray(parsed)) currentTags = parsed;
+      else if (typeof parsed === "string" && parsed) currentTags = [parsed];
+    } catch (_) {
+      if (typeof dbRecord.CustomTag === "string" && dbRecord.CustomTag) {
+        currentTags = [dbRecord.CustomTag];
       }
     }
   }
+
+  if (fs.existsSync(newDir)) {
+    if (!currentTags.includes("Downloads")) {
+      currentTags.push("Downloads");
+    }
+    const tagJson = JSON.stringify(currentTags);
+    if (
+      dbRecord.id &&
+      (dbRecord.folder_name !== newFolderName || dbRecord.CustomTag !== tagJson)
+    ) {
+      try {
+        if (global.db) {
+          global.db
+            .prepare(`UPDATE ${type} SET folder_name = ?, CustomTag = ? WHERE id = ?`)
+            .run(newFolderName, tagJson, dbRecord.id);
+        } else {
+          await run(
+            `UPDATE ${type} SET folder_name = ?, CustomTag = ? WHERE id = ?`,
+            [newFolderName, tagJson, dbRecord.id],
+          );
+        }
+        dbRecord.folder_name = newFolderName;
+        dbRecord.CustomTag = tagJson;
+      } catch (_) {}
+    }
+    return newFolderName;
+  }
+
+  for (const legacyName of legacyCandidates) {
+    if (!legacyName || legacyName === newFolderName) continue;
+    const legacyDir = path.join(baseDir, type, legacyName);
+
+    if (fs.existsSync(legacyDir)) {
+      try {
+        await fs.promises.rename(legacyDir, newDir);
+        logger.info(
+          `Auto-migrated folder for "${title}": "${legacyName}" -> "${newFolderName}"`,
+        );
+      } catch (err) {
+        logger.error(
+          `Failed to migrate folder "${legacyName}": ${err.message}`,
+        );
+        dbRecord.folder_name = legacyName;
+        return legacyName;
+      }
+      break;
+    }
+  }
+
+  if (fs.existsSync(newDir)) {
+    if (!currentTags.includes("Downloads")) {
+      currentTags.push("Downloads");
+    }
+    const tagJson = JSON.stringify(currentTags);
+    if (
+      dbRecord.id &&
+      (dbRecord.folder_name !== newFolderName || dbRecord.CustomTag !== tagJson)
+    ) {
+      try {
+        if (global.db) {
+          global.db
+            .prepare(`UPDATE ${type} SET folder_name = ?, CustomTag = ? WHERE id = ?`)
+            .run(newFolderName, tagJson, dbRecord.id);
+        } else {
+          await run(
+            `UPDATE ${type} SET folder_name = ?, CustomTag = ? WHERE id = ?`,
+            [newFolderName, tagJson, dbRecord.id],
+          );
+        }
+        dbRecord.folder_name = newFolderName;
+        dbRecord.CustomTag = tagJson;
+      } catch (_) {}
+    }
+  }
+
+  return newFolderName;
+}
+
+async function resolveDownloadFolder(type, id, subdub, baseDir) {
+  let typeDir = path.join(baseDir, type, id);
+  if (fs.existsSync(typeDir)) return typeDir;
+
+  const idStripped = id.replace(/-(dub|sub|hsub|both)$/, "");
+  let record = null;
+
+  try {
+    if (global.db) {
+      record = global.db
+        .prepare(`SELECT * FROM ${type} WHERE id = ? OR id = ? OR id = ?`)
+        .get(subdub ? `${idStripped}-${subdub}` : id, id, idStripped);
+    } else {
+      record = await queryOne(
+        `SELECT * FROM ${type} WHERE id = ? OR id = ? OR id = ?`,
+        [subdub ? `${idStripped}-${subdub}` : id, id, idStripped],
+      );
+    }
+  } catch (_) {}
+
+  if (record) {
+    await migrateLegacyFolderIfNeeded(type, record, baseDir);
+    const folderName =
+      record.folder_name ||
+      (record.title ? sanitizeFolderName(record.title) : id);
+    return path.join(baseDir, type, folderName);
+  }
+
   return typeDir;
 }
 
@@ -608,5 +757,6 @@ module.exports = {
   invalidateCache,
   getProviderOrThrow,
   resolveDownloadFolder,
+  migrateLegacyFolderIfNeeded,
   resolveSubDubId,
 };

@@ -12,6 +12,7 @@ import android.webkit.WebViewClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.ValueCallback;
+import android.webkit.MimeTypeMap;
 import androidx.activity.result.ActivityResult;
 import androidx.core.content.FileProvider;
  import com.getcapacitor.JSArray;
@@ -438,6 +439,77 @@ public class CloudflareBypassPlugin extends Plugin {
                 }
             }
             pendingInstallIntent = null;
+        }
+    }
+
+    private String getMimeType(String filePath) {
+        String type = null;
+        String extension = MimeTypeMap.getFileExtensionFromUrl(filePath);
+        if (extension != null && !extension.isEmpty()) {
+            type = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension.toLowerCase());
+        }
+        if (type == null) {
+            String lower = filePath.toLowerCase();
+            if (lower.endsWith(".mp4") || lower.endsWith(".mkv") || lower.endsWith(".webm") || lower.endsWith(".avi") || lower.endsWith(".ts")) {
+                return "video/*";
+            } else if (lower.endsWith(".cbz") || lower.endsWith(".cbr") || lower.endsWith(".zip")) {
+                return "application/x-cbz";
+            } else if (lower.endsWith(".pdf")) {
+                return "application/pdf";
+            } else if (lower.endsWith(".jpg") || lower.endsWith(".png") || lower.endsWith(".jpeg") || lower.endsWith(".webp")) {
+                return "image/*";
+            }
+            return "*/*";
+        }
+        return type;
+    }
+
+    @PluginMethod
+    public void openFile(PluginCall call) {
+        String filePath = call.getString("path");
+        boolean openFolder = Boolean.TRUE.equals(call.getBoolean("openFolder", false));
+        if (filePath == null) {
+            call.reject("File path is required");
+            return;
+        }
+
+        try {
+            File file = new File(filePath);
+            if (!file.exists()) {
+                call.reject("File does not exist: " + filePath);
+                return;
+            }
+
+            Context context = getContext();
+            Uri fileUri = FileProvider.getUriForFile(
+                context,
+                context.getPackageName() + ".fileprovider",
+                file
+            );
+
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            if (file.isDirectory() || openFolder) {
+                File dir = file.isDirectory() ? file : file.getParentFile();
+                Uri dirUri = FileProvider.getUriForFile(
+                    context,
+                    context.getPackageName() + ".fileprovider",
+                    dir != null ? dir : file
+                );
+                intent.setDataAndType(dirUri, "*/*");
+            } else {
+                String mimeType = getMimeType(filePath);
+                intent.setDataAndType(fileUri, mimeType != null ? mimeType : "*/*");
+            }
+
+            Intent chooser = Intent.createChooser(intent, "Open with");
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(chooser);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to open file: " + e.getMessage());
         }
     }
 

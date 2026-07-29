@@ -1,7 +1,13 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps, no-unused-vars */
-import { useState, useEffect, useLayoutEffect, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useCallback,
+} from "react";
 import "./css/Catalog.css";
-import { Plus } from "lucide-react";
+import { Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
 import { apiPost } from "../utils/common";
@@ -11,6 +17,7 @@ import LibraryStats from "./catalog/LibraryStats";
 import RecentHistory from "./catalog/RecentHistory";
 import AiringCalendar from "./catalog/AiringCalendar";
 import CatalogGrid from "./catalog/CatalogGrid";
+import TagPickerModal from "./catalog/TagPickerModal";
 
 export default function Catalog({
   type,
@@ -69,6 +76,264 @@ export default function Catalog({
   );
   const [errorMsg, setErrorMsg] = useState(() => cache?.errorMsg || "");
   const [localTags, setLocalTags] = useState([]);
+  const [tagModalMedia, setTagModalMedia] = useState(null);
+  const tagChipsRef = useRef(null);
+
+  const getItemTagInfo = useCallback((item) => {
+    if (!item || !item.CustomTag) return null;
+    let parsed = [];
+    try {
+      parsed = JSON.parse(item.CustomTag);
+    } catch (e) {
+      parsed = [item.CustomTag];
+    }
+    const tags = Array.isArray(parsed)
+      ? parsed.filter((t) => typeof t === "string" && t.trim())
+      : [parsed];
+    if (tags.length === 0) return null;
+    return { tags };
+  }, []);
+
+  const handleOpenTagModal = (e, item) => {
+    if (e && e.stopPropagation) e.stopPropagation();
+    setTagModalMedia(item);
+    if (!localTags || localTags.length === 0) {
+      fetch(`/api/local/tags/view/${type}`)
+        .then((res) => res.json())
+        .then((tags) => {
+          if (Array.isArray(tags)) setLocalTags(tags);
+        })
+        .catch((err) => console.error("Failed to fetch tags on demand:", err));
+    }
+  };
+
+  const handleSelectTagInModal = async (selectedTag) => {
+    if (!tagModalMedia) return;
+    try {
+      const activeProvider =
+        tagModalMedia.provider &&
+        tagModalMedia.provider !== "provider" &&
+        tagModalMedia.provider !== "local source"
+          ? tagModalMedia.provider
+          : provider !== "provider" && provider !== "local"
+            ? provider
+            : undefined;
+
+      const response = await apiPost("/api/local/tags/add", {
+        type: type,
+        id: tagModalMedia.id,
+        provider: activeProvider,
+        MalID: tagModalMedia.malid || tagModalMedia.MalID || tagModalMedia.id,
+        CustomTag: selectedTag,
+      });
+
+      if (!response?.error) {
+        if (window.catalogCache) {
+          delete window.catalogCache[`Anime_local`];
+          delete window.catalogCache[`Manga_local`];
+        }
+        if (provider === "local") {
+          setData((prev) => {
+            if (!prev || !prev.results) return prev;
+            return {
+              ...prev,
+              results: prev.results.filter(
+                (i) =>
+                  i.id !== tagModalMedia.id &&
+                  (!i.malid ||
+                    !tagModalMedia.malid ||
+                    i.malid !== tagModalMedia.malid),
+              ),
+            };
+          });
+        } else {
+          setData((prev) => {
+            if (!prev || !prev.results) return prev;
+            const updated = prev.results.map((i) =>
+              i.id === tagModalMedia.id ||
+              (i.malid &&
+                tagModalMedia.malid &&
+                i.malid === tagModalMedia.malid)
+                ? { ...i, CustomTag: JSON.stringify([selectedTag]) }
+                : i,
+            );
+            return { ...prev, results: updated };
+          });
+        }
+        swalSuccess(
+          "Tag Updated",
+          `Set tag to "${selectedTag}" for ${tagModalMedia.title || "media"}.`,
+        );
+      } else {
+        swalError("Error", response?.message || "Failed to update tag.");
+      }
+    } catch (err) {
+      console.error("Error setting tag:", err);
+    } finally {
+      setTagModalMedia(null);
+    }
+  };
+
+  const handleRemoveTagInModal = async () => {
+    if (!tagModalMedia) return;
+    try {
+      const response = await apiPost("/api/local/tags/add", {
+        type: type,
+        id: tagModalMedia.id,
+        provider:
+          tagModalMedia.provider !== "provider" &&
+          tagModalMedia.provider !== "local source"
+            ? tagModalMedia.provider
+            : undefined,
+        MalID: tagModalMedia.malid || tagModalMedia.MalID || tagModalMedia.id,
+        CustomTag: "",
+      });
+
+      if (!response?.error) {
+        if (window.catalogCache) {
+          delete window.catalogCache[`Anime_local`];
+          delete window.catalogCache[`Manga_local`];
+        }
+        if (provider === "local") {
+          setData((prev) => {
+            if (!prev || !prev.results) return prev;
+            return {
+              ...prev,
+              results: prev.results.filter(
+                (i) =>
+                  i.id !== tagModalMedia.id &&
+                  (!i.malid ||
+                    !tagModalMedia.malid ||
+                    i.malid !== tagModalMedia.malid),
+              ),
+            };
+          });
+        } else {
+          setData((prev) => {
+            if (!prev || !prev.results) return prev;
+            const updated = prev.results.map((i) =>
+              i.id === tagModalMedia.id ||
+              (i.malid &&
+                tagModalMedia.malid &&
+                i.malid === tagModalMedia.malid)
+                ? { ...i, CustomTag: "" }
+                : i,
+            );
+            return { ...prev, results: updated };
+          });
+        }
+        swalSuccess(
+          "Tag Removed",
+          `Removed tag from ${tagModalMedia.title || "media"}.`,
+        );
+      }
+    } catch (err) {
+      console.error("Error removing tag:", err);
+    } finally {
+      setTagModalMedia(null);
+    }
+  };
+
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkTagScroll = useCallback(() => {
+    const el = tagChipsRef.current;
+    if (!el) return;
+    const { scrollLeft, scrollWidth, clientWidth } = el;
+    setCanScrollLeft(scrollLeft > 10);
+    setCanScrollRight(scrollWidth - (scrollLeft + clientWidth) > 10);
+  }, []);
+
+  const isMouseDownRef = useRef(false);
+  const startXRef = useRef(0);
+  const scrollLeftRef = useRef(0);
+  const isDraggingRef = useRef(false);
+
+  useEffect(() => {
+    checkTagScroll();
+    const el = tagChipsRef.current;
+    if (!el) return;
+
+    const animId = requestAnimationFrame(checkTagScroll);
+    el.addEventListener("scroll", checkTagScroll, { passive: true });
+    window.addEventListener("resize", checkTagScroll);
+
+    const handleWheel = (e) => {
+      if (e.deltaY !== 0) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+
+    const handleMouseDown = (e) => {
+      if (e.button !== 0 && e.button !== 2) return;
+      isMouseDownRef.current = true;
+      isDraggingRef.current = false;
+      startXRef.current = e.pageX - el.offsetLeft;
+      scrollLeftRef.current = el.scrollLeft;
+      el.classList.add("is-dragging");
+    };
+
+    const handleMouseMove = (e) => {
+      if (!isMouseDownRef.current) return;
+      const x = e.pageX - el.offsetLeft;
+      const walk = x - startXRef.current;
+      if (Math.abs(walk) > 5) {
+        isDraggingRef.current = true;
+      }
+      el.scrollLeft = scrollLeftRef.current - walk;
+    };
+
+    const handleMouseUp = () => {
+      if (isMouseDownRef.current) {
+        isMouseDownRef.current = false;
+        el.classList.remove("is-dragging");
+        setTimeout(() => {
+          isDraggingRef.current = false;
+        }, 50);
+      }
+    };
+
+    const handleContextMenu = (e) => {
+      if (isDraggingRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    el.addEventListener("mousedown", handleMouseDown);
+    el.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    const ro = new ResizeObserver(() => checkTagScroll());
+    ro.observe(el);
+
+    return () => {
+      cancelAnimationFrame(animId);
+      el.removeEventListener("scroll", checkTagScroll);
+      el.removeEventListener("wheel", handleWheel);
+      el.removeEventListener("mousedown", handleMouseDown);
+      el.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("resize", checkTagScroll);
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+      ro.disconnect();
+    };
+  }, [localTags, checkTagScroll]);
+
+  const scrollTags = (direction) => {
+    if (tagChipsRef.current) {
+      const scrollAmount = tagChipsRef.current.clientWidth * 0.75;
+      tagChipsRef.current.scrollBy({
+        left: direction === "left" ? -scrollAmount : scrollAmount,
+        behavior: "smooth",
+      });
+      setTimeout(checkTagScroll, 350);
+    }
+  };
 
   const [linkingMalItem, setLinkingMalItem] = useState(null);
   const [stats, setStats] = useState(null);
@@ -692,8 +957,10 @@ export default function Catalog({
     if (provider === "local") {
       fetch(`/api/local/tags/view/${type}`)
         .then((res) => res.json())
-        .then((tags) => setLocalTags(tags))
-        .catch((err) => console.error(err));
+        .then((tags) => {
+          if (Array.isArray(tags)) setLocalTags(tags);
+        })
+        .catch((err) => console.error("Failed to fetch local tags:", err));
 
       fetch("/api/history/stats")
         .then((res) => res.json())
@@ -889,57 +1156,6 @@ export default function Catalog({
       };
     }
   }, [type]);
-
-  const handleAddLocalTag = async () => {
-    const { value: tagName } = await Swal.fire({
-      title: "Create Custom Tag",
-      input: "text",
-      inputPlaceholder: "Enter tag name...",
-      showCancelButton: true,
-      confirmButtonText: "Create Tag",
-      cancelButtonText: "Cancel",
-      background: "var(--bg-secondary)",
-      color: "var(--text-main)",
-      confirmButtonColor: "var(--accent)",
-      cancelButtonColor: "var(--bg-tertiary)",
-      customClass: {
-        confirmButton: "swal-confirm-btn",
-        cancelButton: "swal-cancel-btn",
-        popup: "swal-custom-popup",
-      },
-    });
-    if (tagName && tagName.trim()) {
-      const trimmed = tagName.trim();
-      const forbidden = [
-        "watching",
-        "plan to watch",
-        "reading",
-        "plan to read",
-        "downloads",
-      ];
-      if (forbidden.includes(trimmed.toLowerCase())) {
-        swalError(
-          "Reserved Tag Name",
-          `"${trimmed}" is a reserved system tag and cannot be created manually.`,
-        );
-        return;
-      }
-      if (!localTags.includes(trimmed)) {
-        setLocalTags((prev) => [...prev, trimmed]);
-        Swal.fire({
-          title: "Tag Created",
-          text: `Tag "${trimmed}" created. You can now assign it to items in their details page!`,
-          icon: "success",
-          toast: true,
-          position: "top-end",
-          showConfirmButton: false,
-          timer: 3000,
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-        });
-      }
-    }
-  };
 
   const handleRemoveFromLibrary = async (item) => {
     const confirmed = await swalConfirm(
@@ -1368,24 +1584,42 @@ export default function Catalog({
 
       {/* Local Tag Filter panel */}
       {provider === "local" && !linkingMalItem && (
-        <div className="tag-chips-container">
-          {localTags.map((tag) => (
+        <div className="tag-chips-wrapper">
+          {canScrollLeft && (
             <button
-              key={tag}
-              onClick={() => handleFilterChange("tag", tag)}
-              className={`tag-chip ${activeFilters.tag === tag ? "active" : ""}`}
+              type="button"
+              onClick={() => scrollTags("left")}
+              className="tag-scroll-btn scroll-left-btn"
+              title="Scroll left"
             >
-              {tag}
+              <ChevronLeft size={16} />
             </button>
-          ))}
-          <button
-            onClick={handleAddLocalTag}
-            className="tag-chip btn-add-tag"
-            title="Create Custom Tag"
-          >
-            <Plus size={14} className="u-style-16" />
-            Add Tag
-          </button>
+          )}
+
+          <div className="tag-chips-container" ref={tagChipsRef}>
+            {localTags.map((tag) => (
+              <button
+                key={tag}
+                onClick={() =>
+                  !isDraggingRef.current && handleFilterChange("tag", tag)
+                }
+                className={`tag-chip ${activeFilters.tag === tag ? "active" : ""}`}
+              >
+                {tag}
+              </button>
+            ))}
+          </div>
+
+          {canScrollRight && (
+            <button
+              type="button"
+              onClick={() => scrollTags("right")}
+              className="tag-scroll-btn scroll-right-btn"
+              title="Scroll right"
+            >
+              <ChevronRight size={16} />
+            </button>
+          )}
         </div>
       )}
 
@@ -1439,6 +1673,20 @@ export default function Catalog({
           handleMediaClick={handleMediaClick}
           handlePageChange={handlePageChange}
           handleRemoveFromLibrary={handleRemoveFromLibrary}
+          getItemTagInfo={getItemTagInfo}
+          onOpenTagModal={handleOpenTagModal}
+        />
+      )}
+
+      {tagModalMedia && (
+        <TagPickerModal
+          item={tagModalMedia}
+          type={type}
+          availableTags={localTags}
+          currentTags={getItemTagInfo(tagModalMedia)?.tags || []}
+          onSelectTag={handleSelectTagInModal}
+          onRemoveTag={handleRemoveTagInModal}
+          onClose={() => setTagModalMedia(null)}
         />
       )}
     </div>

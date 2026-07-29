@@ -639,3 +639,259 @@
     transform: rotate(360deg);
   }
 }
+
+/* Tag Management Styles */
+.tags-management-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+  margin-bottom: 20px;
+  gap: 16px;
+}
+
+.tag-type-toggle {
+  display: flex;
+  background-color: var(--bg-tertiary);
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  gap: 4px;
+}
+
+.tag-type-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tag-type-btn.active {
+  background-color: var(--accent);
+  color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.create-tag-container {
+  margin-bottom: 24px;
+}
+
+.create-tag-input-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 6px 6px 14px;
+  transition: border-color 0.2s ease;
+}
+
+.create-tag-input-group:focus-within {
+  border-color: var(--accent);
+}
+
+.create-tag-icon {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.create-tag-input {
+  flex: 1;
+  background: transparent;
+  border: none !important;
+  padding: 8px 0;
+  color: var(--text-main);
+  font-size: 14px;
+  outline: none;
+}
+
+.btn-create-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--accent);
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.btn-create-tag:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-create-tag:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.tag-reorder-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tag-item-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 16px;
+  user-select: none;
+  transition: all 0.2s ease;
+  cursor: grab;
+}
+
+.tag-item-card:active {
+  cursor: grabbing;
+}
+
+.tag-item-card.dragging {
+  opacity: 0.4;
+  border-style: dashed;
+  border-color: var(--accent);
+}
+
+.tag-item-card.drag-over {
+  border-color: var(--accent);
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.3);
+  transform: scale(1.01);
+}
+
+.tag-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tag-drag-handle {
+  color: var(--text-muted);
+  cursor: grab;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+.tag-item-card:hover .tag-drag-handle {
+  color: var(--text-main);
+  background-color: var(--bg-tertiary);
+}
+
+.tag-item-name {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--text-main);
+}
+
+.tag-item-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 20px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.badge-system {
+  background-color: rgba(167, 139, 250, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(167, 139, 250, 0.3);
+}
+
+.badge-custom {
+  background-color: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.tag-hidden-card {
+  opacity: 0.65;
+  border-style: dashed;
+}
+
+.tag-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tag-action-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.tag-action-btn.hide-btn:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.tag-action-btn.unhide-btn {
+  color: var(--accent);
+}
+
+.tag-action-btn.unhide-btn:hover {
+  background-color: rgba(167, 139, 250, 0.15);
+  color: white;
+}
+
+.badge-hidden {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.tag-delete-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.tag-delete-btn:hover {
+  background-color: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+.no-tags-notice {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-muted);
+  font-size: 14px;
+  background-color: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}

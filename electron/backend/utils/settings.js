@@ -10,7 +10,6 @@ const {
   getDownloadsFolder,
   ensureDirectoryExists,
 } = require("./DirectoryMaker");
-const { MalRefreshTokenGen } = require("./mal.js");
 const { StartDiscordRPC, StopDiscordRPC } = require("./discord");
 const { logger } = require("./AppLogger.js");
 const userDataPath = app.getPath("userData");

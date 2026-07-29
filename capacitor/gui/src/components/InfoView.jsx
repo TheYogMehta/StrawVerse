@@ -15,6 +15,7 @@ import {
   Film,
   ChevronDown,
   Plus,
+  FolderOpen,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
@@ -530,6 +531,14 @@ export default function InfoView({
         }),
       });
       const data = await response.json();
+
+      if (data?.DownloadedEpisodes || data?.DownloadedChapters) {
+        setDetails((prev) => ({
+          ...prev,
+          DownloadedEpisodes: data.DownloadedEpisodes || prev?.DownloadedEpisodes,
+          DownloadedChapters: data.DownloadedChapters || prev?.DownloadedChapters,
+        }));
+      }
 
       const resList = isAnime ? data?.episodes : data?.Chapters;
 
@@ -1773,6 +1782,32 @@ export default function InfoView({
     });
   };
 
+  // Open file or folder in File Explorer / system default player
+  const handleOpenFile = async (
+    number = null,
+    subdub = null,
+    action = "open_file",
+  ) => {
+    try {
+      const res = await apiPost("/api/local/open", {
+        type,
+        id,
+        number,
+        subdub,
+        action,
+      });
+      if (res.error) {
+        swalError(
+          "Error Opening File",
+          res.message || "Failed to open file or directory.",
+        );
+      }
+    } catch (err) {
+      console.error(err);
+      swalError("Error", "Failed to open file or directory.");
+    }
+  };
+
   // Bulk Delete Trigger
   const handleBulkDelete = async () => {
     const isAnime = type === "Anime";
@@ -2031,13 +2066,23 @@ export default function InfoView({
               </button>
 
               {hasAnyDownloads && (
-                <button
-                  onClick={handleDeleteLocal}
-                  className="btn-action-base u-style-36"
-                >
-                  <Trash2 size={16} className="u-style-35" />
-                  <span>Delete All Downloads</span>
-                </button>
+                <>
+                  <button
+                    onClick={() => handleOpenFile(null, null, "open_folder")}
+                    className="btn-action-base"
+                    title="Open Download Folder in File Explorer"
+                  >
+                    <FolderOpen size={16} className="u-style-35" />
+                    <span>Open Folder</span>
+                  </button>
+                  <button
+                    onClick={handleDeleteLocal}
+                    className="btn-action-base u-style-36"
+                  >
+                    <Trash2 size={16} className="u-style-35" />
+                    <span>Delete All Downloads</span>
+                  </button>
+                </>
               )}
             </div>
 
@@ -2671,8 +2716,22 @@ export default function InfoView({
                                     )
                                   }
                                   className="btn-play"
+                                  title="Play in App"
                                 >
                                   <Play size={18} />
+                                </button>
+                                <button
+                                  onClick={() =>
+                                    handleOpenFile(
+                                      item.number,
+                                      langKey,
+                                      "open_file",
+                                    )
+                                  }
+                                  className="btn-action-open"
+                                  title="Open File / File Explorer"
+                                >
+                                  <FolderOpen size={18} />
                                 </button>
                                 {isLocal && (
                                   <button
@@ -2680,6 +2739,7 @@ export default function InfoView({
                                       handleDeleteEpisode(item.number, langKey)
                                     }
                                     className="btn-action-trash"
+                                    title="Delete Download"
                                   >
                                     <Trash2 size={18} />
                                   </button>
@@ -2734,13 +2794,24 @@ export default function InfoView({
                               )
                             }
                             className="btn-read"
+                            title="Read in App"
                           >
                             <BookOpen size={18} />
+                          </button>
+                          <button
+                            onClick={() =>
+                              handleOpenFile(item.number, null, "open_file")
+                            }
+                            className="btn-action-open"
+                            title="Open File / File Explorer"
+                          >
+                            <FolderOpen size={18} />
                           </button>
                           {isLocal && (
                             <button
                               onClick={() => handleDeleteChapter(item.number)}
                               className="btn-action-trash"
+                              title="Delete Download"
                             >
                               <Trash2 size={18} />
                             </button>

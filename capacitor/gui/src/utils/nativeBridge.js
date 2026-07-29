@@ -17,6 +17,7 @@ const routeMap = {
   "native-cancel": { path: "/api/ipc/native-cancel", method: "POST" },
   "check-wt-health": { path: "/api/update/health", method: "GET" },
   "get-app-version": { path: "/api/version", method: "GET" },
+  "open-local-path": { path: "/api/local/open", method: "POST" },
 };
 
 function invoke(channel, ...args) {
@@ -140,6 +141,18 @@ function ensureEventSource() {
         window.open(data.url, "_blank", "noopener");
       }
 
+      if (channel === "open-file" && data?.path) {
+        console.log("[nativeBridge] Handling open-file for path:", data.path);
+        const plugin = window.Capacitor?.Plugins?.CloudflareBypass;
+        if (plugin && plugin.openFile) {
+          plugin
+            .openFile({ path: data.path, openFolder: !!data.openFolder })
+            .catch((err) => {
+              console.error("[nativeBridge] openFile plugin error:", err);
+            });
+        }
+      }
+
       if (channel === "native-request" && data?.requestId && data?.url) {
         dispatchNativeRequest(data);
       }
@@ -260,6 +273,11 @@ function createPolyfill() {
     downloadUpdate: () => invoke("download-update"),
     installUpdate: () => invoke("install-update"),
     getAppVersion: () => invoke("get-app-version"),
+    openLocalPath: (targetPath, openFolder) =>
+      invoke("open-local-path", {
+        customPath: targetPath,
+        action: openFolder ? "open_folder" : "open_file",
+      }),
     checkWtHealth: (url) => invoke("check-wt-health", url),
     cancelNativeRequests: () => invoke("native-cancel"),
   };

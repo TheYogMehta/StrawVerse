@@ -1149,6 +1149,23 @@ router.post("/api/info/items", async (req, res) => {
       if (data.hasNextPage === undefined && data.totalPages !== undefined) {
         data.hasNextPage = page < data.totalPages;
       }
+
+      try {
+        const config = await settingfetch();
+        const localInfo = await FindMapping(
+          type,
+          id,
+          null,
+          config?.CustomDownloadLocation,
+        );
+        if (localInfo && localInfo.DownloadedEpisodes) {
+          data.DownloadedEpisodes = localInfo.DownloadedEpisodes;
+        }
+        if (localInfo && localInfo.DownloadedChapters) {
+          data.DownloadedChapters = localInfo.DownloadedChapters;
+        }
+      } catch (_) {}
+
       return res.json(data);
     } else {
       return res.json({});

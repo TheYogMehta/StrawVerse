@@ -8,6 +8,11 @@ import {
   MessageSquare,
   Link as LinkIcon,
   RefreshCw,
+  Tag,
+  GripVertical,
+  Plus,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../../utils/swal";
@@ -225,6 +230,207 @@ export default function SettingsView({
       fetchChangelogData();
     }
   }, [activeTab, changelog]);
+
+  // Tag Management State & Handlers
+  const [tagType, setTagType] = useState("Anime");
+  const [tagsList, setTagsList] = useState([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
+  const [newTagInput, setNewTagInput] = useState("");
+  const [creatingTag, setCreatingTag] = useState(false);
+  const [draggedTagIndex, setDraggedTagIndex] = useState(null);
+  const [dragOverIndex, setDragOverIndex] = useState(null);
+
+  const fetchTags = async (type = tagType) => {
+    setTagsLoading(true);
+    try {
+      const res = await fetch(
+        `/api/local/tags/view/${type}?includeHidden=true`,
+      );
+      const data = await res.json();
+      if (data && Array.isArray(data.tags)) {
+        setTagsList(data.tags);
+      } else if (Array.isArray(data)) {
+        setTagsList(data.map((t) => ({ name: t, hidden: false })));
+      }
+    } catch (err) {
+      console.error("Failed to fetch tags:", err);
+    } finally {
+      setTagsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === "tags") {
+      fetchTags(tagType);
+    }
+  }, [activeTab, tagType]);
+
+  const handleToggleVisibility = async (tagName, currentHidden) => {
+    const nextHidden = !currentHidden;
+    try {
+      const data = await apiPost("/api/local/tags/toggle-visibility", {
+        type: tagType,
+        tag: tagName,
+        hidden: nextHidden,
+      });
+      if (data.error) {
+        swalError("Error", data.error);
+      } else {
+        setTagsList((prev) =>
+          prev.map((t) => {
+            const name = typeof t === "string" ? t : t.name;
+            return name === tagName ? { name: tagName, hidden: nextHidden } : t;
+          }),
+        );
+      }
+    } catch (err) {
+      swalError("Error", err.message || "Failed to update tag visibility");
+    }
+  };
+
+  const handleCreateTag = async () => {
+    if (!newTagInput || !newTagInput.trim()) return;
+    const trimmed = newTagInput.trim();
+    const reservedLower = [
+      "watching",
+      "plan to watch",
+      "reading",
+      "plan to read",
+      "downloads",
+    ];
+    if (reservedLower.includes(trimmed.toLowerCase())) {
+      swalError(
+        "Reserved System Tag",
+        `"${trimmed}" is a reserved system tag.`,
+      );
+      return;
+    }
+    if (
+      tagsList.some(
+        (t) =>
+          (typeof t === "string" ? t : t.name).trim().toLowerCase() ===
+          trimmed.toLowerCase(),
+      )
+    ) {
+      swalError(
+        "Duplicate Tag Name",
+        `A tag named "${trimmed}" already exists. Tag names must be unique.`,
+      );
+      return;
+    }
+
+    setCreatingTag(true);
+    try {
+      const data = await apiPost("/api/local/tags/create", {
+        type: tagType,
+        tag: trimmed,
+      });
+      if (data.error) {
+        swalError("Error", data.error);
+      } else {
+        swalSuccess("Tag Created", `Tag "${trimmed}" created successfully!`);
+        setNewTagInput("");
+        fetchTags(tagType);
+      }
+    } catch (err) {
+      swalError("Error", err.message || "Failed to create tag");
+    } finally {
+      setCreatingTag(false);
+    }
+  };
+
+  const handleDeleteTag = async (tagToDelete) => {
+    const tagName =
+      typeof tagToDelete === "string" ? tagToDelete : tagToDelete.name;
+    const reservedLower = [
+      "watching",
+      "plan to watch",
+      "reading",
+      "plan to read",
+      "downloads",
+    ];
+    if (reservedLower.includes(tagName.toLowerCase())) {
+      swalError(
+        "Cannot Delete Tag",
+        `"${tagName}" is a system tag and cannot be deleted.`,
+      );
+      return;
+    }
+
+    const confirmResult = await swalConfirm(
+      `Delete Tag "${tagName}"?`,
+      `This will remove "${tagName}" from your settings and from any library items assigned to it.`,
+      "Yes, delete tag",
+    );
+    if (!confirmResult.isConfirmed) return;
+
+    try {
+      const data = await apiPost("/api/local/tags/delete-tag", {
+        type: tagType,
+        tag: tagName,
+      });
+      if (data.error) {
+        swalError("Error", data.error);
+      } else {
+        swalSuccess("Tag Deleted", `Tag "${tagName}" deleted successfully.`);
+        fetchTags(tagType);
+      }
+    } catch (err) {
+      swalError("Error", err.message || "Failed to delete tag");
+    }
+  };
+
+  const handleDragStart = (e, index) => {
+    setDraggedTagIndex(index);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", String(index));
+  };
+
+  const handleDragOver = (e, index) => {
+    e.preventDefault();
+    if (draggedTagIndex === null) return;
+    if (dragOverIndex !== index) {
+      setDragOverIndex(index);
+    }
+  };
+
+  const handleDrop = async (e, targetIndex) => {
+    e.preventDefault();
+    if (draggedTagIndex === null || draggedTagIndex === targetIndex) {
+      setDraggedTagIndex(null);
+      setDragOverIndex(null);
+      return;
+    }
+
+    const updated = [...tagsList];
+    const [movedItem] = updated.splice(draggedTagIndex, 1);
+    updated.splice(targetIndex, 0, movedItem);
+
+    setTagsList(updated);
+    setDraggedTagIndex(null);
+    setDragOverIndex(null);
+
+    const tagNames = updated.map((t) => (typeof t === "string" ? t : t.name));
+
+    try {
+      const data = await apiPost("/api/local/tags/reorder", {
+        type: tagType,
+        tags: tagNames,
+      });
+      if (data.error) {
+        swalError("Error", data.error);
+        fetchTags(tagType);
+      }
+    } catch (err) {
+      console.error("Failed to reorder tags:", err);
+      fetchTags(tagType);
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggedTagIndex(null);
+    setDragOverIndex(null);
+  };
 
   const fetchCacheStats = async () => {
     try {
@@ -773,6 +979,13 @@ export default function SettingsView({
             className={`settings-tab-btn ${activeTab === "anime_manga" ? "active" : ""}`}
           >
             Anime & Manga Settings
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("tags")}
+            className={`settings-tab-btn ${activeTab === "tags" ? "active" : ""}`}
+          >
+            Library Tags
           </button>
           <button
             type="button"
@@ -1595,6 +1808,168 @@ export default function SettingsView({
                     })()}
                   </div>
                 </>
+              )}
+            </div>
+          )}
+
+          {activeTab === "tags" && (
+            <div className="settings-panel glass-panel">
+              <div className="tags-management-header">
+                <div>
+                  <h3 className="settings-section-title">
+                    Library Tag Management
+                  </h3>
+                  <p className="settings-row-hint" style={{ marginTop: "4px" }}>
+                    Create, delete, and drag-and-drop reorder custom tags for
+                    your local Anime and Manga library.
+                  </p>
+                </div>
+
+                <div className="tag-type-toggle">
+                  <button
+                    type="button"
+                    onClick={() => setTagType("Anime")}
+                    className={`tag-type-btn ${tagType === "Anime" ? "active" : ""}`}
+                  >
+                    Anime Tags
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTagType("Manga")}
+                    className={`tag-type-btn ${tagType === "Manga" ? "active" : ""}`}
+                  >
+                    Manga Tags
+                  </button>
+                </div>
+              </div>
+
+              {/* Create Tag Bar */}
+              <div className="create-tag-container">
+                <div className="create-tag-input-group">
+                  <Tag size={16} className="create-tag-icon" />
+                  <input
+                    type="text"
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleCreateTag();
+                      }
+                    }}
+                    placeholder={`Enter new ${tagType} tag name...`}
+                    className="settings-text-input create-tag-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCreateTag}
+                    disabled={creatingTag || !newTagInput.trim()}
+                    className="btn-create-tag"
+                  >
+                    <Plus size={16} />
+                    Create Tag
+                  </button>
+                </div>
+              </div>
+
+              {/* Draggable Tag List */}
+              {tagsLoading ? (
+                <div className="settings-loading-center">
+                  <Loader2 size={32} className="spin" />
+                  <p>Loading tags...</p>
+                </div>
+              ) : tagsList.length === 0 ? (
+                <div className="no-tags-notice">
+                  No tags available. Create one above!
+                </div>
+              ) : (
+                <div className="tag-reorder-list">
+                  {tagsList.map((tagObj, index) => {
+                    const tagName =
+                      typeof tagObj === "string" ? tagObj : tagObj.name;
+                    const isHidden =
+                      typeof tagObj === "object" ? !!tagObj.hidden : false;
+                    const isReserved = [
+                      "watching",
+                      "plan to watch",
+                      "reading",
+                      "plan to read",
+                      "downloads",
+                    ].includes(tagName.toLowerCase());
+
+                    return (
+                      <div
+                        key={tagName}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDragOver={(e) => handleDragOver(e, index)}
+                        onDrop={(e) => handleDrop(e, index)}
+                        onDragEnd={handleDragEnd}
+                        className={`tag-item-card ${
+                          draggedTagIndex === index ? "dragging" : ""
+                        } ${dragOverIndex === index ? "drag-over" : ""} ${
+                          isHidden ? "tag-hidden-card" : ""
+                        }`}
+                      >
+                        <div className="tag-item-left">
+                          <span
+                            className="tag-drag-handle"
+                            title="Drag to reorder"
+                          >
+                            <GripVertical size={16} />
+                          </span>
+                          <span className="tag-item-name">{tagName}</span>
+                          <span
+                            className={`tag-item-badge ${
+                              isReserved ? "badge-system" : "badge-custom"
+                            }`}
+                          >
+                            {isReserved ? "System Tag" : "Custom Tag"}
+                          </span>
+                          {isHidden && (
+                            <span className="tag-item-badge badge-hidden">
+                              Hidden
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="tag-item-actions">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleToggleVisibility(tagName, isHidden)
+                            }
+                            className={`tag-action-btn ${
+                              isHidden ? "unhide-btn" : "hide-btn"
+                            }`}
+                            title={
+                              isHidden
+                                ? `Unhide tag "${tagName}" in UI`
+                                : `Hide tag "${tagName}" from UI`
+                            }
+                          >
+                            {isHidden ? (
+                              <EyeOff size={16} />
+                            ) : (
+                              <Eye size={16} />
+                            )}
+                          </button>
+
+                          {!isReserved && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTag(tagName)}
+                              className="tag-delete-btn"
+                              title={`Delete tag "${tagName}"`}
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}

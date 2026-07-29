@@ -694,6 +694,32 @@ ipcMain.handle("get-app-version", () => {
   return app.getVersion();
 });
 
+ipcMain.handle(
+  "open-local-path",
+  async (event, targetPath, openFolder = false) => {
+    try {
+      if (!targetPath || !fs.existsSync(targetPath)) {
+        return { success: false, error: "Path does not exist" };
+      }
+      const isDir = fs.statSync(targetPath).isDirectory();
+      if (openFolder || isDir) {
+        if (isDir) {
+          const err = await shell.openPath(targetPath);
+          return { success: !err, error: err };
+        } else {
+          shell.showItemInFolder(targetPath);
+          return { success: true };
+        }
+      } else {
+        const err = await shell.openPath(targetPath);
+        return { success: !err, error: err };
+      }
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  },
+);
+
 ipcMain.handle("play-in-mpv", async (event, options) => {
   const win = BrowserWindow.getFocusedWindow() || global.win;
   if (!win) return { success: false, error: "No focused window found." };

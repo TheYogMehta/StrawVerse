@@ -8,6 +8,8 @@ const { getFfmpegPath } = require("./downloader");
 const { tables, exec, queryAll, queryOne, run } = require("./db");
 const { getHeaders } = require("./proxyHeaders");
 const ImageCacheManager = require("./ImageCacheManager");
+const { sanitizeFolderName, getDownloadsFolder } = require("./DirectoryMaker");
+const { migrateLegacyFolderIfNeeded } = require("./AnimeManga");
 
 const VIDEO_EXTENSIONS = [
   ".mp4",
@@ -75,22 +77,65 @@ function getMalIdFromMapping(type, providerName, cleanId) {
           .get(cleanId, cleanId);
       } else if (name.includes("anikoto")) {
         row = global.mappingDb
-          .prepare("SELECT malid FROM anikototv WHERE id = ? LIMIT 1")
-          .get(cleanId);
+          .prepare(
+            "SELECT malid FROM anikototv WHERE id = ? OR id LIKE ? LIMIT 1",
+          )
+          .get(cleanId, `${cleanId}%`);
       } else if (name.includes("anineko")) {
         row = global.mappingDb
-          .prepare("SELECT malid FROM anineko WHERE id = ? LIMIT 1")
-          .get(cleanId);
+          .prepare(
+            "SELECT malid FROM anineko WHERE id = ? OR id LIKE ? LIMIT 1",
+          )
+          .get(cleanId, `${cleanId}%`);
+      }
+
+      if (!row) {
+        row = global.mappingDb
+          .prepare(
+            `
+            SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
+            UNION
+            SELECT malid FROM anikototv WHERE id = ? OR id LIKE ?
+            UNION
+            SELECT malid FROM anineko WHERE id = ? OR id LIKE ?
+            LIMIT 1
+          `,
+          )
+          .get(
+            cleanId,
+            cleanId,
+            cleanId,
+            `${cleanId}%`,
+            cleanId,
+            `${cleanId}%`,
+          );
       }
     } else if (type === "Manga") {
       if (name.includes("weebcentral")) {
         row = global.mappingDb
-          .prepare("SELECT malid FROM weebcentral WHERE id = ? LIMIT 1")
-          .get(cleanId);
+          .prepare(
+            "SELECT malid FROM weebcentral WHERE id = ? OR id LIKE ? LIMIT 1",
+          )
+          .get(cleanId, `${cleanId}%`);
       } else if (name.includes("allmanga")) {
         row = global.mappingDb
-          .prepare("SELECT malid FROM allmanga WHERE id = ? LIMIT 1")
-          .get(cleanId);
+          .prepare(
+            "SELECT malid FROM allmanga WHERE id = ? OR id LIKE ? LIMIT 1",
+          )
+          .get(cleanId, `${cleanId}%`);
+      }
+
+      if (!row) {
+        row = global.mappingDb
+          .prepare(
+            `
+            SELECT malid FROM weebcentral WHERE id = ? OR id LIKE ?
+            UNION
+            SELECT malid FROM allmanga WHERE id = ? OR id LIKE ?
+            LIMIT 1
+          `,
+          )
+          .get(cleanId, `${cleanId}%`, cleanId, `${cleanId}%`);
       }
     }
     return row?.malid || null;
@@ -173,7 +218,7 @@ async function MetadataAdd(type, valuesToAdd) {
     }
 
     if (valuesToAdd?.title) {
-      const baseFolderName = valuesToAdd.title.replace(/[^a-zA-Z0-9]/g, "_");
+      const baseFolderName = sanitizeFolderName(valuesToAdd.title);
       valuesToAdd.folder_name = baseFolderName;
     }
 
@@ -314,7 +359,7 @@ function resolveLocalFolder(metadata, folderSet, type) {
   }
 
   if (metadata.title) {
-    const baseName = metadata.title.replace(/[^a-zA-Z0-9]/g, "_");
+    const baseName = sanitizeFolderName(metadata.title);
     const nameCandidates = [
       baseName,
       `${baseName}_sub`,
@@ -330,7 +375,7 @@ function resolveLocalFolder(metadata, folderSet, type) {
 
   if (metadata.linkedProviders) {
     for (const lp of metadata.linkedProviders) {
-      const lpName = lp.folder_name || lp.title?.replace(/[^a-zA-Z0-9]/g, "_");
+      const lpName = lp.folder_name || sanitizeFolderName(lp.title);
       if (lpName) {
         const lpCandidates = [
           lpName,
@@ -352,6 +397,10 @@ function resolveLocalFolder(metadata, folderSet, type) {
 
 // Get All Metadata
 async function getAllMetadata(type, baseDir, page = 1, tag = null) {
+  baseDir =
+    typeof baseDir === "string" && baseDir.trim()
+      ? baseDir
+      : getDownloadsFolder();
   if (!tables[type]) {
     throw new Error(`Invalid table: ${type}`);
   }
@@ -458,7 +507,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
         return;
 
       storedMetadata.push({
-        title: alltitles.replaceAll("_", ""),
+        title: formatFallbackTitle(alltitles),
         folder_name: alltitles,
         id: alltitles,
         type: type,
@@ -876,6 +925,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
     const updatedMetadata = await Promise.all(
       paginatedMetadata.map(async (metadata) => {
+        await migrateLegacyFolderIfNeeded(type, metadata, baseDir);
         let resolvedFolder = metadata.folder_name || "";
         let folderExists = false;
 
@@ -898,7 +948,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
         }
 
         if (!folderExists && metadata.title) {
-          const baseName = metadata.title.replace(/[^a-zA-Z0-9]/g, "_");
+          const baseName = sanitizeFolderName(metadata.title);
           const nameCandidates = [
             baseName,
             `${baseName}_sub`,
@@ -917,8 +967,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
         if (!folderExists && metadata.linkedProviders) {
           for (const lp of metadata.linkedProviders) {
-            const lpName =
-              lp.folder_name || lp.title?.replace(/[^a-zA-Z0-9]/g, "_");
+            const lpName = lp.folder_name || sanitizeFolderName(lp.title);
             if (lpName) {
               const lpCandidates = [
                 lpName,
@@ -1133,6 +1182,10 @@ async function extractSubtitlesFromVideo(videoPath, epNum) {
 
 // Get Local Source By id
 async function getSourceById(type, baseDir, id, number, subdub) {
+  baseDir =
+    typeof baseDir === "string" && baseDir.trim()
+      ? baseDir
+      : getDownloadsFolder();
   if (!tables[type]) {
     throw new Error(`Invalid table: ${type}`);
   }
@@ -1143,9 +1196,10 @@ async function getSourceById(type, baseDir, id, number, subdub) {
   try {
     const metadata = queryOne(`SELECT * FROM ${type} WHERE id = ?`, [id]);
     if (metadata) {
+      await migrateLegacyFolderIfNeeded(type, metadata, baseDir);
       folder_name =
         metadata.folder_name ||
-        (metadata.title ? metadata.title.replace(/[^a-zA-Z0-9]/g, "_") : id);
+        (metadata.title ? sanitizeFolderName(metadata.title) : id);
       malId = metadata.MalID;
       mainSubOrDub = metadata.subOrDub;
     }
@@ -1309,29 +1363,62 @@ async function getSourceById(type, baseDir, id, number, subdub) {
 
 // find mapping ids
 async function FindMapping(type, AnimeMangaid, malid, dir) {
+  dir = typeof dir === "string" && dir.trim() ? dir : getDownloadsFolder();
   try {
     let data = {};
 
     // if logged in mal && Anime
     if (type === "Anime") {
-      let id = AnimeMangaid?.replace(/-(dub|sub|hsub|both)$/, "");
+      const cleanId = AnimeMangaid?.replace(/-(dub|sub|hsub|both)$/, "");
       const searchTerms = Array.from(
         new Set([
-          `${id}-sub`,
-          `${id}-hsub`,
-          `${id}-dub`,
-          `${id}-both`,
+          `${cleanId}-sub`,
+          `${cleanId}-hsub`,
+          `${cleanId}-dub`,
+          `${cleanId}-both`,
           AnimeMangaid,
-          id,
+          cleanId,
+          sanitizeFolderName(AnimeMangaid),
+          sanitizeFolderName(cleanId),
+          String(cleanId).replace(/[^a-zA-Z0-9]/g, "_"),
         ]),
       ).filter(Boolean);
 
       try {
-        const placeholders = searchTerms.map(() => "?").join(",");
-        const FoundRow = queryOne(
-          `SELECT MalID, CustomTag FROM Anime WHERE id IN (${placeholders}) OR folder_name IN (${placeholders}) LIMIT 1`,
-          [...searchTerms, ...searchTerms],
-        );
+        let FoundRow = null;
+        if (malid) {
+          FoundRow = queryOne(`SELECT * FROM Anime WHERE MalID = ? LIMIT 1`, [
+            String(malid),
+          ]);
+        }
+
+        if (!FoundRow) {
+          const placeholders = searchTerms.map(() => "?").join(",");
+          const querySql = `
+            SELECT * FROM Anime 
+            WHERE id IN (${placeholders}) 
+               OR folder_name IN (${placeholders}) 
+               OR id = ? 
+               OR id LIKE ? 
+               OR folder_name = ? 
+               OR LOWER(REPLACE(folder_name, ' ', '-')) = LOWER(?) 
+               OR LOWER(REPLACE(title, ' ', '-')) LIKE LOWER(?)
+            LIMIT 1
+          `;
+          FoundRow = queryOne(querySql, [
+            ...searchTerms,
+            ...searchTerms,
+            cleanId,
+            `${cleanId}%`,
+            cleanId,
+            cleanId,
+            `${cleanId}%`,
+          ]);
+        }
+
+        if (FoundRow) {
+          await migrateLegacyFolderIfNeeded("Anime", FoundRow, dir);
+        }
 
         data.CustomTag = FoundRow?.CustomTag || "";
 
@@ -1374,10 +1461,25 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         }
         if (Downloads.length === 0) {
           const placeholders = searchTerms.map(() => "?").join(",");
-          Downloads = queryAll(
-            `SELECT * FROM Anime WHERE id IN (${placeholders}) OR folder_name IN (${placeholders})`,
-            [...searchTerms, ...searchTerms],
-          );
+          const dlQuery = `
+            SELECT * FROM Anime 
+            WHERE id IN (${placeholders}) 
+               OR folder_name IN (${placeholders}) 
+               OR id = ? 
+               OR id LIKE ? 
+               OR folder_name = ? 
+               OR LOWER(REPLACE(folder_name, ' ', '-')) = LOWER(?) 
+               OR LOWER(REPLACE(title, ' ', '-')) LIKE LOWER(?)
+          `;
+          Downloads = queryAll(dlQuery, [
+            ...searchTerms,
+            ...searchTerms,
+            cleanId,
+            `${cleanId}%`,
+            cleanId,
+            cleanId,
+            `${cleanId}%`,
+          ]);
         }
 
         if (Downloads?.length > 0) {
@@ -1411,9 +1513,9 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           };
 
           for (const SubDub of Downloads) {
+            await migrateLegacyFolderIfNeeded("Anime", SubDub, dir);
             const baseFolder =
-              SubDub.folder_name ||
-              `${SubDub.title?.replace(/[^a-zA-Z0-9]/g, "_")}`;
+              SubDub.folder_name || `${sanitizeFolderName(SubDub.title)}`;
             let folderName = baseFolder;
             let folderExists = fs.existsSync(
               path.join(dir, "Anime", folderName),
@@ -1463,7 +1565,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             });
 
             data = {
-              title: AnimeMangaid.replaceAll("_", ""),
+              title: AnimeMangaid,
               folder_name: AnimeMangaid,
               id: AnimeMangaid,
               type: "Anime",
@@ -1489,11 +1591,32 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         let downloadsList = [];
         let malIdToUse = malid;
 
-        const mainRecord = queryOne(
-          "SELECT * FROM Manga WHERE id = ? or folder_name = ?",
-          [AnimeMangaid, AnimeMangaid],
-        );
+        let mainRecord = null;
+        if (malIdToUse) {
+          mainRecord = queryOne("SELECT * FROM Manga WHERE MalID = ? LIMIT 1", [
+            String(malIdToUse),
+          ]);
+        }
+        if (!mainRecord) {
+          const querySql = `
+            SELECT * FROM Manga 
+            WHERE id = ? 
+               OR id LIKE ? 
+               OR folder_name = ? 
+               OR LOWER(REPLACE(folder_name, ' ', '-')) = LOWER(?) 
+               OR LOWER(REPLACE(title, ' ', '-')) LIKE LOWER(?)
+            LIMIT 1
+          `;
+          mainRecord = queryOne(querySql, [
+            AnimeMangaid,
+            `${AnimeMangaid}%`,
+            AnimeMangaid,
+            AnimeMangaid,
+            `${AnimeMangaid}%`,
+          ]);
+        }
         if (mainRecord) {
+          await migrateLegacyFolderIfNeeded("Manga", mainRecord, dir);
           malIdToUse = mainRecord.MalID || malIdToUse;
         }
 

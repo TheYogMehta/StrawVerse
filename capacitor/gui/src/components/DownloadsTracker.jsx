@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Pause,
   Play,
+  FolderOpen,
 } from "lucide-react";
 import { apiPost } from "../utils/common";
 import "./css/DownloadsTracker.css";
@@ -103,20 +104,37 @@ export default function DownloadsTracker() {
     );
   };
 
+  const handleOpenFolder = async () => {
+    try {
+      await apiPost("/api/local/open", { action: "open_folder" });
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div className="tracker-wrapper">
       <header className="tracker-header">
         <h1 className="tracker-title">Download Queue</h1>
         <div className="tracker-actions">
-          {queue.length > 0 && (
           <button
-            onClick={handleTogglePause}
-            className={`btn-pause-queue ${isPaused ? "paused" : ""}`}
-            title={isPaused ? "Start / Resume Queue" : "Pause Queue"}
+            onClick={handleOpenFolder}
+            className="btn-pause-queue"
+            title="Open Main Download Folder in File Explorer"
           >
-            {isPaused ? <Play size={16} /> : <Pause size={16} />}
-            <span>{isPaused ? "Start Queue" : "Pause Queue"}</span>
+            <FolderOpen size={16} />
+            <span>Open Folder</span>
           </button>
+
+          {queue.length > 0 && (
+            <button
+              onClick={handleTogglePause}
+              className={`btn-pause-queue ${isPaused ? "paused" : ""}`}
+              title={isPaused ? "Start / Resume Queue" : "Pause Queue"}
+            >
+              {isPaused ? <Play size={16} /> : <Pause size={16} />}
+              <span>{isPaused ? "Start Queue" : "Pause Queue"}</span>
+            </button>
           )}
 
           <button
