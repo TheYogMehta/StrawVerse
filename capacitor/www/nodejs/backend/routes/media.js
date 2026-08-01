@@ -23,8 +23,6 @@ const {
   FindMapping,
 } = require("../utils/Metadata");
 const { getKeyValue, queryOne, run } = require("../utils/db");
-const { getHeaders } = require("../utils/proxyHeaders");
-const { wrapImagesInObject } = require("../download");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 
 const router = express.Router();
@@ -128,7 +126,7 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
       } catch (_) {}
     }
 
-    return res.json(wrapImagesInObject(data));
+    return res.json(data);
   } catch (err) {
     logger.error(
       `Failed To Fetch ${provider} ${AnimeManga} page ${filters?.page}`,
@@ -1028,7 +1026,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
     }
 
     if (!data?.id) throw new Error(`No ${AnimeManga} Found with id '${id}'`);
-    return res.json(wrapImagesInObject(data));
+    return res.json(data);
   } catch (err) {
     logger.error(
       `Failed To Fetch ${LocalMalProvider} ${AnimeManga} with AnimeID : '${id}'`,

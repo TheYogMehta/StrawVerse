@@ -522,34 +522,6 @@ async function removeIdFromCustomOrders(deletedId) {
   }
 }
 
-function wrapImagesInObject(obj) {
-  if (!obj) return obj;
-  if (Array.isArray(obj)) {
-    return obj.map((item) => wrapImagesInObject(item));
-  }
-  if (typeof obj === "object") {
-    const newObj = { ...obj };
-    if (Array.isArray(newObj.results)) {
-      newObj.results = newObj.results.map((item) => wrapImagesInObject(item));
-    }
-    if (typeof newObj.image === "string") {
-      let imgUrl = newObj.image;
-      if (imgUrl.startsWith("/api/image?url=")) {
-        imgUrl = decodeURIComponent(imgUrl.split("/api/image?url=")[1]);
-      }
-      if (
-        imgUrl.startsWith("http://") ||
-        imgUrl.startsWith("https://") ||
-        imgUrl.startsWith("file://")
-      ) {
-        newObj.image = `/api/image?url=${encodeURIComponent(imgUrl)}`;
-      }
-    }
-    return newObj;
-  }
-  return obj;
-}
-
 module.exports = {
   downloadAnimeSingle,
   downloadAnimeMulti,
@@ -557,5 +529,4 @@ module.exports = {
   downloadMangaMulti,
   getBaseDownloadDir,
   cleanupEmptyDownloadFolder,
-  wrapImagesInObject,
 };

@@ -13,7 +13,6 @@ const { MetadataRemove, MetadataAdd } = require("../utils/Metadata");
 const {
   getBaseDownloadDir,
   cleanupEmptyDownloadFolder,
-  wrapImagesInObject,
 } = require("../download");
 const { updateHistory } = require("../utils/history");
 const { getKeyValue, setKeyValue } = require("../utils/db");
@@ -294,7 +293,9 @@ router.post("/api/local/tags/add", async (req, res) => {
       if (global.mappingDb && id && provider) {
         try {
           const row = global.mappingDb
-            .prepare(`SELECT malid FROM ${provider} WHERE uuid = ? OR id = ? LIMIT 1`)
+            .prepare(
+              `SELECT malid FROM ${provider} WHERE uuid = ? OR id = ? LIMIT 1`,
+            )
             .get(id, id);
           if (row && row.malid) {
             resolvedMalID = String(row.malid);
@@ -313,7 +314,9 @@ router.post("/api/local/tags/add", async (req, res) => {
     }
 
     const existing = global.db
-      .prepare(`SELECT * FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ? OR folder_name = ?`)
+      .prepare(
+        `SELECT * FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ? OR folder_name = ?`,
+      )
       .get(id, id);
 
     if (existing) {
@@ -1146,7 +1149,7 @@ router.get("/api/history/list", async (req, res) => {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, limit);
 
-    res.json(wrapImagesInObject(combined));
+    res.json(combined);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

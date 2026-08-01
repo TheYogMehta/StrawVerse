@@ -13,7 +13,6 @@ const { MetadataRemove, MetadataAdd } = require("../utils/Metadata");
 const {
   getBaseDownloadDir,
   cleanupEmptyDownloadFolder,
-  wrapImagesInObject,
 } = require("../download");
 const { updateHistory } = require("../utils/history");
 const { getKeyValue, setKeyValue } = require("../utils/db");
@@ -1149,7 +1148,7 @@ router.get("/api/history/list", async (req, res) => {
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
       .slice(0, limit);
 
-    res.json(wrapImagesInObject(combined));
+    res.json(combined);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
