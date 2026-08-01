@@ -302,6 +302,31 @@ async function checkForMappingUpdates() {
         global.mappingDb
           .prepare(
             `
+          CREATE TABLE IF NOT EXISTS anime (
+            malid INTEGER PRIMARY KEY,
+            livechart_id TEXT UNIQUE,
+            image_url TEXT
+          )
+        `,
+          )
+          .run();
+
+        const animeCols = global.mappingDb
+          .prepare("PRAGMA table_info(anime)")
+          .all()
+          .map((c) => c.name);
+        if (animeCols.length > 0 && !animeCols.includes("image_url")) {
+          global.mappingDb
+            .prepare("ALTER TABLE anime ADD COLUMN image_url TEXT")
+            .run();
+          logger.info(
+            "[mappingUpdater] Added missing image_url column to anime table in mapping.db",
+          );
+        }
+
+        global.mappingDb
+          .prepare(
+            `
           CREATE TABLE IF NOT EXISTS mapping_changelog (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             version TEXT,

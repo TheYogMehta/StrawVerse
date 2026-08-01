@@ -294,6 +294,23 @@ async function checkForMappingUpdates() {
     await dropAllTriggers();
     try {
       await mappingExec(`
+        CREATE TABLE IF NOT EXISTS anime (
+          malid INTEGER PRIMARY KEY,
+          livechart_id TEXT UNIQUE,
+          image_url TEXT
+        )
+      `);
+
+      const animeColsList = await mappingQueryAll("PRAGMA table_info(anime)");
+      const animeCols = (animeColsList || []).map((c) => c.name);
+      if (animeCols.length > 0 && !animeCols.includes("image_url")) {
+        await mappingExec("ALTER TABLE anime ADD COLUMN image_url TEXT");
+        logger.info(
+          "[mappingUpdater] Added missing image_url column to anime table in mapping.db",
+        );
+      }
+
+      await mappingExec(`
         CREATE TABLE IF NOT EXISTS mapping_changelog (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           version TEXT,
