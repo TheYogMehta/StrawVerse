@@ -133,41 +133,30 @@ router.post("/api/mal/link", async (req, res) => {
     }
 
     MalID = MalID ? String(MalID) : null;
-    id = id.replace(/-(dub|sub|hsub|both)$/, "");
 
     let targetMalID = MalID ? parseInt(MalID, 10) : null;
     let resolvedProvider = null;
     if (provider) {
       const p = provider.toLowerCase();
-      if (p.includes("pahe")) resolvedProvider = "animepahe";
-      else if (p.includes("anikoto")) resolvedProvider = "anikototv";
+      if (p.includes("pahe")) resolvedProvider = "pahe";
+      else if (p.includes("anikoto")) resolvedProvider = "anikoto";
       else if (p.includes("anineko")) resolvedProvider = "anineko";
       else if (p.includes("weebcentral")) resolvedProvider = "weebcentral";
       else if (p.includes("allmanga")) resolvedProvider = "allmanga";
     }
 
     if (resolvedProvider) {
-      const cleanId = id.replace(/-(dub|sub|hsub|both)$/, "");
-
       if (!targetMalID) {
         let dbRow = null;
         try {
           if (type === "Anime") {
             dbRow = global.db
-              .prepare(
-                "SELECT MalID FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?",
-              )
-              .get(
-                cleanId,
-                `${cleanId}-sub`,
-                `${cleanId}-hsub`,
-                `${cleanId}-dub`,
-                `${cleanId}-both`,
-              );
+              .prepare("SELECT MalID FROM Anime WHERE id = ?")
+              .get(id);
           } else {
             dbRow = global.db
               .prepare("SELECT MalID FROM Manga WHERE id = ?")
-              .get(cleanId);
+              .get(id);
           }
         } catch (e) {}
         if (dbRow && dbRow.MalID) {
@@ -175,42 +164,15 @@ router.post("/api/mal/link", async (req, res) => {
         }
       }
 
-      if (!targetMalID && global.mappingDb) {
+      if (!targetMalID && global.mappingDb && resolvedProvider) {
         try {
-          const rule = [
-            {
-              key: "pahe",
-              query: "SELECT malid FROM animepahe WHERE id = ? OR uuid = ?",
-              params: [cleanId, cleanId],
-            },
-            {
-              key: "anikoto",
-              query: "SELECT malid FROM anikototv WHERE id = ?",
-              params: [cleanId],
-            },
-            {
-              key: "anineko",
-              query: "SELECT malid FROM anineko WHERE id = ?",
-              params: [cleanId],
-            },
-            {
-              key: "weebcentral",
-              query: "SELECT malid FROM weebcentral WHERE id = ?",
-              params: [cleanId],
-            },
-            {
-              key: "allmanga",
-              query: "SELECT malid FROM allmanga WHERE id = ?",
-              params: [cleanId],
-            },
-          ].find((r) => resolvedProvider.includes(r.key));
-          if (rule) {
-            const row = global.mappingDb
-              .prepare(rule.query)
-              .get(...rule.params);
-            if (row && row.malid) {
-              targetMalID = parseInt(row.malid, 10);
-            }
+          const row = global.mappingDb
+            .prepare(
+              `SELECT malid FROM ${resolvedProvider} WHERE uuid = ? OR id = ? LIMIT 1`,
+            )
+            .get(id, id);
+          if (row && row.malid) {
+            targetMalID = parseInt(row.malid, 10);
           }
         } catch (e) {}
       }
@@ -220,16 +182,8 @@ router.post("/api/mal/link", async (req, res) => {
         try {
           if (type === "Anime") {
             const row = global.db
-              .prepare(
-                "SELECT title, MalID FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? LIMIT 1",
-              )
-              .get(
-                cleanId,
-                `${cleanId}-sub`,
-                `${cleanId}-hsub`,
-                `${cleanId}-dub`,
-                `${cleanId}-both`,
-              );
+              .prepare("SELECT title, MalID FROM Anime WHERE id = ? LIMIT 1")
+              .get(id);
             if (row) {
               providerTitle = row.title;
               if (!targetMalID && row.MalID) {
@@ -239,7 +193,7 @@ router.post("/api/mal/link", async (req, res) => {
           } else {
             const row = global.db
               .prepare("SELECT title, MalID FROM Manga WHERE id = ? LIMIT 1")
-              .get(cleanId);
+              .get(id);
             if (row) {
               providerTitle = row.title;
               if (!targetMalID && row.MalID) {
@@ -258,7 +212,7 @@ router.post("/api/mal/link", async (req, res) => {
             .post("https://strawverse.theyogmehta.online/mapping", {
               malid: targetMalID,
               provider: resolvedProvider,
-              id: cleanId,
+              id: id,
               title: providerTitle,
             })
             .then(() =>
@@ -312,9 +266,9 @@ router.post("/api/mal/link", async (req, res) => {
     if (type === "Anime") {
       global.db
         .prepare(
-          `UPDATE Anime SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?`,
+          `UPDATE Anime SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
         )
-        .run(MalID, id, `${id}-sub`, `${id}-hsub`, `${id}-dub`, `${id}-both`);
+        .run(MalID, id);
     } else {
       global.db
         .prepare(

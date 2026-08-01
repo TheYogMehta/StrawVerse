@@ -51,8 +51,8 @@ function deserializeDelta(buffer) {
 
   const tblRevMap = {
     1: "anime",
-    2: "animepahe",
-    3: "anikototv",
+    2: "pahe",
+    3: "anikoto",
     4: "anineko",
     5: "manga",
     6: "weebcentral",
@@ -112,22 +112,21 @@ async function checkForMappingUpdates() {
   let hasMappingChangelogTable = false;
   try {
     const tablesList = await mappingQueryAll(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('anime', 'animepahe', 'anikototv', 'anineko', 'manga', 'weebcentral', 'allmanga', 'next_episodes', 'mapping_changelog')",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('anime', 'pahe', 'anikoto', 'anineko', 'manga', 'weebcentral', 'allmanga', 'next_episodes', 'mapping_changelog')",
     );
     const tableNames = tablesList.map((t) => t.name);
+    const tableExists = (name) => tableNames.includes(name);
 
     // Check if the core 8 tables exist (excluding changelog)
-    const coreTables = [
-      "anime",
-      "animepahe",
-      "anikototv",
-      "anineko",
-      "manga",
-      "weebcentral",
-      "allmanga",
-      "next_episodes",
-    ];
-    missingTables = !coreTables.every((name) => tableNames.includes(name));
+    missingTables =
+      !tableExists("anime") ||
+      !tableExists("pahe") ||
+      !tableExists("anikoto") ||
+      !tableExists("anineko") ||
+      !tableExists("manga") ||
+      !tableExists("weebcentral") ||
+      !tableExists("allmanga") ||
+      !tableExists("next_episodes");
 
     hasNextEpisodesTable = tableNames.includes("next_episodes");
     hasMappingChangelogTable = tableNames.includes("mapping_changelog");
@@ -333,12 +332,11 @@ async function checkForMappingUpdates() {
 
         const stmtSqlMap = {
           anime:
-            "INSERT OR REPLACE INTO anime (malid, livechart_id) VALUES (?, ?)",
+            "INSERT OR REPLACE INTO anime (malid, livechart_id, image_url) VALUES (?, ?, ?)",
           manga: "INSERT OR REPLACE INTO manga (malid) VALUES (?)",
-          animepahe:
-            "INSERT OR REPLACE INTO animepahe (id, uuid, malid) VALUES (?, ?, ?)",
-          anikototv:
-            "INSERT OR REPLACE INTO anikototv (id, malid) VALUES (?, ?)",
+          pahe: "INSERT OR REPLACE INTO pahe (id, uuid, malid) VALUES (?, ?, ?)",
+          anikoto: "INSERT OR REPLACE INTO anikoto (id, malid) VALUES (?, ?)",
+
           anineko: "INSERT OR REPLACE INTO anineko (id, malid) VALUES (?, ?)",
           weebcentral:
             "INSERT OR REPLACE INTO weebcentral (id, malid) VALUES (?, ?)",
@@ -360,6 +358,7 @@ async function checkForMappingUpdates() {
                 params: [
                   parsedData.malid ?? null,
                   parsedData.livechart_id ?? null,
+                  parsedData.image_url ?? null,
                 ],
               });
             } else if (tbl === "manga") {
@@ -367,18 +366,18 @@ async function checkForMappingUpdates() {
                 sql: stmtSqlMap.manga,
                 params: [parsedData.malid ?? null],
               });
-            } else if (tbl === "animepahe") {
+            } else if (tbl === "pahe") {
               ops.push({
-                sql: stmtSqlMap.animepahe,
+                sql: stmtSqlMap.pahe,
                 params: [
                   parsedData.id ?? null,
                   parsedData.uuid ?? null,
                   parsedData.malid ?? null,
                 ],
               });
-            } else if (tbl === "anikototv") {
+            } else if (tbl === "anikoto") {
               ops.push({
-                sql: stmtSqlMap.anikototv,
+                sql: stmtSqlMap.anikoto,
                 params: [parsedData.id ?? null, parsedData.malid ?? null],
               });
             } else if (tbl === "anineko") {
@@ -467,6 +466,9 @@ async function checkForMappingUpdates() {
           `[mappingUpdater] Updated client version tag to: ${latestVersion}`,
         );
       }
+      try {
+        await syncLibraryIdsWithMapping();
+      } catch (syncErr) {}
     }
   }
 }
@@ -478,45 +480,99 @@ async function syncLibraryIdsWithMapping() {
       "SELECT id, malid, provider FROM Anime",
     );
     for (const anime of localAnimeList) {
-      if (!anime.malid) continue;
+      let malid = anime.malid ? Number(anime.malid) : null;
       const provider = (anime.provider || "").toLowerCase();
+
+      // If malid is missing, attempt resolution from mappingDb using anime.id
+      if (!malid) {
+        try {
+          const malRow = await mappingQueryOne(
+            `
+              SELECT malid FROM pahe WHERE id = ? OR uuid = ?
+              UNION ALL
+              SELECT malid FROM anikoto WHERE id = ?
+              UNION ALL
+              SELECT malid FROM anineko WHERE id = ?
+              LIMIT 1
+            `,
+            [anime.id, anime.id, anime.id, anime.id],
+          );
+          if (malRow && malRow.malid) {
+            malid = Number(malRow.malid);
+            await run("UPDATE Anime SET MalID = ? WHERE id = ? OR id LIKE ?", [
+              String(malid),
+              anime.id,
+              `${anime.id}-%`,
+            ]);
+          }
+        } catch (_) {}
+      }
+
       let targetTable = "";
       let useUuid = false;
 
-      if (provider === "pahe") {
-        targetTable = "animepahe";
+      if (provider.includes("pahe")) {
+        targetTable = "pahe";
         useUuid = true;
-      } else if (provider === "anikoto") {
-        targetTable = "anikototv";
-      } else if (provider === "anineko") {
+      } else if (provider.includes("anikoto")) {
+        targetTable = "anikoto";
+      } else if (provider.includes("anineko")) {
         targetTable = "anineko";
+      } else {
+        targetTable = "pahe";
+        useUuid = true;
       }
 
       if (targetTable) {
-        const query = useUuid
-          ? `SELECT id, uuid FROM ${targetTable} WHERE malid = ? LIMIT 1`
-          : `SELECT id FROM ${targetTable} WHERE malid = ? LIMIT 1`;
-        const targetRow = await mappingQueryOne(query, [Number(anime.malid)]);
+        let targetRow = null;
+        if (malid) {
+          const query = useUuid
+            ? `SELECT id, uuid, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`
+            : `SELECT id, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`;
+          targetRow = await mappingQueryOne(query, [malid]);
+        }
+        if (!targetRow) {
+          const query = useUuid
+            ? `SELECT id, uuid, malid FROM ${targetTable} WHERE id = ? OR uuid = ? LIMIT 1`
+            : `SELECT id, malid FROM ${targetTable} WHERE id = ? LIMIT 1`;
+          targetRow = useUuid
+            ? await mappingQueryOne(query, [anime.id, anime.id])
+            : await mappingQueryOne(query, [anime.id]);
+        }
+
         if (targetRow) {
           const latestId = useUuid
             ? targetRow.uuid || targetRow.id
             : targetRow.id;
-          const cleanId = anime.id.replace(/-(sub|dub|hsub|both)$/, "");
-          if (latestId && latestId !== cleanId) {
+          if (latestId && latestId !== anime.id) {
             await run(
               "UPDATE OR REPLACE Anime SET id = REPLACE(id, ?, ?) WHERE id = ? OR id LIKE ?",
-              [cleanId, latestId, cleanId, `${cleanId}-%`],
+              [anime.id, latestId, anime.id, `${anime.id}-%`],
             );
             await run(
               "UPDATE WatchHistory SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?",
-              [cleanId, latestId, cleanId, `${cleanId}-%`],
+              [anime.id, latestId, anime.id, `${anime.id}-%`],
             );
             await run(
               "UPDATE SkipTimes SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?",
-              [cleanId, latestId, cleanId, `${cleanId}-%`],
+              [anime.id, latestId, anime.id, `${anime.id}-%`],
             );
+            try {
+              await run(
+                "UPDATE unlinked_mal_ids SET id = REPLACE(id, ?, ?) WHERE id = ? OR id LIKE ?",
+                [anime.id, latestId, anime.id, `${anime.id}-%`],
+              );
+            } catch (_) {}
+
+            if (targetRow.malid && !anime.malid) {
+              await run(
+                "UPDATE Anime SET MalID = ? WHERE id = ? OR id LIKE ?",
+                [String(targetRow.malid), latestId, `${latestId}-%`],
+              );
+            }
+
             logger.info(
-              `[mappingUpdater] Automatically synced local Anime ID from ${cleanId} to ${latestId} to match updated mapping`,
+              `[mappingUpdater] Automatically synced local Anime ID from ${anime.id} to ${latestId} to match updated mapping`,
             );
           }
         }
@@ -528,35 +584,73 @@ async function syncLibraryIdsWithMapping() {
       "SELECT id, malid, provider FROM Manga",
     );
     for (const manga of localMangaList) {
-      if (!manga.malid) continue;
+      let malid = manga.malid ? Number(manga.malid) : null;
       const provider = (manga.provider || "").toLowerCase();
-      let targetTable = "";
 
+      if (!malid) {
+        try {
+          const malRow = await mappingQueryOne(
+            `
+              SELECT malid FROM weebcentral WHERE id = ?
+              UNION ALL
+              SELECT malid FROM allmanga WHERE id = ?
+              LIMIT 1
+            `,
+            [manga.id, manga.id],
+          );
+          if (malRow && malRow.malid) {
+            malid = Number(malRow.malid);
+            await run("UPDATE Manga SET MalID = ? WHERE id = ?", [
+              String(malid),
+              manga.id,
+            ]);
+          }
+        } catch (_) {}
+      }
+
+      let targetTable = "";
       if (provider.includes("weebcentral")) {
         targetTable = "weebcentral";
       } else if (provider.includes("allmanga")) {
         targetTable = "allmanga";
+      } else {
+        targetTable = "weebcentral";
       }
 
       if (targetTable) {
-        const targetRow = await mappingQueryOne(
-          `SELECT id FROM ${targetTable} WHERE malid = ? LIMIT 1`,
-          [Number(manga.malid)],
-        );
+        let targetRow = null;
+        if (malid) {
+          targetRow = await mappingQueryOne(
+            `SELECT id, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`,
+            [malid],
+          );
+        }
+        if (!targetRow) {
+          targetRow = await mappingQueryOne(
+            `SELECT id, malid FROM ${targetTable} WHERE id = ? LIMIT 1`,
+            [manga.id],
+          );
+        }
+
         if (targetRow) {
           const latestId = targetRow.id;
-          const cleanId = manga.id;
-          if (latestId && latestId !== cleanId) {
+          if (latestId && latestId !== manga.id) {
             await run(
               "UPDATE OR REPLACE Manga SET id = REPLACE(id, ?, ?) WHERE id = ?",
-              [cleanId, latestId, cleanId],
+              [manga.id, latestId, manga.id],
             );
             await run(
               "UPDATE ReadHistory SET manga_id = REPLACE(manga_id, ?, ?) WHERE manga_id = ?",
-              [cleanId, latestId, cleanId],
+              [manga.id, latestId, manga.id],
             );
+            if (targetRow.malid && !manga.malid) {
+              await run("UPDATE Manga SET MalID = ? WHERE id = ?", [
+                String(targetRow.malid),
+                latestId,
+              ]);
+            }
             logger.info(
-              `[mappingUpdater] Automatically synced local Manga ID from ${cleanId} to ${latestId} to match updated mapping`,
+              `[mappingUpdater] Automatically synced local Manga ID from ${manga.id} to ${latestId} to match updated mapping`,
             );
           }
         }

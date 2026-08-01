@@ -124,36 +124,24 @@ async function downloadAnimeSingle(
     const Animeprovider =
       preFetchedProvider || (await providerFetch("Anime", provider));
 
-    let resolvedSubDub = subdub;
-    if (!resolvedSubDub) {
-      resolvedSubDub = animeid.endsWith("dub") ? "dub" : "sub";
-    }
-
-    const strippedId = animeid.replace(/-(sub|dub|hsub|both)$/, "");
-    const dbId = `${strippedId}-${resolvedSubDub}`;
+    let resolvedSubDub = subdub || "sub";
 
     if (saveinfo) {
       const existing = await queryOne("SELECT id FROM Anime WHERE id = ?", [
-        dbId,
+        animeid,
       ]);
       if (!existing) {
-        const lookupId =
-          Animeprovider.provider_name === "pahe"
-            ? animeid
-            : animeid.replace(/-(dub|sub|hsub|both)$/, "");
         const animedata = await animeinfo(
           Animeprovider,
           config?.CustomDownloadLocation,
-          lookupId,
+          animeid,
         );
         if (animedata) {
+          const finalTitle = animedata?.title || Title;
           MetadataAdd("Anime", {
-            id: dbId,
-            title: `${animedata?.title?.replace(/-(dub|sub|hsub|both)$/, ``)} ${
-              resolvedSubDub
-            }`,
+            id: animeid,
+            title: finalTitle,
             provider: Animeprovider.provider_name,
-            subOrDub: resolvedSubDub,
             type: animedata.type ?? null,
             description: animedata.description ?? null,
             status: animedata.status ?? null,
@@ -179,14 +167,15 @@ async function downloadAnimeSingle(
     try {
       let animeMapping = await FindMapping(
         "Anime",
-        dbId,
+        animeid,
         null,
         config?.CustomDownloadLocation,
       );
       if (animeMapping && animeMapping.DownloadedEpisodes) {
         const num = parseFloat(number);
-        const downloadedList =
-          animeMapping.DownloadedEpisodes[resolvedSubDub] || [];
+        const downloadedList = Array.isArray(animeMapping.DownloadedEpisodes)
+          ? animeMapping.DownloadedEpisodes
+          : [];
         if (downloadedList.map(Number).includes(num)) {
           return {
             error: true,
@@ -201,7 +190,7 @@ async function downloadAnimeSingle(
     if (!targetMalid) {
       try {
         const row = await queryOne("SELECT MalID FROM Anime WHERE id = ?", [
-          dbId,
+          animeid,
         ]);
         if (row && row.MalID) {
           targetMalid = row.MalID;
@@ -212,7 +201,7 @@ async function downloadAnimeSingle(
     const queueItem = {
       Type: "Anime",
       EpNum: number,
-      id: dbId,
+      id: animeid,
       Title: Title,
       SubDub: resolvedSubDub,
       malid: targetMalid ? String(targetMalid) : null,

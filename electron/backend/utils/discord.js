@@ -308,23 +308,52 @@ async function getMediaImage(mediaId, type) {
   try {
     let localRec = null;
     if (type === "Anime") {
-      const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
+      // 1. Try finding malid from local Anime database record or mapping.db provider mapping
+      let malid = null;
       localRec = db
         .prepare(
           `
         SELECT MalID, image_url FROM Anime 
-        WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
+        WHERE id = ? OR folder_name = ?
       `,
         )
-        .get(
-          mediaId,
-          `${strippedId}-sub`,
-          `${strippedId}-hsub`,
-          `${strippedId}-dub`,
-          `${strippedId}-both`,
-          mediaId,
-          strippedId,
-        );
+        .get(mediaId, mediaId);
+      if (localRec && localRec.MalID) {
+        malid = Number(localRec.MalID);
+      }
+
+      if (!malid && global.mappingDb) {
+        try {
+          const row = global.mappingDb
+            .prepare(
+              `
+              SELECT malid FROM pahe WHERE uuid = ? OR id = ?
+              UNION
+              SELECT malid FROM anikoto WHERE id = ?
+              UNION
+              SELECT malid FROM anineko WHERE id = ?
+              LIMIT 1
+            `,
+            )
+            .get(mediaId, mediaId, mediaId, mediaId);
+          if (row && row.malid) {
+            malid = Number(row.malid);
+          }
+        } catch (e) {}
+      }
+
+      // 2. Check mapping.db anime table for image_url if malid exists
+      if (malid && global.mappingDb) {
+        try {
+          const mapRow = global.mappingDb
+            .prepare("SELECT image_url FROM anime WHERE malid = ?")
+            .get(malid);
+          if (mapRow && mapRow.image_url && mapRow.image_url.startsWith("http")) {
+            return mapRow.image_url;
+          }
+        } catch (e) {}
+      }
+
       if (localRec) {
         if (localRec.image_url && localRec.image_url.startsWith("http")) {
           return localRec.image_url;
@@ -360,6 +389,52 @@ async function getMediaImage(mediaId, type) {
 
 async function resolveAndUploadToCatbox(imageUrl, mediaId, type) {
   if (!imageUrl || typeof imageUrl !== "string") return null;
+
+  // Check if mapping.db has image_url for this MAL ID before uploading to Catbox
+  if ((type === "Anime" || !type) && global.mappingDb) {
+    let malid = null;
+    if (mediaId) {
+      try {
+        const localRec = db
+          .prepare("SELECT MalID FROM Anime WHERE id = ? OR folder_name = ?")
+          .get(mediaId, mediaId);
+        if (localRec && localRec.MalID) {
+          malid = Number(localRec.MalID);
+        }
+      } catch (e) {}
+
+      if (!malid) {
+        try {
+          const row = global.mappingDb
+            .prepare(
+              `
+              SELECT malid FROM pahe WHERE uuid = ? OR id = ?
+              UNION
+              SELECT malid FROM anikoto WHERE id = ?
+              UNION
+              SELECT malid FROM anineko WHERE id = ?
+              LIMIT 1
+            `,
+            )
+            .get(mediaId, mediaId, mediaId, mediaId);
+          if (row && row.malid) {
+            malid = Number(row.malid);
+          }
+        } catch (e) {}
+      }
+    }
+
+    if (malid) {
+      try {
+        const mapRow = global.mappingDb
+          .prepare("SELECT image_url FROM anime WHERE malid = ?")
+          .get(malid);
+        if (mapRow && mapRow.image_url && mapRow.image_url.startsWith("http")) {
+          return mapRow.image_url;
+        }
+      } catch (e) {}
+    }
+  }
 
   const cachedUrl = getCachedCatboxUrl(imageUrl);
   if (cachedUrl) {
@@ -414,18 +489,9 @@ async function resolveAndUploadToCatbox(imageUrl, mediaId, type) {
           const table = type === "Anime" ? "Anime" : "Manga";
           let localRec = null;
           if (type === "Anime") {
-            const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
             localRec = db
-              .prepare(
-                `SELECT id, image, image_url FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ?`,
-              )
-              .get(
-                mediaId,
-                `${strippedId}-sub`,
-                `${strippedId}-hsub`,
-                `${strippedId}-dub`,
-                `${strippedId}-both`,
-              );
+              .prepare(`SELECT id, image, image_url FROM Anime WHERE id = ?`)
+              .get(mediaId);
           } else {
             localRec = db
               .prepare(`SELECT id, image, image_url FROM Manga WHERE id = ?`)

@@ -544,22 +544,30 @@
 }
 
 .badge-subdub {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10px;
   font-weight: 700;
   padding: 4px 8px;
   border-radius: 4px;
-}
-
-.badge-subdub.sub {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
   background-color: rgba(59, 130, 246, 0.15);
   color: #60a5fa;
   border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
-.badge-subdub.dub {
-  background-color: rgba(236, 72, 153, 0.15);
-  color: #f472b6;
-  border: 1px solid rgba(236, 72, 153, 0.3);
+.badge-subdub:hover {
+  opacity: 0.8;
+}
+
+.badge-subdub.sub,
+.badge-subdub.dub,
+.badge-subdub.hsub {
+  background-color: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
 }
 
 .badge-manga {

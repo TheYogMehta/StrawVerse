@@ -54,12 +54,9 @@ async function updateHistory({
   // Update main table cache entry
   if (provider) {
     try {
-      const cleanId = isAnime
-        ? mediaId.replace(/-(dub|sub|hsub|both)$/, "")
-        : mediaId;
       const exists = await queryOne(
         `SELECT id FROM ${mainTable} WHERE id = ?`,
-        [cleanId],
+        [mediaId],
       );
       if (!exists) {
         await run(
@@ -68,7 +65,7 @@ async function updateHistory({
           VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         `,
           [
-            cleanId,
+            mediaId,
             resolvedTitle || type,
             provider,
             malid ? String(malid) : null,
@@ -84,7 +81,7 @@ async function updateHistory({
               image_url = COALESCE(image_url, ?)
           WHERE id = ?
         `,
-          [provider, malid ? String(malid) : null, image || null, cleanId],
+          [provider, malid ? String(malid) : null, image || null, mediaId],
         );
       }
     } catch (cacheErr) {
@@ -110,18 +107,7 @@ async function updateHistory({
       }
     } catch (err) {}
 
-    let suffixIds = [];
-    queryIds.forEach((id) => {
-      suffixIds.push(id);
-      const stripped = id.replace(/-(dub|sub|hsub|both)$/, "");
-      suffixIds.push(
-        `${stripped}-sub`,
-        `${stripped}-hsub`,
-        `${stripped}-dub`,
-        `${stripped}-both`,
-      );
-    });
-    queryIds = Array.from(new Set(suffixIds));
+    queryIds = Array.from(new Set(queryIds));
   } else {
     try {
       const localRec = await queryOne(`SELECT MalID FROM Manga WHERE id = ?`, [

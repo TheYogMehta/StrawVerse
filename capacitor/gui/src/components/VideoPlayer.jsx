@@ -633,11 +633,14 @@ export default function VideoPlayer({
   // Helper to determine if an episode number is downloaded
   const isEpDownloaded = (num, currentLang = playerSubDub) => {
     if (!downloadedEpisodes) return false;
+    if (Array.isArray(downloadedEpisodes)) {
+      return downloadedEpisodes.map(Number).includes(Number(num));
+    }
     const subList = downloadedEpisodes.sub || [];
     const dubList = downloadedEpisodes.dub || [];
     return currentLang === "dub"
-      ? dubList.includes(Number(num))
-      : subList.includes(Number(num));
+      ? dubList.map(Number).includes(Number(num))
+      : subList.map(Number).includes(Number(num));
   };
 
   // Sort episodes list in ascending order to make Next/Prev predictable
@@ -1366,36 +1369,12 @@ export default function VideoPlayer({
         <div className="u-style-27">
           {(() => {
             if (loading || !currentEpisodeObj) return null;
-            let availableLangs = [];
-            if (
+            let availableLangs =
               currentEpisodeObj.langs &&
-              Array.isArray(currentEpisodeObj.langs)
-            ) {
-              availableLangs = currentEpisodeObj.langs;
-            } else {
-              if (currentEpisodeObj.lang === "both") {
-                availableLangs = ["sub", "dub"];
-              } else if (currentEpisodeObj.lang === "dub") {
-                availableLangs = ["dub"];
-              } else {
-                availableLangs = ["sub"];
-              }
-              if (
-                currentEpisodeObj.hasHsub &&
-                !availableLangs.includes("hsub")
-              ) {
-                availableLangs = ["sub", "hsub", "dub"].filter(
-                  (l) =>
-                    l === "hsub" ||
-                    (l === "sub" &&
-                      (currentEpisodeObj.lang === "sub" ||
-                        currentEpisodeObj.lang === "both")) ||
-                    (l === "dub" &&
-                      (currentEpisodeObj.lang === "dub" ||
-                        currentEpisodeObj.lang === "both")),
-                );
-              }
-            }
+              Array.isArray(currentEpisodeObj.langs) &&
+              currentEpisodeObj.langs.length > 0
+                ? currentEpisodeObj.langs
+                : ["sub"];
 
             if (availableLangs.length <= 1) return null;
 
@@ -1472,7 +1451,6 @@ export default function VideoPlayer({
           </div>
         ) : (
           <>
-
             {/* Custom Big Play Button Overlay */}
             {!isPlaying && !loading && !errorMsg && (
               <div className="player-big-play-btn" onClick={togglePlay}>

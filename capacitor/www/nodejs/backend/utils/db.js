@@ -168,8 +168,8 @@ async function mappingQueryAll(sql, params = []) {
 
   const tablesToCheck = [
     "anime",
-    "animepahe",
-    "anikototv",
+    "pahe",
+    "anikoto",
     "anineko",
     "manga",
     "weebcentral",
@@ -209,8 +209,8 @@ async function mappingQueryOne(sql, params = []) {
 
   const tablesToCheck = [
     "anime",
-    "animepahe",
-    "anikototv",
+    "pahe",
+    "anikoto",
     "anineko",
     "manga",
     "weebcentral",
@@ -290,7 +290,6 @@ const tables = {
     id: "TEXT PRIMARY KEY",
     folder_name: "TEXT",
     title: "TEXT",
-    subOrDub: "TEXT",
     type: "TEXT",
     provider: "TEXT",
     description: "TEXT",
@@ -475,6 +474,59 @@ async function initDatabase() {
     logger.error("Failed to create unique index on SkipTimes: " + e.message);
   }
 
+  // migration: strip -sub/-dub/-both/-hsub suffixes from Anime.id
+  try {
+    const suffixedRows = await queryAll(
+      "SELECT id FROM Anime WHERE id LIKE '%-sub' OR id LIKE '%-dub' OR id LIKE '%-both' OR id LIKE '%-hsub'",
+    );
+    if (suffixedRows.length > 0) {
+      logger.info(
+        `[db migration] Found ${suffixedRows.length} Anime rows with sub/dub suffixes, migrating...`,
+      );
+      for (const row of suffixedRows) {
+        const oldId = row.id;
+        const newId = oldId.replace(/-(dub|sub|hsub|both)$/, "");
+        if (oldId === newId) continue;
+        // Check if the clean ID already exists (conflict)
+        const existing = await queryOne("SELECT id FROM Anime WHERE id = ?", [
+          newId,
+        ]);
+        if (existing) {
+          // Clean ID already exists, just delete the suffixed duplicate
+          await run("DELETE FROM Anime WHERE id = ?", [oldId]);
+          logger.info(
+            `[db migration] Deleted duplicate suffixed row '${oldId}' (clean '${newId}' already exists)`,
+          );
+        } else {
+          await run("UPDATE Anime SET id = ? WHERE id = ?", [newId, oldId]);
+          logger.info(`[db migration] Anime id: '${oldId}' -> '${newId}'`);
+        }
+        // Update referencing tables
+        try {
+          await run("UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?", [
+            newId,
+            oldId,
+          ]);
+          await run("UPDATE SkipTimes SET anime_id = ? WHERE anime_id = ?", [
+            newId,
+            oldId,
+          ]);
+          await run("UPDATE DownloadQueue SET id = ? WHERE id = ?", [
+            newId,
+            oldId,
+          ]);
+        } catch (refErr) {
+          logger.error(
+            `[db migration] Error updating references for '${oldId}': ${refErr.message}`,
+          );
+        }
+      }
+      logger.info("[db migration] Suffix cleanup migration complete");
+    }
+  } catch (e) {
+    logger.error("[db migration] Suffix cleanup error: " + e.message);
+  }
+
   // Clean up orphaned history records
   try {
     const watchRows = await queryAll(
@@ -485,8 +537,7 @@ async function initDatabase() {
     const toDelete = [];
     for (const row of watchRows) {
       if (row.anime_id) {
-        const strippedId = row.anime_id.replace(/-(dub|sub|hsub|both)$/, "");
-        if (!animeIds.has(strippedId)) {
+        if (!animeIds.has(row.anime_id)) {
           toDelete.push(row.anime_id);
         }
       }
@@ -510,6 +561,19 @@ async function initDatabase() {
     }
   } catch (e) {
     logger.error("Failed to run database history cleanup: " + e.message);
+  }
+
+  // Drop unused subOrDub column from Anime table
+  try {
+    const animeColumns = (await queryAll("PRAGMA table_info(Anime)")).map(
+      (col) => col.name,
+    );
+    if (animeColumns.includes("subOrDub")) {
+      await run("ALTER TABLE Anime DROP COLUMN subOrDub");
+      logger.info("[db] Dropped unused subOrDub column from Anime table");
+    }
+  } catch (e) {
+    logger.error("[db] Failed to drop subOrDub column: " + e.message);
   }
 
   logger.info("[db] Database initialization complete");

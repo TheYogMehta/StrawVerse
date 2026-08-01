@@ -470,21 +470,9 @@ async function autoTrackMAL(type, mediaId, number) {
     let localRecord = null;
 
     if (type === "Anime") {
-      const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
       localRecord = await queryOne(
-        `
-        SELECT MalID FROM Anime 
-        WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?
-      `,
-        [
-          mediaId,
-          `${strippedId}-sub`,
-          `${strippedId}-hsub`,
-          `${strippedId}-dub`,
-          `${strippedId}-both`,
-          mediaId,
-          strippedId,
-        ],
+        `SELECT MalID FROM Anime WHERE id = ? OR folder_name = ?`,
+        [mediaId, mediaId],
       );
     } else {
       localRecord = await queryOne(
@@ -501,17 +489,16 @@ async function autoTrackMAL(type, mediaId, number) {
     if (!malid && global.mappingDb) {
       if (type === "Anime") {
         try {
-          const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
           const row = await mappingQueryOne(
             `
-              SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
+              SELECT malid FROM pahe WHERE id = ? OR uuid = ?
               UNION
-              SELECT malid FROM anikototv WHERE id = ?
+              SELECT malid FROM anikoto WHERE id = ?
               UNION
               SELECT malid FROM anineko WHERE id = ?
               LIMIT 1
             `,
-            [strippedId, strippedId, strippedId, strippedId],
+            [mediaId, mediaId, mediaId, mediaId],
           );
           if (row?.malid) {
             malid = parseInt(row.malid);

@@ -95,8 +95,6 @@ router.get("/api/local/tags/view/:type", async (req, res) => {
   }
 });
 
-
-
 // Create custom tag in settings
 router.post("/api/local/tags/create", async (req, res) => {
   try {
@@ -290,46 +288,16 @@ router.post("/api/local/tags/add", async (req, res) => {
       provider = null;
     }
 
-    id = id.replace(/-(dub|sub|hsub|both)$/, "");
     let resolvedMalID = MalID ? String(MalID) : null;
 
     if (!resolvedMalID) {
-      if (global.mappingDb && id) {
+      if (global.mappingDb && id && provider) {
         try {
-          const rule = [
-            {
-              key: "pahe",
-              query: "SELECT malid FROM animepahe WHERE id = ? OR uuid = ?",
-              params: [id, id],
-            },
-            {
-              key: "anikoto",
-              query: "SELECT malid FROM anikototv WHERE id = ?",
-              params: [id],
-            },
-            {
-              key: "anineko",
-              query: "SELECT malid FROM anineko WHERE id = ?",
-              params: [id],
-            },
-            {
-              key: "weebcentral",
-              query: "SELECT malid FROM weebcentral WHERE id = ?",
-              params: [id],
-            },
-            {
-              key: "allmanga",
-              query: "SELECT malid FROM allmanga WHERE id = ?",
-              params: [id],
-            },
-          ].find((r) => (provider || "").toLowerCase().includes(r.key));
-          if (rule) {
-            const row = global.mappingDb
-              .prepare(rule.query)
-              .get(...rule.params);
-            if (row && row.malid) {
-              resolvedMalID = String(row.malid);
-            }
+          const row = global.mappingDb
+            .prepare(`SELECT malid FROM ${provider} WHERE uuid = ? OR id = ? LIMIT 1`)
+            .get(id, id);
+          if (row && row.malid) {
+            resolvedMalID = String(row.malid);
           }
         } catch (err) {
           logger.error(
@@ -344,27 +312,9 @@ router.post("/api/local/tags/add", async (req, res) => {
       tagValue = (CustomTag || "").trim();
     }
 
-    let existing = null;
-    if (type === "Anime") {
-      const strippedId = id.replace(/-(dub|sub|hsub|both)$/, "");
-      existing = global.db
-        .prepare(
-          `SELECT * FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
-        )
-        .get(
-          id,
-          `${strippedId}-sub`,
-          `${strippedId}-hsub`,
-          `${strippedId}-dub`,
-          `${strippedId}-both`,
-          id,
-          strippedId,
-        );
-    } else {
-      existing = global.db
-        .prepare(`SELECT * FROM Manga WHERE id = ? OR folder_name = ?`)
-        .get(id, id);
-    }
+    const existing = global.db
+      .prepare(`SELECT * FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ? OR folder_name = ?`)
+      .get(id, id);
 
     if (existing) {
       const updates = [];
@@ -411,10 +361,7 @@ router.post("/api/local/tags/add", async (req, res) => {
         const config = await settingfetch();
         if (resolvedProvider && resolvedProvider.provider) {
           if (type === "Anime") {
-            const lookupId =
-              resolvedProvider.provider_name === "pahe"
-                ? id
-                : id.replace(/-(dub|sub|hsub|both)$/, "");
+            const lookupId = id;
             const animedata = await animeinfo(
               resolvedProvider,
               config?.CustomDownloadLocation,
@@ -426,15 +373,8 @@ router.post("/api/local/tags/add", async (req, res) => {
               }
               values = {
                 ...values,
-                title: animedata.title
-                  ? animedata.title.replace(/-(dub|sub|hsub|both)$/, "")
-                  : "",
+                title: animedata.title ? animedata.title : "",
                 provider: resolvedProvider.provider_name,
-                subOrDub: id.endsWith("dub")
-                  ? "dub"
-                  : id.endsWith("hsub")
-                    ? "hsub"
-                    : "sub",
                 type: animedata.type ?? null,
                 description: animedata.description ?? null,
                 status: animedata.status ?? null,
@@ -896,18 +836,7 @@ router.post("/api/history/hide", async (req, res) => {
     }
 
     if (isAnime) {
-      let suffixIds = [];
-      queryIds.forEach((id) => {
-        suffixIds.push(id);
-        const stripped = id.replace(/-(dub|sub|hsub|both)$/, "");
-        suffixIds.push(
-          `${stripped}-sub`,
-          `${stripped}-hsub`,
-          `${stripped}-dub`,
-          `${stripped}-both`,
-        );
-      });
-      queryIds = Array.from(new Set(suffixIds));
+      queryIds = Array.from(new Set(queryIds));
     }
 
     const placeholders = queryIds.map(() => "?").join(",");
@@ -945,13 +874,6 @@ router.get("/api/history/progress", async (req, res) => {
 
     if (type === "Anime") {
       let queryIds = [mediaId];
-      const strippedId = mediaId.replace(/-(dub|sub|hsub|both)$/, "");
-      queryIds.push(
-        `${strippedId}-sub`,
-        `${strippedId}-hsub`,
-        `${strippedId}-dub`,
-        `${strippedId}-both`,
-      );
 
       let resolvedTitle = null;
       try {

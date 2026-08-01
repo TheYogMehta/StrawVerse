@@ -26,7 +26,6 @@ const tables = {
     id: "TEXT PRIMARY KEY",
     folder_name: "TEXT",
     title: "TEXT",
-    subOrDub: "TEXT",
     type: "TEXT",
     provider: "TEXT",
     description: "TEXT",
@@ -327,6 +326,70 @@ try {
   }
 } catch (e) {
   logger.error("[db] Failed to drop EpisodesDataId column: " + e.message);
+}
+
+// Drop unused subOrDub column from Anime table
+try {
+  const subOrDubCheck = global.db
+    .prepare("PRAGMA table_info(Anime)")
+    .all()
+    .map((col) => col.name);
+  if (subOrDubCheck.includes("subOrDub")) {
+    global.db.exec("ALTER TABLE Anime DROP COLUMN subOrDub");
+    logger.info("[db] Dropped unused subOrDub column from Anime table");
+  }
+} catch (e) {
+  logger.error("[db] Failed to drop subOrDub column: " + e.message);
+}
+
+try {
+  const suffixedRows = global.db
+    .prepare(
+      "SELECT id FROM Anime WHERE id LIKE '%-sub' OR id LIKE '%-dub' OR id LIKE '%-both' OR id LIKE '%-hsub'",
+    )
+    .all();
+  if (suffixedRows.length > 0) {
+    logger.info(
+      `[db migration] Found ${suffixedRows.length} Anime rows with sub/dub suffixes, migrating...`,
+    );
+    for (const row of suffixedRows) {
+      const oldId = row.id;
+      const newId = oldId.replace(/-(dub|sub|hsub|both)$/, "");
+      if (oldId === newId) continue;
+      const existing = global.db
+        .prepare("SELECT id FROM Anime WHERE id = ?")
+        .get(newId);
+      if (existing) {
+        global.db.prepare("DELETE FROM Anime WHERE id = ?").run(oldId);
+        logger.info(
+          `[db migration] Deleted duplicate suffixed row '${oldId}' (clean '${newId}' already exists)`,
+        );
+      } else {
+        global.db
+          .prepare("UPDATE Anime SET id = ? WHERE id = ?")
+          .run(newId, oldId);
+        logger.info(`[db migration] Anime id: '${oldId}' -> '${newId}'`);
+      }
+      try {
+        global.db
+          .prepare("UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?")
+          .run(newId, oldId);
+        global.db
+          .prepare("UPDATE SkipTimes SET anime_id = ? WHERE anime_id = ?")
+          .run(newId, oldId);
+        global.db
+          .prepare("UPDATE DownloadQueue SET id = ? WHERE id = ?")
+          .run(newId, oldId);
+      } catch (refErr) {
+        logger.error(
+          `[db migration] Error updating references for '${oldId}': ${refErr.message}`,
+        );
+      }
+    }
+    logger.info("[db migration] Suffix cleanup migration complete");
+  }
+} catch (e) {
+  logger.error("[db migration] Suffix cleanup error: " + e.message);
 }
 
 function updateTableSchema(tableName, expectedColumns) {

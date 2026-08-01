@@ -627,11 +627,14 @@ export default function VideoPlayer({
   // Helper to determine if an episode number is downloaded
   const isEpDownloaded = (num, currentLang = playerSubDub) => {
     if (!downloadedEpisodes) return false;
+    if (Array.isArray(downloadedEpisodes)) {
+      return downloadedEpisodes.map(Number).includes(Number(num));
+    }
     const subList = downloadedEpisodes.sub || [];
     const dubList = downloadedEpisodes.dub || [];
     return currentLang === "dub"
-      ? dubList.includes(Number(num))
-      : subList.includes(Number(num));
+      ? dubList.map(Number).includes(Number(num))
+      : subList.map(Number).includes(Number(num));
   };
 
   // Sort episodes list in ascending order to make Next/Prev predictable

@@ -3,8 +3,6 @@ const path = require("path");
 const fs = require("fs");
 const { logger, getLogs, clearLogs } = require("../utils/AppLogger");
 const { getQueue, updateQueue } = require("../utils/queue");
-const ImageCacheManager = require("../utils/ImageCacheManager");
-const { UpdateDiscordRPC } = require("../utils/discord");
 const { sendToRenderer } = require("../utils/rendererIPC");
 
 const router = express.Router();
@@ -108,16 +106,6 @@ router.post("/api/cache/clear", async (req, res) => {
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
-  }
-});
-
-// Reset Discord RPC to Idle
-router.post("/api/discord/reset", async (req, res) => {
-  try {
-    UpdateDiscordRPC().catch(() => {});
-    res.json({ success: true });
-  } catch (err) {
-    res.json({ success: false });
   }
 });
 

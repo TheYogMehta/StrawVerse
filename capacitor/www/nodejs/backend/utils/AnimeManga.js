@@ -14,15 +14,6 @@ const { sanitizeFolderName, getDownloadsFolder } = require("./DirectoryMaker");
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
 
-function resolveSubDubId(epId, subdub) {
-  if (!epId) return epId;
-  const strId = String(epId);
-  if (subdub && !strId.match(/-(sub|dub|hsub|both)$/)) {
-    return `${strId}-${subdub}`;
-  }
-  return strId;
-}
-
 async function enrichWithLibraryTags(type, items) {
   if (!items || !Array.isArray(items) || items.length === 0) return items;
 
@@ -34,9 +25,7 @@ async function enrichWithLibraryTags(type, items) {
       .filter((b) => b && b !== "undefined" && b !== "null");
     const cleanTitles = items
       .map((i) =>
-        i.title
-          ? i.title.toLowerCase().replace(/[^a-z0-9]/g, "")
-          : "",
+        i.title ? i.title.toLowerCase().replace(/[^a-z0-9]/g, "") : "",
       )
       .filter(Boolean);
 
@@ -45,8 +34,12 @@ async function enrichWithLibraryTags(type, items) {
     }
 
     const idPlaceholders = ids.length ? ids.map(() => "?").join(",") : "NULL";
-    const malPlaceholders = malIds.length ? malIds.map(() => "?").join(",") : "NULL";
-    const titlePlaceholders = cleanTitles.length ? cleanTitles.map(() => "?").join(",") : "NULL";
+    const malPlaceholders = malIds.length
+      ? malIds.map(() => "?").join(",")
+      : "NULL";
+    const titlePlaceholders = cleanTitles.length
+      ? cleanTitles.map(() => "?").join(",")
+      : "NULL";
 
     const sql = `
       SELECT id, MalID, title, folder_name, CustomTag FROM ${table} 
@@ -91,7 +84,9 @@ async function enrichWithLibraryTags(type, items) {
       const tag =
         matchById.get(item.id) ||
         matchByMal.get(String(item.malid || item.MalID || "")) ||
-        (item.title ? matchByTitle.get(item.title.toLowerCase().replace(/[^a-z0-9]/g, "")) : null);
+        (item.title
+          ? matchByTitle.get(item.title.toLowerCase().replace(/[^a-z0-9]/g, ""))
+          : null);
 
       if (tag) {
         item.CustomTag = tag;
@@ -116,7 +111,8 @@ async function latestAnime(provider, filters) {
   const cachedData = cache.get(cacheKey);
 
   if (cachedData) {
-    if (cachedData.results) await enrichWithLibraryTags("Anime", cachedData.results);
+    if (cachedData.results)
+      await enrichWithLibraryTags("Anime", cachedData.results);
     return cachedData;
   }
 
@@ -312,7 +308,8 @@ async function latestMangas(provider, Page = 1) {
   const cachedData = cache.get(cacheKey);
 
   if (cachedData) {
-    if (cachedData.results) await enrichWithLibraryTags("Manga", cachedData.results);
+    if (cachedData.results)
+      await enrichWithLibraryTags("Manga", cachedData.results);
     if (cachedData.data) await enrichWithLibraryTags("Manga", cachedData.data);
     return cachedData;
   }
@@ -334,8 +331,10 @@ async function MangaSearch(provider, MANGA_NAME, PAGE = 1) {
     const cachedData = cache.get(cacheKey);
 
     if (cachedData) {
-      if (cachedData.results) await enrichWithLibraryTags("Manga", cachedData.results);
-      if (cachedData.data) await enrichWithLibraryTags("Manga", cachedData.data);
+      if (cachedData.results)
+        await enrichWithLibraryTags("Manga", cachedData.results);
+      if (cachedData.data)
+        await enrichWithLibraryTags("Manga", cachedData.data);
       return cachedData;
     }
 
@@ -601,7 +600,10 @@ async function getProviderOrThrow(type, name) {
 
 async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
   if (!dbRecord || (!dbRecord.title && !dbRecord.folder_name)) return;
-  baseDir = (typeof baseDir === "string" && baseDir.trim()) ? baseDir : getDownloadsFolder();
+  baseDir =
+    typeof baseDir === "string" && baseDir.trim()
+      ? baseDir
+      : getDownloadsFolder();
 
   const title = dbRecord.title || dbRecord.folder_name;
   const newFolderName = sanitizeFolderName(title);
@@ -613,7 +615,6 @@ async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
     `${legacyBase}_sub`,
     `${legacyBase}_dub`,
     `${legacyBase}_hsub`,
-    dbRecord.subOrDub ? `${legacyBase}_${dbRecord.subOrDub}` : null,
     `${newFolderName}_sub`,
     `${newFolderName}_dub`,
     `${newFolderName}_hsub`,
@@ -646,7 +647,9 @@ async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
       try {
         if (global.db) {
           global.db
-            .prepare(`UPDATE ${type} SET folder_name = ?, CustomTag = ? WHERE id = ?`)
+            .prepare(
+              `UPDATE ${type} SET folder_name = ?, CustomTag = ? WHERE id = ?`,
+            )
             .run(newFolderName, tagJson, dbRecord.id);
         } else {
           await run(
@@ -669,7 +672,7 @@ async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
       try {
         await fs.promises.rename(legacyDir, newDir);
         logger.info(
-          `Auto-migrated folder for "${title}": "${legacyName}" -> "${newFolderName}"`,
+          `Auto-migrated folder for "${title}": "${dbRecord.folder_name}" -> "${newFolderName}"`,
         );
       } catch (err) {
         logger.error(
@@ -694,7 +697,9 @@ async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
       try {
         if (global.db) {
           global.db
-            .prepare(`UPDATE ${type} SET folder_name = ?, CustomTag = ? WHERE id = ?`)
+            .prepare(
+              `UPDATE ${type} SET folder_name = ?, CustomTag = ? WHERE id = ?`,
+            )
             .run(newFolderName, tagJson, dbRecord.id);
         } else {
           await run(
@@ -715,18 +720,17 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
   let typeDir = path.join(baseDir, type, id);
   if (fs.existsSync(typeDir)) return typeDir;
 
-  const idStripped = id.replace(/-(dub|sub|hsub|both)$/, "");
   let record = null;
 
   try {
     if (global.db) {
       record = global.db
-        .prepare(`SELECT * FROM ${type} WHERE id = ? OR id = ? OR id = ?`)
-        .get(subdub ? `${idStripped}-${subdub}` : id, id, idStripped);
+        .prepare(`SELECT * FROM ${type} WHERE id = ?`)
+        .get(id);
     } else {
       record = await queryOne(
-        `SELECT * FROM ${type} WHERE id = ? OR id = ? OR id = ?`,
-        [subdub ? `${idStripped}-${subdub}` : id, id, idStripped],
+        `SELECT * FROM ${type} WHERE id = ?`,
+        [id],
       );
     }
   } catch (_) {}
@@ -758,5 +762,4 @@ module.exports = {
   getProviderOrThrow,
   resolveDownloadFolder,
   migrateLegacyFolderIfNeeded,
-  resolveSubDubId,
 };

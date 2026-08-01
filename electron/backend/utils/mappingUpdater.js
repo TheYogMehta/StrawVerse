@@ -44,8 +44,8 @@ function deserializeDelta(buffer) {
 
   const tblRevMap = {
     1: "anime",
-    2: "animepahe",
-    3: "anikototv",
+    2: "pahe",
+    3: "anikoto",
     4: "anineko",
     5: "manga",
     6: "weebcentral",
@@ -115,8 +115,8 @@ async function checkForMappingUpdates() {
 
   const missingTables =
     !tableExists("anime") ||
-    !tableExists("animepahe") ||
-    !tableExists("anikototv") ||
+    !tableExists("pahe") ||
+    !tableExists("anikoto") ||
     !tableExists("anineko") ||
     !tableExists("manga") ||
     !tableExists("weebcentral") ||
@@ -345,16 +345,16 @@ async function checkForMappingUpdates() {
         global.mappingDb.prepare("BEGIN").run();
         try {
           const stmtInsertAnime = global.mappingDb.prepare(
-            "INSERT OR REPLACE INTO anime (malid, livechart_id) VALUES (?, ?)",
+            "INSERT OR REPLACE INTO anime (malid, livechart_id, image_url) VALUES (?, ?, ?)",
           );
           const stmtInsertManga = global.mappingDb.prepare(
             "INSERT OR REPLACE INTO manga (malid) VALUES (?)",
           );
-          const stmtInsertAnimepahe = global.mappingDb.prepare(
-            "INSERT OR REPLACE INTO animepahe (id, uuid, malid) VALUES (?, ?, ?)",
+          const stmtInsertPahe = global.mappingDb.prepare(
+            "INSERT OR REPLACE INTO pahe (id, uuid, malid) VALUES (?, ?, ?)",
           );
-          const stmtInsertAnikototv = global.mappingDb.prepare(
-            "INSERT OR REPLACE INTO anikototv (id, malid) VALUES (?, ?)",
+          const stmtInsertAnikoto = global.mappingDb.prepare(
+            "INSERT OR REPLACE INTO anikoto (id, malid) VALUES (?, ?)",
           );
           const stmtInsertAnineko = global.mappingDb.prepare(
             "INSERT OR REPLACE INTO anineko (id, malid) VALUES (?, ?)",
@@ -381,17 +381,18 @@ async function checkForMappingUpdates() {
                 stmtInsertAnime.run(
                   parsedData.malid ?? null,
                   parsedData.livechart_id ?? null,
+                  parsedData.image_url ?? null,
                 );
               } else if (tbl === "manga") {
                 stmtInsertManga.run(parsedData.malid ?? null);
-              } else if (tbl === "animepahe") {
-                stmtInsertAnimepahe.run(
+              } else if (tbl === "pahe") {
+                stmtInsertPahe.run(
                   parsedData.id ?? null,
                   parsedData.uuid ?? null,
                   parsedData.malid ?? null,
                 );
-              } else if (tbl === "anikototv") {
-                stmtInsertAnikototv.run(
+              } else if (tbl === "anikoto") {
+                stmtInsertAnikoto.run(
                   parsedData.id ?? null,
                   parsedData.malid ?? null,
                 );
@@ -488,54 +489,104 @@ function syncLibraryIdsWithMapping() {
       .prepare("SELECT id, malid, provider FROM Anime")
       .all();
     for (const anime of localAnimeList) {
-      if (!anime.malid) continue;
+      let malid = anime.malid ? Number(anime.malid) : null;
       const provider = (anime.provider || "").toLowerCase();
+
+      // If malid is missing, attempt resolution from mappingDb using anime.id
+      if (!malid) {
+        try {
+          const malRow = global.mappingDb
+            .prepare(
+              `
+              SELECT malid FROM pahe WHERE id = ? OR uuid = ?
+              UNION ALL
+              SELECT malid FROM anikoto WHERE id = ?
+              UNION ALL
+              SELECT malid FROM anineko WHERE id = ?
+              LIMIT 1
+            `,
+            )
+            .get(anime.id, anime.id, anime.id, anime.id);
+          if (malRow && malRow.malid) {
+            malid = Number(malRow.malid);
+            global.db
+              .prepare("UPDATE Anime SET MalID = ? WHERE id = ? OR id LIKE ?")
+              .run(String(malid), anime.id, `${anime.id}-%`);
+          }
+        } catch (_) {}
+      }
+
       let targetTable = "";
       let useUuid = false;
 
-      if (provider === "pahe") {
-        targetTable = "animepahe";
+      if (provider.includes("pahe")) {
+        targetTable = "pahe";
         useUuid = true;
-      } else if (provider === "anikoto") {
-        targetTable = "anikototv";
-      } else if (provider === "anineko") {
+      } else if (provider.includes("anikoto")) {
+        targetTable = "anikoto";
+      } else if (provider.includes("anineko")) {
         targetTable = "anineko";
+      } else {
+        targetTable = "pahe";
+        useUuid = true;
       }
 
       if (targetTable) {
-        const query = useUuid
-          ? `SELECT id, uuid FROM ${targetTable} WHERE malid = ? LIMIT 1`
-          : `SELECT id FROM ${targetTable} WHERE malid = ? LIMIT 1`;
+        let targetRow = null;
+        if (malid) {
+          const query = useUuid
+            ? `SELECT id, uuid, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`
+            : `SELECT id, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`;
+          targetRow = global.mappingDb.prepare(query).get(malid);
+        }
+        if (!targetRow) {
+          const query = useUuid
+            ? `SELECT id, uuid, malid FROM ${targetTable} WHERE id = ? OR uuid = ? LIMIT 1`
+            : `SELECT id, malid FROM ${targetTable} WHERE id = ? LIMIT 1`;
+          targetRow = useUuid
+            ? global.mappingDb.prepare(query).get(anime.id, anime.id)
+            : global.mappingDb.prepare(query).get(anime.id);
+        }
 
-        const targetRow = global.mappingDb
-          .prepare(query)
-          .get(Number(anime.malid));
         if (targetRow) {
           const latestId = useUuid
             ? targetRow.uuid || targetRow.id
             : targetRow.id;
-          const cleanId = anime.id.replace(/-(sub|dub|hsub|both)$/, "");
-          if (latestId && latestId !== cleanId) {
+          if (latestId && latestId !== anime.id) {
             global.db
               .prepare(
                 "UPDATE OR REPLACE Anime SET id = REPLACE(id, ?, ?) WHERE id = ? OR id LIKE ?",
               )
-              .run(cleanId, latestId, cleanId, `${cleanId}-%`);
+              .run(anime.id, latestId, anime.id, `${anime.id}-%`);
 
             global.db
               .prepare(
                 "UPDATE WatchHistory SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?",
               )
-              .run(cleanId, latestId, cleanId, `${cleanId}-%`);
+              .run(anime.id, latestId, anime.id, `${anime.id}-%`);
 
             global.db
               .prepare(
                 "UPDATE SkipTimes SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?",
               )
-              .run(cleanId, latestId, cleanId, `${cleanId}-%`);
+              .run(anime.id, latestId, anime.id, `${anime.id}-%`);
+
+            try {
+              global.db
+                .prepare(
+                  "UPDATE unlinked_mal_ids SET id = REPLACE(id, ?, ?) WHERE id = ? OR id LIKE ?",
+                )
+                .run(anime.id, latestId, anime.id, `${anime.id}-%`);
+            } catch (_) {}
+
+            if (targetRow.malid && !anime.malid) {
+              global.db
+                .prepare("UPDATE Anime SET MalID = ? WHERE id = ? OR id LIKE ?")
+                .run(String(targetRow.malid), latestId, `${latestId}-%`);
+            }
 
             logger.info(
-              `[mappingUpdater] Automatically synced local Anime ID from ${cleanId} to ${latestId} to match updated mapping`,
+              `[mappingUpdater] Automatically synced local Anime ID from ${anime.id} to ${latestId} to match updated mapping`,
             );
           }
         }
@@ -547,38 +598,79 @@ function syncLibraryIdsWithMapping() {
       .prepare("SELECT id, malid, provider FROM Manga")
       .all();
     for (const manga of localMangaList) {
-      if (!manga.malid) continue;
+      let malid = manga.malid ? Number(manga.malid) : null;
       const provider = (manga.provider || "").toLowerCase();
-      let targetTable = "";
 
+      if (!malid) {
+        try {
+          const malRow = global.mappingDb
+            .prepare(
+              `
+              SELECT malid FROM weebcentral WHERE id = ?
+              UNION ALL
+              SELECT malid FROM allmanga WHERE id = ?
+              LIMIT 1
+            `,
+            )
+            .get(manga.id, manga.id);
+          if (malRow && malRow.malid) {
+            malid = Number(malRow.malid);
+            global.db
+              .prepare("UPDATE Manga SET MalID = ? WHERE id = ?")
+              .run(String(malid), manga.id);
+          }
+        } catch (_) {}
+      }
+
+      let targetTable = "";
       if (provider.includes("weebcentral")) {
         targetTable = "weebcentral";
       } else if (provider.includes("allmanga")) {
         targetTable = "allmanga";
+      } else {
+        targetTable = "weebcentral";
       }
 
       if (targetTable) {
-        const targetRow = global.mappingDb
-          .prepare(`SELECT id FROM ${targetTable} WHERE malid = ? LIMIT 1`)
-          .get(Number(manga.malid));
+        let targetRow = null;
+        if (malid) {
+          targetRow = global.mappingDb
+            .prepare(
+              `SELECT id, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`,
+            )
+            .get(malid);
+        }
+        if (!targetRow) {
+          targetRow = global.mappingDb
+            .prepare(
+              `SELECT id, malid FROM ${targetTable} WHERE id = ? LIMIT 1`,
+            )
+            .get(manga.id);
+        }
+
         if (targetRow) {
           const latestId = targetRow.id;
-          const cleanId = manga.id;
-          if (latestId && latestId !== cleanId) {
+          if (latestId && latestId !== manga.id) {
             global.db
               .prepare(
                 "UPDATE OR REPLACE Manga SET id = REPLACE(id, ?, ?) WHERE id = ?",
               )
-              .run(cleanId, latestId, cleanId);
+              .run(manga.id, latestId, manga.id);
 
             global.db
               .prepare(
                 "UPDATE ReadHistory SET manga_id = REPLACE(manga_id, ?, ?) WHERE manga_id = ?",
               )
-              .run(cleanId, latestId, cleanId);
+              .run(manga.id, latestId, manga.id);
+
+            if (targetRow.malid && !manga.malid) {
+              global.db
+                .prepare("UPDATE Manga SET MalID = ? WHERE id = ?")
+                .run(String(targetRow.malid), latestId);
+            }
 
             logger.info(
-              `[mappingUpdater] Automatically synced local Manga ID from ${cleanId} to ${latestId} to match updated mapping`,
+              `[mappingUpdater] Automatically synced local Manga ID from ${manga.id} to ${latestId} to match updated mapping`,
             );
           }
         }

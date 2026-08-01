@@ -35,7 +35,6 @@ const VIDEO_EXTENSIONS = [
 function formatFallbackTitle(str) {
   if (!str) return "Untitled";
   return str
-    .replace(/-(sub|dub|hsub|both)$/i, "")
     .replace(/[^a-zA-Z0-9]/g, " ")
     .split(/\s+/)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -47,8 +46,6 @@ function cleanStringForMatching(s) {
   if (!s) return "";
   return s
     .toLowerCase()
-    .replace(/\s+(sub|dub|hsub|both|sub\/dub)$/i, "")
-    .replace(/-(sub|dub|hsub|both)$/i, "")
     .replace(/-[a-z0-9]{5}$/i, "")
     .replace(/[^a-z0-9]/g, " ")
     .replace(/\s+/g, " ")
@@ -80,12 +77,12 @@ async function getMalIdFromMapping(type, providerName, cleanId) {
     if (type === "Anime") {
       if (name.includes("pahe")) {
         row = await mappingQueryOne(
-          "SELECT malid FROM animepahe WHERE id = ? OR uuid = ? LIMIT 1",
+          "SELECT malid FROM pahe WHERE id = ? OR uuid = ? LIMIT 1",
           [cleanId, cleanId],
         );
       } else if (name.includes("anikoto")) {
         row = await mappingQueryOne(
-          "SELECT malid FROM anikototv WHERE id = ? OR id LIKE ? LIMIT 1",
+          "SELECT malid FROM anikoto WHERE id = ? OR id LIKE ? LIMIT 1",
           [cleanId, `${cleanId}%`],
         );
       } else if (name.includes("anineko")) {
@@ -98,9 +95,9 @@ async function getMalIdFromMapping(type, providerName, cleanId) {
       if (!row) {
         row = await mappingQueryOne(
           `
-            SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
+            SELECT malid FROM pahe WHERE id = ? OR uuid = ?
             UNION
-            SELECT malid FROM anikototv WHERE id = ? OR id LIKE ?
+            SELECT malid FROM anikoto WHERE id = ? OR id LIKE ?
             UNION
             SELECT malid FROM anineko WHERE id = ? OR id LIKE ?
             LIMIT 1
@@ -147,11 +144,10 @@ async function MetadataAdd(type, valuesToAdd) {
   }
 
   if (!valuesToAdd.MalID || valuesToAdd.MalID === "") {
-    const cleanId = valuesToAdd.id.replace(/-(dub|sub|hsub|both)$/, "");
     try {
       const customMappingRow = await queryOne(
         "SELECT malid FROM unlinked_mal_ids WHERE id = ?",
-        [cleanId],
+        [valuesToAdd.id],
       );
 
       if (customMappingRow) {
@@ -162,7 +158,7 @@ async function MetadataAdd(type, valuesToAdd) {
         const malId = await getMalIdFromMapping(
           type,
           valuesToAdd.provider,
-          cleanId,
+          valuesToAdd.id,
         );
         if (malId) {
           valuesToAdd.MalID = String(malId);
@@ -396,7 +392,10 @@ function resolveLocalFolder(metadata, folderSet, type) {
 
 // Get All Metadata
 async function getAllMetadata(type, baseDir, page = 1, tag = null) {
-  baseDir = (typeof baseDir === "string" && baseDir.trim()) ? baseDir : getDownloadsFolder();
+  baseDir =
+    typeof baseDir === "string" && baseDir.trim()
+      ? baseDir
+      : getDownloadsFolder();
   if (!tables[type]) {
     throw new Error(`Invalid table: ${type}`);
   }
@@ -689,8 +688,7 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
           GROUP BY anime_id
         `);
         watchRows.forEach((r) => {
-          const strippedId = r.anime_id.replace(/-(dub|sub|hsub|both)$/, "");
-          watchMap[strippedId] = (watchMap[strippedId] || 0) + r.count;
+          watchMap[r.anime_id] = (watchMap[r.anime_id] || 0) + r.count;
         });
       } catch (e) {}
     }
@@ -1167,14 +1165,16 @@ async function extractSubtitlesFromVideo(videoPath, epNum) {
 
 // Get Local Source By id
 async function getSourceById(type, baseDir, id, number, subdub) {
-  baseDir = (typeof baseDir === "string" && baseDir.trim()) ? baseDir : getDownloadsFolder();
+  baseDir =
+    typeof baseDir === "string" && baseDir.trim()
+      ? baseDir
+      : getDownloadsFolder();
   if (!tables[type]) {
     throw new Error(`Invalid table: ${type}`);
   }
 
   let folder_name = id;
   let malId = null;
-  let mainSubOrDub = null;
   try {
     const metadata = await queryOne(`SELECT * FROM ${type} WHERE id = ?`, [id]);
     if (metadata) {
@@ -1183,7 +1183,6 @@ async function getSourceById(type, baseDir, id, number, subdub) {
         metadata.folder_name ||
         (metadata.title ? sanitizeFolderName(metadata.title) : id);
       malId = metadata.MalID;
-      mainSubOrDub = metadata.subOrDub;
     }
   } catch (err) {
     // ignore
@@ -1211,38 +1210,20 @@ async function getSourceById(type, baseDir, id, number, subdub) {
     };
 
     let dirsToSearch = [];
-    if (!subdub || mainSubOrDub === subdub) {
-      dirsToSearch.push(folderPath);
-    }
+    dirsToSearch.push(folderPath);
 
     if (malId) {
       try {
         const linked = await queryAll(
-          `SELECT folder_name, subOrDub FROM ${type} WHERE MalID = ?`,
+          `SELECT folder_name FROM ${type} WHERE MalID = ?`,
           [String(malId)],
         );
 
-        if (subdub) {
-          linked.forEach((r) => {
-            if (r.subOrDub === subdub && r.folder_name !== folder_name) {
-              dirsToSearch.push(path.join(baseDir, type, r.folder_name));
-            }
-          });
-          if (mainSubOrDub !== subdub) {
-            dirsToSearch.push(folderPath);
+        linked.forEach((r) => {
+          if (r.folder_name !== folder_name) {
+            dirsToSearch.push(path.join(baseDir, type, r.folder_name));
           }
-          linked.forEach((r) => {
-            if (r.subOrDub !== subdub && r.folder_name !== folder_name) {
-              dirsToSearch.push(path.join(baseDir, type, r.folder_name));
-            }
-          });
-        } else {
-          linked.forEach((r) => {
-            if (r.folder_name !== folder_name) {
-              dirsToSearch.push(path.join(baseDir, type, r.folder_name));
-            }
-          });
-        }
+        });
       } catch (err) {
         if (!dirsToSearch.includes(folderPath)) {
           dirsToSearch.push(folderPath);
@@ -1345,55 +1326,28 @@ async function getSourceById(type, baseDir, id, number, subdub) {
 
 // find mapping ids
 async function FindMapping(type, AnimeMangaid, malid, dir) {
-  dir = (typeof dir === "string" && dir.trim()) ? dir : getDownloadsFolder();
+  dir = typeof dir === "string" && dir.trim() ? dir : getDownloadsFolder();
   try {
     let data = {};
 
     // if logged in mal && Anime
     if (type === "Anime") {
-      const cleanId = AnimeMangaid?.replace(/-(dub|sub|hsub|both)$/, "");
-      const searchTerms = Array.from(
-        new Set([
-          `${cleanId}-sub`,
-          `${cleanId}-hsub`,
-          `${cleanId}-dub`,
-          `${cleanId}-both`,
-          AnimeMangaid,
-          cleanId,
-          sanitizeFolderName(AnimeMangaid),
-          sanitizeFolderName(cleanId),
-          String(cleanId).replace(/[^a-zA-Z0-9]/g, "_"),
-        ]),
-      ).filter(Boolean);
+      data.DownloadedEpisodes = [];
 
       try {
         let FoundRow = null;
         if (malid) {
-          FoundRow = await queryOne(`SELECT * FROM Anime WHERE MalID = ? LIMIT 1`, [String(malid)]);
+          FoundRow = await queryOne(
+            `SELECT * FROM Anime WHERE MalID = ? LIMIT 1`,
+            [String(malid)],
+          );
         }
 
         if (!FoundRow) {
-          const placeholders = searchTerms.map(() => "?").join(",");
-          const querySql = `
-            SELECT * FROM Anime 
-            WHERE id IN (${placeholders}) 
-               OR folder_name IN (${placeholders}) 
-               OR id = ? 
-               OR id LIKE ? 
-               OR folder_name = ? 
-               OR LOWER(REPLACE(folder_name, ' ', '-')) = LOWER(?) 
-               OR LOWER(REPLACE(title, ' ', '-')) LIKE LOWER(?)
-            LIMIT 1
-          `;
-          FoundRow = await queryOne(querySql, [
-            ...searchTerms,
-            ...searchTerms,
-            cleanId,
-            `${cleanId}%`,
-            cleanId,
-            cleanId,
-            `${cleanId}%`,
-          ]);
+          FoundRow = await queryOne(
+            `SELECT * FROM Anime WHERE id = ? OR folder_name = ? OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?) LIMIT 1`,
+            [AnimeMangaid, AnimeMangaid, AnimeMangaid],
+          );
         }
 
         if (FoundRow) {
@@ -1404,6 +1358,18 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
         if (!malid) {
           data.malid = FoundRow?.MalID ? parseInt(FoundRow.MalID) : null;
+          if (!data.malid && FoundRow?.id) {
+            const resolvedMalId = await getMalIdFromMapping(type, FoundRow.provider, FoundRow.id);
+            if (resolvedMalId) {
+              data.malid = parseInt(resolvedMalId);
+              try {
+                await run("UPDATE Anime SET MalID = ? WHERE id = ?", [
+                  String(resolvedMalId),
+                  FoundRow.id,
+                ]);
+              } catch (_) {}
+            }
+          }
         } else {
           data.malid = malid;
         }
@@ -1415,21 +1381,23 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             [String(data.malid)],
           );
 
-          data = {
-            ...data,
-            totalEpisodes:
-              MalInfo?.totalEpisodes > 0
-                ? MalInfo.totalEpisodes
-                : MalInfo?.lastEpisode
-                  ? MalInfo.lastEpisode
-                  : 0,
-            lastEpisode: MalInfo.lastEpisode ?? null,
-            watched: MalInfo.watched ?? 0,
-            status: MalInfo.status ?? "",
-          };
+          if (MalInfo) {
+            data = {
+              ...data,
+              totalEpisodes:
+                MalInfo.totalEpisodes > 0
+                  ? MalInfo.totalEpisodes
+                  : MalInfo.lastEpisode
+                    ? MalInfo.lastEpisode
+                    : 0,
+              lastEpisode: MalInfo.lastEpisode ?? null,
+              watched: MalInfo.watched ?? 0,
+              status: MalInfo.status ?? "",
+            };
+          }
         }
       } catch (err) {
-        // ignore
+        logger.error(`[FindMapping DB Error] ${err.message}`);
       }
 
       // Finding If Its Downloaded
@@ -1441,34 +1409,18 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           ]);
         }
         if (Downloads.length === 0) {
-          const placeholders = searchTerms.map(() => "?").join(",");
-          const dlQuery = `
-            SELECT * FROM Anime 
-            WHERE id IN (${placeholders}) 
-               OR folder_name IN (${placeholders}) 
-               OR id = ? 
-               OR id LIKE ? 
-               OR folder_name = ? 
-               OR LOWER(REPLACE(folder_name, ' ', '-')) = LOWER(?) 
-               OR LOWER(REPLACE(title, ' ', '-')) LIKE LOWER(?)
-          `;
-          Downloads = await queryAll(dlQuery, [
-            ...searchTerms,
-            ...searchTerms,
-            cleanId,
-            `${cleanId}%`,
-            cleanId,
-            cleanId,
-            `${cleanId}%`,
-          ]);
+          Downloads = await queryAll(
+            `SELECT * FROM Anime WHERE id = ? OR folder_name = ? OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?)`,
+            [AnimeMangaid, AnimeMangaid, AnimeMangaid],
+          );
         }
 
         if (Downloads?.length > 0) {
           const mainDownload =
             Downloads.find(
               (d) =>
-                searchTerms.includes(d.id) ||
-                (d.folder_name && searchTerms.includes(d.folder_name)),
+                d.id === AnimeMangaid ||
+                (d.folder_name && d.folder_name === AnimeMangaid),
             ) || Downloads[0];
 
           mainDownload.dataId = mainDownload?.EpisodesDataId;
@@ -1486,42 +1438,21 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             ...mainDownload,
             title: baseTitle,
             image: baseImage,
-            DownloadedEpisodes: {
-              sub: [],
-              dub: [],
-            },
+            DownloadedEpisodes: [],
             ...data,
           };
 
           for (const SubDub of Downloads) {
             await migrateLegacyFolderIfNeeded("Anime", SubDub, dir);
-            const baseFolder =
+            const folderName =
               SubDub.folder_name || `${sanitizeFolderName(SubDub.title)}`;
-            let folderName = baseFolder;
-            let folderExists = fs.existsSync(
-              path.join(dir, "Anime", folderName),
-            );
-
-            if (!folderExists) {
-              const suffixes = ["_sub", "_dub", "_hsub"];
-              for (const suffix of suffixes) {
-                const checkFolder = `${baseFolder}${suffix}`;
-                if (fs.existsSync(path.join(dir, "Anime", checkFolder))) {
-                  folderName = checkFolder;
-                  folderExists = true;
-                  break;
-                }
-              }
-            }
-
             const folderPath = path.join(dir, "Anime", folderName);
+            const folderExists = fs.existsSync(folderPath);
 
             if (folderExists) {
               const filesAndFolders = await fs.promises.readdir(folderPath, {
                 withFileTypes: true,
               });
-
-              const resolvedSubDub = SubDub.subOrDub || "sub";
 
               const scanned = filesAndFolders
                 .filter((file) => file.isFile())
@@ -1529,43 +1460,19 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
                 .filter((num) => num !== null && !isNaN(num))
                 .sort((a, b) => a - b);
 
-              data.DownloadedEpisodes[resolvedSubDub] = Array.from(
+              data.DownloadedEpisodes = Array.from(
                 new Set([
-                  ...(data.DownloadedEpisodes[resolvedSubDub] || []),
+                  ...(Array.isArray(data.DownloadedEpisodes)
+                    ? data.DownloadedEpisodes
+                    : []),
                   ...scanned,
                 ]),
               ).sort((a, b) => a - b);
             }
           }
-        } else {
-          const folderPath = path.join(dir, "Anime", AnimeMangaid);
-
-          if (fs.existsSync(folderPath)) {
-            const filesAndFolders = await fs.promises.readdir(folderPath, {
-              withFileTypes: true,
-            });
-
-            data = {
-              title: AnimeMangaid,
-              folder_name: AnimeMangaid,
-              id: AnimeMangaid,
-              type: "Anime",
-              provider: "local source",
-              DownloadedEpisodes: {
-                sub: [],
-                dub: [],
-              },
-            };
-
-            data.DownloadedEpisodes["sub"] = filesAndFolders
-              .filter((file) => file.isFile())
-              .map((file) => getEpisodeNumberFromFilename(file.name))
-              .filter((num) => num !== null && !isNaN(num))
-              .sort((a, b) => a - b);
-          }
         }
       } catch (err) {
-        // ignore
+        logger.error(`[FindMapping FS Error] ${err.message}`);
       }
     } else {
       try {
@@ -1574,7 +1481,10 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
         let mainRecord = null;
         if (malIdToUse) {
-          mainRecord = await queryOne("SELECT * FROM Manga WHERE MalID = ? LIMIT 1", [String(malIdToUse)]);
+          mainRecord = await queryOne(
+            "SELECT * FROM Manga WHERE MalID = ? LIMIT 1",
+            [String(malIdToUse)],
+          );
         }
         if (!mainRecord) {
           const querySql = `

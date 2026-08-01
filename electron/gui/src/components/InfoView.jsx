@@ -104,7 +104,14 @@ export default function InfoView({
     const num = parseFloat(itemNum);
     if (isNaN(num)) return false;
     if (type === "Anime") {
-      const list = details?.DownloadedEpisodes?.[subdub] || [];
+      const episodes = details?.DownloadedEpisodes;
+      const list = Array.isArray(episodes)
+        ? episodes
+        : [
+            ...(episodes?.sub || []),
+            ...(episodes?.dub || []),
+            ...(episodes?.hsub || []),
+          ];
       return list.map(Number).includes(num);
     } else {
       const list = details?.DownloadedChapters || [];
@@ -113,21 +120,16 @@ export default function InfoView({
   };
 
   const isItemFullyDownloaded = (item) => {
-    if (type !== "Anime") {
-      return isDownloaded(item.number, "sub");
-    }
-    if (dubSelect === "sub") {
-      return isDownloaded(item.number, "sub");
-    } else if (dubSelect === "dub") {
-      return isDownloaded(item.number, "dub");
-    }
-    return false;
+    return isDownloaded(item.number);
   };
 
   const hasDownloads =
     type === "Anime"
-      ? details?.DownloadedEpisodes?.sub?.length > 0 ||
-        details?.DownloadedEpisodes?.dub?.length > 0
+      ? Array.isArray(details?.DownloadedEpisodes)
+        ? details.DownloadedEpisodes.length > 0
+        : (details?.DownloadedEpisodes?.sub?.length || 0) +
+            (details?.DownloadedEpisodes?.dub?.length || 0) >
+          0
       : details?.DownloadedChapters?.length > 0;
 
   // MAL Status Sync form states
@@ -338,12 +340,16 @@ export default function InfoView({
   };
 
   const hasAutoPlayed = useRef(false);
+  const lastFetchedKeyRef = useRef(null);
 
   const fetchDetails = async (isInitial = false) => {
     if (isInitial) {
       setLoading(true);
     }
     try {
+      const currentKey = `${id}_${type}_${localMalProvider}`;
+      lastFetchedKeyRef.current = currentKey;
+
       const response = await fetch(`/api/info/${type}/${localMalProvider}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -351,10 +357,13 @@ export default function InfoView({
       });
       const data = await response.json();
       setDetails(data);
-      if (data && data.id && data.id !== id) {
-        setId(data.id);
+      if (data && data.id) {
+        if (data.id !== id) {
+          setId(data.id);
+        }
       }
       if (data && data.provider && data.provider !== localMalProvider) {
+        lastFetchedKeyRef.current = `${id}_${type}_${data.provider}`;
         setLocalMalProvider(data.provider);
       }
 
@@ -403,40 +412,6 @@ export default function InfoView({
         }
       }
       setCurrentTags(parsedTags);
-
-      let hasDownloadsOnDisk = false;
-      if (type === "Anime") {
-        const subList = data?.DownloadedEpisodes?.sub || [];
-        const dubList = data?.DownloadedEpisodes?.dub || [];
-        hasDownloadsOnDisk = subList.length > 0 || dubList.length > 0;
-      } else {
-        const chList = data?.DownloadedChapters || [];
-        hasDownloadsOnDisk = chList.length > 0;
-      }
-
-      const isDownloadsTag = parsedTags[0] === "Downloads";
-      if (isDownloadsTag && !hasDownloadsOnDisk) {
-        try {
-          const dlRes = await fetch("/downloads", { method: "POST" });
-          const dlData = await dlRes.json();
-          const activeId = dlData?.id;
-          const isQueued = (dlData?.queue || []).some(
-            (item) =>
-              String(item.id) === String(id) ||
-              String(item.id) === String(data?.id),
-          );
-          const isActive =
-            String(activeId) === String(id) ||
-            String(activeId) === String(data?.id);
-
-          if (!isQueued && !isActive) {
-            await saveTags("");
-            triggerPulse();
-          }
-        } catch (dlErr) {
-          console.error("Failed to check active downloads", dlErr);
-        }
-      }
 
       // Fetch custom tags
       const tagsRes = await fetch(`/api/local/tags/view/${type}`);
@@ -490,8 +465,10 @@ export default function InfoView({
       if (data?.DownloadedEpisodes || data?.DownloadedChapters) {
         setDetails((prev) => ({
           ...prev,
-          DownloadedEpisodes: data.DownloadedEpisodes || prev?.DownloadedEpisodes,
-          DownloadedChapters: data.DownloadedChapters || prev?.DownloadedChapters,
+          DownloadedEpisodes:
+            data.DownloadedEpisodes || prev?.DownloadedEpisodes,
+          DownloadedChapters:
+            data.DownloadedChapters || prev?.DownloadedChapters,
         }));
       }
 
@@ -540,11 +517,12 @@ export default function InfoView({
 
   const fallbackToDownloaded = (targetDetails = details) => {
     if (type === "Anime") {
-      const subList = targetDetails?.DownloadedEpisodes?.sub || [];
-      const dubList = targetDetails?.DownloadedEpisodes?.dub || [];
-      const allNums = Array.from(new Set([...subList, ...dubList])).sort(
-        (a, b) => a - b,
-      );
+      const dl = targetDetails?.DownloadedEpisodes;
+      const subList = Array.isArray(dl) ? dl : dl?.sub || [];
+      const dubList = Array.isArray(dl) ? dl : dl?.dub || [];
+      const allNums = Array.from(new Set([...subList, ...dubList]))
+        .map(Number)
+        .sort((a, b) => a - b);
       if (allNums.length > 0) {
         const localEps = allNums.map((num) => ({
           id: `local-ep-${num}`,
@@ -592,12 +570,12 @@ export default function InfoView({
 
   const playItem = (targetItem) => {
     if (type === "Anime") {
-      const subList = details?.DownloadedEpisodes?.sub || [];
-      const dubList = details?.DownloadedEpisodes?.dub || [];
-      const isDownloadedLocal =
-        dubSelect === "dub"
-          ? dubList.includes(Number(targetItem.number))
-          : subList.includes(Number(targetItem.number));
+      const dl = details?.DownloadedEpisodes;
+      const isDownloadedLocal = Array.isArray(dl)
+        ? dl.map(Number).includes(Number(targetItem.number))
+        : dubSelect === "dub"
+          ? (dl?.dub || []).map(Number).includes(Number(targetItem.number))
+          : (dl?.sub || []).map(Number).includes(Number(targetItem.number));
 
       onWatch(
         id,
@@ -657,6 +635,10 @@ export default function InfoView({
   }, []);
 
   useEffect(() => {
+    const currentKey = `${id}_${type}_${localMalProvider}`;
+    if (lastFetchedKeyRef.current === currentKey) {
+      return;
+    }
     fetchDetails(true);
   }, [id, type, localMalProvider]);
 
@@ -705,15 +687,6 @@ export default function InfoView({
       };
     }
   }, [id, type]);
-
-  // Sync dubSelect automatically with details.subOrDub
-  useEffect(() => {
-    if (details && type === "Anime") {
-      if (details.subOrDub === "sub" || details.subOrDub === "dub") {
-        setDubSelect(details.subOrDub);
-      }
-    }
-  }, [details, type]);
 
   // Reset selection when switching dubSelect
   useEffect(() => {
@@ -773,8 +746,10 @@ export default function InfoView({
   const hasAnyDownloads = useMemo(() => {
     if (!details) return false;
     if (type === "Anime") {
-      const subList = details.DownloadedEpisodes?.sub || [];
-      const dubList = details.DownloadedEpisodes?.dub || [];
+      const dl = details.DownloadedEpisodes;
+      if (Array.isArray(dl)) return dl.length > 0;
+      const subList = dl?.sub || [];
+      const dubList = dl?.dub || [];
       return subList.length > 0 || dubList.length > 0;
     } else {
       const chList = details.DownloadedChapters || [];
@@ -1007,12 +982,12 @@ export default function InfoView({
     if (sorted.length > 0) {
       const targetItem = sorted[0];
       if (type === "Anime") {
-        const subList = details?.DownloadedEpisodes?.sub || [];
-        const dubList = details?.DownloadedEpisodes?.dub || [];
-        const isDownloadedLocal =
-          dubSelect === "dub"
-            ? dubList.includes(Number(targetItem.number))
-            : subList.includes(Number(targetItem.number));
+        const dl = details?.DownloadedEpisodes;
+        const isDownloadedLocal = Array.isArray(dl)
+          ? dl.map(Number).includes(Number(targetItem.number))
+          : dubSelect === "dub"
+            ? (dl?.dub || []).map(Number).includes(Number(targetItem.number))
+            : (dl?.sub || []).map(Number).includes(Number(targetItem.number));
 
         onWatch(
           id,
@@ -1051,12 +1026,12 @@ export default function InfoView({
     if (sorted.length > 0) {
       const targetItem = sorted[sorted.length - 1];
       if (type === "Anime") {
-        const subList = details?.DownloadedEpisodes?.sub || [];
-        const dubList = details?.DownloadedEpisodes?.dub || [];
-        const isDownloadedLocal =
-          dubSelect === "dub"
-            ? dubList.includes(Number(targetItem.number))
-            : subList.includes(Number(targetItem.number));
+        const dl = details?.DownloadedEpisodes;
+        const isDownloadedLocal = Array.isArray(dl)
+          ? dl.map(Number).includes(Number(targetItem.number))
+          : dubSelect === "dub"
+            ? (dl?.dub || []).map(Number).includes(Number(targetItem.number))
+            : (dl?.sub || []).map(Number).includes(Number(targetItem.number));
 
         onWatch(
           id,
@@ -1119,13 +1094,7 @@ export default function InfoView({
               langs = [ep.lang];
             }
           } else {
-            if (details?.subOrDub === "both") {
-              langs = ["sub", "dub"];
-            } else if (details?.subOrDub) {
-              langs = [details.subOrDub];
-            } else {
-              langs = ["sub"];
-            }
+            langs = ["sub"];
           }
 
           if (langs.includes("sub")) hasSub = true;
@@ -1653,9 +1622,10 @@ export default function InfoView({
     const isAnime = type === "Anime";
     const allDownloaded = [];
     if (isAnime) {
-      const subs = details?.DownloadedEpisodes?.sub || [];
-      const dubs = details?.DownloadedEpisodes?.dub || [];
-      const hsubs = details?.DownloadedEpisodes?.hsub || [];
+      const dl = details?.DownloadedEpisodes;
+      const subs = Array.isArray(dl) ? dl : dl?.sub || [];
+      const dubs = Array.isArray(dl) ? [] : dl?.dub || [];
+      const hsubs = Array.isArray(dl) ? [] : dl?.hsub || [];
       const uniqueNums = new Set([...subs, ...dubs, ...hsubs].map(Number));
       allDownloaded.push(...uniqueNums);
     } else {
@@ -1767,13 +1737,25 @@ export default function InfoView({
 
   const isItemUnavailable = (item) => {
     if (type !== "Anime") return false;
-    const hasSubLang =
-      item.lang === "sub" || item.lang === "both" || !item.lang;
-    const hasDubLang = item.lang === "dub" || item.lang === "both";
+    const itemLangs = Array.isArray(item.langs) && item.langs.length > 0
+      ? item.langs.map((l) => String(l).toLowerCase())
+      : [];
+    const hasSub = itemLangs.length > 0
+      ? itemLangs.includes("sub")
+      : (item.lang === "sub" || item.lang === "both" || !item.lang);
+    const hasDub = itemLangs.length > 0
+      ? itemLangs.includes("dub")
+      : (item.lang === "dub" || item.lang === "both" || !!item.hasDub);
+    const hasHsub = itemLangs.length > 0
+      ? itemLangs.includes("hsub")
+      : (!!item.hasHsub || item.lang === "hsub");
+
     if (dubSelect === "sub") {
-      return !hasSubLang;
+      return !hasSub;
     } else if (dubSelect === "dub") {
-      return !hasDubLang;
+      return !hasDub;
+    } else if (dubSelect === "hsub") {
+      return !hasHsub;
     }
     return false;
   };
@@ -2362,24 +2344,32 @@ export default function InfoView({
             {/* Action buttons if online provider is available */}
             {details?.provider && details?.provider !== "local source" && (
               <>
-                {type === "Anime" &&
-                  (episodesOrChapters.some(
-                    (ep) => ep.lang === "both" || ep.lang === "dub",
-                  ) ||
-                    (details?.DownloadedEpisodes?.dub &&
-                      details.DownloadedEpisodes.dub.length > 0)) && (
-                    <Dropdown
-                      value={dubSelect}
-                      onChange={setDubSelect}
-                      options={[
+                {type === "Anime" && (
+                  <Dropdown
+                    value={dubSelect}
+                    onChange={setDubSelect}
+                    options={(() => {
+                      const opts = [
                         { value: "sub", label: "SUB" },
                         { value: "dub", label: "DUB" },
-                      ]}
-                      className="u-style-46"
-                      triggerClassName="u-style-44"
-                      menuClassName="u-style-45"
-                    />
-                  )}
+                      ];
+                      if (
+                        episodesOrChapters.some(
+                          (ep) =>
+                            ep.hasHsub ||
+                            ep.lang === "hsub" ||
+                            (Array.isArray(ep.langs) && ep.langs.includes("hsub")),
+                        )
+                      ) {
+                        opts.push({ value: "hsub", label: "HSUB" });
+                      }
+                      return opts;
+                    })()}
+                    className="u-style-46"
+                    triggerClassName="u-style-44"
+                    menuClassName="u-style-45"
+                  />
+                )}
                 <button
                   onClick={handleSelectAll}
                   style={{
@@ -2496,10 +2486,18 @@ export default function InfoView({
               customBorderClass = "started";
             }
 
-            const hasSubLang =
-              item.lang === "sub" || item.lang === "both" || !item.lang;
-            const hasDubLang = item.lang === "dub" || item.lang === "both";
-            const hasHsubLang = !!item.hasHsub;
+            const itemLangs = Array.isArray(item.langs) && item.langs.length > 0
+              ? item.langs.map((l) => String(l).toLowerCase())
+              : [];
+            const hasSubLang = itemLangs.length > 0
+              ? itemLangs.includes("sub")
+              : (item.lang === "sub" || item.lang === "both" || !item.lang);
+            const hasDubLang = itemLangs.length > 0
+              ? itemLangs.includes("dub")
+              : (item.lang === "dub" || item.lang === "both" || !!item.hasDub);
+            const hasHsubLang = itemLangs.length > 0
+              ? itemLangs.includes("hsub")
+              : (!!item.hasHsub || item.lang === "hsub");
             const showOnlineActions =
               details?.provider && details?.provider !== "local source";
 
@@ -2595,88 +2593,105 @@ export default function InfoView({
                   {/* Local download status & deletion buttons */}
                   {type === "Anime" ? (
                     <>
-                      {(() => {
-                        let availableLangs = [];
-                        if (item.langs && Array.isArray(item.langs)) {
-                          availableLangs = item.langs;
-                        } else {
-                          if (item.lang === "both") {
-                            availableLangs = ["sub", "dub"];
-                          } else if (item.lang === "dub") {
-                            availableLangs = ["dub"];
-                          } else {
-                            availableLangs = ["sub"];
-                          }
-                        }
-
-                        return availableLangs.map((langKey) => {
-                          const isLangDownloaded = isDownloaded(
-                            item.number,
-                            langKey,
-                          );
-                          if (isLangDownloaded) {
-                            return (
-                              <div className="badge-and-action" key={langKey}>
-                                <span className={`badge-subdub ${langKey}`}>
-                                  {langKey.toUpperCase()} Downloaded
-                                </span>
-                                <button
-                                  onClick={() =>
-                                    onWatch(
-                                      id,
-                                      item.number,
-                                      true,
-                                      langKey,
-                                      episodesOrChapters,
-                                      details?.DownloadedEpisodes,
-                                      details?.title,
-                                      details?.provider,
-                                      details?.image,
-                                    )
-                                  }
-                                  className="btn-play"
-                                >
-                                  <Play size={18} />
-                                </button>
-                                {isLocal && (
-                                  <button
-                                    onClick={() =>
-                                      handleDeleteEpisode(item.number, langKey)
-                                    }
-                                    className="btn-action-trash"
-                                  >
-                                    <Trash2 size={18} />
-                                  </button>
-                                )}
-                              </div>
-                            );
-                          } else {
-                            return (
-                              showOnlineActions && (
-                                <button
-                                  key={langKey}
-                                  onClick={() =>
-                                    onWatch(
-                                      id,
-                                      item.id,
-                                      false,
-                                      langKey,
-                                      episodesOrChapters,
-                                      details?.DownloadedEpisodes,
-                                      details?.title,
-                                      details?.provider,
-                                      details?.image,
-                                    )
-                                  }
-                                  className="btn-stream"
-                                >
-                                  <span>Stream {langKey.toUpperCase()}</span>
-                                </button>
+                      {isDownloaded(item.number) ? (
+                        <div className="badge-and-action">
+                          <span className="badge-manga">Downloaded</span>
+                          <button
+                            onClick={() =>
+                              onWatch(
+                                id,
+                                item.number,
+                                true,
+                                dubSelect || "sub",
+                                episodesOrChapters,
+                                details?.DownloadedEpisodes,
+                                details?.title,
+                                details?.provider,
+                                details?.image,
                               )
-                            );
-                          }
-                        });
-                      })()}
+                            }
+                            className="btn-play"
+                          >
+                            <Play size={18} />
+                          </button>
+                          {isLocal && (
+                            <button
+                              onClick={() => handleDeleteEpisode(item.number)}
+                              className="btn-action-trash"
+                            >
+                              <Trash2 size={18} />
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        showOnlineActions && (
+                          <div className="badge-and-action">
+                            {hasSubLang && (
+                              <button
+                                onClick={() =>
+                                  onWatch(
+                                    id,
+                                    item.id,
+                                    false,
+                                    "sub",
+                                    episodesOrChapters,
+                                    details?.DownloadedEpisodes,
+                                    details?.title,
+                                    details?.provider,
+                                    details?.image,
+                                  )
+                                }
+                                className="badge-subdub sub"
+                              >
+                                <Play size={11} fill="currentColor" />
+                                <span>SUB</span>
+                              </button>
+                            )}
+                            {hasDubLang && (
+                              <button
+                                onClick={() =>
+                                  onWatch(
+                                    id,
+                                    item.id,
+                                    false,
+                                    "dub",
+                                    episodesOrChapters,
+                                    details?.DownloadedEpisodes,
+                                    details?.title,
+                                    details?.provider,
+                                    details?.image,
+                                  )
+                                }
+                                className="badge-subdub dub"
+                              >
+                                <Play size={11} fill="currentColor" />
+                                <span>DUB</span>
+                              </button>
+                            )}
+                            {hasHsubLang && (
+                              <button
+                                onClick={() =>
+                                  onWatch(
+                                    id,
+                                    item.id,
+                                    false,
+                                    "hsub",
+                                    episodesOrChapters,
+                                    details?.DownloadedEpisodes,
+                                    details?.title,
+                                    details?.provider,
+                                    details?.image,
+                                  )
+                                }
+                                className="badge-subdub hsub"
+                              >
+                                <Play size={11} fill="currentColor" />
+                                <span>HSUB</span>
+                              </button>
+                            )}
+                          </div>
+                        )
+                      )}
                     </>
                   ) : (
                     /* Manga reader buttons */

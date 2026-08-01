@@ -85,9 +85,11 @@ export default function WatchTogetherView({ onNavigate }) {
   const filteredEpisodes = useMemo(() => {
     let list = [...animeEpisodes];
     if (dubSelect === "dub") {
-      list = list.filter((ep) => ep.lang === "dub" || ep.hasDub || ep.isDub);
+      list = list.filter(
+        (ep) => (ep.langs && ep.langs.includes("dub")) || ep.hasDub || ep.isDub,
+      );
     } else if (dubSelect === "sub") {
-      list = list.filter((ep) => ep.lang !== "dub");
+      list = list.filter((ep) => !ep.langs || ep.langs.includes("sub"));
     }
     if (episodeSearchQuery.trim()) {
       const q = episodeSearchQuery.toLowerCase().trim();

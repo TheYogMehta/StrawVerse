@@ -16,9 +16,12 @@ const {
   MangaChapterFetch,
   fetchChapters,
   getProviderOrThrow,
-  resolveSubDubId,
 } = require("../utils/AnimeManga");
-const { getAllMetadata, getSourceById } = require("../utils/Metadata");
+const {
+  getAllMetadata,
+  getSourceById,
+  FindMapping,
+} = require("../utils/Metadata");
 const { getKeyValue, queryOne, run } = require("../utils/db");
 const { getHeaders } = require("../utils/proxyHeaders");
 const { wrapImagesInObject } = require("../download");
@@ -188,9 +191,9 @@ router.get("/api/schedule/weekly", async (req, res) => {
             const mapped = global.mappingDb
               .prepare(
                 `
-                SELECT 1 FROM animepahe WHERE malid = ?
+                SELECT 1 FROM pahe WHERE malid = ?
                 UNION ALL
-                SELECT 1 FROM anikototv WHERE malid = ?
+                SELECT 1 FROM anikoto WHERE malid = ?
                 UNION ALL
                 SELECT 1 FROM anineko WHERE malid = ?
                 LIMIT 1
@@ -229,9 +232,6 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
   const { AnimeManga } = req.params;
   let { LocalMalProvider } = req.params;
   let { id } = req.body;
-  if (id !== undefined && id !== null) {
-    id = String(id);
-  }
 
   const data = {
     MalLoggedIn: !!global?.MalLoggedIn,
@@ -264,34 +264,28 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
         let resolvedId = null;
         let resolvedProvider = null;
         let resolvedMalId = null;
-        let cleanId = id?.replace(/-(dub|sub|hsub|both)$/, "");
-        let suffix = "";
-        if (id.endsWith("-sub")) suffix = "-sub";
-        else if (id.endsWith("-dub")) suffix = "-dub";
-        else if (id.endsWith("-hsub")) suffix = "-hsub";
-        else if (id.endsWith("-both")) suffix = "-both";
 
-        if (AnimeManga === "Anime" && global.mappingDb && cleanId) {
+        if (AnimeManga === "Anime" && global.mappingDb && id) {
           try {
             const row = global.mappingDb
               .prepare(
                 `
-                SELECT malid, 'pahe' AS provider FROM animepahe WHERE id = ? OR uuid = ?
+                SELECT malid, 'pahe' AS provider FROM pahe WHERE uuid = ? OR id = ?
                 UNION
-                SELECT malid, 'anikoto' AS provider FROM anikototv WHERE id = ?
+                SELECT malid, 'anikoto' AS provider FROM anikoto WHERE id = ?
                 UNION
                 SELECT malid, 'anineko' AS provider FROM anineko WHERE id = ?
                 LIMIT 1
               `,
               )
-              .get(cleanId, cleanId, cleanId, cleanId);
+              .get(id, id, id, id);
             if (row) {
               resolvedMalId = row.malid;
               resolvedProvider = row.provider;
-              resolvedId = cleanId;
+              resolvedId = id;
             }
           } catch (err2) {}
-        } else if (AnimeManga === "Manga" && global.mappingDb && cleanId) {
+        } else if (AnimeManga === "Manga" && global.mappingDb && id) {
           try {
             const row = global.mappingDb
               .prepare(
@@ -302,103 +296,57 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 LIMIT 1
               `,
               )
-              .get(cleanId, cleanId);
+              .get(id, id);
             if (row) {
               resolvedMalId = row.malid;
               resolvedProvider = row.provider;
-              resolvedId = cleanId;
+              resolvedId = id;
             }
           } catch (err2) {}
         }
 
         if (resolvedMalId) {
           if (AnimeManga === "Anime") {
-            const settingProviderLower = (
+            const currentAnimeProvider = (
               setting.Animeprovider || "pahe"
             ).toLowerCase();
-            const currentAnimeProvider = settingProviderLower.includes(
-              "anikoto",
-            )
-              ? "anikoto"
-              : settingProviderLower.includes("anineko")
-                ? "anineko"
-                : "pahe";
             if (currentAnimeProvider !== resolvedProvider) {
-              if (currentAnimeProvider === "pahe") {
-                try {
-                  const targetRow = global.mappingDb
-                    .prepare(
-                      "SELECT id, uuid FROM animepahe WHERE malid = ? LIMIT 1",
-                    )
-                    .get(resolvedMalId);
-                  if (targetRow) {
-                    resolvedId = targetRow.uuid || targetRow.id;
-                    resolvedProvider = "pahe";
-                  }
-                } catch (err2) {}
-              } else if (currentAnimeProvider === "anikoto") {
-                try {
-                  const targetRow = global.mappingDb
-                    .prepare("SELECT id FROM anikototv WHERE malid = ? LIMIT 1")
-                    .get(resolvedMalId);
-                  if (targetRow) {
-                    resolvedId = targetRow.id;
-                    resolvedProvider = "anikoto";
-                  }
-                } catch (err2) {}
-              } else if (currentAnimeProvider === "anineko") {
-                try {
-                  const targetRow = global.mappingDb
-                    .prepare("SELECT id FROM anineko WHERE malid = ? LIMIT 1")
-                    .get(resolvedMalId);
-                  if (targetRow) {
-                    resolvedId = targetRow.id;
-                    resolvedProvider = "anineko";
-                  }
-                } catch (err2) {}
-              }
+              try {
+                const targetRow = global.mappingDb
+                  .prepare(
+                    currentAnimeProvider === "pahe"
+                      ? "SELECT id, uuid FROM pahe WHERE malid = ? LIMIT 1"
+                      : `SELECT id FROM ${currentAnimeProvider} WHERE malid = ? LIMIT 1`,
+                  )
+                  .get(resolvedMalId);
+                if (targetRow) {
+                  resolvedId = targetRow.uuid || targetRow.id;
+                  resolvedProvider = currentAnimeProvider;
+                }
+              } catch (err2) {}
             }
           } else if (AnimeManga === "Manga") {
-            const settingProviderLower = (
+            const currentMangaProvider = (
               setting.Mangaprovider || "weebcentral"
             ).toLowerCase();
-            const currentMangaProvider = settingProviderLower.includes(
-              "allmanga",
-            )
-              ? "allmanga"
-              : "weebcentral";
             if (currentMangaProvider !== resolvedProvider) {
-              if (currentMangaProvider === "weebcentral") {
-                try {
-                  const targetRow = global.mappingDb
-                    .prepare(
-                      "SELECT id FROM weebcentral WHERE malid = ? LIMIT 1",
-                    )
-                    .get(resolvedMalId);
-                  if (targetRow) {
-                    resolvedId = targetRow.id;
-                    resolvedProvider = "weebcentral";
-                  }
-                } catch (err2) {}
-              } else if (currentMangaProvider === "allmanga") {
-                try {
-                  const targetRow = global.mappingDb
-                    .prepare("SELECT id FROM allmanga WHERE malid = ? LIMIT 1")
-                    .get(resolvedMalId);
-                  if (targetRow) {
-                    resolvedId = targetRow.id;
-                    resolvedProvider = "allmanga";
-                  }
-                } catch (err2) {}
-              }
+              try {
+                const targetRow = global.mappingDb
+                  .prepare(
+                    `SELECT id FROM ${currentMangaProvider} WHERE malid = ? LIMIT 1`,
+                  )
+                  .get(resolvedMalId);
+                if (targetRow) {
+                  resolvedId = targetRow.id;
+                  resolvedProvider = currentMangaProvider;
+                }
+              } catch (err2) {}
             }
           }
         }
 
         if (resolvedId && resolvedProvider) {
-          if (resolvedProvider === "pahe") {
-            resolvedId = resolvedId + (suffix || "-sub");
-          }
+          resolvedId = String(resolvedId);
           id = resolvedId;
           LocalMalProvider = resolvedProvider;
           provider = resolvedProvider;
@@ -414,14 +362,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
         const targetMalId = Number(id);
 
         if (AnimeManga === "Anime") {
-          const settingProviderLower = (
-            setting.Animeprovider || "pahe"
-          ).toLowerCase();
-          const preferred = settingProviderLower.includes("anikoto")
-            ? "anikoto"
-            : settingProviderLower.includes("anineko")
-              ? "anineko"
-              : "pahe";
+          const preferred = (setting.Animeprovider || "pahe").toLowerCase();
 
           let rows = [];
           try {
@@ -429,9 +370,9 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               rows = global.mappingDb
                 .prepare(
                   `
-                SELECT 'pahe' AS provider, id, uuid FROM animepahe WHERE malid = ?
+                SELECT 'pahe' AS provider, id, uuid FROM pahe WHERE malid = ?
                 UNION ALL
-                SELECT 'anikoto' AS provider, id, NULL AS uuid FROM anikototv WHERE malid = ?
+                SELECT 'anikoto' AS provider, id, NULL AS uuid FROM anikoto WHERE malid = ?
                 UNION ALL
                 SELECT 'anineko' AS provider, id, NULL AS uuid FROM anineko WHERE malid = ?
               `,
@@ -446,12 +387,9 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             resolvedProvider = match.provider;
           }
         } else if (AnimeManga === "Manga") {
-          const settingProviderLower = (
+          const preferred = (
             setting.Mangaprovider || "weebcentral"
           ).toLowerCase();
-          const preferred = settingProviderLower.includes("allmanga")
-            ? "allmanga"
-            : "weebcentral";
 
           let rows = [];
           try {
@@ -476,16 +414,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
         }
 
         if (resolvedId && resolvedProvider) {
-          if (resolvedProvider === "pahe") {
-            if (
-              !resolvedId.endsWith("-sub") &&
-              !resolvedId.endsWith("-dub") &&
-              !resolvedId.endsWith("-hsub") &&
-              !resolvedId.endsWith("-both")
-            ) {
-              resolvedId = resolvedId + "-sub";
-            }
-          }
+          resolvedId = String(resolvedId);
           id = resolvedId;
           LocalMalProvider = resolvedProvider;
           provider = resolvedProvider;
@@ -512,10 +441,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               ? LocalMalProvider
               : provider) ?? null,
           );
-          const lookupId =
-            Animeprovider.provider_name === "pahe"
-              ? id
-              : id.replace(/-(dub|sub|hsub|both)$/, "");
+          const lookupId = id;
           let AnimeInfo = null;
           try {
             AnimeInfo = await animeinfo(
@@ -534,24 +460,31 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             Animeprovider.provider_name === "pahe" &&
             (!AnimeInfo || !AnimeInfo.title || AnimeInfo.results)
           ) {
-            if (global?.mappingDb && data.malid) {
+            if (global?.mappingDb) {
               try {
-                const mappingRow = global.mappingDb
-                  .prepare(`SELECT id, uuid FROM animepahe WHERE malid = ?`)
-                  .get(Number(data.malid));
+                let mappingRow = null;
+                const cleanOldId = id;
+                if (data.malid) {
+                  mappingRow = global.mappingDb
+                    .prepare(
+                      `SELECT id, uuid, malid FROM pahe WHERE malid = ?`,
+                    )
+                    .get(Number(data.malid));
+                }
+                if (!mappingRow) {
+                  mappingRow = global.mappingDb
+                    .prepare(
+                      `SELECT id, uuid, malid FROM pahe WHERE uuid = ? OR id = ?`,
+                    )
+                    .get(cleanOldId, cleanOldId);
+                }
                 if (mappingRow) {
-                  const cleanOldId = id.replace(/-(dub|sub|hsub|both)$/, "");
                   const newId = mappingRow.uuid || mappingRow.id;
                   if (newId && newId !== cleanOldId) {
-                    let suffix = "both";
-                    if (id.endsWith("dub")) suffix = "dub";
-                    else if (id.endsWith("sub")) suffix = "sub";
-                    else if (id.endsWith("hsub")) suffix = "hsub";
-
                     AnimeInfo = await animeinfo(
                       Animeprovider,
                       setting?.CustomDownloadLocation,
-                      `${newId}-${suffix}`,
+                      newId,
                       false,
                     );
 
@@ -559,25 +492,35 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                       try {
                         global.db
                           .prepare(
-                            "UPDATE OR REPLACE Anime SET id = REPLACE(id, ?, ?) WHERE id = ? OR id LIKE ?",
+                            "UPDATE OR REPLACE Anime SET id = REPLACE(id, ?, ?) WHERE id = ?",
                           )
-                          .run(
-                            cleanOldId,
-                            newId,
-                            cleanOldId,
-                            `${cleanOldId}-%`,
-                          );
+                          .run(cleanOldId, newId, cleanOldId);
 
                         global.db
                           .prepare(
-                            "UPDATE WatchHistory SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?",
+                            "UPDATE WatchHistory SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ?",
                           )
-                          .run(
-                            cleanOldId,
-                            newId,
-                            cleanOldId,
-                            `${cleanOldId}-%`,
-                          );
+                          .run(cleanOldId, newId, cleanOldId);
+
+                        global.db
+                          .prepare(
+                            "UPDATE SkipTimes SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ?",
+                          )
+                          .run(cleanOldId, newId, cleanOldId);
+
+                        try {
+                          global.db
+                            .prepare(
+                              "UPDATE unlinked_mal_ids SET id = REPLACE(id, ?, ?) WHERE id = ?",
+                            )
+                            .run(cleanOldId, newId, cleanOldId);
+                        } catch (_) {}
+
+                        id = newId;
+                        data.id = newId;
+                        if (mappingRow.malid) {
+                          data.malid = Number(mappingRow.malid);
+                        }
 
                         logger.info(
                           `[pahe-resolve] Successfully updated Anime ID from ${cleanOldId} to ${newId}`,
@@ -608,7 +551,6 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               "totalEpisodes",
               "nextEpisodeIn",
               "dataId",
-              "subOrDub",
             ];
             fieldsToOverwrite.forEach((key) => {
               if (
@@ -731,7 +673,6 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
 
     if (data && global.mappingDb) {
       try {
-        const cleanId = id.replace(/-(dub|sub|hsub|both)$/, "");
         const customMappingRow = global.db
           .prepare("SELECT malid FROM unlinked_mal_ids WHERE id = ?")
           .get(id);
@@ -771,8 +712,8 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                   neko.id AS anineko_id,
                   an.livechart_id
                 FROM (SELECT ? AS malid) rm
-                LEFT JOIN animepahe p ON p.malid = rm.malid
-                LEFT JOIN anikototv a ON a.malid = rm.malid
+                LEFT JOIN pahe p ON p.malid = rm.malid
+                LEFT JOIN anikoto a ON a.malid = rm.malid
                 LEFT JOIN anineko neko ON neko.malid = rm.malid
                 LEFT JOIN anime an ON an.malid = rm.malid
                 LIMIT 1
@@ -809,9 +750,9 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
           if (AnimeManga === "Anime") {
             const query = `
               WITH resolved AS (
-                SELECT malid FROM animepahe WHERE id = ? OR uuid = ?
+                SELECT malid FROM pahe WHERE uuid = ? OR id = ?
                 UNION ALL
-                SELECT malid FROM anikototv WHERE id = ?
+                SELECT malid FROM anikoto WHERE id = ?
                 UNION ALL
                 SELECT malid FROM anineko WHERE id = ?
               )
@@ -822,14 +763,14 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 neko.id AS anineko_id,
                 an.livechart_id
               FROM (SELECT malid FROM resolved WHERE malid IS NOT NULL LIMIT 1) rm
-              LEFT JOIN animepahe p ON p.malid = rm.malid
-              LEFT JOIN anikototv a ON a.malid = rm.malid
+              LEFT JOIN pahe p ON p.malid = rm.malid
+              LEFT JOIN anikoto a ON a.malid = rm.malid
               LEFT JOIN anineko neko ON neko.malid = rm.malid
               LEFT JOIN anime an ON an.malid = rm.malid
             `;
             mappingRow = global.mappingDb
               .prepare(query)
-              .get(cleanId, cleanId, cleanId, cleanId);
+              .get(id, id, id, id);
           } else {
             const query = `
               WITH resolved AS (
@@ -845,7 +786,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               LEFT JOIN weebcentral w ON w.malid = rm.malid
               LEFT JOIN allmanga allm ON allm.malid = rm.malid
             `;
-            mappingRow = global.mappingDb.prepare(query).get(cleanId, cleanId);
+            mappingRow = global.mappingDb.prepare(query).get(id, id);
           }
 
           if (mappingRow && mappingRow.malid) {
@@ -877,17 +818,9 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
             });
 
             if (AnimeManga === "Anime") {
-              const suffix = id.endsWith("-dub")
-                ? "-dub"
-                : id.endsWith("-sub")
-                  ? "-sub"
-                  : id.endsWith("-hsub")
-                    ? "-hsub"
-                    : "-both";
-
               if (mappingRow.pahe_uuid && !linkedProvidersMap["pahe"]) {
                 linkedProvidersMap["pahe"] = {
-                  id: `${mappingRow.pahe_uuid}${suffix}`,
+                  id: mappingRow.pahe_uuid,
                   provider: "pahe",
                   title: data.title || "",
                   folder_name: null,
@@ -947,9 +880,9 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 try {
                   const watchedRow = global.db
                     .prepare(
-                      "SELECT watched_episodes FROM WatchHistory WHERE anime_id = ? OR anime_id LIKE ?",
+                      "SELECT watched_episodes FROM WatchHistory WHERE anime_id = ?",
                     )
-                    .get(id, `${id?.replace(/-(sub|dub|hsub|both)$/, "")}-%`);
+                    .get(id);
                   if (watchedRow && watchedRow.watched_episodes) {
                     watchedEpisodes = watchedRow.watched_episodes;
                   }
@@ -1061,29 +994,18 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
 
     try {
       let tagRow = null;
-      const strippedId = id
-        ? String(id).replace(/-(dub|sub|hsub|both)$/, "")
-        : "";
       if (AnimeManga === "Anime") {
         tagRow = global.db
           .prepare(
-            `SELECT CustomTag FROM Anime WHERE id = ? OR id = ? OR id = ? OR id = ? OR id = ? OR folder_name = ? OR folder_name = ?`,
+            `SELECT CustomTag FROM Anime WHERE id = ? OR folder_name = ?`,
           )
-          .get(
-            id,
-            `${strippedId}-sub`,
-            `${strippedId}-hsub`,
-            `${strippedId}-dub`,
-            `${strippedId}-both`,
-            id,
-            strippedId,
-          );
+          .get(id, id);
       } else {
         tagRow = global.db
           .prepare(
             `SELECT CustomTag FROM Manga WHERE id = ? OR folder_name = ?`,
           )
-          .get(id, strippedId);
+          .get(id, id);
       }
 
       const targetMalId = data?.malid || data?.MalID;
@@ -1150,22 +1072,6 @@ router.post("/api/info/items", async (req, res) => {
         data.hasNextPage = page < data.totalPages;
       }
 
-      try {
-        const config = await settingfetch();
-        const localInfo = await FindMapping(
-          type,
-          id,
-          null,
-          config?.CustomDownloadLocation,
-        );
-        if (localInfo && localInfo.DownloadedEpisodes) {
-          data.DownloadedEpisodes = localInfo.DownloadedEpisodes;
-        }
-        if (localInfo && localInfo.DownloadedChapters) {
-          data.DownloadedChapters = localInfo.DownloadedChapters;
-        }
-      } catch (_) {}
-
       return res.json(data);
     } else {
       return res.json({});
@@ -1185,8 +1091,7 @@ router.post("/api/watch", async (req, res) => {
     if (!Downloaded) {
       if (!ep) throw new Error("Episode ID Not Found");
       const Animeprovider = await providerFetch("Anime", provider);
-      const resolvedEp = resolveSubDubId(ep, subdub);
-      const sourcesArray = await fetchEpisodeSources(Animeprovider, resolvedEp);
+      const sourcesArray = await fetchEpisodeSources(Animeprovider, ep);
       res.status(200).json(sourcesArray || { sources: [] });
     } else {
       if (!epNum) throw new Error("Episode Number Not Found");

@@ -351,14 +351,9 @@ async function continuousExecution() {
             id: animeId,
           } = currentTask;
           if (config && Title && EpNum && epid && SubDub) {
-            const lowerTitle = (Title || "").toLowerCase().trim();
-            const lowerSubDub = (SubDub || "").toLowerCase().trim();
-            const displayTitle = lowerTitle.endsWith(lowerSubDub)
-              ? Title
-              : `${Title} ${SubDub}`;
             await downloadep(
               config,
-              displayTitle,
+              Title,
               EpNum,
               epid,
               SubDub,

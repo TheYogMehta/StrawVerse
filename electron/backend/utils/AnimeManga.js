@@ -12,15 +12,6 @@ const { sanitizeFolderName, getDownloadsFolder } = require("./DirectoryMaker");
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
 
-function resolveSubDubId(epId, subdub) {
-  if (!epId) return epId;
-  const strId = String(epId);
-  if (subdub && !strId.match(/-(sub|dub|hsub|both)$/)) {
-    return `${strId}-${subdub}`;
-  }
-  return strId;
-}
-
 function enrichWithLibraryTags(type, items) {
   if (!items || !Array.isArray(items) || items.length === 0) return items;
   if (!global.db) return items;
@@ -621,7 +612,6 @@ async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
     `${legacyBase}_sub`,
     `${legacyBase}_dub`,
     `${legacyBase}_hsub`,
-    dbRecord.subOrDub ? `${legacyBase}_${dbRecord.subOrDub}` : null,
     `${newFolderName}_sub`,
     `${newFolderName}_dub`,
     `${newFolderName}_hsub`,
@@ -673,17 +663,10 @@ async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
     if (fs.existsSync(legacyDir)) {
       try {
         await fs.promises.rename(legacyDir, newDir);
-        logger.info(
-          `Auto-migrated folder for "${title}": "${legacyName}" -> "${newFolderName}"`,
-        );
       } catch (err) {
-        logger.error(
-          `Failed to migrate folder "${legacyName}": ${err.message}`,
-        );
         dbRecord.folder_name = legacyName;
         return legacyName;
       }
-      break;
     }
   }
 
@@ -717,14 +700,13 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
   let typeDir = path.join(baseDir, type, id);
   if (fs.existsSync(typeDir)) return typeDir;
 
-  const idStripped = id.replace(/-(dub|sub|hsub|both)$/, "");
   let record = null;
 
   try {
     if (global.db) {
       record = global.db
-        .prepare(`SELECT * FROM ${type} WHERE id = ? OR id = ? OR id = ?`)
-        .get(subdub ? `${idStripped}-${subdub}` : id, id, idStripped);
+        .prepare(`SELECT * FROM ${type} WHERE id = ?`)
+        .get(id);
     }
   } catch (_) {}
 
@@ -755,5 +737,4 @@ module.exports = {
   getProviderOrThrow,
   resolveDownloadFolder,
   migrateLegacyFolderIfNeeded,
-  resolveSubDubId,
 };
