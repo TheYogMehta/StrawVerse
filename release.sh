@@ -8,9 +8,9 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CHANGELOG="$SCRIPT_DIR/CHANGELOG.md"
 ELECTRON_DIR="$SCRIPT_DIR/electron"
 CAPACITOR_DIR="$SCRIPT_DIR/capacitor"
+CHANGELOG="$ELECTRON_DIR/CHANGELOG.md"
 ELECTRON_PKG="$ELECTRON_DIR/package.json"
 CAPACITOR_PKG="$CAPACITOR_DIR/package.json"
 DIST_DIR="$ELECTRON_DIR/dist"
@@ -30,14 +30,9 @@ ok()    { echo -e "${GREEN}  ✓${NC} $*"; }
 warn()  { echo -e "${YELLOW}  ⚠${NC} $*"; }
 fail()  { echo -e "${RED}  ✗ $*${NC}" >&2; exit 1; }
 
-# ── 1. Ensure CHANGELOG.md exists in root ────────────────
+# ── 1. Ensure CHANGELOG.md exists ─────────────────────────
 if [ ! -f "$CHANGELOG" ]; then
-  if [ -f "$ELECTRON_DIR/CHANGELOG.md" ]; then
-    cp "$ELECTRON_DIR/CHANGELOG.md" "$CHANGELOG"
-    ok "Copied CHANGELOG.md to project root"
-  else
-    fail "CHANGELOG.md not found in root or electron directory"
-  fi
+  fail "CHANGELOG.md not found at $CHANGELOG"
 fi
 
 # ── 2. Extract version from root CHANGELOG.md ────────────
@@ -99,11 +94,6 @@ update_pkg_version() {
 
 update_pkg_version "$ELECTRON_PKG"
 update_pkg_version "$CAPACITOR_PKG"
-
-# Also sync electron CHANGELOG.md if present
-if [ -f "$ELECTRON_DIR/CHANGELOG.md" ]; then
-  cp "$CHANGELOG" "$ELECTRON_DIR/CHANGELOG.md"
-fi
 
 # ── 7. Build Desktop (Electron) Application ──────────────
 log "Building Desktop (Electron) frontend..."
