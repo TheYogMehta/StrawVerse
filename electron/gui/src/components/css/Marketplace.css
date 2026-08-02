@@ -1,0 +1,339 @@
+.market-wrapper {
+  flex: 1;
+  padding: 30px;
+  overflow-y: auto;
+  height: 100%;
+  background-color: var(--bg-primary);
+}
+
+.market-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 30px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.market-title {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  margin-bottom: 4px;
+}
+
+.market-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.market-tabs-wrapper {
+  display: flex;
+  background-color: var(--bg-secondary);
+  padding: 4px;
+  border-radius: 24px;
+  border: 1px solid var(--border);
+}
+
+.market-tab-btn {
+  background-color: transparent;
+  border: none;
+  color: var(--text-muted);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.market-tab-btn.active {
+  background-color: var(--accent);
+  color: white;
+}
+
+.market-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+.market-card {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 180px;
+}
+
+.market-card-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.market-logo-wrapper {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  background-color: var(--bg-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+}
+
+.market-logo {
+  width: 24px;
+  height: 24px;
+}
+
+.market-card-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.market-version {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.market-disabled-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background-color: rgba(239, 68, 68, 0.1);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  color: var(--danger);
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.market-card-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.market-loading-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  width: 100%;
+}
+
+.market-loading-center img {
+  width: 64px;
+  height: 64px;
+}
+
+.market-loading-center p {
+  margin-top: 16px;
+  color: var(--text-muted);
+}
+
+/* MPV Player Integration Styles */
+.market-player-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 20px 0;
+  width: 100%;
+}
+
+.market-player-card {
+  width: 100%;
+  max-width: 580px;
+  padding: 30px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.market-player-card-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.market-player-icon {
+  color: var(--accent);
+}
+
+.market-player-title {
+  font-size: 22px;
+  font-weight: 800;
+  margin: 0 0 4px 0;
+}
+
+.market-player-badge {
+  background: rgba(167, 139, 250, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  color: #c4b5fd;
+  padding: 3px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.market-player-desc {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.market-player-status-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.market-player-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.market-player-status.success {
+  border: 1px solid rgba(52, 211, 153, 0.25);
+  color: #34d399;
+}
+
+.market-player-status.warning {
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #f59e0b;
+}
+
+.market-player-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.market-player-dot.green {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+}
+
+.market-player-dot.orange {
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+}
+
+.market-player-download-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.market-player-status-text {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.market-player-progress-bar {
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.market-player-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.btn-install-player {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.btn-install-player:hover {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-market-installed {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+  width: 100%;
+  text-align: center;
+}
+
+.market-player-instructions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+}
+
+.market-player-instructions h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 0;
+  color: #fff;
+}
+
+.market-player-instructions p {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+.market-pre {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--border);
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin: 0;
+  overflow-x: auto;
+}
+
+.market-pre code {
+  font-family: monospace;
+  font-size: 12px;
+  color: #c4b5fd;
+  line-height: 1.5;
+}

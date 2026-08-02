@@ -1,0 +1,496 @@
+/*
+ * Mobile retrofit for the Android app (and any narrow window).
+ *
+ * Desktop styles are untouched - everything here lives behind a single
+ * max-width media query. The main structural change: the left sidebar
+ * becomes a bottom navigation bar (icon-only), which is the natural
+ * pattern on phones and requires zero JSX changes.
+ *
+ * Selectors are prefixed with `html` to out-rank component stylesheets,
+ * which are bundled AFTER this file (they're imported inside components).
+ */
+
+@media (max-width: 768px) {
+  /* ---------------------------------------------------------------- */
+  /* Layout: column with content on top, nav bar pinned at the bottom */
+  /* ---------------------------------------------------------------- */
+  html .app-layout {
+    flex-direction: column;
+    height: 100dvh;
+  }
+
+  html .app-layout > main {
+    order: 1;
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Sidebar -> bottom navigation bar                                  */
+  /* ---------------------------------------------------------------- */
+  html .sidebar,
+  html .sidebar.collapsed {
+    order: 2;
+    width: 100% !important;
+    height: auto;
+    min-height: 0;
+    flex-direction: row;
+    display: flex !important;
+    justify-content: space-around !important;
+    align-items: center;
+    border-right: none;
+    border-top: 1px solid var(--border, #27272a);
+    padding: 6px 0;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    flex-shrink: 0;
+  }
+
+  /* Logo + collapse toggle are noise on a phone */
+  html .sidebar .sidebar-header,
+  html .sidebar.collapsed .sidebar-header {
+    display: none;
+  }
+
+  html .sidebar .sidebar-nav {
+    display: contents !important;
+  }
+
+  html .sidebar .sidebar-footer {
+    display: contents !important;
+  }
+
+  /* Watch Together landing screen compact columns */
+  html .wt-landing-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+
+  html .wt-landing-box {
+    min-height: auto !important;
+    padding: 16px !important;
+  }
+
+  html .wt-landing-box-middle {
+    margin-bottom: 12px !important;
+  }
+
+  html .sidebar .sidebar-item {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 3px;
+    padding: 8px 10px;
+    width: auto;
+    min-width: 52px;
+    font-size: 10px;
+  }
+
+  html .sidebar.collapsed .sidebar-item {
+    justify-content: center;
+  }
+
+  html .sidebar .sidebar-item span {
+    display: none;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Cinema mode (video player): hide the nav bar entirely             */
+  /* ---------------------------------------------------------------- */
+  html .cinema-mode .sidebar,
+  html .cinema-mode .sidebar.collapsed {
+    display: none;
+  }
+
+  html .cinema-mode-trigger {
+    display: none;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Overlays and toasts                                               */
+  /* ---------------------------------------------------------------- */
+  html .whats-new-overlay {
+    padding: 16px;
+  }
+
+  html .whats-new-card {
+    width: 100%;
+    max-width: 100%;
+    max-height: 85dvh;
+  }
+
+  html .toast-container {
+    left: 12px;
+    right: 12px;
+    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    width: auto;
+  }
+
+  html .toast-card {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Catalog (Home / Discover)                                         */
+  /* ---------------------------------------------------------------- */
+  html .catalog-header {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  html .catalog-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  html .search-form {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  html .content-grid {
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 14px;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Info view (anime/manga details)                                   */
+  /* ---------------------------------------------------------------- */
+  html .info-wrapper {
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  html .details-grid {
+    grid-template-columns: 1fr !important;
+    gap: 20px !important;
+    padding: 16px !important;
+    margin: 0 16px 20px 16px !important;
+    border-radius: 16px !important;
+    width: auto !important;
+    max-width: calc(100% - 32px) !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  html .cover-wrapper {
+    max-width: 180px !important;
+    margin: 0 auto !important;
+  }
+
+  html .info-content {
+    align-items: center !important;
+    text-align: center !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  html .info-title {
+    font-size: 22px !important;
+    text-align: center !important;
+    word-break: break-word !important;
+    width: 100% !important;
+  }
+
+  html .info-description {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    font-size: 14px !important;
+    text-align: left !important;
+  }
+
+  html .actions-row {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 16px !important;
+  }
+
+  html .quick-actions-wrapper {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  html .btn-continue,
+  html .btn-action-base {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    justify-content: center !important;
+    text-align: center !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+  }
+
+  html .tracking-group {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  html .tracking-group .input-group,
+  html .u-style-37,
+  html .u-style-38,
+  html .u-style-40,
+  html .u-style-43,
+  html .u-style-46 {
+    min-width: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  html .custom-dropdown-trigger {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    min-width: 0 !important;
+    gap: 6px !important;
+    padding: 8px 10px !important;
+  }
+
+  html .custom-dropdown-trigger-text {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+    text-align: left !important;
+    font-size: 13px !important;
+  }
+
+  html .mal-box {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 14px !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+  }
+
+  html .mal-box-header,
+  html .u-style-39 {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  html .mal-title,
+  html .u-style-11 {
+    text-align: center !important;
+    margin-bottom: 0 !important;
+    word-break: break-word !important;
+  }
+
+  html .btn-link-mal {
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    text-align: center !important;
+    white-space: normal !important;
+  }
+
+  html .mal-box p,
+  html .u-style-42 {
+    word-break: break-word !important;
+    overflow-wrap: break-word !important;
+    text-align: center !important;
+  }
+
+  html .search-input-box,
+  html .search-input-box:focus {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Video player: scene finder panel becomes full-width sheet         */
+  /* ---------------------------------------------------------------- */
+  html .scene-finder-panel {
+    width: 100%;
+    border-left: none;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Marketplace                                                       */
+  /* ---------------------------------------------------------------- */
+  html .market-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Watch Together: chat panel layout and top bar wrapping            */
+  /* ---------------------------------------------------------------- */
+  html .wt-top-bar {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    height: auto !important;
+    padding: 10px 14px !important;
+    gap: 8px !important;
+    align-items: center !important;
+    position: relative !important;
+    z-index: 100 !important;
+  }
+
+  html .wt-top-left {
+    order: 1 !important;
+    flex: 1 !important;
+  }
+
+  html .wt-top-right {
+    order: 2 !important;
+    flex: 0 0 auto !important;
+  }
+
+  html .wt-top-search-wrapper {
+    order: 3 !important;
+    flex: 1 1 100% !important;
+    max-width: 100% !important;
+  }
+
+  html .wt-main-body {
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+
+  html .wt-left-content {
+    margin-right: 0 !important;
+    width: 100% !important;
+    flex: 0 0 auto !important;
+    height: auto !important;
+    position: relative !important;
+    z-index: 50 !important;
+  }
+
+  html .wt-right-chat.expanded,
+  html .wt-right-chat.collapsed {
+    position: relative !important;
+    width: 100% !important;
+    flex: 1 1 auto !important;
+    height: 0 !important;
+    top: 0 !important;
+    border-left: none !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.08) !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  /* Compact "now playing" bar on mobile */
+  html .wt-bottom-info {
+    height: 60px !important;
+    padding: 0 4px !important;
+    border-radius: 8px !important;
+    margin: 8px 12px !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+
+  html .wt-current-info {
+    padding: 0 8px !important;
+    gap: 10px !important;
+  }
+
+  html .wt-bottom-cover {
+    width: 32px !important;
+    height: 44px !important;
+    border-radius: 4px !important;
+  }
+
+  html .wt-bottom-details {
+    gap: 2px !important;
+  }
+
+  html .wt-bottom-title {
+    font-size: 0.85rem !important;
+  }
+
+  html .wt-bottom-ep {
+    font-size: 0.72rem !important;
+  }
+
+  html .wt-bottom-actions {
+    gap: 8px !important;
+    padding: 0 8px !important;
+    align-items: center !important;
+    display: flex !important;
+  }
+
+  html .wt-btn-provider-dropdown {
+    height: 30px !important;
+    font-size: 0.75rem !important;
+    padding: 0 10px !important;
+  }
+
+  html .wt-btn-skip {
+    height: 30px !important;
+    font-size: 0.75rem !important;
+    padding: 0 12px !important;
+  }
+
+  html .wt-sidebar-tab-btn {
+    max-width: none !important;
+  }
+
+  html .wt-chat-collapse-btn,
+  html .wt-chat-collapsed-bar {
+    display: none !important;
+  }
+
+  html .wt-mobile-search-tab-scroll {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    padding: 12px !important;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Settings: tab row scrolls horizontally instead of clipping        */
+  /* ---------------------------------------------------------------- */
+  html .settings-tabs-row {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  html .settings-tab-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* General touch ergonomics                                          */
+  /* ---------------------------------------------------------------- */
+  html button,
+  html [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html ::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+  }
+}

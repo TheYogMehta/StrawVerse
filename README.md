@@ -1,7 +1,12 @@
 <h6 align="right">Support Windows & Linux</h6>
 <h1 align="center">
-  <img src="https://capsule-render.vercel.app/api?type=soft&fontColor=703ee5&text=StrawVerse&height=150&fontSize=40&desc=Ridiculously%20efficient,%20fast%20and%20light-weight.&descAlignY=75&descAlign=50&color=00000000&animation=twinkling">
+  <img src="https://capsule-render.vercel.app/api?type=soft&fontColor=703ee5&text=StrawVerse&height=150&fontSize=40&desc=The%20Modern%20Anime%20%26%20Manga%20Desktop%20Experience&descAlignY=75&descAlign=50&color=00000000&animation=twinkling">
 </h1>
+
+<p align="center">
+  <b>Your Personal Anime & Manga Hub Stream, Read, Track & Sync</b><br>
+  <sub>Watch. Read. Download. Together.</sub>
+</p>
 
 <p align="center">
   <a href="https://discord.gg/PzfUBgQ2gt">
@@ -158,7 +163,7 @@ Follow these steps to build application:
 2. Navigate to the project directory:
 
    ```bash
-   cd StrawVerse/src
+   cd StrawVerse/electron
    ```
 
 3. Install dependencies:
@@ -184,3 +189,56 @@ Follow these steps to build application:
 - Start: Runs the app locally in the Electron environment without building an executable.
 - Ensure that your system has the latest versions of Node.js and Git installed for compatibility.
 - If you encounter any issues, feel free to open an issue or join our [Discord Server](https://discord.gg/PzfUBgQ2gt) for support and chat!
+
+---
+
+# Build and Run the Android Application
+
+Follow these steps to build and run the application on Android:
+
+## Prerequisites
+
+1. **Android SDK / Android Studio** installed.
+2. A connected **Android device** (with USB Debugging enabled) or an **emulator** running.
+3. Node.js & npm installed.
+
+## Steps to Build and Run
+
+1. **Install Dependencies**:
+
+   In the repository root:
+
+   ```bash
+   npm install
+   ```
+
+   Go into the `capacitor` folder and install its dependencies:
+
+   ```bash
+   cd capacitor
+   npm install
+   ```
+
+2. **Prepare the Capacitor Assets**:
+
+   Build the GUI, sync the backend, and download the Android ffmpeg binaries:
+
+   ```bash
+   npm run prepare:app
+   ```
+
+3. **Sync with Capacitor**:
+
+   ```bash
+   npx cap sync android
+   ```
+
+4. **Run the Application**:
+   - **Option A**: Directly from the terminal:
+     ```bash
+     npx cap run android
+     ```
+   - **Option B**: Using Android Studio:
+     ```bash
+     npx cap open android
+     ```

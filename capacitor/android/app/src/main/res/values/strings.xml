@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">StrawVerse</string>
+    <string name="title_activity_main">StrawVerse</string>
+    <string name="package_name">app.strawverse.android</string>
+    <string name="custom_url_scheme">app.strawverse.android</string>
+</resources>
