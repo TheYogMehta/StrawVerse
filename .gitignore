@@ -4,7 +4,6 @@ node_modules/
 TODO.TODO
 Api/
 electron/scratch/
-electron/release.sh
 electron/mpv/linux
 electron/mpv/win32
 capacitor/android/app/src/main/jniLibs/arm64-v8a/libffmpeg.so
@@ -21,3 +20,9 @@ local.properties
 **/.gradle/
 **/build/
 capacitor/www/nodejs/main.bundle.js
+*.jks
+*.keystore
+*.p12
+*.pepk
+**/release/
+capacitor/android/app/release/

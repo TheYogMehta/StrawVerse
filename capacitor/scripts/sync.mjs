@@ -19,10 +19,13 @@ const steps = [
   "fetch-ffmpeg.mjs",
 ];
 
+const passArgs = process.argv.slice(2);
+
 for (const script of steps) {
   const scriptPath = path.join(__dirname, script);
   console.log(`\n▶ Running ${script}...\n`);
-  execFileSync("node", [scriptPath], {
+  const extraArgs = script === "fetch-ffmpeg.mjs" ? passArgs : [];
+  execFileSync("node", [scriptPath, ...extraArgs], {
     cwd: path.resolve(__dirname, ".."),
     stdio: "inherit",
   });

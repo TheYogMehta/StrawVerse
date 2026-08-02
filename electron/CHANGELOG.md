@@ -2,6 +2,11 @@
 
 # [9.1.0] - 2026-08-03
 
+### Mobile (Android)
+
+- **Official Android Build Support**: Added Capacitor Android packaging pipeline and build scripts (`npm run package:android`).
+- **Signed APK Release**: Configured automated release signing for production APK distribution (`StrawVerse-<version>.apk`).
+
 ### MPV Video Player & Streaming
 
 - **Player Loading Overlay**: Added a smooth loading card and progress indicator when launching the MPV video player engine.

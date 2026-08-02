@@ -219,19 +219,21 @@ Follow these steps to build and run the application on Android:
    npm install
    ```
 
-2. **Prepare the Capacitor Assets**:
+2. **Sync Android Project**:
 
-   Build the GUI, sync the backend, and download the Android ffmpeg binaries:
-
-   ```bash
-   npm run prepare:app
-   ```
-
-3. **Sync with Capacitor**:
+   Build GUI, bundle backend, fetch dependencies, and sync with Capacitor:
 
    ```bash
-   npx cap sync android
+   npm run sync:android
    ```
+
+3. **Build Android APK**:
+
+   ```bash
+   npm run package:android
+   ```
+
+   *(Outputs signed release APK to `capacitor/android/app/build/outputs/apk/release/app-release.apk`)*
 
 4. **Run the Application**:
    - **Option A**: Directly from the terminal:
