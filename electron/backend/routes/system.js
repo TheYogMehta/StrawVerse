@@ -74,11 +74,13 @@ router.post("/api/logger", async (req, res) => {
         totalSegments,
         currentSegments,
         epid,
+        isPaused: isQueuePaused(),
         queue: queue.filter((item) => item?.currentSegments === 0),
       });
     } else {
       sendToRenderer("download-logger", {
         caption: "Nothing in progress",
+        isPaused: isQueuePaused(),
         queue,
       });
     }

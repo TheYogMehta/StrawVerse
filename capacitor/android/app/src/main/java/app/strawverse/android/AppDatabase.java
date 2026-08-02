@@ -89,7 +89,7 @@ public class AppDatabase {
 
     public static void saveStreamReferer(Context context, String domain, String referer) {
         SQLiteDatabase db = getDatabase(context);
-        if (db == null || domain == null || referer == null) return;
+        if (db == null || db.isReadOnly() || domain == null || referer == null) return;
         try {
             String cleanDomain = domain.replace("www.", "").toLowerCase();
             ContentValues values = new ContentValues();

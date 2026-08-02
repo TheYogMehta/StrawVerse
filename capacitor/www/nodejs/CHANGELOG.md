@@ -1,38 +1,26 @@
 # Changelog
 
-## [9.0.1] - 2026-08-02
+## [9.1.0] - 2026-08-03
 
 ### Initial Release
 
-### Playback & Streaming Improvements
+### Native Video Player & Touch Gestures
 
-- **Improved Stream Protection Handling**: Automatically passes security headers and session cookies to prevent playback and buffering errors on protected video sources.
-- **Enhanced Subtitle & Track Controls**: Smooth audio track switching (Dub/Sub) and reliable subtitle track selection during playback.
+- **Picture-in-Picture (PiP) Mode**: Continue watching anime in a floating window while multitasking on your device.
+- **In-Player Controls & Quality Selection**: Switch video stream quality, server sources, audio tracks (Dub/Sub), and subtitles directly inside the player.
+- **Intuitive Touch Gestures**: Double-tap left/right to seek 10s backward/forward, swipe vertically to adjust screen brightness and volume, and smooth timeline drag seeking.
+- **Playback Enhancements**: One-tap intro/outro skip buttons and playback speed control (0.25x to 2.0x).
 
-### Settings Fixes
+### Anime Streaming & Offline Downloads
 
-- **Clearer Language Tags**: Better identification of available language formats (Subbed, Dubbed, Softsub, Softdub).
-- **Expandable Show Descriptions**: Easily read long anime synopses with an expandable description toggle.
+- **High-Performance Streaming & Faster Cloudflare Bypass**: Smooth playback with automatic security header/cookie handling and faster challenge resolution on protected sources.
+- **Offline Batch Downloads & Notifications**: Download full series or selected episodes directly to your device, with real-time download progress and error notifications.
+- **Gallery Auto-Hide**: Keeps app media assets and downloaded covers hidden from your device photo gallery.
+- **Subtitle Language Preference**: Prioritizes subtitle downloads and streams based on your preferred languages setting.
+- **Smart Folder Cleanup**: Automatically cleans up empty download directories while preserving your library tracking data.
 
-##### Native Video Player & Touch Gestures
+### Catalog & Library Management
 
-- **Intuitive Touch Gestures**:
-  - **Double-Tap to Seek**: Double-tap on the left or right side of the video to jump backward or forward.
-  - **Swipe Volume & Brightness**: Swipe vertically on the left side of the screen to adjust screen brightness and on the right side to adjust volume.
-  - **Fluid Timeline Scrubbing**: Smooth touch drag seeking along the video timeline for precise navigation.
-- **Playback Controls**:
-  - **Intro & Outro Skip**: One-tap skip buttons to fast-forward through anime openings and endings.
-  - **Playback Speed Control**: Custom speed adjustments ranging from 0.25x up to 2.0x.
-  - **Audio & Subtitle Selection**: Easily switch between available audio tracks (Dub/Sub) and subtitle options.
-  - **Picture-in-Picture (PiP) Mode**: Continue watching your anime in a floating window while multitasking on your device.
-
-##### Anime Streaming & Offline Downloads
-
-- **High-Performance Playback**: Fast and smooth streaming across supported anime sources.
-- **Offline Batch Downloads**: Download full series or selected episodes directly to your device for offline viewing anywhere.
-
-##### Catalog & MyAnimeList Integration
-
-- **Rich Catalog Exploration**: Browse airing calendars, top titles, and detailed media info.
-- **MyAnimeList Sync**: Track watch/read progress, prioritize MAL cover art, and filter your library by status (Watched, Unwatched, Read, Unread).
-- **Custom Tagging**: Organize your collection using customizable tags and quick filters.
+- **MyAnimeList Integration**: Track watch/read progress, prioritize high-resolution MAL cover art, and filter your library by status (Watched, Unwatched, Read, Unread).
+- **Catalog Exploration & Tagging**: Browse airing calendars, detailed media info, expandable show descriptions, and custom library tags.
+- **Download Path Fixes**: Resolved folder name handling to prevent duplicate or invalid series download paths.

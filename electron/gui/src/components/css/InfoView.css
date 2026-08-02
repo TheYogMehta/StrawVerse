@@ -678,9 +678,40 @@
 }
 
 .btn-read {
-  background-color: #3b82f6;
-  border: none;
-  color: white;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background-color: rgba(59, 130, 246, 0.12);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  box-sizing: border-box;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.btn-read:hover {
+  background-color: rgba(59, 130, 246, 0.25);
+  border-color: rgba(59, 130, 246, 0.5);
+  color: #93c5fd;
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.25);
+}
+
+.btn-read:active {
+  transform: scale(0.96);
+}
+
+.btn-action-open {
+  background-color: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #60a5fa;
   width: 36px;
   height: 36px;
   border-radius: 6px;
@@ -691,7 +722,9 @@
   transition: var(--transition);
 }
 
-.btn-read:hover {
+.btn-action-open:hover {
+  background-color: rgba(59, 130, 246, 0.3);
+  color: #93c5fd;
   transform: scale(1.05);
 }
 

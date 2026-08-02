@@ -95,6 +95,8 @@ sed -i '/nodeEnv.put("DATADIR", dataPath);/ {
             \
             nodeEnv.put("NODEJS_MOBILE_DATA_DIR", publicRoot.getAbsolutePath());\
             nodeEnv.put("STRAWVERSE_PUBLIC_ROOT", publicRoot.getAbsolutePath());\
+            nodeEnv.put("INTERNAL_DATA_DIR", dataPath);\
+            nodeEnv.put("NATIVE_LIB_DIR", context.getApplicationInfo().nativeLibraryDir);\
             nodeEnv.put("NODE_PATH", modulesPaths);\
             nodeEnv.putAll(env);
 }' "$TARGET_FILE"

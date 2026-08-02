@@ -109,15 +109,15 @@ export default function DownloadsTracker() {
       <header className="tracker-header">
         <h1 className="tracker-title">Download Queue</h1>
         <div className="tracker-actions">
-          {queue.length > 0 && (
-          <button
-            onClick={handleTogglePause}
-            className={`btn-pause-queue ${isPaused ? "paused" : ""}`}
-            title={isPaused ? "Start / Resume Queue" : "Pause Queue"}
-          >
-            {isPaused ? <Play size={16} /> : <Pause size={16} />}
-            <span>{isPaused ? "Start Queue" : "Pause Queue"}</span>
-          </button>
+          {(queue.length > 0 || activeTask || isPaused) && (
+            <button
+              onClick={handleTogglePause}
+              className={`btn-pause-queue ${isPaused ? "paused" : ""}`}
+              title={isPaused ? "Start / Resume Queue" : "Pause Queue"}
+            >
+              {isPaused ? <Play size={16} /> : <Pause size={16} />}
+              <span>{isPaused ? "Start Queue" : "Pause Queue"}</span>
+            </button>
           )}
 
           <button
@@ -204,25 +204,34 @@ export default function DownloadsTracker() {
             </div>
           ) : (
             <div className="queue-list">
-              {queue.map((item, idx) => (
-                <div key={item.epid || idx} className="queue-card glass-panel">
-                  <div className="queue-item-info">
-                    <span className="queue-title-text">{item.Title}</span>
-                    <span className="queue-meta">
-                      {item.Type === "Anime"
-                        ? `Episode ${item.EpNum}`
-                        : `Chapter ${item.EpNum}`}{" "}
-                      • {item.Type.toUpperCase()}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => handleRemoveItem(item.epid)}
-                    className="btn-remove-item"
+              {queue.map((item, idx) => {
+                const qualStr = item.config?.quality
+                  ? ` ( ${item.config.quality} )`
+                  : "";
+                const displayTitle =
+                  item.Type === "Anime"
+                    ? `EP ${item.EpNum} ${item.Title}${qualStr}`
+                    : `CHP ${item.EpNum} ${item.Title}${qualStr}`;
+                return (
+                  <div
+                    key={item.epid || idx}
+                    className="queue-card glass-panel"
                   >
-                    <X size={16} />
-                  </button>
-                </div>
-              ))}
+                    <div className="queue-item-info">
+                      <span className="queue-title-text">{displayTitle}</span>
+                      <span className="queue-meta">
+                        {item.Type.toUpperCase()}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveItem(item.epid)}
+                      className="btn-remove-item"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

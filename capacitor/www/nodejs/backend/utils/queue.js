@@ -9,12 +9,28 @@ const {
   MangaChapterFetch,
   DownloadChapters,
   fetchEpisodeSources,
+  processServer,
 } = require("./AnimeManga");
-const { providerFetch } = require("./settings");
+const {
+  providerFetch,
+  isLanguagePreferred,
+  settingfetch,
+} = require("./settings");
+
+let _bgDownloadDepth = 0;
+let isProcessorRunning = false;
+global.__isBackgroundDownload = () =>
+  isProcessorRunning || _bgDownloadDepth > 0;
+
+function parseBoolSetting(val) {
+  if (val === true || val === 1 || val === "1" || val === "true") return true;
+  return false;
+}
 
 let AnimeQueue = [];
-let isProcessorRunning = false;
-let isQueuePausedState = getKeyValue("Settings", "isQueuePaused") || false;
+let isQueuePausedState = parseBoolSetting(
+  getKeyValue("Settings", "isQueuePaused"),
+);
 
 function isQueuePaused() {
   return isQueuePausedState;
@@ -98,7 +114,9 @@ async function loadQueue() {
     AnimeQueue = [];
     logger.error("Failed to load DownloadQueue DB: " + err.message);
   }
-  isQueuePausedState = getKeyValue("Settings", "isQueuePaused") || false;
+  isQueuePausedState = parseBoolSetting(
+    getKeyValue("Settings", "isQueuePaused"),
+  );
   if (!isQueuePausedState) {
     try {
       continuousExecution();
@@ -366,14 +384,23 @@ async function continuousExecution() {
             continue;
           }
         } else if (currentTask?.Type === "Manga") {
-          let { Title, EpNum, epid, ChapterTitle, config } = currentTask;
-          if (Title && EpNum && epid && ChapterTitle && config) {
+          let { Title, EpNum, epid, ChapterTitle, config, id } = currentTask;
+          const safeChapterTitle =
+            ChapterTitle || (EpNum ? `Chapter ${EpNum}` : "Chapter");
+          if (
+            Title &&
+            EpNum !== undefined &&
+            EpNum !== null &&
+            epid &&
+            config
+          ) {
             await downloadMangaChapters(
               config,
               Title,
               EpNum,
               epid,
-              ChapterTitle,
+              safeChapterTitle,
+              id || currentTask?.id,
             );
           } else {
             logger.error(
@@ -411,6 +438,17 @@ async function continuousExecution() {
         }
         logger.error(`Error message: ${err.message}`);
         logger.error(`Stack trace: ${err.stack}`);
+        try {
+          const { sendToRenderer } = require("./rendererIPC");
+          const itemLabel = currentTask?.Title
+            ? `${currentTask.Title} (${currentTask?.Type === "Manga" ? "CHP" : "EP"} ${currentTask?.EpNum || ""})`
+            : "Download";
+          sendToRenderer("download-error", {
+            title: "Download Failed",
+            message: `${itemLabel}: ${err.message}`,
+            epid: currentTask?.epid,
+          });
+        } catch (ipcErr) {}
         if (
           AnimeQueue.length > 0 &&
           AnimeQueue[0]?.epid === currentTask?.epid
@@ -429,6 +467,15 @@ async function continuousExecution() {
   } finally {
     logger.info("[queueWorker] Queue empty. Stopping download processor...");
     isProcessorRunning = false;
+
+    if (!isQueuePausedState && AnimeQueue && AnimeQueue.length > 0) {
+      logger.info(
+        "[queueWorker] New items found after processor stopped. Restarting...",
+      );
+      setTimeout(() => {
+        continuousExecution().catch(() => {});
+      }, 500);
+    }
   }
 }
 
@@ -446,8 +493,22 @@ async function downloadep(
     Title,
     EpNum,
     Videoconfig?.CustomDownloadLocation,
+    animeId || AnimeEpId,
   );
+  _bgDownloadDepth++;
   try {
+    const qualStr = Videoconfig?.quality ? ` ( ${Videoconfig.quality} )` : "";
+    const initialCaption = `Downloading EP ${EpNum} ${Title}${qualStr}`;
+    await updateQueue(AnimeEpId, 1, 0, initialCaption);
+    const { sendToRenderer } = require("./rendererIPC");
+    sendToRenderer("download-logger", {
+      caption: initialCaption,
+      totalSegments: 1,
+      currentSegments: 0,
+      epid: AnimeEpId,
+      isPaused: isQueuePaused(),
+    });
+
     await downloadEpisodeByQuality(
       Videoconfig,
       EpNum,
@@ -458,8 +519,8 @@ async function downloadep(
       malid,
       animeId,
     );
-  } catch (err) {
-    throw err;
+  } finally {
+    _bgDownloadDepth--;
   }
 }
 
@@ -481,26 +542,26 @@ async function downloadEpisodeByQuality(
     if (subdub && !epid.endsWith(`-${subdub}`) && !epid.endsWith("-both")) {
       resolvedEpid = `${epid}-${subdub}`;
     }
-    let sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
+    let sourcesArray = await fetchEpisodeSources(
+      provider,
+      resolvedEpid,
+      subdub,
+    );
 
     const extractSources = (srcObj, prefSubDub) => {
       if (!srcObj) return [];
-      if (Array.isArray(srcObj.sources) && srcObj.sources.length > 0) {
-        return srcObj.sources;
-      }
-      if (
-        prefSubDub &&
-        Array.isArray(srcObj[prefSubDub]?.sources) &&
-        srcObj[prefSubDub].sources.length > 0
-      ) {
-        return srcObj[prefSubDub].sources;
-      }
       if (
         prefSubDub &&
         Array.isArray(srcObj[prefSubDub]) &&
         srcObj[prefSubDub].length > 0
       ) {
         return srcObj[prefSubDub];
+      }
+      if (Array.isArray(srcObj.sources) && srcObj.sources.length > 0) {
+        return srcObj.sources;
+      }
+      if (Array.isArray(srcObj) && srcObj.length > 0) {
+        return srcObj;
       }
       return [
         ...(Array.isArray(srcObj.sources) ? srcObj.sources : []),
@@ -513,6 +574,11 @@ async function downloadEpisodeByQuality(
           ? srcObj.dub.sources
           : Array.isArray(srcObj.dub)
             ? srcObj.dub
+            : []),
+        ...(Array.isArray(srcObj.hsub?.sources)
+          ? srcObj.hsub.sources
+          : Array.isArray(srcObj.hsub)
+            ? srcObj.hsub
             : []),
       ];
     };
@@ -537,14 +603,14 @@ async function downloadEpisodeByQuality(
       }
     }
 
-    if (!selectedSource && sourcesList?.[0]?.url) {
+    if (!selectedSource && sourcesList?.[0]) {
       selectedSource = { ...sourcesList[0] };
       if (!selectedSource.quality) {
         selectedSource.quality = "best";
       }
     }
 
-    const subtitles =
+    let subtitles =
       sourcesArray?.subtitles ||
       sourcesArray?.[subdub]?.subtitles ||
       sourcesArray?.sub?.subtitles ||
@@ -552,10 +618,44 @@ async function downloadEpisodeByQuality(
       [];
 
     if (selectedSource) {
+      if (!selectedSource.url || selectedSource.isUnresolved) {
+        const resolved = await processServer(
+          provider,
+          selectedSource.rawServer || selectedSource,
+        );
+        if (resolved && resolved.url) {
+          selectedSource.url = resolved.url;
+          selectedSource.headers =
+            resolved.headers || selectedSource.headers || {};
+          if (
+            Array.isArray(resolved.subtitles) &&
+            resolved.subtitles.length > 0
+          ) {
+            subtitles = resolved.subtitles;
+          }
+        } else {
+          throw new Error("Failed to resolve stream link for download");
+        }
+      }
+
       const dlQuality =
         selectedSource.quality && selectedSource.quality.match(/\d+p/)
           ? selectedSource.quality
           : config?.quality || "1080p";
+
+      const currentSettings = (await settingfetch()) || {};
+      const preferredLangs = config?.preferredSubtitleLanguages ||
+        currentSettings?.preferredSubtitleLanguages || ["English"];
+
+      let filteredSubtitles = (subdub === "hsub" ? [] : subtitles || []).filter(
+        ({ lang, label, language }) => {
+          const subLang = lang || label || language;
+          return (
+            subLang !== "Thumbnails" &&
+            isLanguagePreferred(subLang, preferredLangs)
+          );
+        },
+      );
 
       await downloadVideo(
         selectedSource.url,
@@ -564,7 +664,7 @@ async function downloadEpisodeByQuality(
         dlQuality,
         Title,
         epid,
-        subdub === "hsub" ? [] : subtitles,
+        filteredSubtitles,
         subdub === "hsub"
           ? false
           : config?.mergeSubtitles === true
@@ -639,12 +739,13 @@ async function downloadVideo(
   headers = {},
 ) {
   try {
+    const qualStr = quality ? ` ( ${quality} )` : "";
     await download({
       directory: directoryPath,
       Epnum: episodeNumber,
       streamUrl: Url,
       quality: quality,
-      caption: `Downloading ${Title} || EP ${episodeNumber} [  ${quality}  ]`,
+      caption: `Downloading EP ${episodeNumber} ${Title}${qualStr}`,
       EpID: epid,
       subtitles: subtitles,
       MergeSubtitles: MergeSubtitles,
@@ -666,18 +767,41 @@ async function downloadMangaChapters(
   EpNum,
   ChapterId,
   ChapterTitle,
+  mediaId,
 ) {
-  const provider = await providerFetch("Manga", config?.Mangaprovider);
-  const ChapterData = await MangaChapterFetch(provider, ChapterId);
-
-  if (!ChapterData || ChapterData?.length < 1) {
-    await removeQueue(ChapterId);
-    throw new Error("No Image Found For This Chapter!");
-  }
-
-  const directoryPath = await MangaDir(Title, config?.CustomDownloadLocation);
+  _bgDownloadDepth++;
   try {
-    const sanitizedChapterName = ChapterTitle.replace(/[<>:"/\\|?*]/g, "-");
+    const qualStr = config?.quality ? ` ( ${config.quality} )` : "";
+    const chpStr = EpNum || ChapterTitle || "";
+    const initialCaption = `Downloading CHP ${chpStr} ${Title}${qualStr}`;
+    await updateQueue(ChapterId, 1, 0, initialCaption);
+    const { sendToRenderer } = require("./rendererIPC");
+    sendToRenderer("download-logger", {
+      caption: initialCaption,
+      totalSegments: 1,
+      currentSegments: 0,
+      epid: ChapterId,
+      isPaused: isQueuePaused(),
+    });
+
+    const provider = await providerFetch("Manga", config?.Mangaprovider);
+    const ChapterData = await MangaChapterFetch(provider, ChapterId);
+
+    if (!ChapterData || ChapterData?.length < 1) {
+      await removeQueue(ChapterId);
+      throw new Error("No Image Found For This Chapter!");
+    }
+
+    const directoryPath = await MangaDir(
+      Title,
+      config?.CustomDownloadLocation,
+      mediaId,
+    );
+
+    const sanitizedChapterName = (ChapterTitle || `Chapter ${EpNum}`).replace(
+      /[<>:"/\\|?*]/g,
+      "-",
+    );
     const outputFile = path.join(directoryPath, `${sanitizedChapterName}.cbz`);
     await DownloadChapters(
       outputFile,
@@ -685,9 +809,11 @@ async function downloadMangaChapters(
       Title,
       ChapterTitle,
       ChapterId,
+      EpNum,
+      config?.quality,
     );
-  } catch (err) {
-    throw err;
+  } finally {
+    _bgDownloadDepth--;
   }
 }
 
@@ -701,7 +827,6 @@ module.exports = {
   loadQueue,
   removeQueue,
   removeMultipleFromQueue,
-
   updateQueue,
   getQueue,
   checkEpisodeDownload,

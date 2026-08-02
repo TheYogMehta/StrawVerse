@@ -68,6 +68,7 @@ export default function SettingsView({
   const [malUsername, setMalUsername] = useState(null);
   const [imageCacheSizeLimit, setImageCacheSizeLimit] = useState(5);
   const [developerMode, setDeveloperMode] = useState(false);
+  const [downloadNotification, setDownloadNotification] = useState(true);
   const [autoSkipIntro, setAutoSkipIntro] = useState(true);
   const [mangaReaderLayout, setMangaReaderLayout] = useState("long-strip");
   const [mangaReaderWidth, setMangaReaderWidth] = useState(800);
@@ -469,6 +470,9 @@ export default function SettingsView({
         );
         setImageCacheSizeLimit(s.imageCacheSizeLimit || 5);
         setDeveloperMode(s.developerMode);
+        setDownloadNotification(
+          s.downloadNotification !== undefined ? s.downloadNotification : true,
+        );
         setAutoSkipIntro(s.autoSkipIntro);
         const layoutVal = s.mangaReaderLayout || "long-strip";
         setMangaReaderLayout(layoutVal);
@@ -588,6 +592,13 @@ export default function SettingsView({
       dirty.preferredSubtitleLanguages = preferredSubtitleLanguages;
     if (developerMode !== settings.developerMode)
       dirty.developerMode = developerMode;
+    if (
+      downloadNotification !==
+      (settings.downloadNotification !== undefined
+        ? settings.downloadNotification
+        : true)
+    )
+      dirty.downloadNotification = downloadNotification;
     if (autoSkipIntro !== settings.autoSkipIntro)
       dirty.autoSkipIntro = autoSkipIntro;
     if (mangaReaderLayout !== (settings.mangaReaderLayout || "long-strip"))
@@ -608,6 +619,21 @@ export default function SettingsView({
           await window.sharedStateAPI.updateSetting(key, dirty[key]);
         } else {
           await window.sharedStateAPI.updateSettings(dirty);
+        }
+
+        if (
+          dirty.downloadNotification !== undefined &&
+          window.Capacitor &&
+          window.Capacitor.Plugins &&
+          window.Capacitor.Plugins.CloudflareBypass &&
+          window.Capacitor.Plugins.CloudflareBypass
+            .setDownloadNotificationEnabled
+        ) {
+          window.Capacitor.Plugins.CloudflareBypass.setDownloadNotificationEnabled(
+            {
+              enabled: dirty.downloadNotification,
+            },
+          ).catch(() => {});
         }
 
         if (dirty.Animeprovider || dirty.Mangaprovider) {
@@ -1053,6 +1079,20 @@ export default function SettingsView({
                     </button>
                   </div>
                 </div>{" "}
+                <SettingsRow
+                  label="Download Notifications"
+                  desc="Show active download progress notification in the Android status bar."
+                >
+                  <Dropdown
+                    value={String(downloadNotification)}
+                    onChange={(val) => setDownloadNotification(val === "true")}
+                    options={[
+                      { value: "true", label: "Enabled" },
+                      { value: "false", label: "Disabled" },
+                    ]}
+                    minWidth={200}
+                  />
+                </SettingsRow>
                 <SettingsRow
                   label="Developer Mode"
                   desc="Enable advanced logs viewer tab and debug utilities."

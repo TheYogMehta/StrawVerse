@@ -9,6 +9,7 @@
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
+        android:extractNativeLibs="true"
         android:theme="@style/AppTheme">
 
         <activity
@@ -51,6 +52,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <receiver android:name=".NotificationActionReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="app.strawverse.android.ACTION_PAUSE" />
+                <action android:name="app.strawverse.android.ACTION_RESUME" />
+                <action android:name="app.strawverse.android.ACTION_CANCEL" />
+            </intent-filter>
+        </receiver>
     </application>
 
     <!-- Permissions -->

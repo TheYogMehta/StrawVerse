@@ -90,6 +90,37 @@ public class CloudflareBypassPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void updateDownloadNotification(PluginCall call) {
+        String caption = call.getString("caption", "");
+        int currentSegments = call.getInt("currentSegments", 0);
+        int totalSegments = call.getInt("totalSegments", 0);
+        String epid = call.getString("epid", "");
+        Boolean isPaused = call.getBoolean("isPaused", false);
+
+        try {
+            if (currentSegments >= totalSegments || totalSegments <= 0 || "Nothing in progress".equals(caption)) {
+                DownloadNotificationManager.getInstance(getContext()).cancelNotification();
+            } else {
+                DownloadNotificationManager.getInstance(getContext()).updateProgress(caption, currentSegments, totalSegments, epid, isPaused != null ? isPaused : false);
+            }
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to update download notification: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void setDownloadNotificationEnabled(PluginCall call) {
+        Boolean enabled = call.getBoolean("enabled", true);
+        try {
+            DownloadNotificationManager.getInstance(getContext()).setEnabled(enabled);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to set download notification setting: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void bypass(PluginCall call) {
         String url = call.getString("url");
         if (url == null) {
@@ -562,10 +593,20 @@ public class CloudflareBypassPlugin extends Plugin {
     @PluginMethod
     public void nativeRequest(final PluginCall call) {
         String url = call.getString("url");
-        if (url != null && (url.startsWith("http://") || url.startsWith("https://")) && !url.contains("127.0.0.1") && !url.contains("localhost")) {
-            executeWebViewRequest(url, call.getString("method"), call.getObject("headers"), call.getString("body"), call);
+        JSObject headers = call.getObject("headers");
+
+        boolean isMedia = false;
+        if (url != null) {
+            String lowerUrl = url.toLowerCase();
+            isMedia = lowerUrl.contains(".m3u8") || lowerUrl.contains(".ts") || lowerUrl.contains("owocdn.top") || lowerUrl.contains("uwucdn.top") || lowerUrl.contains("kotocdn.site") || lowerUrl.contains("megaplay.buzz");
+        }
+
+        if (!isMedia) {
+            executeWebViewRequest(url, call.getString("method"), headers, call.getString("body"), call);
             return;
         }
+
+        final boolean finalIsMedia = isMedia;
 
         new Thread(new Runnable() {
             @Override
@@ -616,8 +657,13 @@ public class CloudflareBypassPlugin extends Plugin {
                         conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
                     }
 
+                    String reqReferer = headers != null ? headers.optString("Referer", headers.optString("referer", "")) : "";
                     String browserCookies = CookieManager.getInstance().getCookie(url);
-                    String mergedCookies = AppDatabase.mergeCookies(explicitCookies, browserCookies);
+                    String refererCookies = (!reqReferer.isEmpty() && (reqReferer.startsWith("http://") || reqReferer.startsWith("https://")))
+                            ? CookieManager.getInstance().getCookie(reqReferer)
+                            : null;
+                    String allBrowserCookies = AppDatabase.mergeCookies(browserCookies, refererCookies);
+                    String mergedCookies = AppDatabase.mergeCookies(explicitCookies, allBrowserCookies);
                     if (!mergedCookies.isEmpty()) {
                         conn.setRequestProperty("Cookie", mergedCookies);
                         Log.i("StrawVerseBypass", "nativeRequest cookies: " + AppDatabase.cookieNames(mergedCookies));
@@ -635,6 +681,16 @@ public class CloudflareBypassPlugin extends Plugin {
                     String contentType = conn.getContentType();
                     int contentLength = conn.getContentLength();
                     Log.i("StrawVerseBypass", "nativeRequest response code: " + responseCode + ", type: " + contentType + ", length: " + contentLength);
+                    
+                    boolean isCloudflareHtmlChallenge = (responseCode == 403 || responseCode == 503)
+                        && contentType != null
+                        && contentType.toLowerCase().contains("text/html");
+
+                    if (isCloudflareHtmlChallenge) {
+                        Log.i("StrawVerseBypass", "Cloudflare status " + responseCode + " HTML challenge detected on native request, falling back to WebView for: " + url);
+                        executeWebViewRequest(url, method, headers, body, call);
+                        return;
+                    }
                     
                     is = (responseCode >= 200 && responseCode < 300) 
                         ? conn.getInputStream() 

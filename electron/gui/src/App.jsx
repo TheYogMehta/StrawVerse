@@ -267,6 +267,13 @@ export default function App() {
       window.sharedStateAPI.on("mal-sync-notification", (data) => {
         showToast(data.title, data.body, data.icon);
       });
+      window.sharedStateAPI.on("download-error", (data) => {
+        showToast(
+          data.title || "Download Error",
+          data.message || "Download failed",
+          "error",
+        );
+      });
     }
   }, []);
 
@@ -584,21 +591,42 @@ export default function App() {
               key={toast.id}
               className={`toast-card ${toast.fadeOut ? "fade-out" : ""}`}
             >
-              <div className="toast-icon-container success">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="toast-check-svg"
-                >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
+              <div
+                className={`toast-icon-container ${toast.icon === "error" ? "error" : "success"}`}
+              >
+                {toast.icon === "error" ? (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="toast-check-svg"
+                  >
+                    <circle cx="12" cy="12" r="10" />
+                    <line x1="15" y1="9" x2="9" y2="15" />
+                    <line x1="9" y1="9" x2="15" y2="15" />
+                  </svg>
+                ) : (
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="toast-check-svg"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
               </div>
               <div className="toast-content">
                 <div className="toast-title">{toast.title}</div>

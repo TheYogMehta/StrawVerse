@@ -18,7 +18,8 @@ const { updateHistory } = require("../utils/history");
 const { getKeyValue, setKeyValue } = require("../utils/db");
 const { sanitizeFolderName } = require("../utils/DirectoryMaker");
 
-const { exec } = require("child_process");
+const { GetDir } = require("../utils/DirectoryMaker");
+const ImageCacheManager = require("../utils/ImageCacheManager");
 const { sendToRenderer } = require("../utils/rendererIPC");
 
 const router = express.Router();
@@ -61,7 +62,13 @@ router.get("/api/local/tags/view/:type", async (req, res) => {
             allTagsSet.add(parsed.trim());
           }
         } catch (e) {
-          allTagsSet.add(tag);
+          if (tag.includes(",")) {
+            tag.split(",").forEach((t) => {
+              if (t && t.trim()) allTagsSet.add(t.trim());
+            });
+          } else {
+            allTagsSet.add(tag);
+          }
         }
       }
     }
@@ -311,7 +318,37 @@ router.post("/api/local/tags/add", async (req, res) => {
 
     let tagValue = "";
     if (CustomTag !== undefined) {
-      tagValue = (CustomTag || "").trim();
+      if (Array.isArray(CustomTag)) {
+        const cleanArr = CustomTag.map((t) => String(t).trim()).filter(Boolean);
+        tagValue = cleanArr.length > 0 ? JSON.stringify(cleanArr) : "[]";
+      } else if (typeof CustomTag === "string") {
+        const trimmed = CustomTag.trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (Array.isArray(parsed)) {
+              const cleanArr = parsed
+                .map((t) => String(t).trim())
+                .filter(Boolean);
+              tagValue = cleanArr.length > 0 ? JSON.stringify(cleanArr) : "[]";
+            } else {
+              tagValue = trimmed;
+            }
+          } catch (_) {
+            tagValue = trimmed;
+          }
+        } else if (trimmed.includes(",")) {
+          const parsed = trimmed
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean);
+          tagValue = JSON.stringify(parsed);
+        } else {
+          tagValue = trimmed ? JSON.stringify([trimmed]) : "[]";
+        }
+      } else {
+        tagValue = String(CustomTag || "").trim();
+      }
     }
 
     const existing = global.db
@@ -593,7 +630,7 @@ router.post("/api/local/delete", async (req, res) => {
     }
 
     const baseDir = await getBaseDownloadDir();
-    let typeDir = resolveDownloadFolder(type, id, subdub, baseDir);
+    let typeDir = await resolveDownloadFolder(type, id, subdub, baseDir);
 
     if (!fs.existsSync(typeDir)) {
       throw new Error(`${type} folder not found on disk`);
@@ -735,7 +772,7 @@ router.post("/api/local/open", async (req, res) => {
       if (!id) {
         targetPath = baseDir;
       } else {
-        targetPath = resolveDownloadFolder(type, id, subdub, baseDir);
+        targetPath = await resolveDownloadFolder(type, id, subdub, baseDir);
         if (number != null && fs.existsSync(targetPath)) {
           const files = await fs.promises.readdir(targetPath);
           const targetNum = parseFloat(number);
@@ -1051,6 +1088,65 @@ router.get("/api/history/stats", async (req, res) => {
   }
 });
 
+async function resolveHistoryCoverImage(
+  mediaId,
+  title,
+  type = "Anime",
+  malId = null,
+  rawScraperImg = null,
+  rawMalImg = null,
+) {
+  let localSrc = null;
+
+  const urlsToCheck = [rawMalImg, rawScraperImg].filter(Boolean);
+  for (const url of urlsToCheck) {
+    try {
+      const cached = queryOne("SELECT filename FROM ImageCache WHERE url = ?", [
+        url,
+      ]);
+      if (cached) {
+        const cacheDir = ImageCacheManager.getImageCacheDir();
+        if (fs.existsSync(path.join(cacheDir, cached.filename))) {
+          localSrc = `/api/image?url=${encodeURIComponent(url)}`;
+          break;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (!localSrc && title) {
+    try {
+      const dirPath = await GetDir(title, null, type, mediaId);
+      if (fs.existsSync(dirPath)) {
+        const files = fs.readdirSync(dirPath);
+        const coverFile = files.find((f) =>
+          /^(cover|poster|folder)\.(jpg|jpeg|png|webp)$/i.test(f),
+        );
+        if (coverFile) {
+          const p = path.join(dirPath, coverFile);
+          localSrc = `/api/image?url=${encodeURIComponent("file://" + p)}`;
+        }
+      }
+    } catch (_) {}
+  }
+
+  const malSrc = rawMalImg
+    ? `/api/image?url=${encodeURIComponent(rawMalImg)}`
+    : null;
+
+  const scraperSrc = rawScraperImg
+    ? `/api/image?url=${encodeURIComponent(rawScraperImg)}`
+    : null;
+
+  return {
+    image: localSrc || malSrc || scraperSrc || "/images/image-404.png",
+    local_image: localSrc,
+    mal_image: malSrc,
+    scraper_image: scraperSrc,
+    fallback_image: "/images/image-404.png",
+  };
+}
+
 // Fetch history list
 router.get("/api/history/list", async (req, res) => {
   try {
@@ -1076,9 +1172,10 @@ router.get("/api/history/list", async (req, res) => {
       ? ""
       : "WHERE (r.hidden IS NULL OR r.hidden = 0)";
 
-    const watchLogs = global.db
-      .prepare(
-        `
+    const watchLogs =
+      global.db
+        .prepare(
+          `
       SELECT 
         w.id,
         'Anime' AS type,
@@ -1094,7 +1191,8 @@ router.get("/api/history/list", async (req, res) => {
         a.provider,
         a.MalID AS mal_id,
         CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
-        mal.totalEpisodes AS total_count
+        mal.totalEpisodes AS total_count,
+        mal.image AS mal_image
       FROM WatchHistory w
       LEFT JOIN Anime a ON a.id = w.anime_id
       LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
@@ -1102,17 +1200,26 @@ router.get("/api/history/list", async (req, res) => {
       ORDER BY w.last_watched DESC
       LIMIT ?
     `,
-      )
-      .all(limit);
+        )
+        .all(limit) || [];
 
-    watchLogs.forEach((log) => {
-      log.image = log.image_url || null;
+    for (const log of watchLogs) {
+      const coverRes = await resolveHistoryCoverImage(
+        log.media_id,
+        log.title,
+        "Anime",
+        log.mal_id,
+        log.image_url,
+        log.mal_image,
+      );
       delete log.image_url;
-    });
+      Object.assign(log, coverRes);
+    }
 
-    const readLogs = global.db
-      .prepare(
-        `
+    const readLogs =
+      global.db
+        .prepare(
+          `
       SELECT 
         r.id,
         'Manga' AS type,
@@ -1128,7 +1235,8 @@ router.get("/api/history/list", async (req, res) => {
         m.provider,
         m.MalID AS mal_id,
         CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
-        mml.totalChapters AS total_count
+        mml.totalChapters AS total_count,
+        mml.image AS mal_image
       FROM ReadHistory r
       LEFT JOIN Manga m ON m.id = r.manga_id
       LEFT JOIN MyMangaList mml ON mml.id = m.MalID
@@ -1136,13 +1244,21 @@ router.get("/api/history/list", async (req, res) => {
       ORDER BY r.last_read DESC
       LIMIT ?
     `,
-      )
-      .all(limit);
+        )
+        .all(limit) || [];
 
-    readLogs.forEach((log) => {
-      log.image = log.image_url || null;
+    for (const log of readLogs) {
+      const coverRes = await resolveHistoryCoverImage(
+        log.media_id,
+        log.title,
+        "Manga",
+        log.mal_id,
+        log.image_url,
+        log.mal_image,
+      );
       delete log.image_url;
-    });
+      Object.assign(log, coverRes);
+    }
 
     const combined = [...watchLogs, ...readLogs]
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())

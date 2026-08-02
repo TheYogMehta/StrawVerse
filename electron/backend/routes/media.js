@@ -13,6 +13,7 @@ const {
   animesearch,
   fetchEpisode,
   fetchEpisodeSources,
+  processServer,
   MangaChapterFetch,
   fetchChapters,
   getProviderOrThrow,
@@ -1203,108 +1204,50 @@ router.post("/api/watch", async (req, res) => {
     if (!Downloaded) {
       if (!ep) throw new Error("Episode ID Not Found");
       const Animeprovider = await providerFetch("Anime", provider);
-      let sourcesArray = await fetchEpisodeSources(Animeprovider, ep);
+      let sourcesArray = await fetchEpisodeSources(Animeprovider, ep, subdub);
 
-      if (sourcesArray) {
-        const prefSubDub = subdub || "sub";
-        let rawSources = [];
-        if (
-          prefSubDub &&
-          Array.isArray(sourcesArray[prefSubDub]?.sources) &&
-          sourcesArray[prefSubDub].sources.length > 0
-        ) {
-          rawSources = sourcesArray[prefSubDub].sources;
-        } else if (
-          prefSubDub &&
-          Array.isArray(sourcesArray[prefSubDub]) &&
-          sourcesArray[prefSubDub].length > 0
-        ) {
-          rawSources = sourcesArray[prefSubDub];
-        } else if (
-          Array.isArray(sourcesArray.sources) &&
-          sourcesArray.sources.length > 0
-        ) {
-          rawSources = sourcesArray.sources;
-        } else {
-          const subSrcs = Array.isArray(sourcesArray.sub?.sources)
-            ? sourcesArray.sub.sources
-            : Array.isArray(sourcesArray.sub)
-              ? sourcesArray.sub
-              : [];
-          const dubSrcs = Array.isArray(sourcesArray.dub?.sources)
-            ? sourcesArray.dub.sources
-            : Array.isArray(sourcesArray.dub)
-              ? sourcesArray.dub
-              : [];
-          const hsubSrcs = Array.isArray(sourcesArray.hsub?.sources)
-            ? sourcesArray.hsub.sources
-            : Array.isArray(sourcesArray.hsub)
-              ? sourcesArray.hsub
-              : [];
-
-          rawSources = [...subSrcs, ...dubSrcs, ...hsubSrcs];
-        }
-
-        const isHSub = (s) =>
-          s.isHsub ||
-          s.type === "hsub" ||
-          s.quality?.toLowerCase().includes("hsub");
-        const isDub = (s) =>
-          s.isDub ||
-          s.type === "dub" ||
-          s.quality?.toLowerCase().includes("dub");
-
-        let mainSources = rawSources;
-        if (prefSubDub === "sub") {
-          const cleanSub = rawSources.filter((s) => !isHSub(s) && !isDub(s));
-          if (cleanSub.length > 0) mainSources = cleanSub;
-        } else if (prefSubDub === "hsub") {
-          const cleanHsub = rawSources.filter((s) => isHSub(s));
-          if (cleanHsub.length > 0) mainSources = cleanHsub;
-        } else if (prefSubDub === "dub") {
-          const cleanDub = rawSources.filter((s) => isDub(s));
-          if (cleanDub.length > 0) mainSources = cleanDub;
-        }
-
-        const mainSubtitles =
-          prefSubDub === "hsub"
-            ? []
-            : [
-                ...(Array.isArray(sourcesArray.subtitles)
-                  ? sourcesArray.subtitles
-                  : []),
-                ...(Array.isArray(sourcesArray[prefSubDub]?.subtitles)
-                  ? sourcesArray[prefSubDub].subtitles
-                  : []),
-                ...(Array.isArray(sourcesArray.sub?.subtitles)
-                  ? sourcesArray.sub.subtitles
-                  : []),
-                ...(Array.isArray(sourcesArray.dub?.subtitles)
-                  ? sourcesArray.dub.subtitles
-                  : []),
-              ];
-        const uniqueSubtitles = Array.from(
-          new Map(mainSubtitles.map((s) => [s.url, s])).values(),
-        );
-
-        const formatSubtitleLabel = (sub) => {
-          return sub?.lang || sub?.label || sub?.name || "";
-        };
-
-        const formattedSubtitles = uniqueSubtitles.map((s, idx) => ({
-          ...s,
-          lang: formatSubtitleLabel(s, idx),
-          label: formatSubtitleLabel(s, idx),
-        }));
-
-        sourcesArray = {
-          ...sourcesArray,
-          sources: mainSources,
-          subtitles: formattedSubtitles,
-        };
+      if (!sourcesArray) {
+        sourcesArray = { sources: [], subtitles: [] };
       }
 
-      res.status(200).json(sourcesArray || { sources: [] });
+      const prefSubDub = (subdub || "sub").toLowerCase();
+      let rawSources = Array.isArray(sourcesArray.sources)
+        ? sourcesArray.sources
+        : Array.isArray(sourcesArray[prefSubDub]?.sources)
+          ? sourcesArray[prefSubDub].sources
+          : Array.isArray(sourcesArray[prefSubDub])
+            ? sourcesArray[prefSubDub]
+            : [];
+
+      let rawSubtitles =
+        prefSubDub === "hsub"
+          ? []
+          : Array.isArray(sourcesArray.subtitles)
+            ? sourcesArray.subtitles
+            : Array.isArray(sourcesArray[prefSubDub]?.subtitles)
+              ? sourcesArray[prefSubDub].subtitles
+              : [];
+
+      const formatSubtitleLabel = (sub) => {
+        return sub?.lang || sub?.label || sub?.name || "";
+      };
+
+      const formattedSubtitles = rawSubtitles.map((s, idx) => ({
+        ...s,
+        lang: formatSubtitleLabel(s, idx),
+        label: formatSubtitleLabel(s, idx),
+      }));
+
+      const cleanSources = rawSources.map((s) => {
+        if (!s) return s;
+        const { subtitles: _sub, ...sourceWithoutSubtitles } = s;
+        return sourceWithoutSubtitles;
+      });
+
+      res.status(200).json({
+        sources: cleanSources,
+        subtitles: formattedSubtitles,
+      });
     } else {
       if (!epNum) throw new Error("Episode Number Not Found");
       if (!ep) throw new Error("Anime ID Not Found");
@@ -1329,6 +1272,8 @@ router.post("/api/watch", async (req, res) => {
         videoData.sources.push({
           url: `/video?path=${encodeURIComponent(SourcesData?.filepath)}`,
           quality: "HD",
+          server: "Local",
+          provider: "Local",
         });
       }
 
@@ -1349,6 +1294,24 @@ router.post("/api/watch", async (req, res) => {
     res.status(200).json({
       sources: [],
     });
+  }
+});
+
+// Resolve specific server stream on demand (lazy loading)
+router.post("/api/watch/server", async (req, res) => {
+  const { provider = null, server } = req.body;
+  try {
+    if (!server) throw new Error("Server payload missing");
+    const Animeprovider = await providerFetch("Anime", provider);
+    const resolved = await processServer(Animeprovider, server);
+    if (!resolved) {
+      return res.json({ error: true, message: "Failed to resolve server" });
+    }
+    const { subtitles: _sub, ...cleanResolved } = resolved;
+    res.status(200).json(cleanResolved);
+  } catch (err) {
+    logger.error(`Error resolving server stream: ${err.message}`);
+    res.status(500).json({ error: true, message: err.message });
   }
 });
 

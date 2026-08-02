@@ -755,6 +755,13 @@ body {
   color: #10b981; /* Green check icon color */
 }
 
+.toast-icon-container.error {
+  background: rgba(239, 68, 68, 0.15); /* Red error theme tint */
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+  color: #ef4444; /* Red error icon color */
+}
+
 .toast-check-svg {
   flex-shrink: 0;
 }

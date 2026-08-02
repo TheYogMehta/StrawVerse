@@ -13,6 +13,12 @@ function getImageCacheDir() {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  const nomedia = path.join(dir, ".nomedia");
+  if (!fs.existsSync(nomedia)) {
+    try {
+      fs.writeFileSync(nomedia, "");
+    } catch (_) {}
+  }
   return dir;
 }
 

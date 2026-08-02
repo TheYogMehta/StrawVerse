@@ -13,8 +13,60 @@ function sanitizeFolderName(title) {
   return sanitized || "Untitled";
 }
 
+// Helper to resolve or create a unique directory for an anime/manga by title and mediaId
+async function getOrCreateMediaDir(parentDir, title, mediaId) {
+  const baseName = sanitizeFolderName(title);
+  let folderName = baseName;
+  let counter = 1;
+
+  while (true) {
+    const candidatePath = path.join(parentDir, folderName);
+    const metaFile = path.join(candidatePath, ".strawverse_id");
+
+    if (fs.existsSync(candidatePath)) {
+      if (fs.existsSync(metaFile)) {
+        try {
+          const content = fs.readFileSync(metaFile, "utf-8");
+          const data = JSON.parse(content);
+          if (
+            !mediaId ||
+            String(data.mediaId) === String(mediaId) ||
+            data.title === title
+          ) {
+            return candidatePath;
+          }
+        } catch (_) {}
+      } else {
+        if (mediaId) {
+          try {
+            fs.writeFileSync(
+              metaFile,
+              JSON.stringify({ mediaId, title }, null, 2),
+            );
+          } catch (_) {}
+        }
+        return candidatePath;
+      }
+
+      counter++;
+      folderName = `${baseName} (${counter})`;
+    } else {
+      await fs.promises.mkdir(candidatePath, { recursive: true });
+      if (mediaId) {
+        try {
+          fs.writeFileSync(
+            metaFile,
+            JSON.stringify({ mediaId, title }, null, 2),
+          );
+        } catch (_) {}
+      }
+      return candidatePath;
+    }
+  }
+}
+
 // Anime Dir Maker
-async function directoryMaker(title, ep, customdir) {
+async function directoryMaker(title, ep, customdir, mediaId = null) {
   let destination;
   if (customdir) {
     try {
@@ -37,22 +89,18 @@ async function directoryMaker(title, ep, customdir) {
       await fs.promises.mkdir(animeDirectory, { recursive: true });
     }
   }
-
-  const directoryName = sanitizeFolderName(title);
-  const directoryPath = path.join(animeDirectory, directoryName);
-  try {
-    await fs.promises.access(directoryPath);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      await fs.promises.mkdir(directoryPath, { recursive: true });
-    }
+  const animeNomedia = path.join(animeDirectory, ".nomedia");
+  if (!fs.existsSync(animeNomedia)) {
+    try {
+      fs.writeFileSync(animeNomedia, "");
+    } catch (_) {}
   }
 
-  return directoryPath;
+  return await getOrCreateMediaDir(animeDirectory, title, mediaId);
 }
 
 // Dir GET
-async function GetDir(title, customdir, Type) {
+async function GetDir(title, customdir, Type, mediaId = null) {
   let destination;
   if (customdir) {
     try {
@@ -75,18 +123,14 @@ async function GetDir(title, customdir, Type) {
       await fs.promises.mkdir(Directory, { recursive: true });
     }
   }
-
-  const directoryName = sanitizeFolderName(title);
-  const directoryPath = path.join(Directory, directoryName);
-  try {
-    await fs.promises.access(directoryPath);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      await fs.promises.mkdir(directoryPath, { recursive: true });
-    }
+  const dirNomedia = path.join(Directory, ".nomedia");
+  if (!fs.existsSync(dirNomedia)) {
+    try {
+      fs.writeFileSync(dirNomedia, "");
+    } catch (_) {}
   }
 
-  return directoryPath;
+  return await getOrCreateMediaDir(Directory, title, mediaId);
 }
 
 // dir + file remover
@@ -100,7 +144,7 @@ async function directoryRemover(tempeps) {
 }
 
 // Manga Dir Maker
-async function MangaDir(title, customdir) {
+async function MangaDir(title, customdir, mediaId = null) {
   let customdirneko = customdir || getDownloadsFolder();
   let destination;
   try {
@@ -122,18 +166,14 @@ async function MangaDir(title, customdir) {
       await fs.promises.mkdir(MangaDirectory, { recursive: true });
     }
   }
-
-  const directoryName = sanitizeFolderName(title);
-  const directoryPath = path.join(MangaDirectory, directoryName);
-  try {
-    await fs.promises.access(directoryPath);
-  } catch (error) {
-    if (error.code === "ENOENT") {
-      await fs.promises.mkdir(directoryPath, { recursive: true });
-    }
+  const mangaNomedia = path.join(MangaDirectory, ".nomedia");
+  if (!fs.existsSync(mangaNomedia)) {
+    try {
+      fs.writeFileSync(mangaNomedia, "");
+    } catch (_) {}
   }
 
-  return directoryPath;
+  return await getOrCreateMediaDir(MangaDirectory, title, mediaId);
 }
 
 // download folder Location

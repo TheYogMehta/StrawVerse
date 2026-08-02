@@ -630,7 +630,9 @@ local function select_server()
             show_osc()
 
             state.resume_pos = mp.get_property_number("time-pos", 0)
-            mp.commandv("loadfile", source.url, "replace")
+            if not source.url:find("^unresolved:") and source.url ~= source.name then
+                mp.commandv("loadfile", source.url, "replace")
+            end
             mp.set_property("user-data/strawverse-action", "change-server:" .. source.name)
         end
     end
@@ -670,12 +672,18 @@ local function open_server_menu(menu_type)
     server_menu.menu_type = menu_type
     server_menu.active = true
 
+    local active_server = mp.get_property("user-data/strawverse-active-server")
     local current_url = mp.get_property("stream-open-filename") or mp.get_property("path")
-    server_menu.selected_index = 1
-    for idx, s in ipairs(sources) do
-        if s.selected or (current_url and s.url == current_url) then
-            server_menu.selected_index = idx
-            break
+
+    if server_menu.current_selected and server_menu.current_selected > 0 and server_menu.current_selected <= #sources then
+        server_menu.selected_index = server_menu.current_selected
+    else
+        server_menu.selected_index = 1
+        for idx, s in ipairs(sources) do
+            if (active_server and s.name == active_server) or s.selected or (current_url and s.url == current_url) then
+                server_menu.selected_index = idx
+                break
+            end
         end
     end
     
@@ -3507,12 +3515,16 @@ mp.register_event('file-loaded', function()
 end)
 mp.observe_property('playback-time', 'number', function(name, val)
     if val then
+        local op_start = tonumber(mp.get_opt("modernx-op-start")) or 83
+        local op_end = tonumber(mp.get_opt("modernx-op-end")) or 141
+        local ed_start = tonumber(mp.get_opt("modernx-ed-start")) or 1320
+
         -- 1. Auto Skip Intro
         if user_opts.autoskip_intro then
-            if val >= 83 and val < 141 then
+            if val >= op_start and val < op_end then
                 if not state.intro_skipped then
                     state.intro_skipped = true
-                    mp.commandv("seek", 141, "absolute")
+                    mp.commandv("seek", op_end, "absolute")
                     return
                 end
             else
@@ -3523,7 +3535,7 @@ mp.observe_property('playback-time', 'number', function(name, val)
         -- 2. Auto Play Next (when entering Outro)
         if user_opts.autoplay_next then
             local dur = mp.get_property_number("duration", 0)
-            if dur > 0 and val >= 1320 and val < dur then
+            if dur > 0 and val >= ed_start and val < dur then
                 if not state.outro_skipped then
                     state.outro_skipped = true
                     if have_pl and (pl_pos < pl_count) then

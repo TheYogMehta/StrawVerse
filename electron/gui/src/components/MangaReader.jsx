@@ -3,7 +3,6 @@ import { useEffect, useState, useRef, useMemo } from "react";
 import {
   ArrowLeft,
   Loader2,
-  ChevronsUp,
   ChevronsDown,
   ChevronLeft,
   ChevronRight,
@@ -76,7 +75,6 @@ export default function MangaReader({
   const [loading, setLoading] = useState(true);
   const [appendingLoading, setAppendingLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-  const [showScrollTop, setShowScrollTop] = useState(false);
   const containerRef = useRef(null);
 
   // Loaded chapters cache (chapterObj.id strings)
@@ -764,13 +762,6 @@ export default function MangaReader({
     if (!container) return;
 
     const handleScroll = () => {
-      // Toggle scroll-to-top button
-      if (container.scrollTop > 800) {
-        setShowScrollTop(true);
-      } else {
-        setShowScrollTop(false);
-      }
-
       // Check which chapter and page are currently in view
       const pageElements = container.querySelectorAll("[data-chapter]");
       let activeId = null;
@@ -842,12 +833,6 @@ export default function MangaReader({
     loadedChapters,
     sortedChapters,
   ]);
-
-  const scrollToTop = () => {
-    if (containerRef.current) {
-      containerRef.current.scrollTo({ top: 0, behavior: "smooth" });
-    }
-  };
 
   return (
     <div ref={containerRef} className="reader-wrapper">
@@ -1136,13 +1121,6 @@ export default function MangaReader({
           </div>
         )}
       </div>
-
-      {/* Floating Scroll Top button */}
-      {showScrollTop && (
-        <button onClick={scrollToTop} className="btn-scroll-top">
-          <ChevronsUp size={24} />
-        </button>
-      )}
     </div>
   );
 }

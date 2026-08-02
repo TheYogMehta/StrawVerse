@@ -2,11 +2,148 @@ const { spawn } = require("child_process");
 const net = require("net");
 const fs = require("fs");
 const path = require("path");
+const axios = require("axios");
 const { logger } = require("./AppLogger");
 const { updateHistory } = require("./history");
+const { providerFetch } = require("./settings");
+const { processServer, fetchEpisodeSources } = require("./AnimeManga");
+
+async function fetchSkipTimes(malid, epNum) {
+  if (!malid || !epNum) return null;
+  try {
+    const url = `https://api.aniskip.com/v2/skip-times/${malid}/${Number(epNum)}?types[]=op&types[]=ed&types[]=mixed-op&types[]=mixed-ed&episodeLength=0`;
+    const res = await axios.get(url, { timeout: 3000 });
+    if (res.data && res.data.found && Array.isArray(res.data.results)) {
+      let opStart = null;
+      let opEnd = null;
+      let edStart = null;
+      let edEnd = null;
+
+      for (const item of res.data.results) {
+        if (item.skipType === "op" || item.skipType === "mixed-op") {
+          if (
+            item.interval?.startTime !== undefined &&
+            item.interval?.endTime !== undefined
+          ) {
+            opStart = item.interval.startTime;
+            opEnd = item.interval.endTime;
+          }
+        } else if (item.skipType === "ed" || item.skipType === "mixed-ed") {
+          if (
+            item.interval?.startTime !== undefined &&
+            item.interval?.endTime !== undefined
+          ) {
+            edStart = item.interval.startTime;
+            edEnd = item.interval.endTime;
+          }
+        }
+      }
+      return { opStart, opEnd, edStart, edEnd };
+    }
+  } catch (e) {
+    logger.info(
+      `[MPV] AniSkip timestamps not found or timed out for MalID ${malid} Ep ${epNum}`,
+    );
+  }
+  return null;
+}
 
 function formatSubtitleLabel(sub) {
   return sub?.lang || sub?.label || sub?.name || "";
+}
+
+function normalizeLangCode(str) {
+  if (!str) return "";
+  const s = String(str).toLowerCase().trim();
+  if (s === "en" || s === "eng" || s.includes("english")) return "english";
+  if (s === "jp" || s === "jpn" || s.includes("japanese")) return "japanese";
+  if (s === "es" || s === "spa" || s.includes("spanish")) return "spanish";
+  if (s === "fr" || s === "fra" || s === "fre" || s.includes("french"))
+    return "french";
+  if (s === "de" || s === "deu" || s === "ger" || s.includes("german"))
+    return "german";
+  if (s === "it" || s === "ita" || s.includes("italian")) return "italian";
+  if (s === "ru" || s === "rus" || s.includes("russian")) return "russian";
+  if (
+    s === "pt" ||
+    s === "por" ||
+    s.includes("portuguese") ||
+    s.includes("brazilian")
+  )
+    return "portuguese";
+  if (s === "zh" || s === "zho" || s.includes("chinese")) return "chinese";
+  if (s === "ar" || s === "ara" || s.includes("arabic")) return "arabic";
+  return s;
+}
+
+function filterPreselectedSubtitle(subs, preferredLang = "english") {
+  if (!subs || !Array.isArray(subs) || subs.length === 0) return [];
+  const prefNorm = normalizeLangCode(preferredLang);
+  if (prefNorm === "off" || prefNorm === "false" || prefNorm === "none") {
+    return [];
+  }
+
+  const matchLang = (sub, targetNorm) => {
+    if (!sub || !targetNorm) return false;
+    const l1 = normalizeLangCode(sub.lang);
+    const l2 = normalizeLangCode(sub.label);
+    const l3 = normalizeLangCode(sub.name);
+    const l4 = normalizeLangCode(sub.url);
+    return (
+      (l1 && (l1 === targetNorm || l1.includes(targetNorm))) ||
+      (l2 && (l2 === targetNorm || l2.includes(targetNorm))) ||
+      (l3 && (l3 === targetNorm || l3.includes(targetNorm))) ||
+      (l4 && (l4 === targetNorm || l4.includes(targetNorm)))
+    );
+  };
+
+  if (prefNorm) {
+    const matched = subs.find((s) => matchLang(s, prefNorm));
+    if (matched) return [matched];
+  }
+
+  if (prefNorm !== "english") {
+    const engMatched = subs.find((s) => matchLang(s, "english"));
+    if (engMatched) return [engMatched];
+  }
+
+  return [subs[0]];
+}
+
+function sortSourcesByPreferredQuality(sources, preferredQuality = "highest") {
+  if (!sources || !Array.isArray(sources) || sources.length <= 1) return sources;
+
+  const parseQualNum = (s) => {
+    const qStr = (s.quality || s.name || "").toLowerCase();
+    const match = qStr.match(/(\d+)p/);
+    if (match) return parseInt(match[1], 10);
+    if (qStr.includes("1080")) return 1080;
+    if (qStr.includes("720")) return 720;
+    if (qStr.includes("480")) return 480;
+    if (qStr.includes("360")) return 360;
+    return 0;
+  };
+
+  const prefNorm = String(preferredQuality).toLowerCase().trim();
+
+  if (prefNorm !== "highest" && prefNorm !== "auto" && prefNorm !== "default") {
+    const prefNum = parseInt(prefNorm.replace(/\D/g, ""), 10);
+    if (prefNum > 0) {
+      const matchIdx = sources.findIndex((s) => parseQualNum(s) === prefNum);
+      if (matchIdx > 0) {
+        const matched = sources.splice(matchIdx, 1)[0];
+        sources.unshift(matched);
+        return sources;
+      }
+    }
+  }
+
+  const hasQualities = sources.some((s) => parseQualNum(s) > 0);
+  if (hasQualities) {
+    sources.sort((a, b) => parseQualNum(b) - parseQualNum(a));
+  }
+
+  return sources;
 }
 
 const getMpvPath = () => {
@@ -155,18 +292,24 @@ async function playInMpv(window, options) {
   global.activePlayRequestId = (global.activePlayRequestId || 0) + 1;
   const currentRequestId = global.activePlayRequestId;
 
-  const {
-    url,
-    sources,
-    title,
-    episode,
-    currentTime: startSeek,
-    subtitles,
-    mediaId,
-    image,
-    provider,
-    malid,
-  } = options;
+  let episode = options.episode || 1;
+  if (typeof episode === "string") {
+    if (episode.includes("|")) {
+      const parts = episode.split("|");
+      const firstPartNum = Number(parts[0]);
+      episode = !isNaN(firstPartNum) && firstPartNum > 0 ? firstPartNum : 1;
+    } else if (isNaN(Number(episode))) {
+      episode = 1;
+    }
+  }
+  let episodeId = options.episodeId || options.episode || episode;
+  let title = options.title || "Anime";
+  let mediaId = options.mediaId;
+  let image = options.image || "";
+  let provider = options.provider || "";
+  let malid = options.malid || "";
+  let subdub = options.subdub || "sub";
+  let url = options.url || "";
 
   let autoSkipIntro = true;
   let autoPlayNextEpisode = true;
@@ -186,7 +329,171 @@ async function playInMpv(window, options) {
     logger.error("Failed to load settings in mpvPlayer: " + e.message);
   }
 
-  const resolvedUrl = resolvePathOrUrl(url);
+  logger.info(
+    `[MPV] Launch request #${currentRequestId} for anime "${title}" (Ep ${episode}), provider=${provider}, subdub=${subdub}`,
+  );
+
+  let activeSources = Array.isArray(options.sources)
+    ? [...options.sources]
+    : [];
+  let activeSubtitles = Array.isArray(options.subtitles)
+    ? [...options.subtitles]
+    : [];
+
+  if (activeSources.length === 0 && (episodeId || episode)) {
+    try {
+      logger.info(`[MPV] Fetching episode sources for ID/Num: ${episodeId}...`);
+      const Animeprovider = await providerFetch("Anime", provider);
+      const fetched = await fetchEpisodeSources(
+        Animeprovider,
+        episodeId,
+        subdub,
+      );
+      if (fetched && Array.isArray(fetched.sources)) {
+        activeSources = fetched.sources;
+      }
+      if (fetched && Array.isArray(fetched.subtitles)) {
+        activeSubtitles = fetched.subtitles;
+      }
+      logger.info(
+        `[MPV] Fetched ${activeSources.length} sources and ${activeSubtitles.length} subtitles from ${provider}`,
+      );
+    } catch (e) {
+      logger.error(
+        `[MPV Error] Failed to fetch episode sources: ${e.message}`,
+        e,
+      );
+      return { error: `Failed to fetch episode sources: ${e.message}` };
+    }
+  }
+
+  if (activeSources && activeSources.length > 1) {
+    let preferredQuality = "highest";
+    try {
+      const settingsPath = path.join(
+        require("electron").app.getPath("userData"),
+        "settings.json",
+      );
+      if (fs.existsSync(settingsPath)) {
+        const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+        if (settings.quality) preferredQuality = settings.quality;
+      }
+    } catch (e) {}
+
+    activeSources = sortSourcesByPreferredQuality(
+      activeSources,
+      preferredQuality,
+    );
+  }
+
+  if (activeSources.length === 0) {
+    const msg = `No video sources found for ${title} Episode ${episode}.`;
+    logger.error(`[MPV Error] ${msg}`);
+    return { error: msg };
+  }
+
+  let startSeek = options.currentTime !== undefined ? options.currentTime : 0;
+  if (startSeek === 0 && mediaId && global.db) {
+    try {
+      const historyRec = global.db
+        .prepare(
+          "SELECT currentTime, number FROM History WHERE mediaId = ? AND type = 'Anime' ORDER BY updated_at DESC LIMIT 1",
+        )
+        .get(mediaId);
+      if (
+        historyRec &&
+        Number(historyRec.number) === Number(episode) &&
+        historyRec.currentTime
+      ) {
+        startSeek = Math.max(0, parseFloat(historyRec.currentTime || 0) - 5);
+      }
+    } catch (e) {}
+  }
+
+  let playTargetUrl = url;
+
+  if (activeSources.length > 0) {
+    const primary = activeSources[0];
+    if (primary && (primary.isUnresolved || !primary.url)) {
+      try {
+        logger.info(
+          `[MPV Startup] Resolving primary server "${primary.name || primary.quality}"...`,
+        );
+        const Animeprovider = await providerFetch("Anime", provider);
+        const resolved = await processServer(Animeprovider, primary);
+        if (resolved && resolved.url) {
+          try {
+            const streamDomain = new URL(resolved.url).hostname;
+            const ref =
+              resolved.headers?.Referer ||
+              resolved.headers?.referer ||
+              "https://megaplay.buzz/";
+            if (global.setDynamicReferer) {
+              global.setDynamicReferer(streamDomain, ref);
+              global.setFallbackReferer(ref);
+            }
+          } catch (e) {}
+          if (
+            Array.isArray(resolved.subtitles) &&
+            resolved.subtitles.length > 0
+          ) {
+            activeSubtitles.push(...resolved.subtitles);
+          }
+          activeSources[0] = { ...primary, ...resolved, isUnresolved: false };
+        }
+      } catch (e) {
+        logger.error(
+          `Failed to resolve primary server ${primary.name || primary.quality} for MPV: ${e.message}`,
+        );
+      }
+    }
+    playTargetUrl = activeSources[0]?.url || url;
+  }
+
+  // Deduplicate and filter preselected subtitle track by user setting
+  if (Array.isArray(activeSubtitles) && activeSubtitles.length > 0) {
+    activeSubtitles = Array.from(
+      new Map(activeSubtitles.map((sub) => [sub.url || sub, sub])).values(),
+    );
+
+    activeSubtitles.forEach((sub) => {
+      if (
+        sub &&
+        sub.url &&
+        sub.url.startsWith("http") &&
+        global.setDynamicReferer
+      ) {
+        try {
+          const subDomain = new URL(sub.url).hostname;
+          const ref =
+            activeSources[0]?.headers?.Referer || "https://megaplay.buzz/";
+          global.setDynamicReferer(subDomain, ref);
+        } catch (e) {}
+      }
+    });
+
+    let preferredSubLang = "english";
+    try {
+      const settingsPath = path.join(
+        require("electron").app.getPath("userData"),
+        "settings.json",
+      );
+      if (fs.existsSync(settingsPath)) {
+        const settings = JSON.parse(fs.readFileSync(settingsPath, "utf-8"));
+        if (settings.subtitleLang) preferredSubLang = settings.subtitleLang;
+      }
+    } catch (e) {}
+
+    activeSubtitles = filterPreselectedSubtitle(
+      activeSubtitles,
+      preferredSubLang,
+    );
+    logger.info(
+      `[MPV] Selected ${activeSubtitles.length} preselected subtitle track (${preferredSubLang})`,
+    );
+  }
+
+  const resolvedUrl = resolvePathOrUrl(playTargetUrl);
   const isExternal = resolvedUrl.startsWith("http");
   const playUrl = isExternal ? toProxyUrl(resolvedUrl) : resolvedUrl;
   const ipcPath = getIpcPath();
@@ -221,24 +528,6 @@ async function playInMpv(window, options) {
     `--brightness=${options.brightness || 0}`,
   ];
 
-  // Headers only needed for local files — proxy handles CDN headers itself.
-  if (!isExternal) {
-    const headers = getHeaders(resolvedUrl);
-    if (headers) {
-      if (headers["Referer"]) {
-        args.push(`--referrer=${headers["Referer"]}`);
-        args.push(`--http-header-fields=Referer: ${headers["Referer"]}`);
-      }
-      if (headers["User-Agent"]) {
-        args.push(`--user-agent=${headers["User-Agent"]}`);
-        args.push(`--http-header-fields=User-Agent: ${headers["User-Agent"]}`);
-      }
-      if (headers["Cookie"]) {
-        args.push(`--http-header-fields=Cookie: ${headers["Cookie"]}`);
-      }
-    }
-  }
-
   const scriptOpts = [
     `osc-autoskip_intro=${autoSkipIntro ? "yes" : "no"}`,
     `osc-autoplay_next=${autoPlayNextEpisode ? "yes" : "no"}`,
@@ -246,47 +535,68 @@ async function playInMpv(window, options) {
     `modernx-has-prev=${options.hasPrev ? "yes" : "no"}`,
   ];
 
-  if (sources && sources.length > 0) {
-    const sourcesStr = sources
-      .map((s) => {
-        const sUrl = resolvePathOrUrl(s.url);
-        return `${s.quality}|${sUrl.startsWith("http") ? toProxyUrl(sUrl) : sUrl}`;
-      })
-      .join("##");
-    scriptOpts.push(`modernx-sources=${sourcesStr}`);
+  const skipTimes = await fetchSkipTimes(malid, episode);
+  if (skipTimes) {
+    if (skipTimes.opStart !== null && skipTimes.opEnd !== null) {
+      scriptOpts.push(`modernx-op-start=${Math.floor(skipTimes.opStart)}`);
+      scriptOpts.push(`modernx-op-end=${Math.floor(skipTimes.opEnd)}`);
+    }
+    if (skipTimes.edStart !== null) {
+      scriptOpts.push(`modernx-ed-start=${Math.floor(skipTimes.edStart)}`);
+    }
+    logger.info(
+      `[MPV] Applied AniSkip timestamps for Ep ${episode}: OP (${skipTimes.opStart}s - ${skipTimes.opEnd}s), ED (${skipTimes.edStart}s)`,
+    );
   }
 
-  if (subtitles && Array.isArray(subtitles)) {
-    const subsStr = subtitles
-      .filter((sub) => sub && sub.url)
+  if (activeSources && activeSources.length > 0) {
+    const sourcesStr = activeSources
+      .filter((s) => s && (s.url || s.name || s.quality))
+      .map((s) => {
+        const name = s.quality || s.name || "Server";
+        if (s.url) {
+          const sUrl = resolvePathOrUrl(s.url);
+          return `${name}|${sUrl.startsWith("http") ? toProxyUrl(sUrl) : sUrl}`;
+        }
+        return `${name}|unresolved:${name}`;
+      })
+      .join("##");
+    if (sourcesStr) {
+      scriptOpts.push(`modernx-sources=${sourcesStr}`);
+    }
+  }
+
+  if (activeSubtitles && Array.isArray(activeSubtitles)) {
+    const validSubs = activeSubtitles.filter((sub) => sub && sub.url);
+    logger.info(`[MPV] Processing ${validSubs.length} subtitle tracks for MPV`);
+
+    const subsStr = validSubs
       .map((sub, idx) => {
         const cleanLang = formatSubtitleLabel(sub, idx);
-        const subUrl = resolvePathOrUrl(sub.url);
+        const rawUrl = resolvePathOrUrl(sub.url);
+        const subUrl = rawUrl.startsWith("http") ? toProxyUrl(rawUrl) : rawUrl;
         return `${cleanLang}|${subUrl}`;
       })
       .join("##");
+
     if (subsStr) {
       scriptOpts.push(`modernx-subtitles=${subsStr}`);
     }
+
+    validSubs.forEach((sub, idx) => {
+      const cleanLang = formatSubtitleLabel(sub, idx);
+      sub.lang = cleanLang;
+      sub.label = cleanLang;
+      const rawUrl = resolvePathOrUrl(sub.url);
+      const subUrl = rawUrl.startsWith("http") ? toProxyUrl(rawUrl) : rawUrl;
+      args.push(`--sub-file=${subUrl}`);
+    });
   }
 
   args.push(`--script-opts=${scriptOpts.join(",")}`);
 
   if (startSeek > 0) {
     args.push(`--start=${Math.floor(startSeek)}`);
-  }
-
-  if (subtitles && Array.isArray(subtitles)) {
-    subtitles.forEach((sub, idx) => {
-      if (sub && sub.url) {
-        const cleanLang = formatSubtitleLabel(sub, idx);
-        sub.lang = cleanLang;
-        sub.label = cleanLang;
-        args.push(`--sub-file=${resolvePathOrUrl(sub.url)}`);
-      }
-    });
-  } else if (subtitles && typeof subtitles === "string") {
-    args.push(`--sub-file=${resolvePathOrUrl(subtitles)}`);
   }
 
   args.push(playUrl);
@@ -305,12 +615,32 @@ async function playInMpv(window, options) {
   }
 
   const mpvExe = getMpvPath();
+  if (!mpvExe || !fs.existsSync(mpvExe)) {
+    const errMsg = `MPV binary executable not found on system at: ${mpvExe}`;
+    logger.error(`[MPV Error] ${errMsg}`);
+    return { error: errMsg };
+  }
+
   logger.info(
-    `[MPV] Spawning MPV process using [${mpvExe}] for ${title} Ep ${episode}. Args: ${args.join(" ")}`,
+    `[MPV] Spawning MPV process using [${mpvExe}] for ${title} Ep ${episode}.`,
   );
 
-  const mpvProcess = spawn(mpvExe, args);
-  global.activeMpvProcess = mpvProcess;
+  let mpvProcess;
+  try {
+    mpvProcess = spawn(mpvExe, args);
+    global.activeMpvProcess = mpvProcess;
+    mpvProcess.on("error", (err) => {
+      logger.error(`[MPV Spawn Error] ${err.message}`, err);
+      if (window && window.webContents) {
+        window.webContents.send("mpv-error", {
+          message: `Failed to launch MPV executable: ${err.message}`,
+        });
+      }
+    });
+  } catch (err) {
+    logger.error(`[MPV Spawn Exception] ${err.message}`, err);
+    return { error: `Failed to spawn MPV process: ${err.message}` };
+  }
 
   let client = null;
   let duration = 0;
@@ -332,8 +662,17 @@ async function playInMpv(window, options) {
   try {
     client = await connectIpc(ipcPath);
     global.activeMpvClient = client;
-    logger.info("[MPV] Connected to JSON-RPC IPC socket successfully.");
-    sendStarted();
+    const activeServerName =
+      activeSources[0]?.name || activeSources[0]?.quality || "Server 1";
+    client.write(
+      JSON.stringify({
+        command: [
+          "set_property",
+          "user-data/strawverse-active-server",
+          activeServerName,
+        ],
+      }) + "\n",
+    );
 
     client.write(
       JSON.stringify({ command: ["observe_property", 1, "time-pos"] }) + "\n",
@@ -412,6 +751,120 @@ async function playInMpv(window, options) {
             if (pendingAction.startsWith("change-server:")) {
               actionName = "change-server";
               actionUrl = pendingAction.substring("change-server:".length);
+
+              logger.info(
+                `[MPV IPC] Received change-server request for: "${actionUrl}"`,
+              );
+
+              if (actionUrl && activeSources.length > 0) {
+                const cleanAct = actionUrl
+                  .toLowerCase()
+                  .replace(/^server\s*/, "")
+                  .trim();
+                const targetServer = activeSources.find((s) => {
+                  const sName = (s.name || "").toLowerCase();
+                  const sQual = (s.quality || "").toLowerCase();
+                  const cleanName = sName.replace(/^server\s*/, "").trim();
+                  const cleanQual = sQual.replace(/^server\s*/, "").trim();
+                  return (
+                    sName === actionUrl.toLowerCase() ||
+                    sQual === actionUrl.toLowerCase() ||
+                    cleanName === cleanAct ||
+                    cleanQual === cleanAct ||
+                    sName.includes(cleanAct) ||
+                    sQual.includes(cleanAct)
+                  );
+                });
+
+                if (!targetServer) {
+                  logger.error(
+                    `[MPV IPC Error] Target server "${actionUrl}" not found in activeSources. Available: ${JSON.stringify(activeSources.map((s) => s.name || s.quality))}`,
+                  );
+                } else {
+                  logger.info(
+                    `[MPV IPC] Matched targetServer: "${targetServer.name || targetServer.quality}" (isUnresolved: ${targetServer.isUnresolved})`,
+                  );
+                  (async () => {
+                    let finalServer = targetServer;
+                    if (targetServer.isUnresolved || !targetServer.url) {
+                      try {
+                        logger.info(
+                          `[MPV IPC] Resolving stream for server "${targetServer.name || targetServer.quality}" via ${provider}...`,
+                        );
+                        const Animeprovider = await providerFetch(
+                          "Anime",
+                          provider,
+                        );
+                        const resolved = await processServer(
+                          Animeprovider,
+                          targetServer,
+                        );
+                        if (resolved && resolved.url) {
+                          try {
+                            const streamDomain = new URL(resolved.url).hostname;
+                            const ref =
+                              resolved.headers?.Referer ||
+                              resolved.headers?.referer ||
+                              "https://megaplay.buzz/";
+                            if (global.setDynamicReferer) {
+                              global.setDynamicReferer(streamDomain, ref);
+                              global.setFallbackReferer(ref);
+                            }
+                          } catch (e) {}
+                          finalServer = {
+                            ...targetServer,
+                            ...resolved,
+                            isUnresolved: false,
+                          };
+                          const idx = activeSources.indexOf(targetServer);
+                          if (idx >= 0) activeSources[idx] = finalServer;
+                          logger.info(
+                            `[MPV IPC] Successfully resolved stream URL for "${targetServer.name || targetServer.quality}": ${resolved.url}`,
+                          );
+                        } else {
+                          logger.error(
+                            `[MPV IPC Error] processServer returned invalid stream URL for ${actionUrl}`,
+                          );
+                        }
+                      } catch (e) {
+                        logger.error(
+                          `[MPV IPC Error] Failed resolving server ${actionUrl}: ${e.message}`,
+                        );
+                      }
+                    }
+                    if (finalServer && finalServer.url) {
+                      const serverName =
+                        finalServer.name || finalServer.quality;
+                      const newProxyUrl = toProxyUrl(
+                        resolvePathOrUrl(finalServer.url),
+                      );
+                      logger.info(
+                        `[MPV IPC] Sending loadfile command to MPV for ${serverName}: ${newProxyUrl}`,
+                      );
+                      if (client && !client.destroyed) {
+                        client.write(
+                          JSON.stringify({
+                            command: [
+                              "set_property",
+                              "user-data/strawverse-active-server",
+                              serverName,
+                            ],
+                          }) + "\n",
+                        );
+                        client.write(
+                          JSON.stringify({
+                            command: ["loadfile", newProxyUrl, "replace"],
+                          }) + "\n",
+                        );
+                      }
+                    } else {
+                      logger.error(
+                        `[MPV IPC Error] Unable to play server ${actionUrl}: No stream URL available`,
+                      );
+                    }
+                  })();
+                }
+              }
             }
 
             hasStartedSent = false;

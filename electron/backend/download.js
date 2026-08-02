@@ -474,16 +474,24 @@ async function getBaseDownloadDir() {
 
 async function cleanupEmptyDownloadFolder(folderPath, type, id) {
   try {
-    const remaining = await fs.promises.readdir(folderPath);
-    if (remaining.length === 0) {
-      await fs.promises.rmdir(folderPath);
-      logger.info(`Removed empty download folder: ${folderPath}`);
-      if (id) {
-        try {
-          global.db.prepare(`DELETE FROM ${type} WHERE id = ?`).run(id);
-          logger.info(`Cleaned up DB entry for ${type}: ${id}`);
-          removeIdFromCustomOrders(id);
-        } catch (_) {}
+    if (fs.existsSync(folderPath)) {
+      const remaining = await fs.promises.readdir(folderPath);
+      const visibleFiles = remaining.filter((f) => !f.startsWith("."));
+      if (visibleFiles.length === 0) {
+        await fs.promises.rm(folderPath, { recursive: true, force: true });
+        logger.info(`Removed empty download folder: ${folderPath}`);
+        if (id) {
+          try {
+            const dbRecord = global.db
+              .prepare(`SELECT MalID FROM ${type} WHERE id = ?`)
+              .get(id);
+            if (!dbRecord || !dbRecord.MalID) {
+              global.db.prepare(`DELETE FROM ${type} WHERE id = ?`).run(id);
+              logger.info(`Cleaned up DB entry for ${type}: ${id}`);
+              removeIdFromCustomOrders(id);
+            }
+          } catch (_) {}
+        }
       }
     }
   } catch (_) {}

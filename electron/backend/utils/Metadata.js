@@ -479,22 +479,31 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
     }
 
     try {
+      storedMetadata = global.db
+        .prepare(`SELECT * FROM ${type} ORDER BY last_updated DESC`)
+        .all();
+
       if (
         tag &&
         tag !== "All" &&
         tag !== "" &&
         tag.toLowerCase() !== "downloads"
       ) {
-        const likeTag = `%"${tag}"%`;
-        storedMetadata = global.db
-          .prepare(
-            `SELECT * FROM ${type} WHERE CustomTag = ? OR CustomTag LIKE ? ORDER BY last_updated DESC`,
-          )
-          .all(tag, likeTag);
-      } else {
-        storedMetadata = global.db
-          .prepare(`SELECT * FROM ${type} ORDER BY last_updated DESC`)
-          .all();
+        const targetTag = tag.toLowerCase().trim();
+        storedMetadata = storedMetadata.filter((item) => {
+          if (!item.CustomTag) return false;
+          let tags = [];
+          try {
+            const parsed = JSON.parse(item.CustomTag);
+            if (Array.isArray(parsed)) tags = parsed;
+            else if (typeof parsed === "string") tags = [parsed];
+          } catch (_) {
+            tags = item.CustomTag.split(",").map((s) => s.trim());
+          }
+          return tags.some(
+            (t) => t && String(t).toLowerCase().trim() === targetTag,
+          );
+        });
       }
     } catch (err) {
       storedMetadata = [];
@@ -1036,18 +1045,22 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
                 .filter(
                   (file) =>
                     file.isFile() &&
-                    file.name.endsWith(".cbz") &&
-                    file.name.toLowerCase().includes("chapter"),
+                    (file.name.toLowerCase().endsWith(".cbz") ||
+                      file.name.toLowerCase().endsWith(".zip") ||
+                      file.name.toLowerCase().endsWith(".epub") ||
+                      file.name.toLowerCase().endsWith(".pdf")),
                 )
-                .map((file) =>
-                  parseInt(
-                    file?.name
-                      ?.toLowerCase()
-                      ?.split("chapter")?.[1]
-                      ?.split(".cbz")[0],
-                  ),
-                )
-                .filter(Boolean)
+                .map((file) => {
+                  const name = file.name;
+                  const match = name.match(
+                    /(?:chapter|chp|ch|ep)?\s*[-_]?\s*(\d+(?:\.\d+)?)/i,
+                  );
+                  if (match) {
+                    return parseFloat(match[1]);
+                  }
+                  return null;
+                })
+                .filter((num) => num !== null && !isNaN(num))
                 .sort((a, b) => a - b);
             }
           } catch (readdirErr) {
@@ -1075,21 +1088,85 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
     let finalResults = updatedMetadata.filter(Boolean);
 
     if (tag && tag.toLowerCase() === "downloads") {
-      finalResults = finalResults.filter((item) => {
-        if (item.Downloaded && item.Downloaded.length > 0) return true;
-        if (item.CustomTag) {
-          try {
-            const parsed = JSON.parse(item.CustomTag);
-            if (Array.isArray(parsed)) {
-              return parsed.some((t) => t && t.toLowerCase() === "downloads");
+      const validResults = [];
+      for (const item of updatedMetadata) {
+        if (!item) continue;
+        const hasFiles =
+          Array.isArray(item.Downloaded) && item.Downloaded.length > 0;
+        const inQueue =
+          global.isEpisodeInQueue &&
+          (global.isEpisodeInQueue(item.id) ||
+            (item.title && global.isEpisodeInQueue(item.title)));
+
+        if (hasFiles || inQueue) {
+          validResults.push(item);
+        } else {
+          // 0 files downloaded and 0 items in queue -> auto-clean ghost DB record
+          let tags = [];
+          if (item.CustomTag) {
+            try {
+              const parsed = JSON.parse(item.CustomTag);
+              if (Array.isArray(parsed)) tags = parsed;
+              else if (typeof parsed === "string") tags = [parsed];
+            } catch (_) {
+              tags = [item.CustomTag];
             }
-            return String(parsed).toLowerCase() === "downloads";
-          } catch (_) {
-            return item.CustomTag.toLowerCase().includes("downloads");
+          }
+          const hasDownloadTag = tags.some(
+            (t) => t && t.toLowerCase() === "downloads",
+          );
+          if (hasDownloadTag) {
+            const remainingTags = tags.filter(
+              (t) => t && t.toLowerCase() !== "downloads",
+            );
+            if (remainingTags.length > 0) {
+              try {
+                run(`UPDATE ${type} SET CustomTag = ? WHERE id = ?`, [
+                  JSON.stringify(remainingTags),
+                  item.id,
+                ]);
+              } catch (_) {}
+            } else {
+              try {
+                if (!item.MalID) {
+                  run(`DELETE FROM ${type} WHERE id = ?`, [item.id]);
+                } else {
+                  run(`UPDATE ${type} SET CustomTag = ? WHERE id = ?`, [
+                    "[]",
+                    item.id,
+                  ]);
+                }
+              } catch (_) {}
+            }
+            logger.info(
+              `[Auto-Clean DB] Cleaned ghost download DB record for ${type} id=${item.id}`,
+            );
+          }
+
+          const folderName =
+            item.folder_name ||
+            (item.title ? sanitizeFolderName(item.title) : item.id);
+          if (folderName) {
+            const targetFolderPath = path.join(baseDir, type, folderName);
+            try {
+              if (fs.existsSync(targetFolderPath)) {
+                const remFiles = await fs.promises.readdir(targetFolderPath);
+                const visibleFiles = remFiles.filter((f) => !f.startsWith("."));
+                if (visibleFiles.length === 0) {
+                  await fs.promises.rm(targetFolderPath, {
+                    recursive: true,
+                    force: true,
+                  });
+                  logger.info(
+                    `[Auto-Clean DB] Removed empty folder on disk: ${targetFolderPath}`,
+                  );
+                }
+              }
+            } catch (_) {}
           }
         }
-        return false;
-      });
+      }
+      finalResults = validResults;
     }
 
     return {
@@ -1610,13 +1687,22 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
                 .filter(
                   (file) =>
                     file.isFile() &&
-                    file.name.endsWith(".cbz") &&
-                    file.name.toLowerCase().includes("chapter"),
+                    (file.name.toLowerCase().endsWith(".cbz") ||
+                      file.name.toLowerCase().endsWith(".zip") ||
+                      file.name.toLowerCase().endsWith(".epub") ||
+                      file.name.toLowerCase().endsWith(".pdf")),
                 )
-                .map((file) =>
-                  parseInt(file.name.toLowerCase().split("chapter")[1]),
-                )
-                .filter(Boolean)
+                .map((file) => {
+                  const name = file.name;
+                  const match = name.match(
+                    /(?:chapter|chp|ch|ep)?\s*[-_]?\s*(\d+(?:\.\d+)?)/i,
+                  );
+                  if (match) {
+                    return parseFloat(match[1]);
+                  }
+                  return null;
+                })
+                .filter((num) => num !== null && !isNaN(num))
                 .forEach((chNum) => uniqueChapters.add(chNum));
             }
           }

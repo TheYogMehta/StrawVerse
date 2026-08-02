@@ -6,6 +6,7 @@ import {
   Download,
   Play,
   BookOpen,
+  FolderOpen,
   Trash2,
   CheckCircle,
   ExternalLink,
@@ -231,6 +232,104 @@ export default function InfoView({
   const [historyProgress, setHistoryProgress] = useState(null);
   const [hasProgress, setHasProgress] = useState(false);
 
+  const [downloadsState, setDownloadsState] = useState({
+    activeTask: null,
+    queue: [],
+  });
+
+  useEffect(() => {
+    let intervalId = null;
+    const fetchDownloadsState = async () => {
+      try {
+        const res = await fetch("/downloads", { method: "POST" });
+        const data = await res.json();
+        let active = null;
+        if (data.totalSegments && data.totalSegments > 0) {
+          active = {
+            caption: data.caption,
+            totalSegments: data.totalSegments,
+            currentSegments: data.currentSegments,
+            epid: data.epid,
+            id: data.id,
+          };
+        }
+        setDownloadsState({
+          activeTask: active,
+          queue: data.queue || [],
+        });
+      } catch (err) {}
+    };
+
+    fetchDownloadsState();
+    intervalId = setInterval(fetchDownloadsState, 1500);
+
+    if (window.sharedStateAPI && window.sharedStateAPI.on) {
+      window.sharedStateAPI.on("download-logger", (data) => {
+        let active = null;
+        if (data.totalSegments && data.totalSegments > 0) {
+          active = {
+            caption: data.caption,
+            totalSegments: data.totalSegments,
+            currentSegments: data.currentSegments,
+            epid: data.epid,
+            id: data.id,
+          };
+        }
+        setDownloadsState({
+          activeTask: active,
+          queue: data.queue || [],
+        });
+      });
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, []);
+
+  const getItemQueueStatus = useCallback(
+    (itemNum) => {
+      const active = downloadsState.activeTask;
+      const queueList = downloadsState.queue || [];
+
+      if (active) {
+        const activeNum = active.EpNum || active.episodeNumber;
+        const activeTitle = active.Title || active.title;
+        const matchesTitle =
+          activeTitle &&
+          details?.title &&
+          activeTitle.trim().toLowerCase() === details.title.trim().toLowerCase();
+        const matchesId = active.id && id && String(active.id) === String(id);
+
+        if ((matchesId || matchesTitle) && Number(activeNum) === Number(itemNum)) {
+          const total = active.totalSegments || 1;
+          const current = active.currentSegments || 0;
+          const pct = Math.min(100, Math.floor((current / total) * 100));
+          return { inProgress: true, pct, isQueued: false };
+        }
+      }
+
+      const queuedItem = queueList.find((q) => {
+        const qNum = q.EpNum || q.episodeNumber || q.number;
+        const qTitle = q.Title || q.title;
+        const matchesTitle =
+          qTitle &&
+          details?.title &&
+          qTitle.trim().toLowerCase() === details.title.trim().toLowerCase();
+        const matchesId = q.id && id && String(q.id) === String(id);
+
+        return (matchesId || matchesTitle) && Number(qNum) === Number(itemNum);
+      });
+
+      if (queuedItem) {
+        return { inProgress: true, pct: 0, isQueued: true };
+      }
+
+      return { inProgress: false, pct: 0, isQueued: false };
+    },
+    [downloadsState, id, details?.title],
+  );
+
   // Custom dropdown states
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const dropdownRef = useRef(null);
@@ -425,7 +524,9 @@ export default function InfoView({
         let savedSort = null;
         if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
           try {
-            const res = await window.sharedStateAPI.getSettings(["infoSortOrder"]);
+            const res = await window.sharedStateAPI.getSettings([
+              "infoSortOrder",
+            ]);
             savedSort = res?.settings?.infoSortOrder;
           } catch (_) {}
         }
@@ -2036,11 +2137,15 @@ export default function InfoView({
                 onClick={handleContinueWatchRead}
                 className="btn-action-base btn-continue"
               >
-                <Play size={16} className="u-style-35" />
+                {type === "Manga" ? (
+                  <BookOpen size={16} className="u-style-35" />
+                ) : (
+                  <Play size={16} className="u-style-35" />
+                )}
                 {isFinished
                   ? type === "Anime"
                     ? "Rewatch from Episode 1"
-                    : "Rewatch from Chapter 1"
+                    : "Reread from Chapter 1"
                   : type === "Anime"
                     ? nextToPlay === 1
                       ? "Start watching Episode 1"
@@ -2660,73 +2765,33 @@ export default function InfoView({
                     <>
                       {isDownloaded(item.number) ? (
                         <div className="badge-and-action">
-                          {itemLangs.map((langKey) => {
-                            if (!isDownloaded(item.number, langKey)) return null;
-                            let label = langKey.toUpperCase();
-                            if (
-                              langKey === "softsub" ||
-                              langKey === "soft_sub"
-                            )
-                              label = "SOFT SUB";
-                            else if (
-                              langKey === "softdub" ||
-                              langKey === "soft_dub"
-                            )
-                              label = "SOFT DUB";
-                            else if (langKey === "hsub") label = "HSUB";
-                            else if (langKey === "sub") label = "SUB";
-                            else if (langKey === "dub") label = "DUB";
-
-                            return (
-                              <button
-                                key={langKey}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onWatch(
-                                    id,
-                                    item.number,
-                                    true,
-                                    langKey,
-                                    episodesOrChapters,
-                                    details?.DownloadedEpisodes,
-                                    details?.title,
-                                    details?.provider,
-                                    details?.image,
-                                  );
-                                }}
-                                className={`badge-subdub ${langKey}`}
-                                title={`Play Downloaded ${label}`}
-                              >
-                                <Play size={11} fill="currentColor" />
-                                <span>{label}</span>
-                              </button>
-                            );
-                          })}
-                          {!itemLangs.some((langKey) =>
-                            isDownloaded(item.number, langKey),
-                          ) && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onWatch(
-                                  id,
-                                  item.number,
-                                  true,
-                                  dubSelect || "sub",
-                                  episodesOrChapters,
-                                  details?.DownloadedEpisodes,
-                                  details?.title,
-                                  details?.provider,
-                                  details?.image,
-                                );
-                              }}
-                              className="badge-subdub sub"
-                              title="Play Downloaded Episode"
-                            >
-                              <Play size={11} fill="currentColor" />
-                              <span>PLAY</span>
-                            </button>
-                          )}
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const downloadedLang =
+                                itemLangs.find((langKey) =>
+                                  isDownloaded(item.number, langKey),
+                                ) ||
+                                dubSelect ||
+                                "sub";
+                              onWatch(
+                                id,
+                                item.number,
+                                true,
+                                downloadedLang,
+                                episodesOrChapters,
+                                details?.DownloadedEpisodes,
+                                details?.title,
+                                details?.provider,
+                                details?.image,
+                              );
+                            }}
+                            className="badge-subdub sub"
+                            title="Play Downloaded Episode"
+                          >
+                            <Play size={11} fill="currentColor" />
+                            <span>PLAY</span>
+                          </button>
                           {isLocal && (
                             <button
                               onClick={(e) => {
@@ -2740,71 +2805,119 @@ export default function InfoView({
                             </button>
                           )}
                         </div>
-                      ) : (
-                        showOnlineActions && (
-                          <div className="badge-and-action">
-                            {itemLangs.map((langKey) => {
-                              let label = langKey.toUpperCase();
-                              if (
-                                langKey === "softsub" ||
-                                langKey === "soft_sub"
-                              )
-                                label = "SOFT SUB";
-                              else if (
-                                langKey === "softdub" ||
-                                langKey === "soft_dub"
-                              )
-                                label = "SOFT DUB";
-                              else if (langKey === "hsub") label = "HSUB";
-                              else if (langKey === "sub") label = "SUB";
-                              else if (langKey === "dub") label = "DUB";
-
-                              return (
-                                <button
-                                  key={langKey}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onWatch(
-                                      id,
-                                      item.id,
-                                      false,
-                                      langKey,
-                                      episodesOrChapters,
-                                      details?.DownloadedEpisodes,
-                                      details?.title,
-                                      details?.provider,
-                                      details?.image,
-                                    );
-                                  }}
-                                  className={`badge-subdub ${langKey}`}
-                                  title={`Play ${label}`}
-                                >
-                                  <Play size={11} fill="currentColor" />
-                                  <span>{label}</span>
-                                </button>
-                              );
-                            })}
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDownload(item);
-                              }}
-                              className="badge-subdub download-btn"
-                              title="Download Episode"
+                      ) : (() => {
+                        const qStatus = getItemQueueStatus(item.number);
+                        if (qStatus.inProgress) {
+                          return (
+                            <div
+                              className="badge-and-action"
+                              style={{ width: "100%", padding: "4px 0" }}
                             >
-                              <Download size={11} />
-                              <span>DOWNLOAD</span>
-                            </button>
-                          </div>
-                        )
-                      )}
+                              <div
+                                style={{
+                                  flex: 1,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    flex: 1,
+                                    height: "6px",
+                                    background: "rgba(255,255,255,0.1)",
+                                    borderRadius: "3px",
+                                    overflow: "hidden",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      height: "100%",
+                                      width: `${qStatus.pct}%`,
+                                      background: "var(--accent-color, #3b82f6)",
+                                      transition: "width 0.3s ease",
+                                    }}
+                                  />
+                                </div>
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: "600",
+                                    color: "var(--accent-color, #3b82f6)",
+                                    minWidth: "32px",
+                                  }}
+                                >
+                                  {qStatus.pct}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          showOnlineActions && (
+                            <div className="badge-and-action">
+                              {itemLangs.map((langKey) => {
+                                let label = langKey.toUpperCase();
+                                if (
+                                  langKey === "softsub" ||
+                                  langKey === "soft_sub"
+                                )
+                                  label = "SOFT SUB";
+                                else if (
+                                  langKey === "softdub" ||
+                                  langKey === "soft_dub"
+                                )
+                                  label = "SOFT DUB";
+                                else if (langKey === "hsub") label = "HSUB";
+                                else if (langKey === "sub") label = "SUB";
+                                else if (langKey === "dub") label = "DUB";
+
+                                return (
+                                  <button
+                                    key={langKey}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onWatch(
+                                        id,
+                                        item.id,
+                                        false,
+                                        langKey,
+                                        episodesOrChapters,
+                                        details?.DownloadedEpisodes,
+                                        details?.title,
+                                        details?.provider,
+                                        details?.image,
+                                      );
+                                    }}
+                                    className={`badge-subdub ${langKey}`}
+                                    title={`Play ${label}`}
+                                  >
+                                    <Play size={11} fill="currentColor" />
+                                    <span>{label}</span>
+                                  </button>
+                                );
+                              })}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownload(item);
+                                }}
+                                className="badge-subdub download-btn"
+                                title="Download Episode"
+                              >
+                                <Download size={11} />
+                                <span>DOWNLOAD</span>
+                              </button>
+                            </div>
+                          )
+                        );
+                      })()}
                     </>
                   ) : (
                     /* Manga reader buttons */
                     <>
                       {hasSub ? (
                         <div className="badge-and-action">
-                          <span className="badge-manga">Downloaded</span>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
@@ -2820,9 +2933,10 @@ export default function InfoView({
                               );
                             }}
                             className="btn-read"
-                            title="Read in App"
+                            title="Read Downloaded Chapter"
                           >
-                            <BookOpen size={16} />
+                            <BookOpen size={11} />
+                            <span>READ</span>
                           </button>
                           <button
                             onClick={(e) => {
@@ -2847,43 +2961,92 @@ export default function InfoView({
                             </button>
                           )}
                         </div>
-                      ) : (
-                        showOnlineActions && (
-                          <div className="badge-and-action">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onRead(
-                                  id,
-                                  item.id,
-                                  false,
-                                  sortedItems,
-                                  details?.DownloadedChapters,
-                                  details?.title,
-                                  details?.provider,
-                                  details?.image,
-                                );
-                              }}
-                              className="btn-read"
-                              title="Read Online"
+                      ) : (() => {
+                        const qStatus = getItemQueueStatus(item.number);
+                        if (qStatus.inProgress) {
+                          return (
+                            <div
+                              className="badge-and-action"
+                              style={{ width: "100%", padding: "4px 0" }}
                             >
-                              <BookOpen size={16} />
-                              <span>READ</span>
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDownload(item);
-                              }}
-                              className="badge-subdub download-btn"
-                              title="Download Chapter"
-                            >
-                              <Download size={11} />
-                              <span>DOWNLOAD</span>
-                            </button>
-                          </div>
-                        )
-                      )}
+                              <div
+                                style={{
+                                  flex: 1,
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "8px",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    flex: 1,
+                                    height: "6px",
+                                    background: "rgba(255,255,255,0.1)",
+                                    borderRadius: "3px",
+                                    overflow: "hidden",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      height: "100%",
+                                      width: `${qStatus.pct}%`,
+                                      background: "var(--accent-color, #3b82f6)",
+                                      transition: "width 0.3s ease",
+                                    }}
+                                  />
+                                </div>
+                                <span
+                                  style={{
+                                    fontSize: "11px",
+                                    fontWeight: "600",
+                                    color: "var(--accent-color, #3b82f6)",
+                                    minWidth: "32px",
+                                  }}
+                                >
+                                  {qStatus.pct}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return (
+                          showOnlineActions && (
+                            <div className="badge-and-action">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRead(
+                                    id,
+                                    item.id,
+                                    false,
+                                    sortedItems,
+                                    details?.DownloadedChapters,
+                                    details?.title,
+                                    details?.provider,
+                                    details?.image,
+                                  );
+                                }}
+                                className="btn-read"
+                                title="Read Online"
+                              >
+                                <BookOpen size={11} />
+                                <span>READ</span>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDownload(item);
+                                }}
+                                className="badge-subdub download-btn"
+                                title="Download Chapter"
+                              >
+                                <Download size={11} />
+                                <span>DOWNLOAD</span>
+                              </button>
+                            </div>
+                          )
+                        );
+                      })()}
                     </>
                   )}
                 </div>

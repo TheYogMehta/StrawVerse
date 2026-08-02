@@ -616,7 +616,7 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
             if (
               !force ||
               hasClearanceForDomain ||
-              (i > 25 && !isWindowLoading)
+              (i > 3 && !isWindowLoading)
             ) {
               break;
             }

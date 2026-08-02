@@ -1,21 +1,15 @@
 #!/usr/bin/env node
 /**
- * Downloads static ffmpeg binaries and installs them as jniLibs so they ship
- * inside the APK as `libffmpeg.so`.
+ * Downloads Android NDK compiled static ffmpeg binaries and installs them as
+ * jniLibs so they ship inside the APK as `libffmpeg.so`.
  *
- *   jniLibs/arm64-v8a/libffmpeg.so    <- ffmpeg-release-arm64-static
- *   jniLibs/armeabi-v7a/libffmpeg.so  <- ffmpeg-release-armhf-static
- *   jniLibs/x86_64/libffmpeg.so      <- ffmpeg-release-amd64-static (emulator)
+ *   jniLibs/arm64-v8a/libffmpeg.so    <- ffmpeg-android-arm64.zip
+ *   jniLibs/armeabi-v7a/libffmpeg.so  <- ffmpeg-android-arm.zip
+ *   jniLibs/x86_64/libffmpeg.so      <- ffmpeg-android-x64.zip
  *
- * The John Van Sickle builds are fully static (no libc dependency), so they
- * run fine under Android's bionic runtime. Because the manifest sets
- * android:extractNativeLibs="true" (and gradle uses legacy jniLibs
- * packaging), the binaries land uncompressed in the app's nativeLibraryDir -
- * the only executable location on modern Android. The ffmpeg-static shim in
- * capacitor/nodejs/shims resolves them from there at runtime.
- *
- * Requires `tar` with xz support on the build machine (standard on
- * Linux/macOS; on Windows use WSL or Git Bash with xz installed).
+ * These binaries are compiled specifically with the Android NDK (targeting
+ * Android Bionic libc / linker), ensuring they conform to Android's kernel
+ * seccomp sandbox policy and run without SIGSYS errors.
  *
  * Usage:
  *   node capacitor/scripts/fetch-ffmpeg.mjs             # arm64 only (default)
@@ -40,22 +34,22 @@ const jniLibsDir = path.resolve(
   "jniLibs",
 );
 
-const BASE = "https://johnvansickle.com/ffmpeg/releases";
+const BASE = "https://github.com/Tyrrrz/FFmpegBin/releases/latest/download";
 
 const TARGETS = [
   {
     abi: "arm64-v8a",
-    archive: "ffmpeg-release-arm64-static.tar.xz",
+    archive: "ffmpeg-android-arm64.zip",
     default: true,
   },
   {
     abi: "armeabi-v7a",
-    archive: "ffmpeg-release-armhf-static.tar.xz",
+    archive: "ffmpeg-android-arm.zip",
     default: false,
   },
   {
     abi: "x86_64",
-    archive: "ffmpeg-release-amd64-static.tar.xz",
+    archive: "ffmpeg-android-x64.zip",
     default: false,
   },
 ];
@@ -69,7 +63,9 @@ async function download(url, dest) {
     execFileSync("curl", ["-L", "-o", dest, url], { stdio: "inherit" });
     return;
   } catch (err) {
-    console.warn(`[ffmpeg] curl download failed or not available: ${err.message}. Falling back to fetch...`);
+    console.warn(
+      `[ffmpeg] curl download failed or not available: ${err.message}. Falling back to fetch...`,
+    );
   }
 
   const res = await fetch(url, { redirect: "follow" });
@@ -89,12 +85,16 @@ async function download(url, dest) {
     if (contentLength > 0) {
       const percent = Math.floor((downloadedBytes / contentLength) * 100);
       if (percent >= lastLoggedPercent + 10) {
-        console.log(`[ffmpeg] Downloaded ${percent}% (${(downloadedBytes / 1024 / 1024).toFixed(1)} / ${(contentLength / 1024 / 1024).toFixed(1)} MB)...`);
+        console.log(
+          `[ffmpeg] Downloaded ${percent}% (${(downloadedBytes / 1024 / 1024).toFixed(1)} / ${(contentLength / 1024 / 1024).toFixed(1)} MB)...`,
+        );
         lastLoggedPercent = percent;
       }
     } else {
       if (downloadedBytes % (1024 * 1024) === 0) {
-        console.log(`[ffmpeg] Downloaded ${(downloadedBytes / 1024 / 1024).toFixed(1)} MB...`);
+        console.log(
+          `[ffmpeg] Downloaded ${(downloadedBytes / 1024 / 1024).toFixed(1)} MB...`,
+        );
       }
     }
   }
@@ -103,13 +103,14 @@ async function download(url, dest) {
 }
 
 function extractFfmpeg(archivePath, workDir) {
-  execFileSync("tar", ["-xJf", archivePath, "-C", workDir], {
+  execFileSync("unzip", ["-o", archivePath, "-d", workDir], {
     stdio: "inherit",
   });
-  // Archive contains a single ffmpeg-<version>-<arch>-static/ directory
+  const candidate = path.join(workDir, "ffmpeg");
+  if (fs.existsSync(candidate)) return candidate;
   for (const entry of fs.readdirSync(workDir)) {
-    const candidate = path.join(workDir, entry, "ffmpeg");
-    if (fs.existsSync(candidate)) return candidate;
+    const subCandidate = path.join(workDir, entry, "ffmpeg");
+    if (fs.existsSync(subCandidate)) return subCandidate;
   }
   throw new Error(`ffmpeg binary not found inside ${archivePath}`);
 }
@@ -131,7 +132,7 @@ async function main() {
       console.log(`[ffmpeg] ${target.abi}: downloading ${target.archive}...`);
       await download(`${BASE}/${target.archive}`, archivePath);
 
-      console.log(`[ffmpeg] ${target.abi}: extracting...`);
+      console.log(`[ffmpeg] ${target.abi}: extracting Android NDK build...`);
       const bin = extractFfmpeg(archivePath, workDir);
 
       fs.mkdirSync(outDir, { recursive: true });
@@ -139,7 +140,7 @@ async function main() {
       fs.chmodSync(outFile, 0o755);
       const sizeMb = (fs.statSync(outFile).size / 1024 / 1024).toFixed(1);
       console.log(
-        `[ffmpeg] ${target.abi}: installed libffmpeg.so (${sizeMb} MB)`,
+        `[ffmpeg] ${target.abi}: installed Android NDK libffmpeg.so (${sizeMb} MB)`,
       );
     } finally {
       fs.rmSync(workDir, { recursive: true, force: true });

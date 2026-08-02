@@ -12,6 +12,7 @@ const { promisify } = require("util");
 const { app } = require("electron");
 const crypto = require("crypto");
 const { getHeaders } = require("./proxyHeaders");
+const { isLanguagePreferred, settingfetch } = require("./settings");
 
 const pipeline = promisify(stream.pipeline);
 
@@ -84,12 +85,8 @@ async function getFfmpegPath() {
 
   const isGlobalAvailable = await new Promise((resolve) => {
     const child = spawn("ffmpeg", ["-version"], { stdio: "ignore" });
-    child.on("close", (code) => {
-      resolve(code === 0);
-    });
-    child.on("error", () => {
-      resolve(false);
-    });
+    child.on("close", (code) => resolve(code === 0));
+    child.on("error", () => resolve(false));
   });
 
   if (isGlobalAvailable) {
@@ -100,53 +97,9 @@ async function getFfmpegPath() {
     return resolvedFfmpegPath;
   }
 
-  logger.info(
-    `FFmpeg binary not found. Downloading for ${process.platform}-${process.arch}...`,
+  throw new Error(
+    "FFmpeg binary not found in application bundle or system PATH.",
   );
-  if (!fs.existsSync(binDir)) {
-    fs.mkdirSync(binDir, { recursive: true });
-  }
-
-  const release = "b6.1.1";
-  const platform = process.platform;
-  const arch = process.arch;
-  const supported = {
-    darwin: ["x64", "arm64"],
-    freebsd: ["x64"],
-    linux: ["x64", "ia32", "arm64", "arm"],
-    win32: ["x64", "ia32"],
-  };
-
-  if (!supported[platform] || !supported[platform].includes(arch)) {
-    throw new Error(
-      `Unsupported platform/architecture for downloading FFmpeg: ${platform}-${arch}`,
-    );
-  }
-
-  const downloadUrl = `https://github.com/eugeneware/ffmpeg-static/releases/download/${release}/ffmpeg-${platform}-${arch}.gz`;
-
-  try {
-    const downloadStream = got.stream(downloadUrl);
-    const gunzip = zlib.createGunzip();
-    const writer = fs.createWriteStream(localFfmpegPath);
-
-    await pipeline(downloadStream, gunzip, writer);
-
-    fs.chmodSync(localFfmpegPath, 0o755);
-    logger.info(
-      `FFmpeg downloaded successfully and saved at ${localFfmpegPath}`,
-    );
-    resolvedFfmpegPath = localFfmpegPath;
-    return resolvedFfmpegPath;
-  } catch (err) {
-    logger.error(`Failed to download FFmpeg: ${err.message}`);
-    if (fs.existsSync(localFfmpegPath)) {
-      try {
-        fs.unlinkSync(localFfmpegPath);
-      } catch (_) {}
-    }
-    throw new Error(`FFmpeg missing and download failed: ${err.message}`);
-  }
 }
 
 class downloader {
@@ -338,6 +291,10 @@ class downloader {
             const mediaLines = Playlist.split("\n").filter((l) =>
               l.includes("#EXT-X-MEDIA:TYPE=SUBTITLES"),
             );
+            const currentSettings = (await settingfetch()) || {};
+            const preferredLangs =
+              currentSettings?.preferredSubtitleLanguages || ["English"];
+
             for (const mLine of mediaLines) {
               const uriMatch =
                 mLine.match(/URI="([^"]+)"/i) || mLine.match(/URI=([^,\s]+)/i);
@@ -347,8 +304,10 @@ class downloader {
                   mLine.match(/NAME="([^"]+)"/i) ||
                   mLine.match(/LANGUAGE="([^"]+)"/i);
                 const subLang = nameMatch ? nameMatch[1] : "English";
-                if (!this.subtitles) this.subtitles = [];
-                this.subtitles.push({ url: subUri, lang: subLang });
+                if (isLanguagePreferred(subLang, preferredLangs)) {
+                  if (!this.subtitles) this.subtitles = [];
+                  this.subtitles.push({ url: subUri, lang: subLang });
+                }
               }
             }
           } catch (e) {}
@@ -575,7 +534,7 @@ class downloader {
 
           if (alreadyDownloaded) {
             this.currentSegments++;
-            await this.logProgress();
+            this.logProgress();
             activeDownloads--;
             startNext();
             return;
@@ -658,7 +617,7 @@ class downloader {
 
               await fs.promises.writeFile(segmentFile, body);
               this.currentSegments++;
-              await this.logProgress();
+              this.logProgress();
               activeDownloads--;
               startNext();
             } catch (err) {
@@ -672,7 +631,7 @@ class downloader {
                   .writeFile(segmentFile, Buffer.alloc(0))
                   .catch(() => {});
                 this.currentSegments++;
-                await this.logProgress();
+                this.logProgress();
                 activeDownloads--;
                 startNext();
                 return;
@@ -987,8 +946,18 @@ class downloader {
         logger.error(`[Merge] Failed to check TS file size: ${e.message}`);
       }
 
+      const nativeDir = path.dirname(currentFfmpegPath);
+      const spawnEnv = {
+        ...process.env,
+        LD_LIBRARY_PATH:
+          nativeDir +
+          (process.env.LD_LIBRARY_PATH
+            ? ":" + process.env.LD_LIBRARY_PATH
+            : ""),
+      };
+
       await new Promise((resolve, reject) => {
-        const child = spawn(currentFfmpegPath, ffmpegArgs);
+        const child = spawn(currentFfmpegPath, ffmpegArgs, { env: spawnEnv });
         let ffmpegOutput = "";
 
         if (child.stdout) {
@@ -1065,13 +1034,13 @@ class downloader {
       !isFinalUpdate &&
       !captionChanged &&
       !ExtraMessage &&
-      timeSinceLast < 500
+      timeSinceLast < 1000
     ) {
       if (!this._pendingLogTimer) {
         this._pendingLogTimer = setTimeout(() => {
           this._pendingLogTimer = null;
           this.logProgress();
-        }, 500 - timeSinceLast);
+        }, 1000 - timeSinceLast);
       }
       return;
     }

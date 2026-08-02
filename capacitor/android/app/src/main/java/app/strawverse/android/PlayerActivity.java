@@ -34,10 +34,16 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.media3.common.C;
+import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.Player;
 import androidx.media3.common.ForwardingPlayer;
+import androidx.media3.common.Tracks;
+import androidx.media3.common.TrackSelectionOverride;
+import androidx.media3.common.TrackSelectionParameters;
+import java.util.Collections;
+import java.util.Comparator;
 import androidx.media3.datasource.DataSource;
 import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.ResolvingDataSource;
@@ -670,6 +676,17 @@ public class PlayerActivity extends Activity {
             if (subtitlesArray == null) {
                 subtitlesArray = new JSONArray();
             }
+            if (selectedSubtitleIndex == -1 && subtitlesArray.length() > 0) {
+                int defaultIdx = 0;
+                for (int i = 0; i < subtitlesArray.length(); i++) {
+                    String lang = subtitlesArray.getJSONObject(i).optString("lang", "").toLowerCase();
+                    if (lang.contains("english") || lang.equals("en") || lang.contains("eng")) {
+                        defaultIdx = i;
+                        break;
+                    }
+                }
+                selectedSubtitleIndex = defaultIdx;
+            }
             if (skipTimesArray == null) {
                 skipTimesArray = new JSONArray();
             }
@@ -699,34 +716,16 @@ public class PlayerActivity extends Activity {
             }
 
             currentSourceIndex = preferredIndex;
-            JSONObject sourceObj = sourcesArray.getJSONObject(preferredIndex);
-            currentVideoUrl = sourceObj.getString("url");
+            final JSONObject sourceObj = sourcesArray.getJSONObject(preferredIndex);
+            boolean isUnresolved = sourceObj.optBoolean("isUnresolved", false) || !sourceObj.has("url") || sourceObj.optString("url", "").isEmpty();
 
-            // Extract headers
-            final Map<String, String> headersMap = new HashMap<>();
-            JSONObject hdrs = sourceObj.optJSONObject("headers");
-            if (hdrs != null) {
-                java.util.Iterator<String> keys = hdrs.keys();
-                while (keys.hasNext()) {
-                    String key = keys.next();
-                    headersMap.put(key, hdrs.getString(key));
-                }
+            if (isUnresolved) {
+                resolveServerNatively(provider, sourceObj);
+            } else {
+                currentVideoUrl = sourceObj.optString("url", "");
+                final Map<String, String> headersMap = extractHeadersForSource(sourceObj);
+                initializePlayer(currentVideoUrl, headersMap);
             }
-
-            // Get DB clearance cookies/UA
-            Map<String, String> dbHeaders = AppDatabase.getHeadersForUrl(this, currentVideoUrl);
-            for (Map.Entry<String, String> entry : dbHeaders.entrySet()) {
-                if (!headersMap.containsKey(entry.getKey())) {
-                    headersMap.put(entry.getKey(), entry.getValue());
-                }
-            }
-
-            String webViewCookie = CookieManager.getInstance().getCookie(currentVideoUrl);
-            if (webViewCookie != null && !webViewCookie.isEmpty()) {
-                headersMap.put("Cookie", webViewCookie);
-            }
-
-            initializePlayer(currentVideoUrl, headersMap);
 
         } catch (Exception e) {
             Log.e("PlayerActivity", "Error processing fetched sources: " + e.getMessage());
@@ -747,8 +746,126 @@ public class PlayerActivity extends Activity {
         builder.show();
     }
 
+    private Map<String, String> extractHeadersForSource(JSONObject sourceObj) {
+        final Map<String, String> headersMap = new HashMap<>();
+        if (sourceObj == null) return headersMap;
+        JSONObject hdrs = sourceObj.optJSONObject("headers");
+        if (hdrs != null) {
+            java.util.Iterator<String> keys = hdrs.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
+                try {
+                    headersMap.put(key, hdrs.getString(key));
+                } catch (Exception ignored) {}
+            }
+        }
+        String url = sourceObj.optString("url", "");
+        if (!url.isEmpty()) {
+            Map<String, String> dbHeaders = AppDatabase.getHeadersForUrl(this, url);
+            for (Map.Entry<String, String> entry : dbHeaders.entrySet()) {
+                if (!headersMap.containsKey(entry.getKey())) {
+                    headersMap.put(entry.getKey(), entry.getValue());
+                }
+            }
+            String webViewCookie = CookieManager.getInstance().getCookie(url);
+            if (webViewCookie != null && !webViewCookie.isEmpty()) {
+                headersMap.put("Cookie", webViewCookie);
+            }
+        }
+        return headersMap;
+    }
+
+    private void resolveServerNatively(final String providerName, final JSONObject sourceObj) {
+        showHudOverlay("Resolving stream server...");
+        if (hudTextView != null) hudTextView.setVisibility(View.VISIBLE);
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject body = new JSONObject();
+                    body.put("provider", providerName != null ? providerName : provider);
+                    body.put("server", sourceObj);
+                    if (subdub != null) {
+                        body.put("subdub", subdub);
+                    }
+
+                    URL url = new URL("http://127.0.0.1:3459/api/watch/server");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                    conn.setRequestProperty("Accept", "application/json");
+                    conn.setDoOutput(true);
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(15000);
+
+                    try (OutputStream os = conn.getOutputStream()) {
+                        byte[] input = body.toString().getBytes("utf-8");
+                        os.write(input, 0, input.length);
+                    }
+
+                    int code = conn.getResponseCode();
+                    if (code == 200) {
+                        BufferedReader br = new BufferedReader(
+                                new InputStreamReader(conn.getInputStream(), "utf-8"));
+                        StringBuilder response = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) {
+                            response.append(line.trim());
+                        }
+                        final JSONObject resolved = new JSONObject(response.toString());
+                        final String resUrl = resolved.optString("url", "");
+
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (hudTextView != null) hudTextView.setVisibility(View.GONE);
+                                if (resUrl.isEmpty()) {
+                                    showErrorAndFinish("Failed to resolve server stream.");
+                                    return;
+                                }
+                                try {
+                                    sourceObj.put("url", resUrl);
+                                    sourceObj.put("isUnresolved", false);
+                                    JSONObject resHeaders = resolved.optJSONObject("headers");
+                                    if (resHeaders != null) {
+                                        sourceObj.put("headers", resHeaders);
+                                    }
+                                    JSONArray resSubs = resolved.optJSONArray("subtitles");
+                                    if (resSubs != null && resSubs.length() > 0) {
+                                        subtitlesArray = resSubs;
+                                        if (selectedSubtitleIndex == -1) {
+                                            selectedSubtitleIndex = 0;
+                                        }
+                                    }
+                                } catch (Exception ignored) {}
+                                currentVideoUrl = resUrl;
+                                final Map<String, String> headersMap = extractHeadersForSource(sourceObj);
+                                initializePlayer(currentVideoUrl, headersMap);
+                            }
+                        });
+                    } else {
+                        throw new Exception("HTTP error " + code);
+                    }
+                } catch (final Exception e) {
+                    Log.e("PlayerActivity", "Failed resolving server: " + e.getMessage());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (hudTextView != null) hudTextView.setVisibility(View.GONE);
+                            showErrorAndFinish("Failed to resolve server stream: " + e.getMessage());
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
     private void initializePlayer(String videoUrl, final Map<String, String> headers) {
         try {
+            if (videoUrl != null && videoUrl.startsWith("/")) {
+                videoUrl = "http://127.0.0.1:3459" + videoUrl;
+            }
             if (player != null) {
                 player.release();
             }
@@ -811,6 +928,9 @@ public class PlayerActivity extends Activity {
                             break;
                         case androidx.media3.common.Player.STATE_READY:
                             stateString = "STATE_READY";
+                            if (selectedSubtitleIndex >= 0) {
+                                selectSubtitle(selectedSubtitleIndex);
+                            }
                             break;
                         case androidx.media3.common.Player.STATE_ENDED:
                             stateString = "STATE_ENDED";
@@ -839,10 +959,23 @@ public class PlayerActivity extends Activity {
             player.setTrackSelectionParameters(
                     player.getTrackSelectionParameters()
                             .buildUpon()
-                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, selectedSubtitleIndex == -1)
                             .build()
             );
             playerView.setPlayer(player);
+            if (playerView.getSubtitleView() != null) {
+                try {
+                    playerView.getSubtitleView().setStyle(new androidx.media3.ui.CaptionStyleCompat(
+                            Color.WHITE,
+                            Color.TRANSPARENT,
+                            Color.TRANSPARENT,
+                            androidx.media3.ui.CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+                            Color.BLACK,
+                            null
+                    ));
+                    playerView.getSubtitleView().setFixedTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 20);
+                } catch (Exception ignored) {}
+            }
 
             String userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
             if (headers.containsKey("User-Agent")) {
@@ -889,19 +1022,24 @@ public class PlayerActivity extends Activity {
                 } catch (Exception ignored) {}
             }
 
-            String playUrl = toProxyUrl(videoUrl, headersMap);
-            Log.d("PlayerActivity", "initializePlayer: proxied playUrl=" + playUrl);
+            String playUrl = videoUrl;
+            Log.d("PlayerActivity", "initializePlayer: direct playUrl=" + playUrl);
 
-            // Wrap with KwikDataSource to strip PNG headers from obfuscated segments
+            // Wrap with KwikDataSource to strip PNG headers from obfuscated segments and handle M3U8 IV rewriting
             DataSource.Factory kwikFactory = () -> new KwikDataSource(resolvingFactory.createDataSource());
 
-            // Load subtitle tracks if available
             List<MediaItem.SubtitleConfiguration> subtitleConfigurations = getSubtitleConfigurations();
+            boolean isHls = (videoUrl != null && videoUrl.contains(".m3u8"));
 
-            MediaItem mediaItem = new MediaItem.Builder()
+            MediaItem.Builder mediaItemBuilder = new MediaItem.Builder()
                     .setUri(Uri.parse(playUrl))
-                    .setSubtitleConfigurations(subtitleConfigurations)
-                    .build();
+                    .setSubtitleConfigurations(subtitleConfigurations);
+
+            if (isHls) {
+                mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8);
+            }
+
+            MediaItem mediaItem = mediaItemBuilder.build();
 
             MediaSource mediaSource = new DefaultMediaSourceFactory(kwikFactory)
                     .createMediaSource(mediaItem);
@@ -926,17 +1064,29 @@ public class PlayerActivity extends Activity {
     }
 
     private String toProxyUrl(String url) {
+        return toProxyUrl(url, null);
+    }
+
+    private String toProxyUrl(String url, Map<String, String> headers) {
         if (url == null || (!url.startsWith("http://") && !url.startsWith("https://"))) {
             return url;
         }
         if (url.contains("127.0.0.1") || url.contains("localhost")) {
             return url;
         }
-        String base = "http://127.0.0.1:3459/api/stream";
-        if (url.contains(".m3u8")) {
-            return base + "/m3u8?url=" + Uri.encode(url);
+        String ref = null;
+        if (headers != null) {
+            ref = headers.get("Referer");
+            if (ref == null) ref = headers.get("referer");
+            if (ref == null) ref = headers.get("Origin");
+            if (ref == null) ref = headers.get("origin");
         }
-        return base + "/segment?url=" + Uri.encode(url);
+        String base = "http://127.0.0.1:3459/api/stream";
+        String refParam = (ref != null && !ref.isEmpty()) ? "&referer=" + Uri.encode(ref) : "";
+        if (url.contains(".m3u8")) {
+            return base + "/m3u8?url=" + Uri.encode(url) + refParam;
+        }
+        return base + "/segment?url=" + Uri.encode(url) + refParam;
     }
 
     private String formatSubtitleLabel(String raw, String url, int index) {
@@ -972,11 +1122,29 @@ public class PlayerActivity extends Activity {
                     String rawLang = subObj.optString("lang", null);
                     String lang = formatSubtitleLabel(rawLang, url, i);
 
-                    MediaItem.SubtitleConfiguration config = new MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
-                            .setMimeType(MimeTypes.TEXT_VTT)
-                            .setLanguage(lang)
+                    String fullUrl = url;
+                    if (fullUrl.startsWith("/")) {
+                        fullUrl = "http://127.0.0.1:3459" + fullUrl;
+                    }
+
+                    String mimeType = MimeTypes.TEXT_VTT;
+                    String lower = url.toLowerCase();
+                    if (lower.contains(".ass") || lower.contains(".ssa")) {
+                        mimeType = MimeTypes.TEXT_SSA;
+                    } else if (lower.contains(".srt")) {
+                        mimeType = MimeTypes.APPLICATION_SUBRIP;
+                    } else if (lower.contains(".vtt")) {
+                        mimeType = MimeTypes.TEXT_VTT;
+                    }
+
+                    // Use unique ID per track to allow precise selection later
+                    String trackId = "sub_" + i;
+                    MediaItem.SubtitleConfiguration config = new MediaItem.SubtitleConfiguration.Builder(Uri.parse(fullUrl))
+                            .setId(trackId)
+                            .setMimeType(mimeType)
+                            .setLanguage(trackId)
                             .setLabel(lang)
-                            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+                            .setSelectionFlags(0)
                             .build();
                     configs.add(config);
                 } catch (Exception e) {
@@ -1065,8 +1233,15 @@ public class PlayerActivity extends Activity {
         if (sourcesArray == null || index < 0 || index >= sourcesArray.length()) return;
         try {
             currentSourceIndex = index;
-            JSONObject sourceObj = sourcesArray.getJSONObject(index);
-            final String newUrl = sourceObj.getString("url");
+            final JSONObject sourceObj = sourcesArray.getJSONObject(index);
+            boolean isUnresolved = sourceObj.optBoolean("isUnresolved", false) || !sourceObj.has("url") || sourceObj.optString("url", "").isEmpty();
+
+            if (isUnresolved) {
+                resolveServerNatively(provider, sourceObj);
+                return;
+            }
+
+            final String newUrl = sourceObj.optString("url", "");
 
             // Extract custom headers
             final Map<String, String> newHeadersMap = new HashMap<>();
@@ -1101,17 +1276,30 @@ public class PlayerActivity extends Activity {
 
             final Map<String, String> finalHeaders = newHeadersMap;
             final long currentPosition = player.getCurrentPosition();
+            String ref = finalHeaders.get("Referer");
+            if (ref == null) ref = finalHeaders.get("referer");
+            if (ref == null) ref = finalHeaders.get("Origin");
+            if (ref == null) ref = finalHeaders.get("origin");
+            if (ref != null && newUrl != null) {
+                try {
+                    Uri u = Uri.parse(newUrl);
+                    if (u.getHost() != null) {
+                        AppDatabase.saveStreamReferer(this, u.getHost(), ref);
+                    }
+                } catch (Exception ignored) {}
+            }
 
-            CronetEngine cronetEngine = new CronetEngine.Builder(this).build();
-            Executor executor = Executors.newSingleThreadExecutor();
+            String playUrl = toProxyUrl(newUrl, finalHeaders);
 
-            CronetDataSource.Factory cronetDataSourceFactory =
-                    new CronetDataSource.Factory(cronetEngine, executor)
-                            .setUserAgent(userAgentString);
+            DataSource.Factory baseDataSourceFactory = new androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                    .setUserAgent(userAgentString)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(15000)
+                    .setReadTimeoutMs(15000);
 
             ResolvingDataSource.Factory resolvingFactory =
                     new ResolvingDataSource.Factory(
-                            cronetDataSourceFactory,
+                            baseDataSourceFactory,
                             new ResolvingDataSource.Resolver() {
                                 @Override
                                 public DataSpec resolveDataSpec(DataSpec dataSpec) {
@@ -1131,11 +1319,17 @@ public class PlayerActivity extends Activity {
             DataSource.Factory kwikFactory = () -> new KwikDataSource(resolvingFactory.createDataSource());
 
             List<MediaItem.SubtitleConfiguration> subtitleConfigurations = getSubtitleConfigurations();
+            boolean isHls = (newUrl != null && newUrl.contains(".m3u8")) || (playUrl != null && playUrl.contains("/m3u8"));
 
-            MediaItem mediaItem = new MediaItem.Builder()
-                    .setUri(Uri.parse(newUrl))
-                    .setSubtitleConfigurations(subtitleConfigurations)
-                    .build();
+            MediaItem.Builder mediaItemBuilder = new MediaItem.Builder()
+                    .setUri(Uri.parse(playUrl))
+                    .setSubtitleConfigurations(subtitleConfigurations);
+
+            if (isHls) {
+                mediaItemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8);
+            }
+
+            MediaItem mediaItem = mediaItemBuilder.build();
 
             MediaSource mediaSource = new DefaultMediaSourceFactory(kwikFactory)
                     .createMediaSource(mediaItem);
@@ -1194,26 +1388,75 @@ public class PlayerActivity extends Activity {
 
     private void selectSubtitle(int index) {
         selectedSubtitleIndex = index;
+        if (player == null) return;
         if (index == -1) {
             player.setTrackSelectionParameters(
                     player.getTrackSelectionParameters()
                             .buildUpon()
                             .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                            .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                             .build()
             );
             Toast.makeText(this, "Subtitles turned off", Toast.LENGTH_SHORT).show();
         } else {
             try {
-                JSONObject subObj = subtitlesArray.getJSONObject(index);
-                String lang = subObj.optString("lang", "");
-                player.setTrackSelectionParameters(
-                        player.getTrackSelectionParameters()
-                                .buildUpon()
-                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                                .setPreferredTextLanguage(lang)
-                                .build()
-                );
-                Toast.makeText(this, "Subtitles selected: " + lang, Toast.LENGTH_SHORT).show();
+                String targetTrackId = "sub_" + index;
+                String targetLang = "";
+                if (subtitlesArray != null && index >= 0 && index < subtitlesArray.length()) {
+                    targetLang = subtitlesArray.getJSONObject(index).optString("lang", "");
+                }
+
+                Tracks currentTracks = player.getCurrentTracks();
+                boolean overrideApplied = false;
+
+                TrackSelectionParameters.Builder builder = player.getTrackSelectionParameters().buildUpon();
+                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false);
+                builder.clearOverridesOfType(C.TRACK_TYPE_TEXT);
+
+                int globalTextTrackIndex = 0;
+                for (Tracks.Group trackGroup : currentTracks.getGroups()) {
+                    if (trackGroup.getType() == C.TRACK_TYPE_TEXT) {
+                        boolean isCeaGroup = false;
+                        for (int i = 0; i < trackGroup.getMediaTrackGroup().length; i++) {
+                            Format format = trackGroup.getTrackFormat(i);
+                            if (MimeTypes.APPLICATION_CEA608.equals(format.sampleMimeType) ||
+                                MimeTypes.APPLICATION_CEA708.equals(format.sampleMimeType)) {
+                                isCeaGroup = true;
+                                break;
+                            }
+                        }
+                        if (isCeaGroup) {
+                            continue; // Skip embedded CEA closed captions
+                        }
+
+                        for (int i = 0; i < trackGroup.getMediaTrackGroup().length; i++) {
+                            Format format = trackGroup.getTrackFormat(i);
+                            Log.d("PlayerActivity", "Text track candidate: groupIndex=" + i + ", globalIndex=" + globalTextTrackIndex + ", id=" + format.id + ", lang=" + format.language + ", label=" + format.label);
+
+                            boolean isMatch = (format.id != null && format.id.equals(targetTrackId)) ||
+                                              (format.language != null && format.language.equals(targetTrackId)) ||
+                                              (format.label != null && !targetLang.isEmpty() && format.label.equalsIgnoreCase(targetLang)) ||
+                                              (globalTextTrackIndex == index);
+
+                            if (isMatch) {
+                                builder.setOverrideForType(new TrackSelectionOverride(trackGroup.getMediaTrackGroup(), i));
+                                overrideApplied = true;
+                                Log.d("PlayerActivity", "Matched subtitle track index=" + index + " to group track " + i + " (label=" + format.label + ")");
+                                break;
+                            }
+                            globalTextTrackIndex++;
+                        }
+                        if (overrideApplied) {
+                            break;
+                        }
+                    }
+                }
+
+                player.setTrackSelectionParameters(builder.build());
+
+                String label = targetLang.isEmpty() ? "Subtitles" : targetLang;
+                Log.d("PlayerActivity", "selectSubtitle index=" + index + ", overrideApplied=" + overrideApplied + ", label=" + label);
+                Toast.makeText(this, "Subtitles: " + label, Toast.LENGTH_SHORT).show();
             } catch (Exception e) {
                 Log.e("PlayerActivity", "Failed selecting subtitle track: " + e.getMessage());
             }
@@ -1381,13 +1624,14 @@ public class PlayerActivity extends Activity {
         final View layoutSpeedMenu = settingsSheetDialog.findViewById(R.id.layout_speed_menu);
         final View layoutSubtitlesMenu = settingsSheetDialog.findViewById(R.id.layout_subtitles_menu);
         final View layoutServerMenu = settingsSheetDialog.findViewById(R.id.layout_server_menu);
+        final View layoutQualityMenu = settingsSheetDialog.findViewById(R.id.layout_quality_menu);
 
         // Server text
         final TextView txtServer = settingsSheetDialog.findViewById(R.id.txt_current_server);
         if (txtServer != null) {
             if (sourcesArray != null && currentSourceIndex >= 0 && currentSourceIndex < sourcesArray.length()) {
                 try {
-                    txtServer.setText(sourcesArray.getJSONObject(currentSourceIndex).optString("quality", "Source " + (currentSourceIndex + 1)));
+                    txtServer.setText(getServerLabel(sourcesArray.getJSONObject(currentSourceIndex), currentSourceIndex));
                 } catch (Exception e) {
                     txtServer.setText("Default");
                 }
@@ -1395,6 +1639,9 @@ public class PlayerActivity extends Activity {
                 txtServer.setText("Default");
             }
         }
+
+        // Quality text
+        final TextView txtQuality = settingsSheetDialog.findViewById(R.id.txt_current_quality);
 
         // Speed text
         final TextView txtSpeed = settingsSheetDialog.findViewById(R.id.txt_current_speed);
@@ -1424,6 +1671,10 @@ public class PlayerActivity extends Activity {
         final LinearLayout containerSpeed = settingsSheetDialog.findViewById(R.id.container_speed_options);
         final LinearLayout containerSubtitles = settingsSheetDialog.findViewById(R.id.container_subtitles_options);
         final LinearLayout containerServer = settingsSheetDialog.findViewById(R.id.container_server_options);
+        final LinearLayout containerQuality = settingsSheetDialog.findViewById(R.id.container_quality_options);
+
+        // Pre-populate Quality text
+        populateQualityOptions(containerQuality, txtQuality);
 
         // Server row click
         View rowServer = settingsSheetDialog.findViewById(R.id.row_server);
@@ -1434,6 +1685,19 @@ public class PlayerActivity extends Activity {
                     if (layoutMainMenu != null) layoutMainMenu.setVisibility(View.GONE);
                     if (layoutServerMenu != null) layoutServerMenu.setVisibility(View.VISIBLE);
                     populateServerOptions(containerServer, txtServer);
+                }
+            });
+        }
+
+        // Quality row click
+        View rowQuality = settingsSheetDialog.findViewById(R.id.row_quality);
+        if (rowQuality != null) {
+            rowQuality.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (layoutMainMenu != null) layoutMainMenu.setVisibility(View.GONE);
+                    if (layoutQualityMenu != null) layoutQualityMenu.setVisibility(View.VISIBLE);
+                    populateQualityOptions(containerQuality, txtQuality);
                 }
             });
         }
@@ -1470,6 +1734,17 @@ public class PlayerActivity extends Activity {
                 @Override
                 public void onClick(View v) {
                     if (layoutServerMenu != null) layoutServerMenu.setVisibility(View.GONE);
+                    if (layoutMainMenu != null) layoutMainMenu.setVisibility(View.VISIBLE);
+                }
+            });
+        }
+
+        View btnBackQuality = settingsSheetDialog.findViewById(R.id.btn_back_quality);
+        if (btnBackQuality != null) {
+            btnBackQuality.setOnClickListener(new View.OnClickListener() {
+                @Override
+                public void onClick(View v) {
+                    if (layoutQualityMenu != null) layoutQualityMenu.setVisibility(View.GONE);
                     if (layoutMainMenu != null) layoutMainMenu.setVisibility(View.VISIBLE);
                 }
             });
@@ -1626,6 +1901,253 @@ public class PlayerActivity extends Activity {
         }
     }
 
+    public static class QualityItem {
+        public String label;
+        public int height;
+        public int trackIndex;
+        public boolean isAuto;
+        public boolean isSelected;
+
+        public QualityItem(String label, boolean isAuto) {
+            this.label = label;
+            this.isAuto = isAuto;
+        }
+    }
+
+    private boolean isResolutionOnly(String text) {
+        if (text == null) return false;
+        String lower = text.trim().toLowerCase();
+        return lower.matches("^(auto|\\d{3,4}p?|hd|sd)$");
+    }
+
+    private String getServerLabel(JSONObject sourceObj, int index) {
+        if (downloaded) {
+            return "Local";
+        }
+        if (sourceObj == null) return "Server " + (index + 1);
+
+        String server = sourceObj.optString("server", sourceObj.optString("provider", ""));
+        String quality = sourceObj.optString("quality", "");
+
+        if (!server.isEmpty()) {
+            if (server.equalsIgnoreCase("Local")) return "Local";
+            if (!quality.isEmpty() && !isResolutionOnly(quality)) {
+                return server + " (" + quality + ")";
+            }
+            return server;
+        }
+
+        if (!quality.isEmpty()) {
+            if (isResolutionOnly(quality)) {
+                String prov = provider != null && !provider.isEmpty()
+                        ? provider.substring(0, 1).toUpperCase() + provider.substring(1)
+                        : "Server";
+                return prov + " " + (index + 1) + " (" + quality + ")";
+            }
+            return quality;
+        }
+
+        return "Server " + (index + 1);
+    }
+
+    private List<QualityItem> getExoPlayerQualityOptions() {
+        List<QualityItem> list = new ArrayList<>();
+        QualityItem autoItem = new QualityItem("Auto", true);
+
+        if (player == null) {
+            autoItem.isSelected = true;
+            list.add(autoItem);
+            return list;
+        }
+
+        TrackSelectionParameters params = player.getTrackSelectionParameters();
+        boolean hasVideoOverride = false;
+        int selectedHeight = -1;
+
+        for (TrackSelectionOverride override : params.overrides.values()) {
+            if (override.getType() == C.TRACK_TYPE_VIDEO && !override.trackIndices.isEmpty()) {
+                hasVideoOverride = true;
+                Format fmt = override.mediaTrackGroup.getFormat(override.trackIndices.get(0));
+                selectedHeight = fmt.height;
+                break;
+            }
+        }
+
+        Tracks currentTracks = player.getCurrentTracks();
+        for (Tracks.Group trackGroup : currentTracks.getGroups()) {
+            if (trackGroup.getType() == C.TRACK_TYPE_VIDEO) {
+                for (int i = 0; i < trackGroup.getMediaTrackGroup().length; i++) {
+                    Format format = trackGroup.getTrackFormat(i);
+                    int h = format.height;
+                    if (h > 0) {
+                        String qlabel = h + "p";
+                        QualityItem item = new QualityItem(qlabel, false);
+                        item.height = format.height;
+                        item.trackIndex = i;
+                        item.isSelected = hasVideoOverride && (format.height == selectedHeight);
+
+                        boolean dup = false;
+                        for (QualityItem existing : list) {
+                            if (existing.height == h) {
+                                dup = true;
+                                if (item.isSelected) existing.isSelected = true;
+                                break;
+                            }
+                        }
+                        if (!dup) {
+                            list.add(item);
+                        }
+                    }
+                }
+            }
+        }
+
+        Collections.sort(list, new Comparator<QualityItem>() {
+            @Override
+            public int compare(QualityItem o1, QualityItem o2) {
+                return Integer.compare(o2.height, o1.height);
+            }
+        });
+
+        autoItem.isSelected = !hasVideoOverride;
+        list.add(0, autoItem);
+        return list;
+    }
+
+    private void selectExoPlayerQuality(QualityItem item) {
+        if (player == null) return;
+
+        if (item.isAuto) {
+            player.setTrackSelectionParameters(
+                player.getTrackSelectionParameters()
+                    .buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                    .setMaxVideoSize(Integer.MAX_VALUE, Integer.MAX_VALUE)
+                    .build()
+            );
+            Toast.makeText(this, "Quality set to Auto", Toast.LENGTH_SHORT).show();
+        } else {
+            Tracks currentTracks = player.getCurrentTracks();
+            TrackSelectionParameters.Builder builder = player.getTrackSelectionParameters().buildUpon();
+            builder.clearOverridesOfType(C.TRACK_TYPE_VIDEO);
+
+            boolean overrideApplied = false;
+            for (Tracks.Group trackGroup : currentTracks.getGroups()) {
+                if (trackGroup.getType() == C.TRACK_TYPE_VIDEO) {
+                    for (int i = 0; i < trackGroup.getMediaTrackGroup().length; i++) {
+                        Format format = trackGroup.getTrackFormat(i);
+                        if (format.height == item.height) {
+                            builder.setOverrideForType(new TrackSelectionOverride(trackGroup.getMediaTrackGroup(), i));
+                            overrideApplied = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (overrideApplied) {
+                player.setTrackSelectionParameters(builder.build());
+                Toast.makeText(this, "Quality locked to " + item.label, Toast.LENGTH_SHORT).show();
+            } else {
+                Toast.makeText(this, "Quality " + item.label + " unavailable", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    private void populateQualityOptions(final LinearLayout container, final TextView txtQuality) {
+        if (container == null) return;
+        container.removeAllViews();
+
+        // Check if the current source has an embedded qualities array (e.g. from pahe scraper)
+        JSONArray sourceQualities = null;
+        String currentQualityName = "";
+        try {
+            if (sourcesArray != null && currentSourceIndex >= 0 && currentSourceIndex < sourcesArray.length()) {
+                JSONObject currentSource = sourcesArray.getJSONObject(currentSourceIndex);
+                sourceQualities = currentSource.optJSONArray("qualities");
+                currentQualityName = currentSource.optString("quality", "");
+            }
+        } catch (Exception e) {
+            sourceQualities = null;
+        }
+
+        if (sourceQualities != null && sourceQualities.length() > 1) {
+            // Use embedded qualities from the source (pahe-style: each quality has its own URL)
+            String currentUrl = currentVideoUrl;
+            for (int i = 0; i < sourceQualities.length(); i++) {
+                try {
+                    final JSONObject qObj = sourceQualities.getJSONObject(i);
+                    final String qUrl = qObj.getString("url");
+                    String qLabel = qObj.optString("quality", "Source " + (i + 1));
+                    boolean isSelected = (!currentQualityName.isEmpty() && currentQualityName.equalsIgnoreCase(qLabel))
+                            || qUrl.equals(currentUrl)
+                            || (currentUrl != null && currentUrl.contains(qUrl));
+
+                    if (isSelected && txtQuality != null) {
+                        txtQuality.setText(qLabel);
+                    }
+
+                    View row = createOptionRow(qLabel, isSelected, new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            if (settingsSheetDialog != null) settingsSheetDialog.dismiss();
+                            switchQualityByUrl(qUrl, qObj.optString("quality", ""));
+                        }
+                    });
+                    container.addView(row);
+                } catch (Exception e) {
+                    Log.e("PlayerActivity", "Error reading quality entry: " + e.getMessage());
+                }
+            }
+        } else {
+            // Fall back to ExoPlayer track-based quality (HLS master playlists)
+            List<QualityItem> exoQualities = getExoPlayerQualityOptions();
+
+            if (exoQualities.size() > 1) {
+                String activeQualityLabel = "Auto";
+                for (final QualityItem item : exoQualities) {
+                    if (item.isSelected) {
+                        activeQualityLabel = item.label;
+                    }
+                    View row = createOptionRow(item.label + (item.isAuto ? " (Recommended)" : ""), item.isSelected, new View.OnClickListener() {
+                        @Override
+                        public void onClick(View v) {
+                            selectExoPlayerQuality(item);
+                            if (txtQuality != null) txtQuality.setText(item.label);
+                            populateQualityOptions(container, txtQuality);
+                        }
+                    });
+                    container.addView(row);
+                }
+                if (txtQuality != null) txtQuality.setText(activeQualityLabel);
+            } else {
+                TextView noQual = new TextView(this);
+                noQual.setText("Auto (Default)");
+                noQual.setTextColor(0x88FFFFFF);
+                noQual.setPadding(20, 20, 20, 20);
+                container.addView(noQual);
+            }
+        }
+    }
+
+    private void switchQualityByUrl(String newUrl, String qualityLabel) {
+        if (newUrl == null || newUrl.equals(currentVideoUrl)) return;
+
+        // Update the URL on the current source object so subsequent switches remember
+        try {
+            if (sourcesArray != null && currentSourceIndex >= 0 && currentSourceIndex < sourcesArray.length()) {
+                JSONObject currentSource = sourcesArray.getJSONObject(currentSourceIndex);
+                currentSource.put("url", newUrl);
+                currentSource.put("quality", qualityLabel);
+            }
+        } catch (Exception e) {
+            Log.e("PlayerActivity", "Error updating source quality: " + e.getMessage());
+        }
+
+        // Reuse the existing switchSource logic to reload the player with the new URL
+        switchSource(currentSourceIndex);
+        Toast.makeText(this, "Quality set to " + qualityLabel, Toast.LENGTH_SHORT).show();
+    }
+
     private void populateServerOptions(final LinearLayout container, final TextView txtServer) {
         if (container == null) return;
         container.removeAllViews();
@@ -1643,11 +2165,10 @@ public class PlayerActivity extends Activity {
             final int index = i;
             String label = "";
             try {
-                label = sourcesArray.getJSONObject(i).optString("quality", "Source " + (i + 1));
+                label = getServerLabel(sourcesArray.getJSONObject(i), i);
             } catch (Exception e) {
-                label = "Source " + (i + 1);
+                label = "Server " + (i + 1);
             }
-            final String finalLabel = label;
             boolean isSelected = currentSourceIndex == index;
 
             View row = createOptionRow(label, isSelected, new View.OnClickListener() {

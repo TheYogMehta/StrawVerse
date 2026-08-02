@@ -252,19 +252,35 @@ async function fetchEpisode(provider, id, page = 1) {
 }
 
 // fetch m3u8 links
-async function fetchEpisodeSources(provider, episodeId) {
+async function fetchEpisodeSources(provider, episodeId, category = null) {
   if (!provider?.provider)
     throw new Error(
       "Missing Provider! ( try downloading from settings > marketplace )",
     );
 
+  let cleanEpisodeId = episodeId;
+  const suffixMatch = episodeId.match(/-(sub|dub|hsub|both)$/);
+  if (suffixMatch) {
+    if (!category) {
+      category = suffixMatch[1] === "both" ? null : suffixMatch[1];
+    }
+    cleanEpisodeId = episodeId.slice(0, -suffixMatch[0].length);
+  }
+
   const cacheKey = CreateHashKey(
-    `animeepisodesources_${provider.provider_name}_${episodeId}`,
+    `animeepisodesources_${provider.provider_name}_${cleanEpisodeId}_${category || "all"}`,
   );
 
   let sources = cache.get(cacheKey);
   if (!sources) {
-    sources = await provider.provider.fetchEpisodeSources(episodeId);
+    if (provider.provider.fetchEpisodeSources.length >= 2) {
+      sources = await provider.provider.fetchEpisodeSources(
+        cleanEpisodeId,
+        category,
+      );
+    } else {
+      sources = await provider.provider.fetchEpisodeSources(cleanEpisodeId);
+    }
     if (sources) {
       cache.set(cacheKey, sources, 60);
     }
@@ -408,12 +424,16 @@ async function DownloadChapters(
   Title,
   ChapterName,
   MangaChapterID,
+  EpNum = null,
+  quality = null,
 ) {
   try {
     const zip = new JSZip();
 
+    const chpStr = EpNum || ChapterName || "";
+    const qualStr = quality ? ` ( ${quality} )` : "";
     const logger = new HLSLogger(
-      `Downloading ${Title} || ${ChapterName}`,
+      `Downloading CHP ${chpStr} ${Title}${qualStr}`,
       `${MangaChapterID}`,
       0,
       false,
@@ -725,11 +745,56 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
   return typeDir;
 }
 
+async function processServer(provider, server) {
+  if (!provider?.provider?.processServer) {
+    return server;
+  }
+
+  const serverId =
+    server.linkId ||
+    server.id ||
+    server.name ||
+    server.quality ||
+    JSON.stringify(server);
+  const cacheKey = CreateHashKey("processServer", provider?.name, serverId);
+  const cachedData = cache.get(cacheKey);
+  if (cachedData) {
+    if (
+      cachedData.url &&
+      global.setDynamicReferer &&
+      cachedData.headers?.Referer
+    ) {
+      try {
+        const cdnDomain = new URL(cachedData.url).hostname;
+        global.setDynamicReferer(cdnDomain, cachedData.headers.Referer);
+        global.setFallbackReferer(cachedData.headers.Referer);
+      } catch (e) {}
+    }
+    return cachedData;
+  }
+
+  const resolved = await provider.provider.processServer(
+    server.rawServer || server,
+  );
+  if (resolved && resolved.url) {
+    if (global.setDynamicReferer && resolved.headers?.Referer) {
+      try {
+        const cdnDomain = new URL(resolved.url).hostname;
+        global.setDynamicReferer(cdnDomain, resolved.headers.Referer);
+        global.setFallbackReferer(resolved.headers.Referer);
+      } catch (e) {}
+    }
+    cache.set(cacheKey, resolved, 300);
+  }
+  return resolved;
+}
+
 module.exports = {
   latestAnime,
   animesearch,
   animeinfo,
   fetchEpisodeSources,
+  processServer,
   fetchEpisode,
   latestMangas,
   MangaSearch,

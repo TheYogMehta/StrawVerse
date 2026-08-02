@@ -213,14 +213,18 @@ async function boot() {
 
     global.cancelNativeRequests = () => {
       const error = cancellationError();
-      const activeIds = Array.from(global.pendingRequests.keys());
-      if (activeIds.length > 0) {
-        broadcast("native-cancel", { requestIds: activeIds });
+      const cancelableIds = [];
+      for (const [requestId, entry] of global.pendingRequests.entries()) {
+        if (entry.background) continue;
+        cancelableIds.push(requestId);
       }
-      for (const requestId of activeIds) {
+      if (cancelableIds.length > 0) {
+        broadcast("native-cancel", { requestIds: cancelableIds });
+      }
+      for (const requestId of cancelableIds) {
         global.pendingRequests.get(requestId)?.reject(error);
       }
-      return activeIds.length;
+      return cancelableIds.length;
     };
 
     global.sendNativeRequest = (config) =>
@@ -242,6 +246,7 @@ async function boot() {
         global.pendingRequests.set(requestId, {
           resolve: (response) => finish(resolve, response),
           reject: (error) => finish(reject, error),
+          background: !!config._background,
         });
 
         broadcast("native-request", {
@@ -257,7 +262,9 @@ async function boot() {
       channel.addListener("native-response", (data) => {
         if (!data || typeof data.requestId === "undefined") return;
         const reqIdNum = Number(data.requestId);
-        const pending = global.pendingRequests.get(data.requestId) || global.pendingRequests.get(reqIdNum);
+        const pending =
+          global.pendingRequests.get(data.requestId) ||
+          global.pendingRequests.get(reqIdNum);
         if (pending) {
           if (data.success) {
             pending.resolve(data.response);
@@ -269,16 +276,6 @@ async function boot() {
     }
 
     const nativeAxiosAdapter = async (config) => {
-      // Requests flagged with strawverseDirectHttp (e.g. image proxy fetches
-      // for CDN thumbnails) must NOT be routed through the WebView native
-      // bridge - fetch them directly from the Node runtime instead. This
-      // avoids clogging the bridge with binary payloads and the 30s
-      // timeout/retry loop that breaks image loading on paginated lists.
-      // EXCEPTION: _forceNativeBridge overrides this for Cloudflare-protected
-      // hosts (e.g. i.animepahe.pw). Cloudflare binds cf_clearance to the TLS
-      // fingerprint of the browser that solved the challenge, so Node's HTTP
-      // stack gets a perpetual 403 even with a valid cookie. Those requests
-      // must go through the WebView, which has the matching fingerprint.
       if (
         config.strawverseDirectHttp === true &&
         config._forceNativeBridge !== true
@@ -287,6 +284,9 @@ async function boot() {
       }
       if (global.sendNativeRequest) {
         try {
+          if (global.__isBackgroundDownload?.()) {
+            config._background = true;
+          }
           const res = await global.sendNativeRequest(config);
 
           const parsedHeaders = {};
@@ -753,7 +753,13 @@ async function boot() {
           savedClearance = true;
           try {
             const proxyHeaders = require("./backend/utils/proxyHeaders");
-            proxyHeaders.updateCache(domain, "cf_clearance", value, expiry.toString(), Date.now().toString());
+            proxyHeaders.updateCache(
+              domain,
+              "cf_clearance",
+              value,
+              expiry.toString(),
+              Date.now().toString(),
+            );
           } catch (e) {}
         }
         if (name === "cf_user_agent" || name === "user_agent") {
@@ -971,7 +977,9 @@ async function boot() {
   appExpress.use(router);
   appExpress.get("/health", (_req, res) => res.json({ ok: true }));
   appExpress.get("/capacitor.js", (_req, res) => {
-    res.type("application/javascript").send("// Capacitor bridge injected natively by WebView\n");
+    res
+      .type("application/javascript")
+      .send("// Capacitor bridge injected natively by WebView\n");
   });
   appExpress.use(express.static(path.join(__dirname, "gui", "dist")));
 
@@ -982,6 +990,15 @@ async function boot() {
     logger.info(`[android] Express listening on http://127.0.0.1:${PORT}`);
     if (channel) channel.send("server-ready", { port: PORT });
   });
+
+  try {
+    const { loadQueue } = require("./backend/utils/queue");
+    await loadQueue();
+  } catch (queueErr) {
+    logger.error(
+      "[android] Failed to load download queue: " + queueErr.message,
+    );
+  }
 
   setTimeout(() => {
     try {

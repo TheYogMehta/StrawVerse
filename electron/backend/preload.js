@@ -14,6 +14,7 @@ const ALLOWED_IPC_CHANNELS = new Set([
   "mpv-progress",
   "mal-sync-notification",
   "download-complete",
+  "download-error",
   "extention-updated",
   "update-not-available",
   "update-download-progress",

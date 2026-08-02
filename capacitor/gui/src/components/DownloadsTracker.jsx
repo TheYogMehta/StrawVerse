@@ -9,7 +9,6 @@ import {
   RefreshCw,
   Pause,
   Play,
-  FolderOpen,
 } from "lucide-react";
 import { apiPost } from "../utils/common";
 import "./css/DownloadsTracker.css";
@@ -104,29 +103,12 @@ export default function DownloadsTracker() {
     );
   };
 
-  const handleOpenFolder = async () => {
-    try {
-      await apiPost("/api/local/open", { action: "open_folder" });
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
   return (
     <div className="tracker-wrapper">
       <header className="tracker-header">
         <h1 className="tracker-title">Download Queue</h1>
         <div className="tracker-actions">
-          <button
-            onClick={handleOpenFolder}
-            className="btn-pause-queue"
-            title="Open Main Download Folder in File Explorer"
-          >
-            <FolderOpen size={16} />
-            <span>Open Folder</span>
-          </button>
-
-          {queue.length > 0 && (
+          {(queue.length > 0 || activeTask || isPaused) && (
             <button
               onClick={handleTogglePause}
               className={`btn-pause-queue ${isPaused ? "paused" : ""}`}
@@ -221,25 +203,34 @@ export default function DownloadsTracker() {
             </div>
           ) : (
             <div className="queue-list">
-              {queue.map((item, idx) => (
-                <div key={item.epid || idx} className="queue-card glass-panel">
-                  <div className="queue-item-info">
-                    <span className="queue-title-text">{item.Title}</span>
-                    <span className="queue-meta">
-                      {item.Type === "Anime"
-                        ? `Episode ${item.EpNum}`
-                        : `Chapter ${item.EpNum}`}{" "}
-                      • {item.Type.toUpperCase()}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => handleRemoveItem(item.epid)}
-                    className="btn-remove-item"
+              {queue.map((item, idx) => {
+                const qualStr = item.config?.quality
+                  ? ` ( ${item.config.quality} )`
+                  : "";
+                const displayTitle =
+                  item.Type === "Anime"
+                    ? `EP ${item.EpNum} ${item.Title}${qualStr}`
+                    : `CHP ${item.EpNum} ${item.Title}${qualStr}`;
+                return (
+                  <div
+                    key={item.epid || idx}
+                    className="queue-card glass-panel"
                   >
-                    <X size={16} />
-                  </button>
-                </div>
-              ))}
+                    <div className="queue-item-info">
+                      <span className="queue-title-text">{displayTitle}</span>
+                      <span className="queue-meta">
+                        {item.Type.toUpperCase()}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleRemoveItem(item.epid)}
+                      className="btn-remove-item"
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

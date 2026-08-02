@@ -16,6 +16,7 @@ const {
   MangaChapterFetch,
   fetchChapters,
   getProviderOrThrow,
+  processServer,
 } = require("../utils/AnimeManga");
 const {
   getAllMetadata,
@@ -1332,6 +1333,8 @@ router.post("/api/watch", async (req, res) => {
         videoData.sources.push({
           url: `/video?path=${encodeURIComponent(SourcesData?.filepath)}`,
           quality: "HD",
+          server: "Local",
+          provider: "Local",
         });
       }
 
@@ -1354,6 +1357,26 @@ router.post("/api/watch", async (req, res) => {
     });
   }
 });
+
+// Resolve specific server stream on demand (lazy loading)
+const handleWatchServer = async (req, res) => {
+  const { provider = null, server } = req.body;
+  try {
+    if (!server) throw new Error("Server payload missing");
+    const Animeprovider = await providerFetch("Anime", provider);
+    const resolved = await processServer(Animeprovider, server);
+    if (!resolved) {
+      return res.json({ error: true, message: "Failed to resolve server" });
+    }
+    res.status(200).json(resolved);
+  } catch (err) {
+    logger.error(`Error resolving server stream: ${err.message}`);
+    res.status(500).json({ error: true, message: err.message });
+  }
+};
+
+router.post("/watch/server", handleWatchServer);
+router.post("/api/watch/server", handleWatchServer);
 
 // Play Video From Local Source
 router.get("/video", (req, res) => {
@@ -1619,16 +1642,26 @@ router.get("/api/image", async (req, res) => {
 // Proxy for m3u8 playlist
 router.get("/api/stream/m3u8", async (req, res) => {
   const url = req.query.url;
+  const customReferer = req.query.referer;
   if (!url) return res.status(400).send("No URL");
   try {
+    if (customReferer && global.setDynamicReferer) {
+      global.setDynamicReferer(url, customReferer);
+    }
     const port = global.PORT || 3000;
     const reqHeaders = getHeaders(url);
+    if (customReferer) {
+      reqHeaders.Referer = customReferer;
+    }
     const { data } = await global.axios.get(url, {
       headers: reqHeaders,
       responseType: "text",
       timeout: 15000,
     });
     const base = url.substring(0, url.lastIndexOf("/") + 1);
+    const refParam = customReferer
+      ? `&referer=${encodeURIComponent(customReferer)}`
+      : "";
     const segProxy = `http://127.0.0.1:${port}/api/stream/segment?url=`;
     const m3u8Proxy = `http://127.0.0.1:${port}/api/stream/m3u8?url=`;
 
@@ -1642,13 +1675,13 @@ router.get("/api/stream/m3u8", async (req, res) => {
             ? t.replace(/URI="([^"]+)"/, (_, u) => {
                 const abs = u.startsWith("http") ? u : base + u;
                 const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
-                return `URI="${proxy}${encodeURIComponent(abs)}"`;
+                return `URI="${proxy}${encodeURIComponent(abs)}${refParam}"`;
               })
             : line;
         }
         const abs = t.startsWith("http") ? t : base + t;
         const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
-        return `${proxy}${encodeURIComponent(abs)}`;
+        return `${proxy}${encodeURIComponent(abs)}${refParam}`;
       })
       .join("\n");
 
@@ -1663,9 +1696,16 @@ router.get("/api/stream/m3u8", async (req, res) => {
 // Proxy for m3u8 video segment
 router.get("/api/stream/segment", async (req, res) => {
   const url = req.query.url;
+  const customReferer = req.query.referer;
   if (!url) return res.status(400).send("No URL");
   try {
+    if (customReferer && global.setDynamicReferer) {
+      global.setDynamicReferer(url, customReferer);
+    }
     const reqHeaders = getHeaders(url);
+    if (customReferer) {
+      reqHeaders.Referer = customReferer;
+    }
     let attempts = 0;
     let data, headers;
     while (attempts < 3) {

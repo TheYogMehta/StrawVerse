@@ -180,12 +180,31 @@ public class MainActivity extends BridgeActivity {
                         java.io.File publicRoot = new java.io.File(extStorage, "Strawverse");
                         
                         new java.io.File(publicRoot, "data").mkdirs();
-                        new java.io.File(publicRoot, "Anime").mkdirs();
-                        new java.io.File(publicRoot, "Manga").mkdirs();
+                        java.io.File animeFolder = new java.io.File(publicRoot, "Anime");
+                        animeFolder.mkdirs();
+                        new java.io.File(animeFolder, ".nomedia").createNewFile();
+                        
+                        java.io.File mangaFolder = new java.io.File(publicRoot, "Manga");
+                        mangaFolder.mkdirs();
+                        new java.io.File(mangaFolder, ".nomedia").createNewFile();
+                        
+                        java.io.File cacheFolder = new java.io.File(publicRoot, ".cache");
+                        cacheFolder.mkdirs();
+                        new java.io.File(cacheFolder, ".nomedia").createNewFile();
+
                         java.io.File scrapperRoot = new java.io.File(publicRoot, "scrapper");
-                        new java.io.File(scrapperRoot, "Anime").mkdirs();
-                        new java.io.File(scrapperRoot, "Manga").mkdirs();
-                        new java.io.File(scrapperRoot, "ico").mkdirs();
+                        scrapperRoot.mkdirs();
+                        new java.io.File(scrapperRoot, ".nomedia").createNewFile();
+
+                        java.io.File scrapperAnime = new java.io.File(scrapperRoot, "Anime");
+                        scrapperAnime.mkdirs();
+
+                        java.io.File scrapperManga = new java.io.File(scrapperRoot, "Manga");
+                        scrapperManga.mkdirs();
+
+                        java.io.File scrapperIco = new java.io.File(scrapperRoot, "ico");
+                        scrapperIco.mkdirs();
+                        new java.io.File(scrapperIco, ".nomedia").createNewFile();
                         Log.i(TAG, "Successfully pre-created Strawverse folders in public storage on resume");
                     } catch (Exception e) {
                         Log.e(TAG, "Failed to create public folders on resume: " + e.getMessage());
@@ -249,5 +268,15 @@ public class MainActivity extends BridgeActivity {
 
     private WebResourceResponse fetchNativelyWithHeaders(WebResourceRequest request) {
         return WebViewRequestHelper.fetchNativelyWithHeaders(getApplicationContext(), request);
+    }
+
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        try {
+            DownloadNotificationManager.getInstance(this).cancelNotification();
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to cancel download notification on destroy: " + e.getMessage());
+        }
     }
 }

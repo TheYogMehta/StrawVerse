@@ -69,25 +69,49 @@ export default function RecentHistory({
                 >
                   <X size={14} />
                 </button>
-                <img
-                  src={
-                    item.image || item.scraper_image || "/images/image-404.png"
-                  }
-                  alt={item.title}
-                  className="continue-img"
-                  onError={(e) => {
-                    const fallback = item.scraper_image || item.fallback_image;
-                    if (
-                      fallback &&
-                      e.target.src !== fallback &&
-                      e.target.src !== window.location.origin + fallback
-                    ) {
-                      e.target.src = fallback;
-                    } else {
-                      e.target.src = "/images/image-404.png";
-                    }
-                  }}
-                />
+                {(() => {
+                  const localSrc =
+                    item.local_image ||
+                    (item.image &&
+                    (item.image.includes("/api/image") ||
+                      item.image.startsWith("file://"))
+                      ? item.image
+                      : null);
+                  const malSrc = item.mal_image;
+                  const scraperSrc = item.scraper_image;
+                  const defaultSrc =
+                    item.fallback_image || "/images/image-404.png";
+                  const primarySrc =
+                    localSrc || malSrc || scraperSrc || defaultSrc;
+
+                  return (
+                    <img
+                      src={primarySrc}
+                      alt={item.title}
+                      className="continue-img"
+                      onError={(e) => {
+                        const currentSrc = e.target.src;
+                        const fallbacks = [
+                          localSrc,
+                          malSrc,
+                          scraperSrc,
+                          defaultSrc,
+                        ].filter(Boolean);
+                        const nextSrc = fallbacks.find(
+                          (src) =>
+                            src &&
+                            currentSrc !== src &&
+                            currentSrc !== window.location.origin + src,
+                        );
+                        if (nextSrc) {
+                          e.target.src = nextSrc;
+                        } else {
+                          e.target.src = defaultSrc;
+                        }
+                      }}
+                    />
+                  );
+                })()}
                 <div className="continue-play-overlay">
                   <Play size={28} className="continue-play-icon" />
                 </div>

@@ -1,5 +1,24 @@
 # Changelog
 
+# [9.1.0] - 2026-08-03
+
+### MPV Video Player & Streaming
+
+- **Player Loading Overlay**: Added a smooth loading card and progress indicator when launching the MPV video player engine.
+- **Playback & Track Sync**: Improved audio/subtitle track selection and settings synchronization in MPV player sessions.
+- **Faster Cloudflare Bypass**: Optimized Cloudflare challenge resolution for faster stream loading.
+
+### Downloads & Library
+
+- **Download Error Toast Notifications**: Displays real-time error toasts whenever a download fails or encounters an issue.
+- **Subtitle Language Preference**: Automatic filtering of subtitle tracks based on your preferred subtitle languages.
+- **Directory Conflict Fixes & Smart Cleanup**: Added media ID identification to prevent folder name collisions and improved empty folder removal.
+
+### User Interface
+
+- **Enhanced Image Fallbacks**: Reliable loading for catalog and history thumbnails using MyAnimeList and local cover art fallbacks.
+- **Improved Chapter Action Controls**: Redesigned manga chapter buttons with smooth hover states and visual feedback.
+
 # [9.0.1] - 2026-08-02
 
 ### Video Player & Playback

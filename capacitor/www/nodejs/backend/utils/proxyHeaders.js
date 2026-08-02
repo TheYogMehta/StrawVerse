@@ -197,9 +197,6 @@ function getHeaders(url, method = "GET") {
   try {
     cookieDomain = new URL(url).hostname;
   } catch (e) {}
-  console.log(
-    `[proxyHeaders] getHeaders called for: ${url}, method=${method}, cookieCacheKeys=${Object.keys(cookieCache)}`,
-  );
 
   let cleanDomain = "";
   if (cookieDomain) {
@@ -288,10 +285,13 @@ function getHeaders(url, method = "GET") {
 
   // 2. Known static defaults (fallback if not dynamically stored yet)
   if (!headers.Referer) {
-    if (url.includes("owocdn.top") || url.includes("uwucdn.top")) {
+    if (
+      url.includes("owocdn") ||
+      url.includes("uwucdn") ||
+      url.includes("kwik") ||
+      url.includes("kwiktv")
+    ) {
       headers.Referer = "https://kwik.cx/";
-    } else if (url.includes("kwik.cx") || url.includes("animepahe")) {
-      headers.Referer = "https://animepahe.pw/";
     } else if (
       url.includes("temp.compsci88.com") ||
       url.includes("weebcentral")
@@ -301,12 +301,7 @@ function getHeaders(url, method = "GET") {
       headers.Referer = "https://anikoto.to/";
     } else if (url.includes("anineko")) {
       headers.Referer = "https://anineko.to/";
-    } else if (
-      url.includes("allmanga") ||
-      url.includes("allanime") ||
-      url.includes("youtube-anime.com")
-    ) {
-      headers.Referer = "https://allmanga.to/";
+
     } else if (
       url.includes("watching.onl") ||
       url.includes("nekostream.site") ||
@@ -317,6 +312,7 @@ function getHeaders(url, method = "GET") {
     ) {
       headers.Referer = "https://megaplay.buzz/";
     }
+  }
 
   if (!headers.Referer) {
     try {

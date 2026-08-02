@@ -111,15 +111,18 @@ router.post("/downloads", async (req, res) => {
 
   if (itemWithSegments) {
     let caption = itemWithSegments.caption;
-    if (!caption) {
-      if (itemWithSegments.Type === "Anime") {
-        caption = `Downloading ${itemWithSegments.Title} || EP ${itemWithSegments.EpNum}`;
-      } else if (itemWithSegments.Type === "Manga") {
-        caption = `Downloading ${itemWithSegments.Title} || ${itemWithSegments.ChapterTitle || "Chapter " + itemWithSegments.EpNum}`;
-      } else {
-        caption = "Downloading...";
-      }
+  if (!caption) {
+    const qualStr = itemWithSegments.config?.quality
+      ? ` ( ${itemWithSegments.config.quality} )`
+      : "";
+    if (itemWithSegments.Type === "Anime") {
+      caption = `Downloading EP ${itemWithSegments.EpNum} ${itemWithSegments.Title}${qualStr}`;
+    } else if (itemWithSegments.Type === "Manga") {
+      caption = `Downloading CHP ${itemWithSegments.EpNum || itemWithSegments.ChapterTitle} ${itemWithSegments.Title}${qualStr}`;
+    } else {
+      caption = "Downloading...";
     }
+  }
     Response.caption = caption;
     Response.totalSegments = itemWithSegments.totalSegments;
     Response.currentSegments = itemWithSegments.currentSegments;
@@ -191,10 +194,13 @@ router.post("/api/download/remove", async (req, res) => {
         if (itemWithSegments) {
           let caption = itemWithSegments.caption;
           if (!caption) {
+            const qualStr = itemWithSegments.config?.quality
+              ? ` ( ${itemWithSegments.config.quality} )`
+              : "";
             if (itemWithSegments.Type === "Anime") {
-              caption = `Downloading ${itemWithSegments.Title} || EP ${itemWithSegments.EpNum}`;
+              caption = `Downloading EP ${itemWithSegments.EpNum} ${itemWithSegments.Title}${qualStr}`;
             } else if (itemWithSegments.Type === "Manga") {
-              caption = `Downloading ${itemWithSegments.Title} || ${itemWithSegments.ChapterTitle || "Chapter " + itemWithSegments.EpNum}`;
+              caption = `Downloading CHP ${itemWithSegments.EpNum || itemWithSegments.ChapterTitle} ${itemWithSegments.Title}${qualStr}`;
             } else {
               caption = "Downloading...";
             }

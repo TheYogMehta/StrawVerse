@@ -536,6 +536,74 @@ function disableWhatsNew() {
   }
 }
 
+function isLanguagePreferred(subLang, preferredLanguages) {
+  if (!preferredLanguages || !Array.isArray(preferredLanguages)) {
+    return true;
+  }
+  if (preferredLanguages.length === 0) {
+    return false;
+  }
+  if (!subLang) return false;
+  const sLower = String(subLang).toLowerCase().trim();
+
+  return preferredLanguages.some((pref) => {
+    const pLower = String(pref).toLowerCase().trim();
+    if (sLower === pLower) return true;
+    if (pLower.startsWith(sLower) || sLower.startsWith(pLower)) return true;
+
+    if (
+      pLower === "english" &&
+      (sLower.includes("eng") || sLower.includes("en"))
+    )
+      return true;
+    if (
+      pLower === "spanish" &&
+      (sLower.includes("spa") || sLower.includes("es"))
+    )
+      return true;
+    if (
+      pLower === "french" &&
+      (sLower.includes("fre") ||
+        sLower.includes("fra") ||
+        sLower.includes("fr"))
+    )
+      return true;
+    if (
+      pLower === "german" &&
+      (sLower.includes("ger") ||
+        sLower.includes("deu") ||
+        sLower.includes("de"))
+    )
+      return true;
+    if (
+      pLower === "italian" &&
+      (sLower.includes("ita") || sLower.includes("it"))
+    )
+      return true;
+    if (
+      pLower === "japanese" &&
+      (sLower.includes("jpn") || sLower.includes("ja"))
+    )
+      return true;
+    if (
+      pLower === "arabic" &&
+      (sLower.includes("ara") || sLower.includes("ar"))
+    )
+      return true;
+    if (
+      pLower === "portuguese" &&
+      (sLower.includes("por") || sLower.includes("pt"))
+    )
+      return true;
+    if (
+      pLower === "russian" &&
+      (sLower.includes("rus") || sLower.includes("ru"))
+    )
+      return true;
+    return false;
+  });
+}
+
 module.exports = {
   settingupdate,
   settingfetch,
@@ -546,5 +614,6 @@ module.exports = {
   HandleExtensions,
   patchModulePaths,
   disableWhatsNew,
+  isLanguagePreferred,
   getScraperIconsPath: () => ScraperIcons,
 };
