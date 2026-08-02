@@ -4,24 +4,29 @@
 
 ### Mobile (Android)
 
-- **Official Android Build Support**: Added Capacitor Android packaging pipeline and build scripts (`npm run package:android`).
-- **Signed APK Release**: Configured automated release signing for production APK distribution (`StrawVerse-<version>.apk`).
+- **Native Video Player & Touch Gestures**: Added Picture-in-Picture (PiP) mode, double-tap to seek 10s backward/forward, vertical swipe gesture for brightness/volume control, and smooth timeline drag seeking.
+- **Offline Batch Downloads & Notifications**: Download full series or selected episodes directly to your device, with real-time download progress and error notifications.
+- **Gallery Auto-Hide**: Keeps app media assets and downloaded covers hidden from your device photo gallery.
+- **Capacitor Packaging Pipeline**: Configured Capacitor Android build scripts (`npm run package:android`) and automated release signing for production APK distribution (`StrawVerse-<version>.apk`).
 
-### MPV Video Player & Streaming
+### Desktop (Electron)
 
 - **Player Loading Overlay**: Added a smooth loading card and progress indicator when launching the MPV video player engine.
 - **Playback & Track Sync**: Improved audio/subtitle track selection and settings synchronization in MPV player sessions.
-- **Faster Cloudflare Bypass**: Optimized Cloudflare challenge resolution for faster stream loading.
 
-### Downloads & Library
+### Core Streaming & Scrapers
+
+- **Faster Cloudflare Bypass**: Optimized Cloudflare challenge resolution for faster stream loading across all providers.
+- **Subtitle Language Preference**: Automatic filtering of subtitle tracks based on your preferred subtitle languages.
+
+### Downloads & Library Management
 
 - **Download Error Toast Notifications**: Displays real-time error toasts whenever a download fails or encounters an issue.
-- **Subtitle Language Preference**: Automatic filtering of subtitle tracks based on your preferred subtitle languages.
 - **Directory Conflict Fixes & Smart Cleanup**: Added media ID identification to prevent folder name collisions and improved empty folder removal.
 
-### User Interface
+### User Interface & Metadata
 
-- **Enhanced Image Fallbacks**: Reliable loading for catalog and history thumbnails using MyAnimeList and local cover art fallbacks.
+- **MyAnimeList Cover Fallbacks**: Reliable loading for catalog and history thumbnails using MyAnimeList and local cover art fallbacks.
 - **Improved Chapter Action Controls**: Redesigned manga chapter buttons with smooth hover states and visual feedback.
 
 # [9.0.1] - 2026-08-02

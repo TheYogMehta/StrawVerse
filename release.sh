@@ -94,6 +94,13 @@ update_pkg_version() {
 
 update_pkg_version "$ELECTRON_PKG"
 update_pkg_version "$CAPACITOR_PKG"
+update_pkg_version "$CAPACITOR_DIR/www/nodejs/package.json"
+
+# Sync CHANGELOG to capacitor nodejs folder
+if [ -f "$CAPACITOR_DIR/www/nodejs/CHANGELOG.md" ]; then
+  cp "$CHANGELOG" "$CAPACITOR_DIR/www/nodejs/CHANGELOG.md"
+  ok "Synced CHANGELOG.md to capacitor nodejs backend"
+fi
 
 # ── 7. Build Desktop (Electron) Application ──────────────
 log "Building Desktop (Electron) frontend..."
