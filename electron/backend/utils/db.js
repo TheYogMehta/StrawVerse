@@ -159,6 +159,14 @@ const tables = {
     file_size: "INTEGER",
     last_accessed: "INTEGER",
   },
+  DomainConcurrency: {
+    domain: "TEXT PRIMARY KEY",
+    current_concurrency: "INTEGER",
+    max_concurrency: "INTEGER",
+    total_requests: "INTEGER DEFAULT 0",
+    failed_requests: "INTEGER DEFAULT 0",
+    updated_at: "INTEGER",
+  },
 };
 
 function getKeyValue(tableName, key) {

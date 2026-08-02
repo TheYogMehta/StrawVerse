@@ -169,6 +169,11 @@ async function animesearch(provider, Anime_NAME, filters = {}) {
 
 // find more anime
 async function findanime(provider, Anime_NAME, filters) {
+  if (!provider?.provider)
+    throw new Error(
+      "Missing Provider! ( try downloading from settings > marketplace )",
+    );
+
   const cacheKey = CreateHashKey(
     `animesearch_${provider.provider_name}_${Anime_NAME}__${JSON.stringify(
       filters,
@@ -321,6 +326,11 @@ async function fetchEpisodeSources(provider, episodeId, category = null) {
 
 // Latest Manga
 async function latestMangas(provider, Page = 1) {
+  if (!provider?.provider)
+    throw new Error(
+      "Missing Provider! ( try downloading from settings > marketplace )",
+    );
+
   const cacheKey = CreateHashKey(
     `latestmanga_${provider.provider_name}_${Page}`,
   );
@@ -342,6 +352,11 @@ async function latestMangas(provider, Page = 1) {
 
 // Manga Search
 async function MangaSearch(provider, MANGA_NAME, PAGE = 1) {
+  if (!provider?.provider)
+    throw new Error(
+      "Missing Provider! ( try downloading from settings > marketplace )",
+    );
+
   try {
     const cacheKey = CreateHashKey(
       `mangasearch_${provider.provider_name}_${MANGA_NAME}_${PAGE}`,
@@ -368,6 +383,11 @@ async function MangaSearch(provider, MANGA_NAME, PAGE = 1) {
 
 // Manga Info
 async function MangaInfo(provider, MANGA_ID) {
+  if (!provider?.provider)
+    throw new Error(
+      "Missing Provider! ( try downloading from settings > marketplace )",
+    );
+
   const cacheKey = CreateHashKey(
     `mangainfo${provider.provider_name}_${MANGA_ID}`,
   );
@@ -385,6 +405,11 @@ async function MangaInfo(provider, MANGA_ID) {
 
 // Manga
 async function fetchChapters(provider, MANGA_ID, page = 1) {
+  if (!provider?.provider)
+    throw new Error(
+      "Missing Provider! ( try downloading from settings > marketplace )",
+    );
+
   const cacheKey = CreateHashKey(
     `mangachapters${provider.provider_name}_${MANGA_ID}_${page}`,
   );
@@ -402,6 +427,11 @@ async function fetchChapters(provider, MANGA_ID, page = 1) {
 
 // Chapters Fetch
 async function MangaChapterFetch(provider, MangaChapterID) {
+  if (!provider?.provider)
+    throw new Error(
+      "Missing Provider! ( try downloading from settings > marketplace )",
+    );
+
   const cacheKey = CreateHashKey(
     `mangachapterfetch_${provider.provider_name}_${MangaChapterID}`,
   );

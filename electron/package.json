@@ -1,6 +1,6 @@
 {
   "name": "strawverse",
-  "version": "9.1.0",
+  "version": "9.1.1",
   "description": "Download anime in batches & its fast :3",
   "main": "gui.js",
   "scripts": {
@@ -44,7 +44,10 @@
         "nsis"
       ],
       "artifactName": "StrawVerse.Setup.${version}.exe",
-      "icon": "assets/luffy.ico"
+      "icon": "assets/luffy.ico",
+      "files": [
+        "!mpv/linux/**/*"
+      ]
     },
     "publish": {
       "provider": "github",
@@ -67,7 +70,10 @@
         "entry": {
           "MimeType": "x-scheme-handler/strawverse;"
         }
-      }
+      },
+      "files": [
+        "!mpv/win32/**/*"
+      ]
     },
     "icon": "assets/luffy.png",
     "compression": "normal",

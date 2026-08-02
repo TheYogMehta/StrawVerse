@@ -1,5 +1,11 @@
 # Changelog
 
+# [9.1.1] - 2026-08-03
+
+### Downloads & Library Management
+
+- **Adaptive Concurrency Auto-Scaler & AnimePahe Fix**: Added dynamic per-domain download concurrency auto-scaling with SQLite persistence. Fixes AnimePahe/Kwik segment download rate limiting (429) by automatically halving worker concurrency on rate-limits and stepping up on smooth download streaks.
+
 # [9.1.0] - 2026-08-03
 
 ### Mobile (Android)

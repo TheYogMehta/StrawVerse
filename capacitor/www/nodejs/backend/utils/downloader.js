@@ -12,6 +12,12 @@ const { promisify } = require("util");
 const crypto = require("crypto");
 const { getHeaders } = require("./proxyHeaders");
 const { isLanguagePreferred } = require("./settings");
+const {
+  extractDomain,
+  getDomainConcurrency,
+  recordDomainFailure,
+  recordDomainSuccess,
+} = require("./domainConcurrency");
 
 const pipeline = promisify(stream.pipeline);
 
@@ -525,7 +531,17 @@ class downloader {
         fs.mkdirSync(tempDir, { recursive: true });
       }
 
-      const CONCURRENCY = 16;
+      const firstSegUrl =
+        typeof this.Segments[0] === "object"
+          ? this.Segments[0]?.url
+          : this.Segments[0];
+
+      const domainName = extractDomain(
+        this.streamUrl || firstSegUrl,
+        this.headers?.Referer || this.headers?.referer,
+      );
+
+      let CONCURRENCY = await getDomainConcurrency(domainName, 16);
       let activeDownloads = 0;
       let currentIndex = 0;
       let stopDownloading = false;
@@ -663,11 +679,14 @@ class downloader {
               }
 
               await fs.promises.writeFile(segmentFile, body);
+              await recordDomainSuccess(domainName, 16);
               this.currentSegments++;
               this.logProgress();
               activeDownloads--;
               startNext();
             } catch (err) {
+              await recordDomainFailure(domainName, CONCURRENCY);
+              CONCURRENCY = await getDomainConcurrency(domainName, 16);
               const maxRetries = 5;
               if (retryCount >= maxRetries) {
                 logger.warn(
@@ -683,9 +702,11 @@ class downloader {
                 startNext();
                 return;
               }
-              const delay = Math.min(30000, 5000 * Math.pow(2, retryCount));
+              const baseDelay = Math.min(15000, 1000 * Math.pow(2, retryCount));
+              const jitter = Math.floor(Math.random() * 1000);
+              const delay = baseDelay + jitter;
               this.logProgress(
-                `Failed To Download Segment ${index}! ( Retrying in ${delay / 1000}s )`,
+                `Failed To Download Segment ${index}! ( Retrying in ${Math.round(delay / 1000)}s )`,
               );
               await new Promise((res) => setTimeout(res, delay));
               await downloadSegment(retryCount + 1);

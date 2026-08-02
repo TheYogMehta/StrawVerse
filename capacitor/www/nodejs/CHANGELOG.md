@@ -1,5 +1,11 @@
 # Changelog
 
+## [9.1.1] - 2026-08-03
+
+### Anime Streaming & Offline Downloads
+
+- **Adaptive Concurrency Auto-Scaler & AnimePahe Fix**: Dynamic per-domain download concurrency auto-scaling stored in SQLite. Automatically halves worker concurrency when rate-limited (HTTP 429) and steps up during smooth downloads, resolving AnimePahe/Kwik download failures.
+
 ## [9.1.0] - 2026-08-03
 
 ### Initial Release
