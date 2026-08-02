@@ -252,6 +252,8 @@ public class CloudflareBypassPlugin extends Plugin {
                     dialog.setCancelable(true);
 
                     final boolean[] finished = {false};
+                    final String initialCookie = CookieManager.getInstance().getCookie(finalUrl);
+                    final String initialClearance = extractCookieValue(initialCookie, "cf_clearance");
                     final Map<String, String> capturedClientHints = new java.util.concurrent.ConcurrentHashMap<>();
                     final android.os.Handler handler = new android.os.Handler();
                     final Runnable cookiePoller = new Runnable() {
@@ -260,8 +262,12 @@ public class CloudflareBypassPlugin extends Plugin {
                             if (finished[0]) return;
 
                             String cookieString = CookieManager.getInstance().getCookie(finalUrl);
-                            if (cookieString != null && cookieString.contains("cf_clearance")) {
-                                Log.i("StrawVerseBypass", "Cookie poller detected cf_clearance!");
+                            String currentClearance = extractCookieValue(cookieString, "cf_clearance");
+                            boolean isNewClearance = currentClearance != null && !currentClearance.isEmpty() &&
+                                    (initialClearance == null || !currentClearance.equals(initialClearance));
+
+                            if (isNewClearance) {
+                                Log.i("StrawVerseBypass", "Cookie poller detected NEW cf_clearance!");
                                 finished[0] = true;
                                 handler.removeCallbacks(this);
                                 CookieManager.getInstance().flush();
@@ -313,7 +319,7 @@ public class CloudflareBypassPlugin extends Plugin {
                         @Override
                         public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                             String reqUrl = request.getUrl().toString();
-                            if (reqUrl.contains("animepahe") || reqUrl.contains("anikototv") || reqUrl.contains("megaplay") || reqUrl.contains("weebcentral") || reqUrl.contains("allmanga") || reqUrl.contains("anineko")) {
+                            if (!reqUrl.contains("127.0.0.1") && !reqUrl.contains("localhost")) {
                                 Log.i("StrawVerseBypass", "WebView Request: " + request.getMethod() + " -> " + reqUrl);
                                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                                     Map<String, String> headers = request.getRequestHeaders();
@@ -556,7 +562,7 @@ public class CloudflareBypassPlugin extends Plugin {
     @PluginMethod
     public void nativeRequest(final PluginCall call) {
         String url = call.getString("url");
-        if (url != null && (url.contains("animepahe") || url.contains("anikototv") || url.contains("megaplay") || url.contains("weebcentral") || url.contains("allmanga") || url.contains("anineko") || url.contains("kwik.cx") || url.contains("owocdn.top") || url.contains("uwucdn.top"))) {
+        if (url != null && (url.startsWith("http://") || url.startsWith("https://")) && !url.contains("127.0.0.1") && !url.contains("localhost")) {
             executeWebViewRequest(url, call.getString("method"), call.getObject("headers"), call.getString("body"), call);
             return;
         }
@@ -722,7 +728,7 @@ public class CloudflareBypassPlugin extends Plugin {
                     public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                             String reqUrl = request.getUrl().toString();
-                            if (reqUrl.contains("animepahe") || reqUrl.contains("anikototv") || reqUrl.contains("megaplay") || reqUrl.contains("weebcentral") || reqUrl.contains("allmanga") || reqUrl.contains("anineko")) {
+                            if (!reqUrl.contains("127.0.0.1") && !reqUrl.contains("localhost")) {
                                 Log.i("StrawVerseBypass", "Background WebView Request: " + request.getMethod() + " -> " + reqUrl);
                                 Log.i("StrawVerseBypass", "Background WebView Request Headers: " + request.getRequestHeaders().toString());
                             }
@@ -1050,5 +1056,17 @@ public class CloudflareBypassPlugin extends Plugin {
                 }
             }
         });
+    }
+
+    private static String extractCookieValue(String cookieString, String cookieName) {
+        if (cookieString == null || cookieName == null) return null;
+        String[] pairs = cookieString.split(";");
+        for (String pair : pairs) {
+            String[] kv = pair.trim().split("=", 2);
+            if (kv.length == 2 && kv[0].trim().equalsIgnoreCase(cookieName)) {
+                return kv[1].trim();
+            }
+        }
+        return null;
     }
 }

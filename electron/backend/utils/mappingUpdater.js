@@ -186,6 +186,14 @@ async function checkForMappingUpdates() {
     action = updateResponse.action;
     latestVersion = updateResponse.version;
     updates = updateResponse.updates || [];
+
+    const MAX_DELTA_THRESHOLD = 10000;
+    if (action === "delta" && updates.length > MAX_DELTA_THRESHOLD) {
+      logger.info(
+        `[mappingUpdater] Delta update contains ${updates.length} records (threshold: ${MAX_DELTA_THRESHOLD}). Forcing full sync...`,
+      );
+      action = "full_sync";
+    }
   }
 
   if (missingTables || hasTriggers || (isNextEpisodesEmpty && storedTag)) {
@@ -391,7 +399,7 @@ async function checkForMappingUpdates() {
             "INSERT OR REPLACE INTO allmanga (id, malid) VALUES (?, ?)",
           );
           const stmtInsertChangelog = global.mappingDb.prepare(
-            "INSERT OR REPLACE INTO mapping_changelog (id, version, action, tbl, row_id, data) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO mapping_changelog (id, version) VALUES (?, ?)",
           );
           const stmtInsertNextEpisodes = global.mappingDb.prepare(
             "INSERT OR REPLACE INTO next_episodes (livechart_id, episode, date, title, image) VALUES (?, ?, ?, ?, ?)",
@@ -466,7 +474,7 @@ async function checkForMappingUpdates() {
               }
             }
 
-            stmtInsertChangelog.run(id, latestVersion, act, tbl, row_id, data);
+            stmtInsertChangelog.run(id, latestVersion);
           }
 
           global.mappingDb.prepare("COMMIT").run();

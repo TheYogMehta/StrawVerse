@@ -115,19 +115,32 @@ async function initCache() {
           hintsCache[domain] = JSON.parse(value);
         } catch (e) {}
       } else if (name === "cf_clearance") {
-        const exp = Number(row.expirationDate);
-        const savedAt = Number(row.local_saved_at);
+        let exp = Number(row.expirationDate);
+        if (exp > 0 && exp < 1e11) {
+          exp = exp * 1000;
+        }
+        let savedAt = Number(row.local_saved_at);
+        if (savedAt > 0 && savedAt < 1e11) {
+          savedAt = savedAt * 1000;
+        }
         const now = Date.now();
         let isValid = false;
-        let expiryTime = now + 10 * 60 * 1000;
-        if (exp > now) {
+        let expiryTime = now + 24 * 60 * 60 * 1000;
+        if (!isNaN(exp) && exp > now) {
           isValid = true;
           expiryTime = exp;
-        } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
+        } else if (
+          !isNaN(savedAt) &&
+          savedAt > 0 &&
+          now - savedAt < 7 * 24 * 60 * 60 * 1000
+        ) {
           isValid = true;
-          expiryTime = savedAt + 2 * 60 * 60 * 1000;
+          expiryTime = savedAt + 24 * 60 * 60 * 1000;
+        } else if (value) {
+          isValid = true;
+          expiryTime = now + 24 * 60 * 60 * 1000;
         }
-        if (isValid) {
+        if (isValid && value) {
           cookieCache[domain] = { value, expiry: expiryTime };
         }
       }
@@ -152,21 +165,30 @@ function updateCache(domain, name, value, expirationDate, local_saved_at) {
         typeof value === "string" ? JSON.parse(value) : value;
     } catch (e) {}
   } else if (name === "cf_clearance") {
-    const exp = Number(expirationDate);
-    const savedAt = Number(local_saved_at);
+    if (!value) {
+      delete cookieCache[cleanDom];
+      return;
+    }
+    let exp = Number(expirationDate);
+    if (exp > 0 && exp < 1e11) {
+      exp = exp * 1000;
+    }
+    let savedAt = Number(local_saved_at);
+    if (savedAt > 0 && savedAt < 1e11) {
+      savedAt = savedAt * 1000;
+    }
     const now = Date.now();
-    let isValid = false;
-    let expiryTime = now + 10 * 60 * 1000;
-    if (exp > now) {
-      isValid = true;
+    let expiryTime = now + 24 * 60 * 60 * 1000;
+    if (!isNaN(exp) && exp > now) {
       expiryTime = exp;
-    } else if (savedAt && Math.abs(now - savedAt) < 2 * 60 * 60 * 1000) {
-      isValid = true;
-      expiryTime = savedAt + 2 * 60 * 60 * 1000;
+    } else if (
+      !isNaN(savedAt) &&
+      savedAt > 0 &&
+      now - savedAt < 7 * 24 * 60 * 60 * 1000
+    ) {
+      expiryTime = savedAt + 24 * 60 * 60 * 1000;
     }
-    if (isValid) {
-      cookieCache[cleanDom] = { value, expiry: expiryTime };
-    }
+    cookieCache[cleanDom] = { value, expiry: expiryTime };
   }
 }
 
@@ -257,61 +279,44 @@ function getHeaders(url, method = "GET") {
     }
   }
 
-  // kwik - animepahe
-  if (url.includes("owocdn.top") || url.includes("uwucdn.top")) {
-    headers.Referer = "https://kwik.cx/";
-  } else if (url.includes("kwik.cx")) {
-    headers.Referer = "https://animepahe.pw/";
-  }
-  // animepahe
-  else if (url.includes("animepahe")) {
-    headers.Referer = "https://animepahe.pw/";
-  }
-  // weebcentral
-  else if (
-    url.includes("temp.compsci88.com") ||
-    url.startsWith("https://temp.compsci88.com/") ||
-    url.includes("weebcentral.com")
-  ) {
-    headers.Referer = "https://weebcentral.com/";
-  }
-  // megaplay - anikoto
-  else if (
-    url.includes("anikoto.to") ||
-    url.includes("anikototv.to") ||
-    url.includes("megaplay.buzz")
-  ) {
-    headers.Referer = "https://anikoto.to/";
-  } else if (
-    url.includes("watching.onl") ||
-    url.includes("nekostream.site") ||
-    url.includes("kotocdn.site") ||
-    url.includes("livedns.my") ||
-    url.includes("sugevideo.xyz") ||
-    url.includes("trycloud.pro")
-  ) {
-    headers.Referer = "https://megaplay.buzz/";
-  }
-  // anineko
-  else if (url.includes("anineko.to")) {
-    headers.Referer = "https://anineko.to/";
-  }
-  // all manga
-  else if (
-    url.includes("allmanga.to") ||
-    url.includes("allanime.day") ||
-    url.includes("youtube-anime.com")
-  ) {
-    headers.Referer = "https://allmanga.to/";
-  }
+  // 1. Prioritize dynamically learned referer headers from extensions/scrapers/player
+  try {
+    const domain = new URL(url).hostname.replace("www.", "");
+    const ref = getStoredStreamReferer(domain);
+    if (ref) headers.Referer = ref;
+  } catch (e) {}
 
+  // 2. Known static defaults (fallback if not dynamically stored yet)
   if (!headers.Referer) {
-    try {
-      const domain = new URL(url).hostname.replace("www.", "");
-      const ref = getStoredStreamReferer(domain);
-      if (ref) headers.Referer = ref;
-    } catch (e) {}
-  }
+    if (url.includes("owocdn.top") || url.includes("uwucdn.top")) {
+      headers.Referer = "https://kwik.cx/";
+    } else if (url.includes("kwik.cx") || url.includes("animepahe")) {
+      headers.Referer = "https://animepahe.pw/";
+    } else if (
+      url.includes("temp.compsci88.com") ||
+      url.includes("weebcentral")
+    ) {
+      headers.Referer = "https://weebcentral.com/";
+    } else if (url.includes("anikoto") || url.includes("megaplay.buzz")) {
+      headers.Referer = "https://anikoto.to/";
+    } else if (url.includes("anineko")) {
+      headers.Referer = "https://anineko.to/";
+    } else if (
+      url.includes("allmanga") ||
+      url.includes("allanime") ||
+      url.includes("youtube-anime.com")
+    ) {
+      headers.Referer = "https://allmanga.to/";
+    } else if (
+      url.includes("watching.onl") ||
+      url.includes("nekostream.site") ||
+      url.includes("kotocdn.site") ||
+      url.includes("livedns.my") ||
+      url.includes("sugevideo.xyz") ||
+      url.includes("trycloud.pro")
+    ) {
+      headers.Referer = "https://megaplay.buzz/";
+    }
 
   if (!headers.Referer) {
     try {

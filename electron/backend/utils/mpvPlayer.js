@@ -4,7 +4,11 @@ const fs = require("fs");
 const path = require("path");
 const { logger } = require("./AppLogger");
 const { updateHistory } = require("./history");
-const { getHeaders } = require("./proxyHeaders");
+
+function formatSubtitleLabel(sub) {
+  return sub?.lang || sub?.label || sub?.name || "";
+}
+
 const getMpvPath = () => {
   const { app } = require("electron");
   const platform = process.platform;
@@ -213,6 +217,7 @@ async function playInMpv(window, options) {
     `--volume=${options.volume !== undefined ? Math.floor(options.volume) : 100}`,
     `--speed=${options.speed || 1.0}`,
     `--sub-visibility=${options.subsEnabled === false ? "no" : "yes"}`,
+    `--sub=${options.subsEnabled === false ? "no" : String((options.selectedSubIndex !== undefined && options.selectedSubIndex >= 0 ? options.selectedSubIndex : 0) + 1)}`,
     `--brightness=${options.brightness || 0}`,
   ];
 
@@ -251,6 +256,20 @@ async function playInMpv(window, options) {
     scriptOpts.push(`modernx-sources=${sourcesStr}`);
   }
 
+  if (subtitles && Array.isArray(subtitles)) {
+    const subsStr = subtitles
+      .filter((sub) => sub && sub.url)
+      .map((sub, idx) => {
+        const cleanLang = formatSubtitleLabel(sub, idx);
+        const subUrl = resolvePathOrUrl(sub.url);
+        return `${cleanLang}|${subUrl}`;
+      })
+      .join("##");
+    if (subsStr) {
+      scriptOpts.push(`modernx-subtitles=${subsStr}`);
+    }
+  }
+
   args.push(`--script-opts=${scriptOpts.join(",")}`);
 
   if (startSeek > 0) {
@@ -258,8 +277,11 @@ async function playInMpv(window, options) {
   }
 
   if (subtitles && Array.isArray(subtitles)) {
-    subtitles.forEach((sub) => {
+    subtitles.forEach((sub, idx) => {
       if (sub && sub.url) {
+        const cleanLang = formatSubtitleLabel(sub, idx);
+        sub.lang = cleanLang;
+        sub.label = cleanLang;
         args.push(`--sub-file=${resolvePathOrUrl(sub.url)}`);
       }
     });

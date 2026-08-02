@@ -516,6 +516,20 @@ local function get_all_sources()
     return #sources > 0 and sources or nil
 end
 
+local function get_all_subtitles()
+    local subs_str = mp.get_opt("modernx-subtitles")
+    if not subs_str or subs_str == "" then
+        return nil
+    end
+    
+    local subs = {}
+    for name, url in string.gmatch(subs_str, "([^|#]+)|([^#]+)") do
+        table.insert(subs, { name = name, url = url })
+    end
+    
+    return #subs > 0 and subs or nil
+end
+
 local function get_server_sources()
     local all_srcs = get_all_sources()
     if not all_srcs or #all_srcs == 0 then return nil end
@@ -1026,10 +1040,23 @@ local function draw_sub_menu(ass)
     if not sub_menu.active then return end
     update_tracklist()
     
+    local custom_subs = get_all_subtitles()
     local items = { "Off" }
+    local ext_count = 0
     for n = 1, #tracks_osc.sub do
         local tr = tracks_osc.sub[n]
-        local name = tr.title or tr.lang or ("Track " .. n)
+        local name = nil
+        if tr.external then
+            ext_count = ext_count + 1
+            if custom_subs and custom_subs[ext_count] and custom_subs[ext_count].name then
+                name = custom_subs[ext_count].name
+            end
+        elseif custom_subs and custom_subs[n] and custom_subs[n].name then
+            name = custom_subs[n].name
+        end
+        if not name or name == "" then
+            name = tr.title or tr.lang or ("Track " .. n)
+        end
         table.insert(items, name)
     end
     

@@ -560,23 +560,6 @@ export default function Catalog({
 
   const applyCustomOrder = (resultsList, currentFilters = activeFilters) => {
     if (!resultsList || resultsList.length === 0) return resultsList;
-    const key = getCustomOrderKey(currentFilters.tag);
-    let savedOrder = null;
-    try {
-      const stored = localStorage.getItem(`custom_order_${key}`);
-      if (stored) savedOrder = JSON.parse(stored);
-    } catch (_) {}
-
-    if (savedOrder && Array.isArray(savedOrder) && savedOrder.length > 0) {
-      const orderMap = new Map();
-      savedOrder.forEach((id, idx) => orderMap.set(id, idx));
-
-      return [...resultsList].sort((a, b) => {
-        const indexA = orderMap.has(a.id) ? orderMap.get(a.id) : 9999;
-        const indexB = orderMap.has(b.id) ? orderMap.get(b.id) : 9999;
-        return indexA - indexB;
-      });
-    }
     return resultsList;
   };
 
@@ -620,9 +603,11 @@ export default function Catalog({
     const orderIds = updated.map((item) => item.id);
     const key = getCustomOrderKey();
 
-    try {
-      localStorage.setItem(`custom_order_${key}`, JSON.stringify(orderIds));
-    } catch (_) {}
+    if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+      window.sharedStateAPI
+        .updateSetting(`custom_order_${key}`, orderIds)
+        .catch(() => {});
+    }
 
     try {
       await fetch("/api/local/reorder", {
@@ -681,9 +666,11 @@ export default function Catalog({
       const orderIds = updated.map((item) => item.id);
       const key = getCustomOrderKey();
 
-      try {
-        localStorage.setItem(`custom_order_${key}`, JSON.stringify(orderIds));
-      } catch (_) {}
+      if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+        window.sharedStateAPI
+          .updateSetting(`custom_order_${key}`, orderIds)
+          .catch(() => {});
+      }
 
       try {
         await fetch("/api/local/reorder", {

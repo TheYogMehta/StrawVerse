@@ -16,9 +16,72 @@ import java.util.Map;
 public class WebViewRequestHelper {
     private static final String TAG = "WebViewRequestHelper";
 
+    /**
+     * Cloudflare binds cf_clearance to the TLS fingerprint of the browser
+     * that solved the challenge.  Java's HttpURLConnection has a completely
+     * different TLS fingerprint than the WebView, so even with valid cookies
+     * Cloudflare returns 403.  For these hosts we must NOT intercept the
+     * request — instead we sync cookies into CookieManager and let the
+     * WebView (which has the matching fingerprint) fetch natively.
+     */
+    private static boolean isCloudflareProtectedHost(String host) {
+        if (host == null) return false;
+        host = host.toLowerCase();
+        if (host.endsWith("animepahe.pw")) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Sync database cookies + stored headers into CookieManager so the
+     * WebView can send them on the native request we are about to let
+     * through (returning null from shouldInterceptRequest).
+     */
+    private static void syncCookiesToCookieManager(Context context, String url) {
+        try {
+            String dbCookies = AppDatabase.getStoredCookiesForUrl(context, url);
+            if (dbCookies != null && !dbCookies.isEmpty()) {
+                Uri uri = Uri.parse(url);
+                String host = uri.getHost();
+                if (host == null) return;
+
+                // Determine the parent domain so cookies cover all subdomains
+                String parentDomain = host.replace("www.", "").toLowerCase();
+                if (parentDomain.contains("animepahe")) {
+                    parentDomain = "animepahe.pw";
+                } else if (parentDomain.contains("kwik.cx") || parentDomain.contains("owocdn.top") || parentDomain.contains("uwucdn.top")) {
+                    parentDomain = "kwik.cx";
+                }
+
+                for (String pair : dbCookies.split("; ")) {
+                    String trimmed = pair.trim();
+                    if (!trimmed.isEmpty()) {
+                        // Set with Domain=.parentDomain so it covers all subdomains
+                        String cookieStr = trimmed + "; Domain=." + parentDomain + "; Path=/; Secure; SameSite=None";
+                        CookieManager.getInstance().setCookie(url, cookieStr);
+                    }
+                }
+                CookieManager.getInstance().flush();
+                Log.i(TAG, "Synced DB cookies to CookieManager for: " + url + " (domain=." + parentDomain + ")");
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to sync cookies to CookieManager: " + e.getMessage());
+        }
+    }
+
     public static WebResourceResponse fetchNativelyWithHeaders(Context context, WebResourceRequest request) {
         try {
             String url = request.getUrl().toString();
+            Uri uri = request.getUrl();
+            String host = uri.getHost();
+            
+            if (isCloudflareProtectedHost(host)) {
+                syncCookiesToCookieManager(context, url);
+                Log.i(TAG, "Skipping interception for CF-protected host, delegating to WebView: " + url);
+                return null;
+            }
+
             Map<String, String> customHeaders = AppDatabase.getHeadersForUrl(context, url);
             if (customHeaders.isEmpty()) {
                 return null;
@@ -33,9 +96,11 @@ public class WebViewRequestHelper {
 
             boolean hasUserAgent = false;
             for (Map.Entry<String, String> header : request.getRequestHeaders().entrySet()) {
-                conn.setRequestProperty(header.getKey(), header.getValue());
                 if (header.getKey().equalsIgnoreCase("user-agent")) {
                     hasUserAgent = true;
+                    conn.setRequestProperty(header.getKey(), CloudflareBypassPlugin.cleanUserAgent(header.getValue()));
+                } else {
+                    conn.setRequestProperty(header.getKey(), header.getValue());
                 }
             }
 
@@ -49,23 +114,18 @@ public class WebViewRequestHelper {
 
             for (Map.Entry<String, String> header : customHeaders.entrySet()) {
                 if (!header.getKey().equalsIgnoreCase("cookie")) {
-                    conn.setRequestProperty(header.getKey(), header.getValue());
+                    String val = header.getValue();
+                    if (header.getKey().equalsIgnoreCase("user-agent")) {
+                        val = CloudflareBypassPlugin.cleanUserAgent(val);
+                    }
+                    conn.setRequestProperty(header.getKey(), val);
                 }
             }
 
-            String finalCookie = "";
-            if (customHeaders.containsKey("Cookie")) {
-                finalCookie = customHeaders.get("Cookie");
-            }
+            String explicitCookie = customHeaders.get("Cookie");
             String webViewCookie = CookieManager.getInstance().getCookie(url);
-            if (webViewCookie != null && !webViewCookie.isEmpty()) {
-                if (!finalCookie.isEmpty()) {
-                    finalCookie = finalCookie + " " + webViewCookie;
-                } else {
-                    finalCookie = webViewCookie;
-                }
-            }
-            if (!finalCookie.isEmpty()) {
+            String finalCookie = AppDatabase.mergeCookies(explicitCookie, webViewCookie);
+            if (finalCookie != null && !finalCookie.isEmpty()) {
                 conn.setRequestProperty("Cookie", finalCookie);
             }
 
@@ -110,7 +170,7 @@ public class WebViewRequestHelper {
             }
 
             InputStream responseStream = (responseCode >= 400) ? conn.getErrorStream() : conn.getInputStream();
-            Log.i(TAG, "WebView Intercept Successful: " + url + " -> Response Code: " + responseCode);
+            Log.i(TAG, "WebView Intercept: " + url + " -> Response Code: " + responseCode);
             return new WebResourceResponse(mimeType, encoding, responseCode, responseMessage, responseHeaders, responseStream);
         } catch (Exception e) {
             Log.e(TAG, "Failed to natively fetch url in WebView interceptor: " + e.getMessage(), e);

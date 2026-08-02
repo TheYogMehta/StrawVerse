@@ -87,15 +87,9 @@ export default function MangaReader({
   const [isCurrentDownloaded, setIsCurrentDownloaded] = useState(isDownloaded);
   const [activeChapterInView, setActiveChapterInView] = useState(null);
   const [autoLoadNext, setAutoLoadNext] = useState(true);
-  const [readerWidth, setReaderWidth] = useState(
-    () => parseInt(localStorage.getItem("manga_reader_width"), 10) || 800,
-  );
-  const [readerLayout, setReaderLayout] = useState(
-    () => localStorage.getItem("manga_reader_layout") || "long-strip",
-  );
-  const [readerDirection, setReaderDirection] = useState(
-    () => localStorage.getItem("manga_reader_direction") || "rtl",
-  );
+  const [readerWidth, setReaderWidth] = useState(800);
+  const [readerLayout, setReaderLayout] = useState("long-strip");
+  const [readerDirection, setReaderDirection] = useState("rtl");
   const [activeItemIndex, setActiveItemIndex] = useState(0);
 
   const saveWidthTimeoutRef = useRef(null);
@@ -125,19 +119,14 @@ export default function MangaReader({
             "autoLoadNextChapter",
             "mangaReaderLayout",
             "mangaReaderWidth",
+            "mangaReaderDirection",
           ]);
           const s = res?.settings;
           if (s) {
-            setAutoLoadNext(s.autoLoadNextChapter);
-            if (s.mangaReaderLayout) {
-              setReaderLayout(s.mangaReaderLayout);
-              localStorage.setItem("manga_reader_layout", s.mangaReaderLayout);
-            }
-            if (s.mangaReaderWidth) {
-              const widthVal = parseInt(s.mangaReaderWidth, 10);
-              setReaderWidth(widthVal);
-              localStorage.setItem("manga_reader_width", widthVal);
-            }
+            if (s.autoLoadNextChapter !== undefined) setAutoLoadNext(s.autoLoadNextChapter);
+            if (s.mangaReaderLayout) setReaderLayout(s.mangaReaderLayout);
+            if (s.mangaReaderWidth) setReaderWidth(parseInt(s.mangaReaderWidth, 10));
+            if (s.mangaReaderDirection) setReaderDirection(s.mangaReaderDirection);
           }
         }
       } catch (err) {
@@ -959,7 +948,6 @@ export default function MangaReader({
               onChange={(e) => {
                 const val = parseInt(e.target.value, 10);
                 setReaderWidth(val);
-                localStorage.setItem("manga_reader_width", val);
                 saveReaderWidthToSettings(val);
               }}
               className="u-style-64"

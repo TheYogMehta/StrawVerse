@@ -271,7 +271,7 @@ async function MetadataAdd(type, valuesToAdd) {
       const values = Object.values(filteredValues);
 
       await run(
-        `INSERT INTO ${type} (${fields}) VALUES (${placeholders})`,
+        `INSERT OR REPLACE INTO ${type} (${fields}) VALUES (${placeholders})`,
         values,
       );
     } catch (error) {

@@ -276,14 +276,20 @@ async function fetchEpisodeSources(provider, episodeId) {
       ...(sources.sub?.sources || []),
       ...(sources.dub?.sources || []),
     ];
-    for (const src of allSources) {
-      if (src.url) {
+    const allSubtitles = [
+      ...(Array.isArray(sources.subtitles) ? sources.subtitles : []),
+      ...(sources.sub?.subtitles || []),
+      ...(sources.dub?.subtitles || []),
+    ];
+    for (const item of [...allSources, ...allSubtitles]) {
+      if (item?.url) {
         try {
-          const cdnDomain = new URL(src.url).hostname;
+          const cdnDomain = new URL(item.url).hostname;
           const ref =
-            src.headers?.Referer ||
-            src.headers?.referer ||
-            (src.extra && src.extra[0]);
+            item.headers?.Referer ||
+            item.headers?.referer ||
+            item.referer ||
+            (item.extra && item.extra[0]);
           if (ref) {
             global.setDynamicReferer(cdnDomain, ref);
           }
@@ -704,9 +710,7 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
 
   try {
     if (global.db) {
-      record = global.db
-        .prepare(`SELECT * FROM ${type} WHERE id = ?`)
-        .get(id);
+      record = global.db.prepare(`SELECT * FROM ${type} WHERE id = ?`).get(id);
     }
   } catch (_) {}
 

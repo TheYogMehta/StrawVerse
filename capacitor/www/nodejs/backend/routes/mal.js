@@ -9,6 +9,7 @@ const {
   MalSearch,
 } = require("../utils/mal");
 const { sendToRenderer } = require("../utils/rendererIPC");
+const { run } = require("../utils/db");
 
 const router = express.Router();
 
@@ -135,30 +136,18 @@ router.post("/api/mal/link", async (req, res) => {
     MalID = MalID ? String(MalID) : null;
 
     let targetMalID = MalID ? parseInt(MalID, 10) : null;
-    let resolvedProvider = null;
-    if (provider) {
-      const p = provider.toLowerCase();
-      if (p.includes("pahe")) resolvedProvider = "pahe";
-      else if (p.includes("anikoto")) resolvedProvider = "anikoto";
-      else if (p.includes("anineko")) resolvedProvider = "anineko";
-      else if (p.includes("weebcentral")) resolvedProvider = "weebcentral";
-      else if (p.includes("allmanga")) resolvedProvider = "allmanga";
-    }
+    let resolvedProvider = provider || null;
 
     if (resolvedProvider) {
       if (!targetMalID) {
         let dbRow = null;
         try {
           if (type === "Anime") {
-            dbRow = global.db
-              .prepare(
-                "SELECT MalID FROM Anime WHERE id = ?",
-              )
-              .get(
-                id
-              );
+            dbRow = await global.db
+              .prepare("SELECT MalID FROM Anime WHERE id = ?")
+              .get(id);
           } else {
-            dbRow = global.db
+            dbRow = await global.db
               .prepare("SELECT MalID FROM Manga WHERE id = ?")
               .get(id);
           }
@@ -170,8 +159,10 @@ router.post("/api/mal/link", async (req, res) => {
 
       if (!targetMalID && global.mappingDb && resolvedProvider) {
         try {
-          const row = global.mappingDb
-            .prepare(`SELECT malid FROM ${resolvedProvider} WHERE uuid = ? OR id = ? LIMIT 1`)
+          const row = await global.mappingDb
+            .prepare(
+              `SELECT malid FROM ${resolvedProvider} WHERE uuid = ? OR id = ? LIMIT 1`,
+            )
             .get(id, id);
           if (row && row.malid) {
             targetMalID = parseInt(row.malid, 10);
@@ -183,13 +174,9 @@ router.post("/api/mal/link", async (req, res) => {
       if (!providerTitle) {
         try {
           if (type === "Anime") {
-            const row = global.db
-              .prepare(
-                "SELECT title, MalID FROM Anime WHERE id = ? LIMIT 1",
-              )
-              .get(
-                id
-              );
+            const row = await global.db
+              .prepare("SELECT title, MalID FROM Anime WHERE id = ? LIMIT 1")
+              .get(id);
             if (row) {
               providerTitle = row.title;
               if (!targetMalID && row.MalID) {
@@ -197,7 +184,7 @@ router.post("/api/mal/link", async (req, res) => {
               }
             }
           } else {
-            const row = global.db
+            const row = await global.db
               .prepare("SELECT title, MalID FROM Manga WHERE id = ? LIMIT 1")
               .get(id);
             if (row) {
@@ -255,14 +242,17 @@ router.post("/api/mal/link", async (req, res) => {
     }
 
     try {
-      const stmt = MalID
-        ? global.db.prepare(
-            "INSERT OR REPLACE INTO unlinked_mal_ids (id, malid) VALUES (?, ?)",
-          )
-        : global.db.prepare(
-            "INSERT OR REPLACE INTO unlinked_mal_ids (id, malid) VALUES (?, NULL)",
-          );
-      stmt.run(id, ...(MalID ? [MalID] : []));
+      if (MalID) {
+        await run(
+          "INSERT OR REPLACE INTO unlinked_mal_ids (id, malid) VALUES (?, ?)",
+          [id, MalID],
+        );
+      } else {
+        await run(
+          "INSERT OR REPLACE INTO unlinked_mal_ids (id, malid) VALUES (?, NULL)",
+          [id],
+        );
+      }
     } catch (err) {
       logger.error(
         `Error updating unlinked_mal_ids in /api/mal/link: ${err.message}`,
@@ -270,17 +260,15 @@ router.post("/api/mal/link", async (req, res) => {
     }
 
     if (type === "Anime") {
-      global.db
-        .prepare(
-          `UPDATE Anime SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
-        )
-        .run(MalID, id);
+      await run(
+        `UPDATE Anime SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+        [MalID, id],
+      );
     } else {
-      global.db
-        .prepare(
-          `UPDATE Manga SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
-        )
-        .run(MalID, id);
+      await run(
+        `UPDATE Manga SET MalID = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+        [MalID, id],
+      );
     }
 
     return res.json({

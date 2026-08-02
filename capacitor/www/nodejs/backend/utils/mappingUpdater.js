@@ -197,6 +197,14 @@ async function checkForMappingUpdates() {
     action = updateResponse.action;
     latestVersion = updateResponse.version;
     updates = updateResponse.updates || [];
+
+    const MAX_DELTA_THRESHOLD = 10000;
+    if (action === "delta" && updates.length > MAX_DELTA_THRESHOLD) {
+      logger.info(
+        `[mappingUpdater] Delta update contains ${updates.length} records (threshold: ${MAX_DELTA_THRESHOLD}). Forcing full sync...`,
+      );
+      action = "full_sync";
+    }
   }
 
   if (missingTables || hasTriggers || (isNextEpisodesEmpty && storedTag)) {
@@ -353,7 +361,6 @@ async function checkForMappingUpdates() {
           manga: "INSERT OR REPLACE INTO manga (malid) VALUES (?)",
           pahe: "INSERT OR REPLACE INTO pahe (id, uuid, malid) VALUES (?, ?, ?)",
           anikoto: "INSERT OR REPLACE INTO anikoto (id, malid) VALUES (?, ?)",
-
           anineko: "INSERT OR REPLACE INTO anineko (id, malid) VALUES (?, ?)",
           weebcentral:
             "INSERT OR REPLACE INTO weebcentral (id, malid) VALUES (?, ?)",
@@ -362,98 +369,108 @@ async function checkForMappingUpdates() {
             "INSERT OR REPLACE INTO next_episodes (livechart_id, episode, date, title, image) VALUES (?, ?, ?, ?, ?)",
         };
         const changelogSql =
-          "INSERT OR REPLACE INTO mapping_changelog (id, version, action, tbl, row_id, data) VALUES (?, ?, ?, ?, ?, ?)";
+          "INSERT OR REPLACE INTO mapping_changelog (id, version) VALUES (?, ?)";
 
-        for (const update of updates) {
-          const { id, action: act, tbl, row_id, data } = update;
+        const UPDATE_CHUNK_SIZE = 500;
+        for (let i = 0; i < updates.length; i += UPDATE_CHUNK_SIZE) {
+          const updateChunk = updates.slice(i, i + UPDATE_CHUNK_SIZE);
+          const ops = [];
 
-          if (act === "INSERT" || act === "UPDATE") {
-            const parsedData = JSON.parse(data);
-            if (tbl === "anime") {
-              ops.push({
-                sql: stmtSqlMap.anime,
-                params: [
-                  parsedData.malid ?? null,
-                  parsedData.livechart_id ?? null,
-                  parsedData.image_url ?? null,
-                ],
-              });
-            } else if (tbl === "manga") {
-              ops.push({
-                sql: stmtSqlMap.manga,
-                params: [parsedData.malid ?? null],
-              });
-            } else if (tbl === "pahe") {
-              ops.push({
-                sql: stmtSqlMap.pahe,
-                params: [
-                  parsedData.id ?? null,
-                  parsedData.uuid ?? null,
-                  parsedData.malid ?? null,
-                ],
-              });
-            } else if (tbl === "anikoto") {
-              ops.push({
-                sql: stmtSqlMap.anikoto,
-                params: [parsedData.id ?? null, parsedData.malid ?? null],
-              });
-            } else if (tbl === "anineko") {
-              ops.push({
-                sql: stmtSqlMap.anineko,
-                params: [parsedData.id ?? null, parsedData.malid ?? null],
-              });
-            } else if (tbl === "weebcentral") {
-              ops.push({
-                sql: stmtSqlMap.weebcentral,
-                params: [parsedData.id ?? null, parsedData.malid ?? null],
-              });
-            } else if (tbl === "allmanga") {
-              ops.push({
-                sql: stmtSqlMap.allmanga,
-                params: [parsedData.id ?? null, parsedData.malid ?? null],
-              });
-            } else if (tbl === "next_episodes") {
-              ops.push({
-                sql: stmtSqlMap.next_episodes,
-                params: [
-                  parsedData.livechart_id ?? null,
-                  parsedData.episode ?? null,
-                  parsedData.date ?? null,
-                  parsedData.title ?? null,
-                  parsedData.image ?? null,
-                ],
-              });
+          for (const update of updateChunk) {
+            const { id, action: act, tbl, row_id, data } = update;
+
+            if (act === "INSERT" || act === "UPDATE") {
+              const parsedData = JSON.parse(data);
+              if (tbl === "anime") {
+                ops.push({
+                  sql: stmtSqlMap.anime,
+                  params: [
+                    parsedData.malid ?? null,
+                    parsedData.livechart_id ?? null,
+                    parsedData.image_url ?? null,
+                  ],
+                });
+              } else if (tbl === "manga") {
+                ops.push({
+                  sql: stmtSqlMap.manga,
+                  params: [parsedData.malid ?? null],
+                });
+              } else if (tbl === "pahe") {
+                ops.push({
+                  sql: stmtSqlMap.pahe,
+                  params: [
+                    parsedData.id ?? null,
+                    parsedData.uuid ?? null,
+                    parsedData.malid ?? null,
+                  ],
+                });
+              } else if (tbl === "anikoto") {
+                ops.push({
+                  sql: stmtSqlMap.anikoto,
+                  params: [parsedData.id ?? null, parsedData.malid ?? null],
+                });
+              } else if (tbl === "anineko") {
+                ops.push({
+                  sql: stmtSqlMap.anineko,
+                  params: [parsedData.id ?? null, parsedData.malid ?? null],
+                });
+              } else if (tbl === "weebcentral") {
+                ops.push({
+                  sql: stmtSqlMap.weebcentral,
+                  params: [parsedData.id ?? null, parsedData.malid ?? null],
+                });
+              } else if (tbl === "allmanga") {
+                ops.push({
+                  sql: stmtSqlMap.allmanga,
+                  params: [parsedData.id ?? null, parsedData.malid ?? null],
+                });
+              } else if (tbl === "next_episodes") {
+                ops.push({
+                  sql: stmtSqlMap.next_episodes,
+                  params: [
+                    parsedData.livechart_id ?? null,
+                    parsedData.episode ?? null,
+                    parsedData.date ?? null,
+                    parsedData.title ?? null,
+                    parsedData.image ?? null,
+                  ],
+                });
+              }
+            } else if (act === "DELETE") {
+              if (tbl === "anime" || tbl === "manga") {
+                ops.push({
+                  sql: `DELETE FROM ${tbl} WHERE malid = ?`,
+                  params: [row_id],
+                });
+              } else if (tbl === "next_episodes") {
+                const parts = row_id.split("_");
+                const livechartId = parts[0];
+                const episode = parseInt(parts[1], 10);
+                ops.push({
+                  sql: "DELETE FROM next_episodes WHERE livechart_id = ? AND episode = ?",
+                  params: [
+                    livechartId ?? null,
+                    isNaN(episode) ? null : episode,
+                  ],
+                });
+              } else {
+                ops.push({
+                  sql: `DELETE FROM ${tbl} WHERE id = ?`,
+                  params: [row_id],
+                });
+              }
             }
-          } else if (act === "DELETE") {
-            if (tbl === "anime" || tbl === "manga") {
-              ops.push({
-                sql: `DELETE FROM ${tbl} WHERE malid = ?`,
-                params: [row_id],
-              });
-            } else if (tbl === "next_episodes") {
-              const parts = row_id.split("_");
-              const livechartId = parts[0];
-              const episode = parseInt(parts[1], 10);
-              ops.push({
-                sql: "DELETE FROM next_episodes WHERE livechart_id = ? AND episode = ?",
-                params: [livechartId ?? null, isNaN(episode) ? null : episode],
-              });
-            } else {
-              ops.push({
-                sql: `DELETE FROM ${tbl} WHERE id = ?`,
-                params: [row_id],
-              });
-            }
+
+            ops.push({
+              sql: changelogSql,
+              params: [id, latestVersion],
+            });
           }
 
-          ops.push({
-            sql: changelogSql,
-            params: [id, latestVersion, act, tbl, row_id, data],
-          });
-        }
-
-        if (ops.length > 0) {
-          await batchRun("mapping", ops);
+          if (ops.length > 0) {
+            await batchRun("mapping", ops);
+            await new Promise((r) => setTimeout(r, 0));
+          }
         }
 
         await mappingExec("PRAGMA foreign_keys = ON");

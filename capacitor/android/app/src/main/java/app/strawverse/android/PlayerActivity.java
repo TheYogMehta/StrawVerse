@@ -844,9 +844,6 @@ public class PlayerActivity extends Activity {
             );
             playerView.setPlayer(player);
 
-            CronetEngine cronetEngine = new CronetEngine.Builder(this).build();
-            Executor executor = Executors.newSingleThreadExecutor();
-
             String userAgentString = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36";
             if (headers.containsKey("User-Agent")) {
                 userAgentString = headers.get("User-Agent");
@@ -854,13 +851,15 @@ public class PlayerActivity extends Activity {
                 userAgentString = headers.get("user-agent");
             }
 
-            CronetDataSource.Factory cronetDataSourceFactory =
-                    new CronetDataSource.Factory(cronetEngine, executor)
-                            .setUserAgent(userAgentString);
+            DataSource.Factory baseDataSourceFactory = new androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                    .setUserAgent(userAgentString)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(15000)
+                    .setReadTimeoutMs(15000);
 
             ResolvingDataSource.Factory resolvingFactory =
                     new ResolvingDataSource.Factory(
-                            cronetDataSourceFactory,
+                            baseDataSourceFactory,
                             new ResolvingDataSource.Resolver() {
                                 @Override
                                 public DataSpec resolveDataSpec(DataSpec dataSpec) {
@@ -876,6 +875,23 @@ public class PlayerActivity extends Activity {
                             }
                     );
 
+            // Save stream referer if passed in headers to AppDatabase for Express proxy
+            String ref = headers.get("Referer");
+            if (ref == null) ref = headers.get("referer");
+            if (ref == null) ref = headers.get("Origin");
+            if (ref == null) ref = headers.get("origin");
+            if (ref != null && videoUrl != null) {
+                try {
+                    Uri u = Uri.parse(videoUrl);
+                    if (u.getHost() != null) {
+                        AppDatabase.saveStreamReferer(this, u.getHost(), ref);
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            String playUrl = toProxyUrl(videoUrl, headersMap);
+            Log.d("PlayerActivity", "initializePlayer: proxied playUrl=" + playUrl);
+
             // Wrap with KwikDataSource to strip PNG headers from obfuscated segments
             DataSource.Factory kwikFactory = () -> new KwikDataSource(resolvingFactory.createDataSource());
 
@@ -883,7 +899,7 @@ public class PlayerActivity extends Activity {
             List<MediaItem.SubtitleConfiguration> subtitleConfigurations = getSubtitleConfigurations();
 
             MediaItem mediaItem = new MediaItem.Builder()
-                    .setUri(Uri.parse(videoUrl))
+                    .setUri(Uri.parse(playUrl))
                     .setSubtitleConfigurations(subtitleConfigurations)
                     .build();
 
@@ -903,9 +919,47 @@ public class PlayerActivity extends Activity {
             skipCheckHandler.post(skipCheckRunnable);
 
         } catch (Exception e) {
+            Log.e("PlayerActivity", "Failed to initialize player: " + e.getMessage(), e);
             Toast.makeText(this, "Failed to initialize player: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             finish();
         }
+    }
+
+    private String toProxyUrl(String url) {
+        if (url == null || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+            return url;
+        }
+        if (url.contains("127.0.0.1") || url.contains("localhost")) {
+            return url;
+        }
+        String base = "http://127.0.0.1:3459/api/stream";
+        if (url.contains(".m3u8")) {
+            return base + "/m3u8?url=" + Uri.encode(url);
+        }
+        return base + "/segment?url=" + Uri.encode(url);
+    }
+
+    private String formatSubtitleLabel(String raw, String url, int index) {
+        String search = ((raw != null ? raw : "") + " " + (url != null ? url : "")).toLowerCase();
+        if (search.contains("english") || search.contains("_eng") || search.contains("-eng") || search.contains(".eng") || search.contains("eng-") || search.contains("eng.")) return "English";
+        if (search.contains("spanish") || search.contains("_spa") || search.contains("-spa") || search.contains(".spa") || search.contains("spa-") || search.contains("spa.")) return "Spanish";
+        if (search.contains("french") || search.contains("_fre") || search.contains("-fre") || search.contains("fra")) return "French";
+        if (search.contains("german") || search.contains("_ger") || search.contains("-ger") || search.contains("deu")) return "German";
+        if (search.contains("italian") || search.contains("_ita") || search.contains("-ita")) return "Italian";
+        if (search.contains("russian") || search.contains("_rus") || search.contains("-rus")) return "Russian";
+        if (search.contains("portuguese") || search.contains("_por") || search.contains("-por") || search.contains("brazilian")) return "Portuguese";
+        if (search.contains("indonesian") || search.contains("_ind") || search.contains("-ind")) return "Indonesian";
+        if (search.contains("thai") || search.contains("_tha") || search.contains("-tha")) return "Thai";
+        if (search.contains("vietnamese") || search.contains("_vie") || search.contains("-vie")) return "Vietnamese";
+        if (search.contains("chinese") || search.contains("_chi") || search.contains("-chi") || search.contains("zho")) return "Chinese";
+        if (search.contains("japanese") || search.contains("_jpn") || search.contains("-jpn")) return "Japanese";
+        if (search.contains("arabic") || search.contains("_ara") || search.contains("-ara")) return "Arabic";
+
+        boolean isHash = raw == null || raw.length() > 20 || raw.contains(".vtt") || raw.contains(".srt");
+        if (raw != null && !raw.trim().isEmpty() && !isHash) {
+            return raw.substring(0, 1).toUpperCase() + raw.substring(1);
+        }
+        return "Subtitle " + (index + 1);
     }
 
     private List<MediaItem.SubtitleConfiguration> getSubtitleConfigurations() {
@@ -915,11 +969,13 @@ public class PlayerActivity extends Activity {
                 try {
                     JSONObject subObj = subtitlesArray.getJSONObject(i);
                     String url = subObj.getString("url");
-                    String lang = subObj.optString("lang", "Subtitle " + (i + 1));
+                    String rawLang = subObj.optString("lang", null);
+                    String lang = formatSubtitleLabel(rawLang, url, i);
 
                     MediaItem.SubtitleConfiguration config = new MediaItem.SubtitleConfiguration.Builder(Uri.parse(url))
                             .setMimeType(MimeTypes.TEXT_VTT)
                             .setLanguage(lang)
+                            .setLabel(lang)
                             .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
                             .build();
                     configs.add(config);
@@ -1110,7 +1166,8 @@ public class PlayerActivity extends Activity {
             final String[] items = new String[subtitlesArray.length() + 1];
             items[0] = "Subtitles Off";
             for (int i = 0; i < subtitlesArray.length(); i++) {
-                items[i + 1] = subtitlesArray.getJSONObject(i).optString("lang", "Language " + (i + 1));
+                JSONObject sObj = subtitlesArray.getJSONObject(i);
+                items[i + 1] = formatSubtitleLabel(sObj.optString("lang", null), sObj.optString("url", null), i);
             }
 
             AlertDialog.Builder builder = new AlertDialog.Builder(this);

@@ -23,6 +23,23 @@ import SettingsRow from "./SettingsRow";
 import Dropdown from "../common/Dropdown";
 import "../css/SettingsView.css";
 
+const ALL_SUBTITLE_LANGUAGES = [
+  "English",
+  "Japanese",
+  "Spanish",
+  "French",
+  "German",
+  "Italian",
+  "Russian",
+  "Portuguese",
+  "Indonesian",
+  "Thai",
+  "Vietnamese",
+  "Chinese",
+  "Arabic",
+  "Hindi",
+];
+
 export default function SettingsView({
   initialTab = "general",
   onMarketplaceOpen,
@@ -45,6 +62,9 @@ export default function SettingsView({
   const [malStatus, setMalStatus] = useState("watching");
   const [mergeSubtitles, setMergeSubtitles] = useState(false);
   const [subtitleFormat, setSubtitleFormat] = useState("vtt");
+  const [preferredSubtitleLanguages, setPreferredSubtitleLanguages] = useState([
+    "English",
+  ]);
   const [malUsername, setMalUsername] = useState(null);
   const [imageCacheSizeLimit, setImageCacheSizeLimit] = useState(5);
   const [developerMode, setDeveloperMode] = useState(false);
@@ -235,7 +255,9 @@ export default function SettingsView({
   const fetchTags = async (type = tagType) => {
     setTagsLoading(true);
     try {
-      const res = await fetch(`/api/local/tags/view/${type}?includeHidden=true`);
+      const res = await fetch(
+        `/api/local/tags/view/${type}?includeHidden=true`,
+      );
       const data = await res.json();
       if (data && Array.isArray(data.tags)) {
         setTagsList(data.tags);
@@ -330,7 +352,8 @@ export default function SettingsView({
   };
 
   const handleDeleteTag = async (tagToDelete) => {
-    const tagName = typeof tagToDelete === "string" ? tagToDelete : tagToDelete.name;
+    const tagName =
+      typeof tagToDelete === "string" ? tagToDelete : tagToDelete.name;
     const reservedLower = [
       "watching",
       "plan to watch",
@@ -361,10 +384,7 @@ export default function SettingsView({
       if (data.error) {
         swalError("Error", data.error);
       } else {
-        swalSuccess(
-          "Tag Deleted",
-          `Tag "${tagName}" deleted successfully.`,
-        );
+        swalSuccess("Tag Deleted", `Tag "${tagName}" deleted successfully.`);
         fetchTags(tagType);
       }
     } catch (err) {
@@ -444,16 +464,17 @@ export default function SettingsView({
         setMalStatus(s.status || "watching");
         setMergeSubtitles(s.mergeSubtitles);
         setSubtitleFormat(s.subtitleFormat || "vtt");
+        setPreferredSubtitleLanguages(
+          s.preferredSubtitleLanguages || ["English"],
+        );
         setImageCacheSizeLimit(s.imageCacheSizeLimit || 5);
         setDeveloperMode(s.developerMode);
         setAutoSkipIntro(s.autoSkipIntro);
         const layoutVal = s.mangaReaderLayout || "long-strip";
         setMangaReaderLayout(layoutVal);
-        localStorage.setItem("manga_reader_layout", layoutVal);
 
         const widthVal = parseInt(s.mangaReaderWidth, 10) || 800;
         setMangaReaderWidth(widthVal);
-        localStorage.setItem("manga_reader_width", widthVal);
         if (window.sharedStateAPI && window.sharedStateAPI.getAppVersion) {
           window.sharedStateAPI.getAppVersion().then(setAppVersion);
         }
@@ -560,6 +581,11 @@ export default function SettingsView({
       dirty.mergeSubtitles = mergeSubtitles;
     if (subtitleFormat !== (settings.subtitleFormat || "vtt"))
       dirty.subtitleFormat = subtitleFormat;
+    if (
+      JSON.stringify(preferredSubtitleLanguages) !==
+      JSON.stringify(settings.preferredSubtitleLanguages || ["English"])
+    )
+      dirty.preferredSubtitleLanguages = preferredSubtitleLanguages;
     if (developerMode !== settings.developerMode)
       dirty.developerMode = developerMode;
     if (autoSkipIntro !== settings.autoSkipIntro)
@@ -591,28 +617,15 @@ export default function SettingsView({
           }
         }
 
-        // Silently update comparison base to reset hasChanges state
-        setSettings({
-          ...settings,
-          ...dirty,
-        });
-        localStorage.setItem("manga_reader_layout", mangaReaderLayout);
-        localStorage.setItem("manga_reader_width", mangaReaderWidth);
-        if (onSettingsSaved) onSettingsSaved();
+        if (onSettingsSaved) {
+          onSettingsSaved(dirty);
+        }
+
+        toastSuccess("Settings saved successfully!");
       }
     } catch (err) {
-      console.error("Failed to auto-save settings:", err);
-      Swal.fire({
-        title: "Error Saving Settings",
-        text: err.message,
-        icon: "error",
-        toast: true,
-        position: "top-end",
-        showConfirmButton: false,
-        timer: 3000,
-        background: "var(--bg-secondary)",
-        color: "var(--text-main)",
-      });
+      console.error("Failed to save settings:", err);
+      toastError("Failed to save settings: " + err.message);
     } finally {
       setSaving(false);
     }
@@ -634,6 +647,8 @@ export default function SettingsView({
       malStatus !== (settings.status || "watching") ||
       mergeSubtitles !== settings.mergeSubtitles ||
       subtitleFormat !== (settings.subtitleFormat || "vtt") ||
+      JSON.stringify(preferredSubtitleLanguages) !==
+        JSON.stringify(settings.preferredSubtitleLanguages || ["English"]) ||
       developerMode !== settings.developerMode ||
       autoSkipIntro !== settings.autoSkipIntro ||
       mangaReaderLayout !== (settings.mangaReaderLayout || "long-strip") ||
@@ -658,6 +673,7 @@ export default function SettingsView({
     malStatus,
     mergeSubtitles,
     subtitleFormat,
+    preferredSubtitleLanguages,
     imageCacheSizeLimit,
     developerMode,
     autoSkipIntro,
@@ -995,7 +1011,14 @@ export default function SettingsView({
                       saved.
                     </div>
                   </div>
-                  <div className="settings-row-control" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                  <div
+                    className="settings-row-control"
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      alignItems: "center",
+                    }}
+                  >
                     <input
                       type="text"
                       value={downloadLocation}
@@ -1017,7 +1040,13 @@ export default function SettingsView({
                       }}
                       className="btn-pause-queue"
                       title="Open Download Folder in File Explorer"
-                      style={{ height: "38px", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: "6px" }}
+                      style={{
+                        height: "38px",
+                        whiteSpace: "nowrap",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "6px",
+                      }}
                     >
                       <FolderOpen size={16} />
                       <span>Open</span>
@@ -1333,6 +1362,128 @@ export default function SettingsView({
                       ]}
                       minWidth={200}
                     />
+                  </div>
+                </div>
+
+                <div
+                  className="settings-row-item vertical-layout"
+                  style={{
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    padding: "16px 0",
+                    borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+                  }}
+                >
+                  <div
+                    className="settings-row-info"
+                    style={{ marginBottom: "12px" }}
+                  >
+                    <div className="settings-row-label">
+                      Preferred Subtitle Languages
+                    </div>
+                    <div className="settings-row-hint">
+                      Select which subtitle languages to load in player and
+                      download during batch downloads. Deselect all to disable
+                      automatic subtitle downloads. (English selected by
+                      default)
+                    </div>
+                  </div>
+                  <div
+                    className="settings-lang-actions"
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreferredSubtitleLanguages(ALL_SUBTITLE_LANGUAGES)
+                      }
+                      style={{
+                        padding: "5px 14px",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        borderRadius: "6px",
+                        background: "rgba(59, 130, 246, 0.2)",
+                        border: "1px solid rgba(59, 130, 246, 0.4)",
+                        color: "#60a5fa",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreferredSubtitleLanguages([])}
+                      style={{
+                        padding: "5px 14px",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        borderRadius: "6px",
+                        background: "rgba(239, 68, 68, 0.2)",
+                        border: "1px solid rgba(239, 68, 68, 0.4)",
+                        color: "#f87171",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Deselect All
+                    </button>
+                  </div>
+                  <div
+                    className="settings-lang-pills"
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "8px",
+                      width: "100%",
+                    }}
+                  >
+                    {ALL_SUBTITLE_LANGUAGES.map((lang) => {
+                      const isSelected =
+                        preferredSubtitleLanguages.includes(lang);
+                      return (
+                        <button
+                          key={lang}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setPreferredSubtitleLanguages(
+                                preferredSubtitleLanguages.filter(
+                                  (l) => l !== lang,
+                                ),
+                              );
+                            } else {
+                              setPreferredSubtitleLanguages([
+                                ...preferredSubtitleLanguages,
+                                lang,
+                              ]);
+                            }
+                          }}
+                          style={{
+                            padding: "6px 14px",
+                            borderRadius: "20px",
+                            fontSize: "12px",
+                            fontWeight: "600",
+                            border: isSelected
+                              ? "1px solid #3b82f6"
+                              : "1px solid rgba(255, 255, 255, 0.15)",
+                            backgroundColor: isSelected
+                              ? "rgba(59, 130, 246, 0.25)"
+                              : "rgba(255, 255, 255, 0.04)",
+                            color: isSelected
+                              ? "#93c5fd"
+                              : "rgba(255, 255, 255, 0.6)",
+                            cursor: "pointer",
+                            transition: "all 0.2s ease",
+                          }}
+                        >
+                          {isSelected ? "✓ " : "+ "}
+                          {lang}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 
@@ -1851,8 +2002,10 @@ export default function SettingsView({
               ) : (
                 <div className="tag-reorder-list">
                   {tagsList.map((tagObj, index) => {
-                    const tagName = typeof tagObj === "string" ? tagObj : tagObj.name;
-                    const isHidden = typeof tagObj === "object" ? !!tagObj.hidden : false;
+                    const tagName =
+                      typeof tagObj === "string" ? tagObj : tagObj.name;
+                    const isHidden =
+                      typeof tagObj === "object" ? !!tagObj.hidden : false;
                     const isReserved = [
                       "watching",
                       "plan to watch",
@@ -1900,7 +2053,9 @@ export default function SettingsView({
                         <div className="tag-item-actions">
                           <button
                             type="button"
-                            onClick={() => handleToggleVisibility(tagName, isHidden)}
+                            onClick={() =>
+                              handleToggleVisibility(tagName, isHidden)
+                            }
                             className={`tag-action-btn ${
                               isHidden ? "unhide-btn" : "hide-btn"
                             }`}
@@ -1910,7 +2065,11 @@ export default function SettingsView({
                                 : `Hide tag "${tagName}" from UI`
                             }
                           >
-                            {isHidden ? <EyeOff size={16} /> : <Eye size={16} />}
+                            {isHidden ? (
+                              <EyeOff size={16} />
+                            ) : (
+                              <Eye size={16} />
+                            )}
                           </button>
 
                           {!isReserved && (

@@ -20,6 +20,74 @@ if (
   };
 }
 
+function formatSubLabel(sub) {
+  return sub?.lang || sub?.label || sub?.name || "";
+}
+
+function normalizeLangCode(str) {
+  if (!str) return "";
+  const s = String(str).toLowerCase().trim();
+  if (s === "en" || s === "eng" || s.includes("english")) return "english";
+  if (s === "jp" || s === "jpn" || s.includes("japanese")) return "japanese";
+  if (s === "es" || s === "spa" || s.includes("spanish")) return "spanish";
+  if (s === "fr" || s === "fra" || s === "fre" || s.includes("french"))
+    return "french";
+  if (s === "de" || s === "deu" || s === "ger" || s.includes("german"))
+    return "german";
+  if (s === "it" || s === "ita" || s.includes("italian")) return "italian";
+  if (s === "ru" || s === "rus" || s.includes("russian")) return "russian";
+  if (
+    s === "pt" ||
+    s === "por" ||
+    s.includes("portuguese") ||
+    s.includes("brazilian")
+  )
+    return "portuguese";
+  if (s === "zh" || s === "zho" || s === "chi" || s.includes("chinese"))
+    return "chinese";
+  if (s === "ar" || s === "ara" || s.includes("arabic")) return "arabic";
+  return s;
+}
+
+function findBestSubtitleIndex(subs, preferredLang = "english") {
+  if (!subs || !Array.isArray(subs) || subs.length === 0) return -1;
+  const prefNorm = normalizeLangCode(preferredLang);
+  if (prefNorm === "off" || prefNorm === "false" || prefNorm === "none")
+    return -1;
+
+  const matchLang = (sub, targetNorm) => {
+    if (!sub || !targetNorm) return false;
+    const l1 = normalizeLangCode(sub.lang);
+    const l2 = normalizeLangCode(sub.label);
+    const l3 = normalizeLangCode(sub.name);
+    const l4 = normalizeLangCode(sub.url);
+    return (
+      (l1 && (l1 === targetNorm || l1.includes(targetNorm))) ||
+      (l2 && (l2 === targetNorm || l2.includes(targetNorm))) ||
+      (l3 && (l3 === targetNorm || l3.includes(targetNorm))) ||
+      (l4 && (l4 === targetNorm || l4.includes(targetNorm)))
+    );
+  };
+
+  if (prefNorm) {
+    const idx = subs.findIndex((s) => matchLang(s, prefNorm));
+    if (idx !== -1) return idx;
+  }
+
+  if (prefNorm !== "english") {
+    const engIdx = subs.findIndex((s) => matchLang(s, "english"));
+    if (engIdx !== -1) return engIdx;
+  }
+
+  return 0;
+}
+
+let playerSubtitlePrefCache = "english";
+
+function getSavedSubtitlePref() {
+  return playerSubtitlePrefCache || "english";
+}
+
 class KwikFragmentLoader {
   constructor(config) {
     this.config = config;
@@ -122,6 +190,7 @@ export default function VideoPlayer({
   onSkip = null,
 }) {
   const videoRef = useRef(null);
+  const loadedSubMapRef = useRef({});
   const hlsRef = useRef(null);
   const wrapperRef = useRef(null);
   const uiTimeoutRef = useRef(null);
@@ -218,18 +287,9 @@ export default function VideoPlayer({
 
   const [showSettings, setShowSettings] = useState(false);
   const [settingsActiveMenu, setSettingsActiveMenu] = useState("main");
-  const [playbackSpeed, setPlaybackSpeed] = useState(() => {
-    const saved = localStorage.getItem("player-speed");
-    return saved !== null ? parseFloat(saved) : 1;
-  });
-  const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(() => {
-    const saved = localStorage.getItem("player-subs-enabled");
-    return saved === "false" ? -1 : 0;
-  });
-  const [brightness, setBrightness] = useState(() => {
-    const saved = localStorage.getItem("player-brightness");
-    return saved !== null ? parseInt(saved, 10) : 0;
-  });
+  const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [selectedSubtitleIndex, setSelectedSubtitleIndex] = useState(0);
+  const [brightness, setBrightness] = useState(0);
 
   const [showUI, setShowUI] = useState(true);
   const [indicator, setIndicator] = useState({
@@ -241,13 +301,8 @@ export default function VideoPlayer({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(() => {
-    const savedVolume = localStorage.getItem("player-volume");
-    return savedVolume !== null ? parseFloat(savedVolume) : 1;
-  });
-  const [isMuted, setIsMuted] = useState(() => {
-    return localStorage.getItem("player-muted") === "true";
-  });
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
   const [buffered, setBuffered] = useState(0);
 
   useEffect(() => {
@@ -263,23 +318,70 @@ export default function VideoPlayer({
     if (video) {
       video.playbackRate = playbackSpeed;
     }
-    localStorage.setItem("player-speed", playbackSpeed.toString());
+    if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+      window.sharedStateAPI.updateSetting("playerSpeed", playbackSpeed);
+    }
   }, [playbackSpeed, selectedSource]);
 
   useEffect(() => {
-    localStorage.setItem(
-      "player-subs-enabled",
-      selectedSubtitleIndex === -1 ? "false" : "true",
-    );
-  }, [selectedSubtitleIndex]);
+    if (!subtitles || subtitles.length === 0) return;
+
+    if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+      if (selectedSubtitleIndex === -1) {
+        window.sharedStateAPI.updateSetting("playerSubsEnabled", false);
+        window.sharedStateAPI.updateSetting("playerSubtitlePref", "off");
+      } else {
+        window.sharedStateAPI.updateSetting("playerSubsEnabled", true);
+        const activeSub = subtitles[selectedSubtitleIndex];
+        if (activeSub) {
+          const lang = normalizeLangCode(
+            activeSub.lang || activeSub.label || activeSub.name || "english",
+          );
+          if (lang) {
+            window.sharedStateAPI.updateSetting("playerSubtitlePref", lang);
+          }
+        }
+      }
+    }
+  }, [selectedSubtitleIndex, subtitles]);
 
   useEffect(() => {
     const video = videoRef.current;
     if (video) {
       video.style.filter = `brightness(${1 + brightness / 100})`;
     }
-    localStorage.setItem("player-brightness", brightness.toString());
+    if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+      window.sharedStateAPI.updateSetting("playerBrightness", brightness);
+    }
   }, [brightness, selectedSource]);
+
+  useEffect(() => {
+    const fetchPlayerDBSettings = async () => {
+      try {
+        if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
+          const res = await window.sharedStateAPI.getSettings([
+            "playerSpeed",
+            "playerBrightness",
+            "playerVolume",
+            "playerMuted",
+            "playerSubtitlePref",
+            "playerSubsEnabled",
+          ]);
+          const s = res?.settings || {};
+          if (s.playerSpeed !== undefined) setPlaybackSpeed(parseFloat(s.playerSpeed) || 1);
+          if (s.playerBrightness !== undefined) setBrightness(parseInt(s.playerBrightness, 10) || 0);
+          if (s.playerVolume !== undefined) setVolume(parseFloat(s.playerVolume) ?? 1);
+          if (s.playerMuted !== undefined) setIsMuted(Boolean(s.playerMuted));
+          if (s.playerSubtitlePref !== undefined && s.playerSubtitlePref !== "off") {
+            playerSubtitlePrefCache = s.playerSubtitlePref;
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load player settings from DB:", err);
+      }
+    };
+    fetchPlayerDBSettings();
+  }, []);
 
   useEffect(() => {
     const fetchSettings = async () => {
@@ -378,14 +480,16 @@ export default function VideoPlayer({
   const handleVolumeSliderChange = (e) => {
     const val = parseFloat(e.target.value);
     setVolume(val);
-    localStorage.setItem("player-volume", val);
+    if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+      window.sharedStateAPI.updateSetting("playerVolume", val);
+      window.sharedStateAPI.updateSetting("playerMuted", val === 0);
+    }
     const video = videoRef.current;
     if (video) {
       video.volume = val;
       video.muted = val === 0;
     }
     setIsMuted(val === 0);
-    localStorage.setItem("player-muted", val === 0 ? "true" : "false");
   };
 
   const handleTimelineChange = (e) => {
@@ -536,11 +640,10 @@ export default function VideoPlayer({
     if (videoRef.current) {
       setVolume(videoRef.current.volume);
       setIsMuted(videoRef.current.muted);
-      localStorage.setItem("player-volume", videoRef.current.volume);
-      localStorage.setItem(
-        "player-muted",
-        videoRef.current.muted ? "true" : "false",
-      );
+      if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+        window.sharedStateAPI.updateSetting("playerVolume", videoRef.current.volume);
+        window.sharedStateAPI.updateSetting("playerMuted", videoRef.current.muted);
+      }
     }
   };
 
@@ -917,12 +1020,84 @@ export default function VideoPlayer({
 
       if (signal?.aborted) return;
 
-      let fetchedSources = data?.sources || [];
-      let fetchedSubs = data?.subtitles || [];
+      let rawSources = [];
+      if (
+        playerSubDub &&
+        Array.isArray(data?.[playerSubDub]?.sources) &&
+        data[playerSubDub].sources.length > 0
+      ) {
+        rawSources = data[playerSubDub].sources;
+      } else if (
+        playerSubDub &&
+        Array.isArray(data?.[playerSubDub]) &&
+        data[playerSubDub].length > 0
+      ) {
+        rawSources = data[playerSubDub];
+      } else {
+        const subSrcs = Array.isArray(data?.sub?.sources)
+          ? data.sub.sources
+          : Array.isArray(data?.sub) ? data.sub : [];
+        const dubSrcs = Array.isArray(data?.dub?.sources)
+          ? data.dub.sources
+          : Array.isArray(data?.dub) ? data.dub : [];
+        const hsubSrcs = Array.isArray(data?.hsub?.sources)
+          ? data.hsub.sources
+          : Array.isArray(data?.hsub) ? data.hsub : [];
+        const baseSrcs = Array.isArray(data?.sources) ? data.sources : [];
+
+        rawSources = [...baseSrcs, ...subSrcs, ...dubSrcs, ...hsubSrcs];
+      }
+
+      const isHSub = (s) =>
+        s.isHsub ||
+        s.type === "hsub" ||
+        s.quality?.toLowerCase().includes("hsub");
+      const isDub = (s) =>
+        s.isDub ||
+        s.type === "dub" ||
+        s.quality?.toLowerCase().includes("dub");
+
+      let fetchedSources = rawSources;
+      if (playerSubDub === "sub") {
+        const cleanSub = rawSources.filter((s) => !isHSub(s) && !isDub(s));
+        if (cleanSub.length > 0) fetchedSources = cleanSub;
+      } else if (playerSubDub === "hsub") {
+        const cleanHsub = rawSources.filter((s) => isHSub(s));
+        if (cleanHsub.length > 0) fetchedSources = cleanHsub;
+      } else if (playerSubDub === "dub") {
+        const cleanDub = rawSources.filter((s) => isDub(s));
+        if (cleanDub.length > 0) fetchedSources = cleanDub;
+      }
+
+      let fetchedSubs = [];
+      if (playerSubDub !== "hsub") {
+        fetchedSubs = [
+          ...(Array.isArray(data?.subtitles) ? data.subtitles : []),
+          ...(Array.isArray(data?.[playerSubDub]?.subtitles)
+            ? data[playerSubDub].subtitles
+            : []),
+          ...(Array.isArray(data?.sub?.subtitles) ? data.sub.subtitles : []),
+          ...(Array.isArray(data?.dub?.subtitles) ? data.dub.subtitles : []),
+        ];
+      }
+      fetchedSubs = Array.from(
+        new Map(fetchedSubs.map((s) => [s.url, s])).values(),
+      ).map((s, idx) => ({
+        ...s,
+        lang: formatSubLabel(s, idx),
+        label: formatSubLabel(s, idx),
+      }));
       let fetchedSkipTimes = data?.skipTimes || [];
 
       setSources(fetchedSources);
       setSubtitles(fetchedSubs);
+      if (fetchedSubs && fetchedSubs.length > 0) {
+        const pref = getSavedSubtitlePref();
+        const bestIdx = findBestSubtitleIndex(fetchedSubs, pref);
+        setSelectedSubtitleIndex(bestIdx);
+      } else {
+        setSelectedSubtitleIndex(-1);
+      }
       if (isCurrentDownloaded) {
         setSkipTimes(fetchedSkipTimes);
       }
@@ -968,50 +1143,91 @@ export default function VideoPlayer({
   }, [id, currentEpisode, isCurrentDownloaded, playerSubDub]);
 
   useEffect(() => {
-    const blobUrls = [];
+    return () => {
+      Object.values(loadedSubMapRef.current).forEach((url) => {
+        if (url && url.startsWith("blob:")) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (e) {}
+        }
+      });
+      loadedSubMapRef.current = {};
+    };
+  }, [subtitles]);
+
+  useEffect(() => {
     let cancelled = false;
-    const processSubtitles = async () => {
-      if (!subtitles || subtitles.length === 0 || playerSubDub === "hsub") {
+    const fetchSelectedSubtitle = async () => {
+      if (
+        !subtitles ||
+        subtitles.length === 0 ||
+        playerSubDub === "hsub" ||
+        selectedSubtitleIndex < 0 ||
+        selectedSubtitleIndex >= subtitles.length
+      ) {
         setProcessedSubtitles([]);
         return;
       }
-      const processed = [];
-      for (const sub of subtitles) {
-        if (!sub.url) continue;
-        if (sub.url.startsWith("blob:")) {
-          processed.push(sub);
-          continue;
-        }
-        try {
-          const res = await fetch(sub.url);
-          if (!res.ok) continue;
-          let text = await res.text();
-          const trimmed = text.trim();
-          if (!trimmed.startsWith("WEBVTT")) {
-            const converted = text.replace(
-              /(\d{1,2}:\d{2}:\d{2}),(\d{2,3})/g,
-              (m, time, ms) => `${time.padStart(8, "0")}.${ms.padEnd(3, "0")}`,
-            );
-            text = "WEBVTT\n\n" + converted;
-          }
-          const blob = new Blob([text], { type: "text/vtt" });
-          const blobUrl = URL.createObjectURL(blob);
-          blobUrls.push(blobUrl);
-          if (!cancelled) {
-            processed.push({ ...sub, url: blobUrl });
-          }
-        } catch (err) {
-          console.warn(`Failed to fetch subtitle: ${sub.url}`, err.message);
-        }
+
+      const sub = subtitles[selectedSubtitleIndex];
+      if (!sub || !sub.url) {
+        setProcessedSubtitles([]);
+        return;
       }
-      if (!cancelled) setProcessedSubtitles(processed);
+
+      if (sub.url.startsWith("blob:") || loadedSubMapRef.current[sub.url]) {
+        const blobUrl = sub.url.startsWith("blob:")
+          ? sub.url
+          : loadedSubMapRef.current[sub.url];
+        if (!cancelled) {
+          setProcessedSubtitles([{ ...sub, url: blobUrl }]);
+        }
+        return;
+      }
+
+      try {
+        const reqHeaders = {};
+        if (selectedSource?.headers) {
+          Object.assign(reqHeaders, selectedSource.headers);
+        }
+        if (sub.headers) {
+          Object.assign(reqHeaders, sub.headers);
+        }
+        if (sub.referer) {
+          reqHeaders["Referer"] = sub.referer;
+        }
+
+        const res = await fetch(sub.url, { headers: reqHeaders });
+        if (!res.ok) return;
+
+        let text = await res.text();
+        const trimmed = text.trim();
+        if (!trimmed.startsWith("WEBVTT")) {
+          const converted = text.replace(
+            /(\d{1,2}:\d{2}:\d{2}),(\d{2,3})/g,
+            (m, time, ms) => `${time.padStart(8, "0")}.${ms.padEnd(3, "0")}`,
+          );
+          text = "WEBVTT\n\n" + converted;
+        }
+
+        const blob = new Blob([text], { type: "text/vtt" });
+        const blobUrl = URL.createObjectURL(blob);
+        loadedSubMapRef.current[sub.url] = blobUrl;
+
+        if (!cancelled) {
+          setProcessedSubtitles([{ ...sub, url: blobUrl }]);
+        }
+      } catch (err) {
+        console.warn(`Failed to fetch subtitle: ${sub.url}`, err.message);
+      }
     };
-    processSubtitles();
+
+    fetchSelectedSubtitle();
+
     return () => {
       cancelled = true;
-      blobUrls.forEach((url) => URL.revokeObjectURL(url));
     };
-  }, [subtitles]);
+  }, [subtitles, selectedSubtitleIndex, selectedSource, playerSubDub]);
 
   useEffect(() => {
     if (!selectedSource || !videoRef.current) return;
@@ -1077,7 +1293,9 @@ export default function VideoPlayer({
 
   useEffect(() => {
     if (subtitles.length > 0) {
-      setSelectedSubtitleIndex(0);
+      const pref = getSavedSubtitlePref();
+      const bestIdx = findBestSubtitleIndex(subtitles, pref);
+      setSelectedSubtitleIndex(bestIdx);
     } else {
       setSelectedSubtitleIndex(-1);
     }
@@ -1231,10 +1449,12 @@ export default function VideoPlayer({
           e.preventDefault();
           const nextVol = Math.min(1, volume + 0.1);
           setVolume(nextVol);
-          localStorage.setItem("player-volume", nextVol.toString());
+          if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+            window.sharedStateAPI.updateSetting("playerVolume", nextVol);
+            window.sharedStateAPI.updateSetting("playerMuted", false);
+          }
           if (isMuted) {
             setIsMuted(false);
-            localStorage.setItem("player-muted", "false");
           }
           showIndicator(Volume2, `${Math.round(nextVol * 100)}%`);
           break;
@@ -1244,7 +1464,9 @@ export default function VideoPlayer({
           e.preventDefault();
           const prevVol = Math.max(0, volume - 0.1);
           setVolume(prevVol);
-          localStorage.setItem("player-volume", prevVol.toString());
+          if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+            window.sharedStateAPI.updateSetting("playerVolume", prevVol);
+          }
           showIndicator(Volume2, `${Math.round(prevVol * 100)}%`);
           break;
         }
@@ -1253,7 +1475,9 @@ export default function VideoPlayer({
           e.preventDefault();
           const nextMuted = !isMuted;
           setIsMuted(nextMuted);
-          localStorage.setItem("player-muted", nextMuted ? "true" : "false");
+          if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+            window.sharedStateAPI.updateSetting("playerMuted", nextMuted);
+          }
           showIndicator(
             nextMuted ? VolumeX : Volume2,
             nextMuted ? "Muted" : "Unmuted",
@@ -1480,16 +1704,24 @@ export default function VideoPlayer({
         const { name, value } = data;
         if (name === "volume") {
           setVolume(value);
-          localStorage.setItem("player-volume", value.toString());
+          if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+            window.sharedStateAPI.updateSetting("playerVolume", value);
+          }
         } else if (name === "speed") {
           setPlaybackSpeed(value);
-          localStorage.setItem("player-speed", value.toString());
+          if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+            window.sharedStateAPI.updateSetting("playerSpeed", value);
+          }
         } else if (name === "subs-enabled") {
           setSelectedSubtitleIndex(value ? 0 : -1);
-          localStorage.setItem("player-subs-enabled", value ? "true" : "false");
+          if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+            window.sharedStateAPI.updateSetting("playerSubsEnabled", Boolean(value));
+          }
         } else if (name === "brightness") {
           setBrightness(value);
-          localStorage.setItem("player-brightness", value.toString());
+          if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+            window.sharedStateAPI.updateSetting("playerBrightness", value);
+          }
         }
       },
     );
@@ -1540,6 +1772,13 @@ export default function VideoPlayer({
       ? currentEpisodeObj.number
       : currentEpisode;
 
+    const activeSubIdx =
+      selectedSubtitleIndex >= 0
+        ? selectedSubtitleIndex
+        : (subtitles && subtitles.length > 0
+            ? findBestSubtitleIndex(subtitles, getSavedSubtitlePref())
+            : -1);
+
     if (mpvStatus === "playing") {
       setMpvStatus("loading");
       lastLoadedUrlRef.current = sourceUrl;
@@ -1561,7 +1800,11 @@ export default function VideoPlayer({
             newMediaTitle,
           ]);
 
-          window.sharedStateAPI.controlMpv("set_property", ["sub", "no"]);
+          const subProp =
+            activeSubIdx !== -1
+              ? String(activeSubIdx + 1)
+              : "no";
+          window.sharedStateAPI.controlMpv("set_property", ["sub", subProp]);
           if (subtitles && Array.isArray(subtitles)) {
             subtitles.forEach((sub) => {
               if (sub && sub.url) {
@@ -1633,7 +1876,8 @@ export default function VideoPlayer({
         // Persisted settings
         volume: volume * 100, // MPV expects 0-100+
         speed: playbackSpeed,
-        subsEnabled: selectedSubtitleIndex !== -1,
+        subsEnabled: activeSubIdx !== -1,
+        selectedSubIndex: activeSubIdx,
         brightness: brightness,
         hasNext: nextIndex !== -1,
         hasPrev: prevIndex !== -1,
@@ -1991,25 +2235,6 @@ export default function VideoPlayer({
                             </button>
 
                             <button
-                              onClick={() => setSettingsActiveMenu("subtitles")}
-                              className="settings-menu-item"
-                            >
-                              <div className="settings-menu-item-left">
-                                <Subtitles size={14} />
-                                <span>Subtitles</span>
-                              </div>
-                              <div className="settings-menu-item-right">
-                                <span>
-                                  {selectedSubtitleIndex === -1
-                                    ? "Off"
-                                    : subtitles[selectedSubtitleIndex]?.lang ||
-                                      `Track ${selectedSubtitleIndex + 1}`}
-                                </span>
-                                <ChevronRight size={14} />
-                              </div>
-                            </button>
-
-                            <button
                               onClick={() =>
                                 setSettingsActiveMenu("brightness")
                               }
@@ -2095,49 +2320,6 @@ export default function VideoPlayer({
                                     {speed === 1 ? "Normal" : `${speed}x`}
                                   </span>
                                   {playbackSpeed === speed && (
-                                    <span className="checkmark">✓</span>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {settingsActiveMenu === "subtitles" && (
-                          <div className="settings-menu-panel">
-                            <button
-                              onClick={() => setSettingsActiveMenu("main")}
-                              className="settings-menu-header"
-                            >
-                              <ChevronLeft size={14} />
-                              <span>Subtitles</span>
-                            </button>
-                            <div className="settings-menu-options">
-                              <button
-                                onClick={() => {
-                                  setSelectedSubtitleIndex(-1);
-                                  setSettingsActiveMenu("main");
-                                  setShowSettings(false);
-                                }}
-                                className={`settings-menu-option-item ${selectedSubtitleIndex === -1 ? "active" : ""}`}
-                              >
-                                <span>Off</span>
-                                {selectedSubtitleIndex === -1 && (
-                                  <span className="checkmark">✓</span>
-                                )}
-                              </button>
-                              {subtitles.map((sub, idx) => (
-                                <button
-                                  key={idx}
-                                  onClick={() => {
-                                    setSelectedSubtitleIndex(idx);
-                                    setSettingsActiveMenu("main");
-                                    setShowSettings(false);
-                                  }}
-                                  className={`settings-menu-option-item ${selectedSubtitleIndex === idx ? "active" : ""}`}
-                                >
-                                  <span>{sub.lang || `Track ${idx + 1}`}</span>
-                                  {selectedSubtitleIndex === idx && (
                                     <span className="checkmark">✓</span>
                                   )}
                                 </button>

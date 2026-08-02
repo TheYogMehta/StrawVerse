@@ -22,6 +22,23 @@ import SettingsRow from "./SettingsRow";
 import Dropdown from "../common/Dropdown";
 import "../css/SettingsView.css";
 
+const ALL_SUBTITLE_LANGUAGES = [
+  "English",
+  "Japanese",
+  "Spanish",
+  "French",
+  "German",
+  "Italian",
+  "Russian",
+  "Portuguese",
+  "Indonesian",
+  "Thai",
+  "Vietnamese",
+  "Chinese",
+  "Arabic",
+  "Hindi",
+];
+
 export default function SettingsView({
   initialTab = "general",
   onMarketplaceOpen,
@@ -50,6 +67,9 @@ export default function SettingsView({
   const [imageCacheSizeLimit, setImageCacheSizeLimit] = useState(5);
   const [developerMode, setDeveloperMode] = useState(false);
   const [autoSkipIntro, setAutoSkipIntro] = useState(true);
+  const [preferredSubtitleLanguages, setPreferredSubtitleLanguages] = useState([
+    "English",
+  ]);
   const [mangaReaderLayout, setMangaReaderLayout] = useState("long-strip");
   const [mangaReaderWidth, setMangaReaderWidth] = useState(800);
   const [cacheStats, setCacheStats] = useState(null);
@@ -463,6 +483,9 @@ export default function SettingsView({
         setMalStatus(s.status || "watching");
         setMergeSubtitles(s.mergeSubtitles);
         setSubtitleFormat(s.subtitleFormat || "vtt");
+        setPreferredSubtitleLanguages(
+          s.preferredSubtitleLanguages || ["English"],
+        );
         setMalDiscordProfile(s.malDiscordProfile);
         setMalUsername(data.malUsername || null);
         setImageCacheSizeLimit(s.imageCacheSizeLimit || 5);
@@ -470,11 +493,9 @@ export default function SettingsView({
         setAutoSkipIntro(s.autoSkipIntro);
         const layoutVal = s.mangaReaderLayout || "long-strip";
         setMangaReaderLayout(layoutVal);
-        localStorage.setItem("manga_reader_layout", layoutVal);
 
         const widthVal = parseInt(s.mangaReaderWidth, 10) || 800;
         setMangaReaderWidth(widthVal);
-        localStorage.setItem("manga_reader_width", widthVal);
         if (window.sharedStateAPI && window.sharedStateAPI.getAppVersion) {
           window.sharedStateAPI.getAppVersion().then(setAppVersion);
         }
@@ -583,6 +604,11 @@ export default function SettingsView({
       dirty.mergeSubtitles = mergeSubtitles;
     if (subtitleFormat !== (settings.subtitleFormat || "vtt"))
       dirty.subtitleFormat = subtitleFormat;
+    if (
+      JSON.stringify(preferredSubtitleLanguages) !==
+      JSON.stringify(settings.preferredSubtitleLanguages || ["English"])
+    )
+      dirty.preferredSubtitleLanguages = preferredSubtitleLanguages;
     if (malDiscordProfile !== settings.malDiscordProfile)
       dirty.malDiscordProfile = malDiscordProfile;
     if (developerMode !== settings.developerMode)
@@ -621,8 +647,6 @@ export default function SettingsView({
           ...settings,
           ...dirty,
         });
-        localStorage.setItem("manga_reader_layout", mangaReaderLayout);
-        localStorage.setItem("manga_reader_width", mangaReaderWidth);
         if (onSettingsSaved) onSettingsSaved();
       }
     } catch (err) {
@@ -660,6 +684,8 @@ export default function SettingsView({
       malStatus !== (settings.status || "watching") ||
       mergeSubtitles !== settings.mergeSubtitles ||
       subtitleFormat !== (settings.subtitleFormat || "vtt") ||
+      JSON.stringify(preferredSubtitleLanguages) !==
+        JSON.stringify(settings.preferredSubtitleLanguages || ["English"]) ||
       malDiscordProfile !== settings.malDiscordProfile ||
       developerMode !== settings.developerMode ||
       autoSkipIntro !== settings.autoSkipIntro ||
@@ -686,6 +712,7 @@ export default function SettingsView({
     malStatus,
     mergeSubtitles,
     subtitleFormat,
+    preferredSubtitleLanguages,
     malDiscordProfile,
     imageCacheSizeLimit,
     developerMode,
@@ -1348,6 +1375,128 @@ export default function SettingsView({
                       ]}
                       minWidth={200}
                     />
+                  </div>
+                </div>
+
+                <div
+                  className="settings-row-item vertical-layout"
+                  style={{
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    padding: "16px 0",
+                    borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+                  }}
+                >
+                  <div
+                    className="settings-row-info"
+                    style={{ marginBottom: "12px" }}
+                  >
+                    <div className="settings-row-label">
+                      Preferred Subtitle Languages
+                    </div>
+                    <div className="settings-row-hint">
+                      Select which subtitle languages to load in player and
+                      download during batch downloads. Deselect all to disable
+                      automatic subtitle downloads. (English selected by
+                      default)
+                    </div>
+                  </div>
+                  <div
+                    className="settings-lang-actions"
+                    style={{
+                      display: "flex",
+                      gap: "8px",
+                      marginBottom: "12px",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreferredSubtitleLanguages(ALL_SUBTITLE_LANGUAGES)
+                      }
+                      style={{
+                        padding: "5px 14px",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        borderRadius: "6px",
+                        background: "rgba(59, 130, 246, 0.2)",
+                        border: "1px solid rgba(59, 130, 246, 0.4)",
+                        color: "#60a5fa",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPreferredSubtitleLanguages([])}
+                      style={{
+                        padding: "5px 14px",
+                        fontSize: "12px",
+                        fontWeight: "600",
+                        borderRadius: "6px",
+                        background: "rgba(239, 68, 68, 0.2)",
+                        border: "1px solid rgba(239, 68, 68, 0.4)",
+                        color: "#f87171",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Deselect All
+                    </button>
+                  </div>
+                  <div
+                    className="settings-lang-pills"
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "8px",
+                      width: "100%",
+                    }}
+                  >
+                    {ALL_SUBTITLE_LANGUAGES.map((lang) => {
+                      const isSelected =
+                        preferredSubtitleLanguages.includes(lang);
+                      return (
+                        <button
+                          key={lang}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setPreferredSubtitleLanguages(
+                                preferredSubtitleLanguages.filter(
+                                  (l) => l !== lang,
+                                ),
+                              );
+                            } else {
+                              setPreferredSubtitleLanguages([
+                                ...preferredSubtitleLanguages,
+                                lang,
+                              ]);
+                            }
+                          }}
+                          style={{
+                            padding: "6px 14px",
+                            borderRadius: "20px",
+                            fontSize: "12px",
+                            fontWeight: "600",
+                            border: isSelected
+                              ? "1px solid #3b82f6"
+                              : "1px solid rgba(255, 255, 255, 0.15)",
+                            backgroundColor: isSelected
+                              ? "rgba(59, 130, 246, 0.25)"
+                              : "rgba(255, 255, 255, 0.04)",
+                            color: isSelected
+                              ? "#93c5fd"
+                              : "rgba(255, 255, 255, 0.6)",
+                            cursor: "pointer",
+                            transition: "all 0.2s ease",
+                          }}
+                        >
+                          {isSelected ? "✓ " : "+ "}
+                          {lang}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 

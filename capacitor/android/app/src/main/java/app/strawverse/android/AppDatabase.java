@@ -1,5 +1,6 @@
 package app.strawverse.android;
 
+import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
@@ -86,6 +87,75 @@ public class AppDatabase {
         return null;
     }
 
+    public static void saveStreamReferer(Context context, String domain, String referer) {
+        SQLiteDatabase db = getDatabase(context);
+        if (db == null || domain == null || referer == null) return;
+        try {
+            String cleanDomain = domain.replace("www.", "").toLowerCase();
+            ContentValues values = new ContentValues();
+            values.put("domain", cleanDomain);
+            values.put("referer", referer);
+            values.put("updatedAt", System.currentTimeMillis());
+            db.insertWithOnConflict("StreamReferer", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to save stream referer: " + e.getMessage());
+        }
+    }
+
+    public static String getStoredCookiesForUrl(Context context, String url) {
+        SQLiteDatabase db = getDatabase(context);
+        if (db == null) return null;
+        Cursor cursor = null;
+        try {
+            Uri uri = Uri.parse(url);
+            String domain = uri.getHost();
+            if (domain != null) {
+                domain = domain.replace("www.", "").toLowerCase();
+                String parentDomain = domain;
+                if (domain.contains("animepahe")) {
+                    parentDomain = "animepahe.pw";
+                } else if (domain.contains("kwik.cx") || domain.contains("owocdn.top") || domain.contains("uwucdn.top")) {
+                    parentDomain = "kwik.cx";
+                } else if (domain.contains("allmanga") || domain.contains("allanime")) {
+                    parentDomain = "allmanga.to";
+                } else {
+                    String[] parts = domain.split("\\.");
+                    if (parts.length >= 2) {
+                        parentDomain = parts[parts.length - 2] + "." + parts[parts.length - 1];
+                    }
+                }
+
+                cursor = db.rawQuery(
+                    "SELECT name, value FROM cookie WHERE (name != 'user_agent' AND name != 'cf_user_agent' AND name NOT LIKE 'sec-ch-ua%') AND (LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.') OR LTRIM(?, '.') = LTRIM(domain, '.') OR LTRIM(?, '.') LIKE '%.' || LTRIM(domain, '.')) ORDER BY CAST(expirationDate AS REAL) DESC",
+                    new String[]{domain, domain, parentDomain, parentDomain}
+                );
+
+                Map<String, String> cookieMap = new java.util.LinkedHashMap<>();
+                while (cursor.moveToNext()) {
+                    String name = cursor.getString(0);
+                    String value = cursor.getString(1);
+                    if (name != null && value != null && !cookieMap.containsKey(name)) {
+                        cookieMap.put(name, value);
+                    }
+                }
+
+                if (!cookieMap.isEmpty()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (Map.Entry<String, String> entry : cookieMap.entrySet()) {
+                        if (sb.length() > 0) sb.append("; ");
+                        sb.append(entry.getKey()).append("=").append(entry.getValue());
+                    }
+                    return sb.toString();
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to query database for cookies: " + e.getMessage());
+        } finally {
+            if (cursor != null) cursor.close();
+        }
+        return null;
+    }
+
     public static String getStoredCfClearanceCookie(Context context, String url) {
         SQLiteDatabase db = getDatabase(context);
         if (db == null) return null;
@@ -95,7 +165,7 @@ public class AppDatabase {
             String domain = uri.getHost();
             if (domain != null) {
                 domain = domain.replace("www.", "").toLowerCase();
-                if (domain.endsWith("animepahe.pw")) {
+                if (domain.contains("animepahe")) {
                     domain = "animepahe.pw";
                 } else if (domain.contains("kwik.cx") || domain.contains("owocdn.top") || domain.contains("uwucdn.top")) {
                     domain = "kwik.cx";
@@ -125,7 +195,7 @@ public class AppDatabase {
             String domain = uri.getHost();
             if (domain != null) {
                 domain = domain.replace("www.", "").toLowerCase();
-                if (domain.endsWith("animepahe.pw")) {
+                if (domain.contains("animepahe")) {
                     domain = "animepahe.pw";
                 } else if (domain.contains("kwik.cx") || domain.contains("owocdn.top") || domain.contains("uwucdn.top")) {
                     domain = "kwik.cx";
@@ -188,10 +258,10 @@ public class AppDatabase {
             }
         }
 
-        // Dynamic cf_clearance cookie from database
-        String cfCookie = getStoredCfClearanceCookie(context, url);
-        if (cfCookie != null && !cfCookie.isEmpty()) {
-            headers.put("Cookie", "cf_clearance=" + cfCookie + ";");
+        // Dynamic cookies from database (fetches all domain & parent domain cookies)
+        String dbCookies = getStoredCookiesForUrl(context, url);
+        if (dbCookies != null && !dbCookies.isEmpty()) {
+            headers.put("Cookie", dbCookies);
         }
 
         // Dynamic user_agent from database

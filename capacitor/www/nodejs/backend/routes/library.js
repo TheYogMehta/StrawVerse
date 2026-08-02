@@ -15,7 +15,13 @@ const {
   cleanupEmptyDownloadFolder,
 } = require("../download");
 const { updateHistory } = require("../utils/history");
-const { getKeyValue, setKeyValue } = require("../utils/db");
+const {
+  getKeyValue,
+  setKeyValue,
+  queryAll,
+  queryOne,
+  run,
+} = require("../utils/db");
 const { exec } = require("child_process");
 const { sanitizeFolderName } = require("../utils/DirectoryMaker");
 const { sendToRenderer } = require("../utils/rendererIPC");
@@ -38,14 +44,13 @@ router.get("/api/local/tags/view/:type", async (req, res) => {
     const includeHidden = req.query.includeHidden === "true";
     const defaultTags = getReservedTags(type);
     const savedOrder =
-      getKeyValue("Settings", `tag_order_${type}`) || defaultTags;
-    const hiddenTags = getKeyValue("Settings", `hidden_tags_${type}`) || [];
+      (await getKeyValue("Settings", `tag_order_${type}`)) || defaultTags;
+    const hiddenTags =
+      (await getKeyValue("Settings", `hidden_tags_${type}`)) || [];
 
-    const rows = global.db
-      .prepare(
-        `SELECT CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`,
-      )
-      .all();
+    const rows = await queryAll(
+      `SELECT CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`,
+    );
     const allTagsSet = new Set([...defaultTags, ...savedOrder]);
     for (const r of rows) {
       const tag = r.CustomTag ? r.CustomTag.trim() : "";
@@ -237,7 +242,7 @@ router.post("/api/local/tags/delete-tag", async (req, res) => {
     }
 
     // 2. Remove from database items
-    const rows = global.db
+    const rows = await global.db
       .prepare(
         `SELECT id, CustomTag FROM ${type} WHERE CustomTag IS NOT NULL AND CustomTag != ''`,
       )
@@ -258,7 +263,7 @@ router.post("/api/local/tags/delete-tag", async (req, res) => {
         const updatedTags = tagsArr.filter((t) => t !== trimmed);
         const newCustomTag =
           updatedTags.length > 0 ? JSON.stringify(updatedTags) : null;
-        global.db
+        await global.db
           .prepare(`UPDATE ${type} SET CustomTag = ? WHERE id = ?`)
           .run(newCustomTag, r.id);
       }
@@ -292,7 +297,7 @@ router.post("/api/local/tags/add", async (req, res) => {
     if (!resolvedMalID) {
       if (global.mappingDb && id && provider) {
         try {
-          const row = global.mappingDb
+          const row = await global.mappingDb
             .prepare(
               `SELECT malid FROM ${provider} WHERE uuid = ? OR id = ? LIMIT 1`,
             )
@@ -313,7 +318,7 @@ router.post("/api/local/tags/add", async (req, res) => {
       tagValue = (CustomTag || "").trim();
     }
 
-    const existing = global.db
+    const existing = await global.db
       .prepare(
         `SELECT * FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ? OR folder_name = ?`,
       )
@@ -337,7 +342,7 @@ router.post("/api/local/tags/add", async (req, res) => {
       }
       if (updates.length > 0) {
         params.push(existing.id);
-        global.db
+        await global.db
           .prepare(
             `UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
           )
@@ -345,7 +350,7 @@ router.post("/api/local/tags/add", async (req, res) => {
 
         const targetMalID = resolvedMalID || existing.MalID;
         if (CustomTag !== undefined && targetMalID && targetMalID !== "") {
-          global.db
+          await global.db
             .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
             .run(tagValue, targetMalID);
         }
@@ -422,12 +427,12 @@ router.post("/api/local/tags/add", async (req, res) => {
       }
 
       await MetadataAdd(type, values);
-      global.db
+      await global.db
         .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
         .run(resolvedMalID, tagValue, id);
 
       if (resolvedMalID && resolvedMalID !== "") {
-        global.db
+        await global.db
           .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
           .run(tagValue, resolvedMalID);
       }
@@ -441,7 +446,7 @@ router.post("/api/local/tags/add", async (req, res) => {
       targetMalID !== ""
     ) {
       try {
-        const rowsToClean = global.db
+        const rowsToClean = await global.db
           .prepare(`SELECT id, folder_name FROM ${type} WHERE MalID = ?`)
           .all(targetMalID);
 
@@ -453,7 +458,7 @@ router.post("/api/local/tags/add", async (req, res) => {
           const folderExists = folderName && fs.existsSync(folderPath);
 
           if (!folderExists) {
-            global.db.prepare(`DELETE FROM ${type} WHERE id = ?`).run(row.id);
+            await run(`DELETE FROM ${type} WHERE id = ?`, [row.id]);
           }
         }
       } catch (err) {
@@ -496,7 +501,7 @@ router.post("/api/local/tags/remove", async (req, res) => {
 
     let dbRecord = null;
     try {
-      dbRecord = global.db
+      dbRecord = await global.db
         .prepare(`SELECT * FROM ${type} WHERE id = ?`)
         .get(id);
     } catch (e) {}
@@ -543,12 +548,12 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
     }
 
     const table = type === "Anime" ? "Anime" : "Manga";
-    const existing = global.db
-      .prepare(`SELECT * FROM ${table} WHERE id = ?`)
-      .get(oldId);
+    const existing = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [
+      oldId,
+    ]);
 
     if (existing) {
-      global.db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(oldId);
+      await run(`DELETE FROM ${table} WHERE id = ?`, [oldId]);
       existing.id = newId;
       existing.provider = newProvider;
       existing.last_updated = new Date().toISOString();
@@ -556,22 +561,20 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
       const placeholders = columns.map(() => "?").join(", ");
       const values = columns.map((col) => existing[col]);
 
-      global.db
-        .prepare(
-          `
-        INSERT OR REPLACE INTO ${table} (${columns.join(", ")})
-        VALUES (${placeholders})
-      `,
-        )
-        .run(...values);
+      await run(
+        `INSERT OR REPLACE INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`,
+        values,
+      );
       if (type === "Anime") {
-        global.db
-          .prepare(`UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?`)
-          .run(newId, oldId);
+        await run(`UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?`, [
+          newId,
+          oldId,
+        ]);
       } else {
-        global.db
-          .prepare(`UPDATE ReadHistory SET manga_id = ? WHERE manga_id = ?`)
-          .run(newId, oldId);
+        await run(`UPDATE ReadHistory SET manga_id = ? WHERE manga_id = ?`, [
+          newId,
+          oldId,
+        ]);
       }
       return res.json({ success: true, migrated: true });
     }
@@ -793,8 +796,8 @@ router.post("/api/history/update", async (req, res) => {
 // Clear all history records
 router.post("/api/history/clear", async (req, res) => {
   try {
-    global.db.prepare(`DELETE FROM WatchHistory`).run();
-    global.db.prepare(`DELETE FROM ReadHistory`).run();
+    await run(`DELETE FROM WatchHistory`);
+    await run(`DELETE FROM ReadHistory`);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -806,7 +809,7 @@ router.delete("/api/history/:type/:id", async (req, res) => {
   try {
     const { type, id } = req.params;
     const historyTable = type === "Anime" ? "WatchHistory" : "ReadHistory";
-    global.db.prepare(`DELETE FROM ${historyTable} WHERE id = ?`).run(id);
+    await run(`DELETE FROM ${historyTable} WHERE id = ?`, [id]);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -830,7 +833,7 @@ router.post("/api/history/hide", async (req, res) => {
     let queryIds = [mediaId];
 
     if (malId) {
-      const siblings = global.db
+      const siblings = await global.db
         .prepare(`SELECT id FROM ${mainTable} WHERE MalID = ?`)
         .all(String(malId));
       siblings.forEach((s) => {
@@ -843,14 +846,14 @@ router.post("/api/history/hide", async (req, res) => {
     }
 
     const placeholders = queryIds.map(() => "?").join(",");
-    global.db
+    await global.db
       .prepare(
         `UPDATE ${historyTable} SET hidden = 1 WHERE ${idField} IN (${placeholders})`,
       )
       .run(...queryIds);
 
     if (title) {
-      global.db
+      await global.db
         .prepare(
           `UPDATE ${historyTable} SET hidden = 1 WHERE LOWER(${titleField}) = LOWER(?)`,
         )
@@ -880,14 +883,16 @@ router.get("/api/history/progress", async (req, res) => {
 
       let resolvedTitle = null;
       try {
-        const localRec = global.db
-          .prepare(`SELECT MalID, title FROM Anime WHERE id = ?`)
-          .get(mediaId);
+        const localRec = await queryOne(
+          `SELECT MalID, title FROM Anime WHERE id = ?`,
+          [mediaId],
+        );
         if (localRec) {
           if (localRec.MalID) {
-            const siblings = global.db
-              .prepare(`SELECT id FROM Anime WHERE MalID = ?`)
-              .all(localRec.MalID);
+            const siblings = await queryAll(
+              `SELECT id FROM Anime WHERE MalID = ?`,
+              [localRec.MalID],
+            );
             siblings.forEach((s) => {
               if (s.id) queryIds.push(s.id);
             });
@@ -907,7 +912,7 @@ router.get("/api/history/progress", async (req, res) => {
         params.push(resolvedTitle);
       }
 
-      const history = global.db.prepare(sql).all(...params);
+      const history = await queryAll(sql, params);
 
       history.sort(
         (a, b) =>
@@ -942,14 +947,16 @@ router.get("/api/history/progress", async (req, res) => {
       let queryIds = [mediaId];
       let resolvedTitle = null;
       try {
-        const localRec = global.db
-          .prepare(`SELECT MalID, title FROM Manga WHERE id = ?`)
-          .get(mediaId);
+        const localRec = await queryOne(
+          `SELECT MalID, title FROM Manga WHERE id = ?`,
+          [mediaId],
+        );
         if (localRec) {
           if (localRec.MalID) {
-            const siblings = global.db
-              .prepare(`SELECT id FROM Manga WHERE MalID = ?`)
-              .all(localRec.MalID);
+            const siblings = await queryAll(
+              `SELECT id FROM Manga WHERE MalID = ?`,
+              [localRec.MalID],
+            );
             siblings.forEach((s) => {
               if (s.id) queryIds.push(s.id);
             });
@@ -969,7 +976,7 @@ router.get("/api/history/progress", async (req, res) => {
         params.push(resolvedTitle);
       }
 
-      const history = global.db.prepare(sql).all(...params);
+      const history = await queryAll(sql, params);
       history.sort(
         (a, b) =>
           new Date(b.last_read).getTime() - new Date(a.last_read).getTime(),
@@ -1015,7 +1022,7 @@ router.get("/api/history/progress", async (req, res) => {
 // Fetch history statistics
 router.get("/api/history/stats", async (req, res) => {
   try {
-    const watchStats = global.db
+    const watchStats = await global.db
       .prepare(
         `
       SELECT 
@@ -1027,7 +1034,7 @@ router.get("/api/history/stats", async (req, res) => {
       )
       .get();
 
-    const readStats = global.db
+    const readStats = await global.db
       .prepare(
         `
       SELECT 
@@ -1056,12 +1063,12 @@ router.get("/api/history/stats", async (req, res) => {
 router.get("/api/history/list", async (req, res) => {
   try {
     try {
-      global.db
+      await global.db
         .prepare(
           "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
         )
         .run();
-      global.db
+      await global.db
         .prepare(
           "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
         )
@@ -1077,68 +1084,70 @@ router.get("/api/history/list", async (req, res) => {
       ? ""
       : "WHERE (r.hidden IS NULL OR r.hidden = 0)";
 
-    const watchLogs = global.db
-      .prepare(
-        `
-      SELECT 
-        w.id,
-        'Anime' AS type,
-        w.anime_id AS media_id,
-        w.anime_title AS title,
-        w.episode_number AS number,
-        w.current_time,
-        w.duration,
-        w.time_spent,
-        w.is_completed,
-        w.last_watched AS date,
-        a.image_url,
-        a.provider,
-        a.MalID AS mal_id,
-        CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
-        mal.totalEpisodes AS total_count
-      FROM WatchHistory w
-      LEFT JOIN Anime a ON a.id = w.anime_id
-      LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
-      ${watchWhereClause}
-      ORDER BY w.last_watched DESC
-      LIMIT ?
-    `,
-      )
-      .all(limit);
+    const watchLogs =
+      (await global.db
+        .prepare(
+          `
+        SELECT 
+          w.id,
+          'Anime' AS type,
+          w.anime_id AS media_id,
+          w.anime_title AS title,
+          w.episode_number AS number,
+          w.current_time,
+          w.duration,
+          w.time_spent,
+          w.is_completed,
+          w.last_watched AS date,
+          a.image_url,
+          a.provider,
+          a.MalID AS mal_id,
+          CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
+          mal.totalEpisodes AS total_count
+        FROM WatchHistory w
+        LEFT JOIN Anime a ON a.id = w.anime_id
+        LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
+        ${watchWhereClause}
+        ORDER BY w.last_watched DESC
+        LIMIT ?
+      `,
+        )
+        .all(limit)) || [];
 
     watchLogs.forEach((log) => {
       log.image = log.image_url || null;
       delete log.image_url;
     });
 
-    const readLogs = global.db
-      .prepare(
-        `
-      SELECT 
-        r.id,
-        'Manga' AS type,
-        r.manga_id AS media_id,
-        r.manga_title AS title,
-        r.chapter_number AS number,
-        r.current_page AS current_time,
-        r.total_pages AS duration,
-        r.time_spent,
-        r.is_completed,
-        r.last_read AS date,
-        m.image_url,
-        m.provider,
-        m.MalID AS mal_id,
-        CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
-        mml.totalChapters AS total_count
-      FROM ReadHistory r
-      LEFT JOIN Manga m ON m.id = r.manga_id
-      LEFT JOIN MyMangaList mml ON mml.id = m.MalID
-      ${readWhereClause}
-      ORDER BY r.last_read DESC
-      LIMIT ?
-    `,
-      )
-      .all(limit);
+    const readLogs =
+      (await global.db
+        .prepare(
+          `
+        SELECT 
+          r.id,
+          'Manga' AS type,
+          r.manga_id AS media_id,
+          r.manga_title AS title,
+          r.chapter_number AS number,
+          r.current_page AS current_time,
+          r.total_pages AS duration,
+          r.time_spent,
+          r.is_completed,
+          r.last_read AS date,
+          m.image_url,
+          m.provider,
+          m.MalID AS mal_id,
+          CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
+          mml.totalChapters AS total_count
+        FROM ReadHistory r
+        LEFT JOIN Manga m ON m.id = r.manga_id
+        LEFT JOIN MyMangaList mml ON mml.id = m.MalID
+        ${readWhereClause}
+        ORDER BY r.last_read DESC
+        LIMIT ?
+      `,
+        )
+        .all(limit)) || [];
 
     readLogs.forEach((log) => {
       log.image = log.image_url || null;

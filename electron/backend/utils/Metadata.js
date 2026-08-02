@@ -273,7 +273,9 @@ async function MetadataAdd(type, valuesToAdd) {
       const values = Object.values(filteredValues);
 
       global.db
-        .prepare(`INSERT INTO ${type} (${fields}) VALUES (${placeholders})`)
+        .prepare(
+          `INSERT OR REPLACE INTO ${type} (${fields}) VALUES (${placeholders})`,
+        )
         .run(...values);
     } catch (error) {
       throw new Error(`Error inserting into ${type}: ${error.message}`);

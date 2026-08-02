@@ -39,11 +39,11 @@ async function clearCache() {
   try {
     const dir = getImageCacheDir();
     const files = await fs.promises.readdir(dir);
-    for (const file of files) {
-      try {
-        await fs.promises.unlink(path.join(dir, file));
-      } catch (_) {}
-    }
+    await Promise.all(
+      files.map((file) =>
+        fs.promises.unlink(path.join(dir, file)).catch(() => {}),
+      ),
+    );
     await run("DELETE FROM ImageCache");
     logger.info("Image cache cleared successfully.");
     return { success: true };

@@ -23,6 +23,55 @@ import { apiPost } from "../utils/common";
 import Dropdown from "./common/Dropdown";
 import "./css/InfoView.css";
 
+const getItemLangs = (item, details, dubSelect) => {
+  let langs = [];
+  if (Array.isArray(item.langs) && item.langs.length > 0) {
+    langs = item.langs.map((l) => String(l).toLowerCase());
+  } else if (item.lang) {
+    if (item.lang === "both") {
+      langs = ["sub", "dub"];
+    } else {
+      langs = [String(item.lang).toLowerCase()];
+    }
+  } else {
+    const hasSub =
+      item.hasSub !== undefined
+        ? item.hasSub
+        : details?.hasSub !== undefined
+          ? details.hasSub
+          : true;
+    const hasDub =
+      item.hasDub !== undefined
+        ? item.hasDub
+        : details?.hasDub ||
+          details?.subOrDub === "both" ||
+          details?.subOrDub === "dub";
+    const hasHsub = item.hasHsub || details?.hasHsub;
+    const hasSoftsub =
+      item.hasSoftsub || item.hasSoftSub || details?.hasSoftsub;
+    const hasSoftdub =
+      item.hasSoftdub || item.hasSoftDub || details?.hasSoftdub;
+
+    if (hasSub) langs.push("sub");
+    if (hasDub) langs.push("dub");
+    if (hasHsub) langs.push("hsub");
+    if (hasSoftsub) langs.push("softsub");
+    if (hasSoftdub) langs.push("softdub");
+
+    if (langs.length === 0) {
+      langs = ["sub"];
+      if (
+        details?.subOrDub === "both" ||
+        details?.subOrDub === "dub" ||
+        dubSelect === "dub"
+      ) {
+        langs.push("dub");
+      }
+    }
+  }
+  return [...new Set(langs)];
+};
+
 export default function InfoView({
   id: propId,
   type,
@@ -128,6 +177,7 @@ export default function InfoView({
   const [detectedPageSize, setDetectedPageSize] = useState(30);
 
   const [selectedItems, setSelectedItems] = useState(new Set());
+  const [isDescExpanded, setIsDescExpanded] = useState(false);
   const [dubSelect, setDubSelect] = useState("sub");
   const [rangeInput, setRangeInput] = useState("");
   const [lastClickedId, setLastClickedId] = useState(null);
@@ -145,18 +195,22 @@ export default function InfoView({
     return `${m}:${pad(s)}`;
   };
 
-  const isDownloaded = (itemNum, subdub = "sub") => {
+  const isDownloaded = (itemNum, subdub = null) => {
     const num = parseFloat(itemNum);
     if (isNaN(num)) return false;
     if (type === "Anime") {
       const episodes = details?.DownloadedEpisodes;
-      const list = Array.isArray(episodes)
-        ? episodes
-        : [
-            ...(episodes?.sub || []),
-            ...(episodes?.dub || []),
-            ...(episodes?.hsub || []),
-          ];
+      if (Array.isArray(episodes)) {
+        return episodes.map(Number).includes(num);
+      }
+      if (subdub && episodes?.[subdub]) {
+        return episodes[subdub].map(Number).includes(num);
+      }
+      const list = [
+        ...(episodes?.sub || []),
+        ...(episodes?.dub || []),
+        ...(episodes?.hsub || []),
+      ];
       return list.map(Number).includes(num);
     } else {
       const list = details?.DownloadedChapters || [];
@@ -411,7 +465,13 @@ export default function InfoView({
       }
 
       if (isInitial) {
-        const savedSort = localStorage.getItem("info_sort_order") || sortOrder;
+        let savedSort = null;
+        if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
+          try {
+            const res = await window.sharedStateAPI.getSettings(["infoSortOrder"]);
+            savedSort = res?.settings?.infoSortOrder;
+          } catch (_) {}
+        }
         if (
           savedSort &&
           (savedSort === "asc" ||
@@ -1798,26 +1858,10 @@ export default function InfoView({
 
   const isItemUnavailable = (item) => {
     if (type !== "Anime") return false;
-    const itemLangs = Array.isArray(item.langs) && item.langs.length > 0
-      ? item.langs.map((l) => String(l).toLowerCase())
-      : [];
-    const hasSub = itemLangs.length > 0
-      ? itemLangs.includes("sub")
-      : (item.lang === "sub" || item.lang === "both" || !item.lang);
-    const hasDub = itemLangs.length > 0
-      ? itemLangs.includes("dub")
-      : (item.lang === "dub" || item.lang === "both" || !!item.hasDub);
-    const hasHsub = itemLangs.length > 0
-      ? itemLangs.includes("hsub")
-      : (!!item.hasHsub || item.lang === "hsub");
-
-    if (dubSelect === "sub") {
-      return !hasSub;
-    } else if (dubSelect === "dub") {
-      return !hasDub;
-    } else if (dubSelect === "hsub") {
-      return !hasHsub;
-    }
+    const langs = (item.langs || []).map((l) => String(l).toLowerCase());
+    if (dubSelect === "sub") return !langs.includes("sub");
+    if (dubSelect === "dub") return !langs.includes("dub");
+    if (dubSelect === "hsub") return !langs.includes("hsub");
     return false;
   };
 
@@ -2000,9 +2044,39 @@ export default function InfoView({
             )}
           </div>
 
-          <p className="info-description">
-            {details?.description || "No description available for this title."}
-          </p>
+          {(() => {
+            const rawDescription = (details?.description || "")
+              .replace(/\s*\[\s*more\s*\]\s*$/i, "")
+              .trim();
+            const isLongDesc = rawDescription.length > 200;
+            const displayDesc =
+              isLongDesc && !isDescExpanded
+                ? rawDescription.slice(0, 200) + "..."
+                : rawDescription || "No description available for this title.";
+            return (
+              <p className="info-description">
+                {displayDesc}
+                {isLongDesc && (
+                  <button
+                    type="button"
+                    onClick={() => setIsDescExpanded(!isDescExpanded)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--accent-blue, #60a5fa)",
+                      cursor: "pointer",
+                      fontWeight: 600,
+                      marginLeft: "6px",
+                      padding: 0,
+                      fontSize: "13px",
+                    }}
+                  >
+                    {isDescExpanded ? "Show Less" : "Show More"}
+                  </button>
+                )}
+              </p>
+            );
+          })()}
 
           {details?.released && (
             <div className="meta-item">
@@ -2362,60 +2436,60 @@ export default function InfoView({
                 </button>
               )}
             </div>
-            {/* Sort Selector */}
-            <Dropdown
-              label="Sort:"
-              value={sortOrder}
-              onChange={(newOrder) => {
-                setSortOrder(newOrder);
-                if (newOrder === "asc" || newOrder === "desc") {
-                  setSortDirection(newOrder);
-                  localStorage.setItem("info_sort_order", newOrder);
-                  if (
-                    window.sharedStateAPI &&
-                    window.sharedStateAPI.updateSetting
-                  ) {
-                    window.sharedStateAPI
-                      .updateSetting("infoSortOrder", newOrder)
-                      .catch((e) => console.error(e));
-                  }
+            {/* Sort & Sub/Dub Controls Row */}
+            <div className="sort-subdub-row">
+              {/* Sort Selector */}
+              <Dropdown
+                label="Sort:"
+                value={sortOrder}
+                onChange={(newOrder) => {
+                  setSortOrder(newOrder);
+                  if (newOrder === "asc" || newOrder === "desc") {
+                    setSortDirection(newOrder);
+                    if (
+                      window.sharedStateAPI &&
+                      window.sharedStateAPI.updateSetting
+                    ) {
+                      window.sharedStateAPI
+                        .updateSetting("infoSortOrder", newOrder)
+                        .catch((e) => console.error(e));
+                    }
 
-                  const isAnimePahe =
-                    details?.provider?.toLowerCase() === "animepahe" ||
-                    details?.provider?.toLowerCase() === "pahe";
-                  if (isAnimePahe) {
-                    fetchItems(newOrder === "asc" ? totalPages : 1);
+                    const isAnimePahe =
+                      details?.provider?.toLowerCase() === "animepahe" ||
+                      details?.provider?.toLowerCase() === "pahe";
+                    if (isAnimePahe) {
+                      fetchItems(newOrder === "asc" ? totalPages : 1);
+                    }
                   }
-                }
-              }}
-              options={[
-                { value: "asc", label: "ASC" },
-                { value: "desc", label: "DESC" },
-                ...(showWatchedSort
-                  ? [
-                      {
-                        value: "watched",
-                        label: type === "Anime" ? "WATCHED" : "READ",
-                      },
-                      {
-                        value: "unwatched",
-                        label: type === "Anime" ? "UNWATCHED" : "UNREAD",
-                      },
-                    ]
-                  : []),
-                ...(hasDownloads
-                  ? [{ value: "downloaded", label: "DOWNLOADED" }]
-                  : []),
-              ]}
-              className="u-style-43"
-              triggerClassName="u-style-44"
-              menuClassName="u-style-45"
-            />
+                }}
+                options={[
+                  { value: "asc", label: "ASC" },
+                  { value: "desc", label: "DESC" },
+                  ...(showWatchedSort
+                    ? [
+                        {
+                          value: "watched",
+                          label: type === "Anime" ? "WATCHED" : "READ",
+                        },
+                        {
+                          value: "unwatched",
+                          label: type === "Anime" ? "UNWATCHED" : "UNREAD",
+                        },
+                      ]
+                    : []),
+                  ...(hasDownloads
+                    ? [{ value: "downloaded", label: "DOWNLOADED" }]
+                    : []),
+                ]}
+                className="u-style-43"
+                triggerClassName="u-style-44"
+                menuClassName="u-style-45"
+              />
 
-            {/* Action buttons if online provider is available */}
-            {details?.provider && details?.provider !== "local source" && (
-              <>
-                {type === "Anime" && (
+              {details?.provider &&
+                details?.provider !== "local source" &&
+                type === "Anime" && (
                   <Dropdown
                     value={dubSelect}
                     onChange={setDubSelect}
@@ -2440,6 +2514,11 @@ export default function InfoView({
                     menuClassName="u-style-45"
                   />
                 )}
+            </div>
+
+            {/* Action buttons if online provider is available */}
+            {details?.provider && details?.provider !== "local source" && (
+              <>
                 <button
                   onClick={handleSelectAll}
                   style={{
@@ -2555,19 +2634,7 @@ export default function InfoView({
             } else if (isStarted) {
               customBorderClass = "started";
             }
-
-            const itemLangs = Array.isArray(item.langs) && item.langs.length > 0
-              ? item.langs.map((l) => String(l).toLowerCase())
-              : [];
-            const hasSubLang = itemLangs.length > 0
-              ? itemLangs.includes("sub")
-              : (item.lang === "sub" || item.lang === "both" || !item.lang);
-            const hasDubLang = itemLangs.length > 0
-              ? itemLangs.includes("dub")
-              : (item.lang === "dub" || item.lang === "both" || !!item.hasDub);
-            const hasHsubLang = itemLangs.length > 0
-              ? itemLangs.includes("hsub")
-              : (!!item.hasHsub || item.lang === "hsub");
+            const itemLangs = getItemLangs(item, details, dubSelect);
             const showOnlineActions =
               details?.provider && details?.provider !== "local source";
 
@@ -2578,45 +2645,47 @@ export default function InfoView({
                 className={`item-card glass-panel ${customBorderClass} ${isSelected ? "selected" : ""}`}
                 onClick={(e) => handleItemClick(e, item)}
               >
-                <div className="u-style-50">
-                  {showOnlineActions && (
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      disabled={isItemUnavailable(item)}
-                      readOnly
-                      style={{
-                        cursor: isItemUnavailable(item)
-                          ? "not-allowed"
-                          : "pointer",
-                        width: "18px",
-                        height: "18px",
-                        opacity: isItemUnavailable(item) ? 0.4 : 1,
-                      }}
-                    />
-                  )}
-                  <span className="item-num u-style-51">
-                    {type === "Anime"
-                      ? `Episode ${item.number}`
-                      : `Chapter ${item.number}`}
-                  </span>
-                </div>
+                {/* LINE 1: Episode Number, Title (if exists), Progress Bar */}
+                <div className="item-card-row-top">
+                  <div className="item-card-title-group">
+                    {showOnlineActions && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        disabled={isItemUnavailable(item)}
+                        readOnly
+                        style={{
+                          cursor: isItemUnavailable(item)
+                            ? "not-allowed"
+                            : "pointer",
+                          width: "18px",
+                          height: "18px",
+                          opacity: isItemUnavailable(item) ? 0.4 : 1,
+                          flexShrink: 0,
+                        }}
+                      />
+                    )}
+                    <span className="item-num">
+                      {type === "Anime"
+                        ? `Episode ${item.number}`
+                        : `Chapter ${item.number}`}
+                    </span>
+                    {type === "Anime" &&
+                      item.title &&
+                      item.title !== `Episode ${item.number}` && (
+                        <span title={item.title} className="item-title-sub">
+                          {item.title}
+                        </span>
+                      )}
+                    {type === "Manga" &&
+                      item.title &&
+                      item.title !== `Chapter ${item.number}` && (
+                        <span title={item.title} className="item-title-sub">
+                          {item.title}
+                        </span>
+                      )}
+                  </div>
 
-                <div className="item-middle-progress u-style-52">
-                  {type === "Anime" &&
-                    item.title &&
-                    item.title !== `Episode ${item.number}` && (
-                      <span title={item.title} className="u-style-53">
-                        {item.title}
-                      </span>
-                    )}
-                  {type === "Manga" &&
-                    item.title &&
-                    item.title !== `Chapter ${item.number}` && (
-                      <span title={item.title} className="u-style-53">
-                        {item.title}
-                      </span>
-                    )}
                   {(() => {
                     if (!epStatus) return null;
                     const curVal =
@@ -2636,8 +2705,8 @@ export default function InfoView({
                       return null;
 
                     return (
-                      <div className="u-style-54">
-                        <div className="u-style-55">
+                      <div className="item-progress-bar-wrap">
+                        <div className="item-progress-bar-bg">
                           <div
                             style={{
                               width: `${Math.min(100, Math.max(0, (curVal / (totVal || 1)) * 100))}%`,
@@ -2649,7 +2718,7 @@ export default function InfoView({
                             }}
                           />
                         </div>
-                        <span className="u-style-56">
+                        <span className="item-progress-text">
                           {type === "Anime"
                             ? `${formatTime(curVal)} / ${formatTime(totVal)}`
                             : `Page ${curVal}/${totVal}`}
@@ -2659,121 +2728,155 @@ export default function InfoView({
                   })()}
                 </div>
 
-                <div className="u-style-57">
-                  {/* Local download status & deletion buttons */}
+                {/* LINE 2: All sub, dub, hsub, download button */}
+                <div className="item-card-row-bottom">
                   {type === "Anime" ? (
                     <>
                       {isDownloaded(item.number) ? (
                         <div className="badge-and-action">
-                          <span className="badge-manga">Downloaded</span>
+                          {itemLangs.map((langKey) => {
+                            if (!isDownloaded(item.number, langKey))
+                              return null;
+                            let label = langKey.toUpperCase();
+                            if (langKey === "softsub" || langKey === "soft_sub")
+                              label = "SOFT SUB";
+                            else if (
+                              langKey === "softdub" ||
+                              langKey === "soft_dub"
+                            )
+                              label = "SOFT DUB";
+                            else if (langKey === "hsub") label = "HSUB";
+                            else if (langKey === "sub") label = "SUB";
+                            else if (langKey === "dub") label = "DUB";
+
+                            return (
+                              <button
+                                key={langKey}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onWatch(
+                                    id,
+                                    item.number,
+                                    true,
+                                    langKey,
+                                    episodesOrChapters,
+                                    details?.DownloadedEpisodes,
+                                    details?.title,
+                                    details?.provider,
+                                    details?.image,
+                                  );
+                                }}
+                                className={`badge-subdub ${langKey}`}
+                                title={`Play Downloaded ${label}`}
+                              >
+                                <Play size={11} fill="currentColor" />
+                                <span>{label}</span>
+                              </button>
+                            );
+                          })}
+                          {!itemLangs.some((langKey) =>
+                            isDownloaded(item.number, langKey),
+                          ) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onWatch(
+                                  id,
+                                  item.number,
+                                  true,
+                                  dubSelect || "sub",
+                                  episodesOrChapters,
+                                  details?.DownloadedEpisodes,
+                                  details?.title,
+                                  details?.provider,
+                                  details?.image,
+                                );
+                              }}
+                              className="badge-subdub sub"
+                              title="Play Downloaded Episode"
+                            >
+                              <Play size={11} fill="currentColor" />
+                              <span>PLAY</span>
+                            </button>
+                          )}
                           <button
-                            onClick={() =>
-                              onWatch(
-                                id,
-                                item.number,
-                                true,
-                                dubSelect || "sub",
-                                episodesOrChapters,
-                                details?.DownloadedEpisodes,
-                                details?.title,
-                                details?.provider,
-                                details?.image,
-                              )
-                            }
-                            className="btn-play"
-                            title="Play in App"
-                          >
-                            <Play size={18} />
-                          </button>
-                          <button
-                            onClick={() =>
-                              handleOpenFile(
-                                item.number,
-                                "sub",
-                                "open_file",
-                              )
-                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenFile(item.number, "sub", "open_file");
+                            }}
                             className="btn-action-open"
                             title="Open File / File Explorer"
                           >
-                            <FolderOpen size={18} />
+                            <FolderOpen size={16} />
                           </button>
                           {isLocal && (
                             <button
-                              onClick={() => handleDeleteEpisode(item.number)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteEpisode(item.number);
+                              }}
                               className="btn-action-trash"
                               title="Delete Download"
                             >
-                              <Trash2 size={18} />
+                              <Trash2 size={16} />
                             </button>
                           )}
                         </div>
                       ) : (
                         showOnlineActions && (
                           <div className="badge-and-action">
-                            {hasSubLang && (
-                              <button
-                                onClick={() =>
-                                  onWatch(
-                                    id,
-                                    item.id,
-                                    false,
-                                    "sub",
-                                    episodesOrChapters,
-                                    details?.DownloadedEpisodes,
-                                    details?.title,
-                                    details?.provider,
-                                    details?.image,
-                                  )
-                                }
-                                className="badge-subdub sub"
-                              >
-                                <Play size={11} fill="currentColor" />
-                                <span>SUB</span>
-                              </button>
-                            )}
-                            {hasDubLang && (
-                              <button
-                                onClick={() =>
-                                  onWatch(
-                                    id,
-                                    item.id,
-                                    false,
-                                    "dub",
-                                    episodesOrChapters,
-                                    details?.DownloadedEpisodes,
-                                    details?.title,
-                                    details?.provider,
-                                    details?.image,
-                                  )
-                                }
-                                className="badge-subdub dub"
-                              >
-                                <Play size={11} fill="currentColor" />
-                                <span>DUB</span>
-                              </button>
-                            )}
-                            {hasHsubLang && (
-                              <button
-                                onClick={() =>
-                                  onWatch(
-                                    id,
-                                    item.id,
-                                    false,
-                                    "hsub",
-                                    episodesOrChapters,
-                                    details?.DownloadedEpisodes,
-                                    details?.title,
-                                    details?.provider,
-                                    details?.image,
-                                  )
-                                }
-                                className="badge-subdub hsub"
-                              >
-                                <Play size={11} fill="currentColor" />
-                                <span>HSUB</span>
-                              </button>
-                            )}
+                            {itemLangs.map((langKey) => {
+                              let label = langKey.toUpperCase();
+                              if (
+                                langKey === "softsub" ||
+                                langKey === "soft_sub"
+                              )
+                                label = "SOFT SUB";
+                              else if (
+                                langKey === "softdub" ||
+                                langKey === "soft_dub"
+                              )
+                                label = "SOFT DUB";
+                              else if (langKey === "hsub") label = "HSUB";
+                              else if (langKey === "sub") label = "SUB";
+                              else if (langKey === "dub") label = "DUB";
+
+                              return (
+                                <button
+                                  key={langKey}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onWatch(
+                                      id,
+                                      item.id,
+                                      false,
+                                      langKey,
+                                      episodesOrChapters,
+                                      details?.DownloadedEpisodes,
+                                      details?.title,
+                                      details?.provider,
+                                      details?.image,
+                                    );
+                                  }}
+                                  className={`badge-subdub ${langKey}`}
+                                  title={`Play ${label}`}
+                                >
+                                  <Play size={11} fill="currentColor" />
+                                  <span>{label}</span>
+                                </button>
+                              );
+                            })}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownload(item);
+                              }}
+                              className="badge-subdub download-btn"
+                              title="Download Episode"
+                            >
+                              <Download size={11} />
+                              <span>DOWNLOAD</span>
+                            </button>
                           </div>
                         )
                       )}
@@ -2785,7 +2888,8 @@ export default function InfoView({
                         <div className="badge-and-action">
                           <span className="badge-manga">Downloaded</span>
                           <button
-                            onClick={() =>
+                            onClick={(e) => {
+                              e.stopPropagation();
                               onRead(
                                 id,
                                 item.number,
@@ -2795,72 +2899,75 @@ export default function InfoView({
                                 details?.title,
                                 details?.provider,
                                 details?.image,
-                              )
-                            }
+                              );
+                            }}
                             className="btn-read"
                             title="Read in App"
                           >
-                            <BookOpen size={18} />
+                            <BookOpen size={16} />
                           </button>
                           <button
-                            onClick={() =>
-                              handleOpenFile(item.number, null, "open_file")
-                            }
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenFile(item.number, null, "open_file");
+                            }}
                             className="btn-action-open"
                             title="Open File / File Explorer"
                           >
-                            <FolderOpen size={18} />
+                            <FolderOpen size={16} />
                           </button>
                           {isLocal && (
                             <button
-                              onClick={() => handleDeleteChapter(item.number)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteChapter(item.number);
+                              }}
                               className="btn-action-trash"
                               title="Delete Download"
                             >
-                              <Trash2 size={18} />
+                              <Trash2 size={16} />
                             </button>
                           )}
                         </div>
                       ) : (
                         showOnlineActions && (
-                          <button
-                            onClick={() =>
-                              onRead(
-                                id,
-                                item.id,
-                                false,
-                                sortedItems,
-                                details?.DownloadedChapters,
-                                details?.title,
-                                details?.provider,
-                                details?.image,
-                              )
-                            }
-                            className="btn-stream"
-                          >
-                            <span>Read Online</span>
-                          </button>
+                          <div className="badge-and-action">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onRead(
+                                  id,
+                                  item.id,
+                                  false,
+                                  sortedItems,
+                                  details?.DownloadedChapters,
+                                  details?.title,
+                                  details?.provider,
+                                  details?.image,
+                                );
+                              }}
+                              className="btn-read"
+                              title="Read Online"
+                            >
+                              <BookOpen size={16} />
+                              <span>READ</span>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDownload(item);
+                              }}
+                              className="badge-subdub download-btn"
+                              title="Download Chapter"
+                            >
+                              <Download size={11} />
+                              <span>DOWNLOAD</span>
+                            </button>
+                          </div>
                         )
                       )}
                     </>
                   )}
-
-                  {/* Single Download button */}
-                  {showOnlineActions &&
-                    !isItemFullyDownloaded(item) &&
-                    !isItemUnavailable(item) && (
-                      <button
-                        onClick={() => handleDownload(item)}
-                        className="btn-single-dl"
-                        title={
-                          type === "Anime"
-                            ? "Download Episode"
-                            : "Download Chapter"
-                        }
-                      >
-                        <Download size={18} />
-                      </button>
-                    )}
                 </div>
               </div>
             );

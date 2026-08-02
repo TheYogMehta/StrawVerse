@@ -135,15 +135,7 @@ router.post("/api/mal/link", async (req, res) => {
     MalID = MalID ? String(MalID) : null;
 
     let targetMalID = MalID ? parseInt(MalID, 10) : null;
-    let resolvedProvider = null;
-    if (provider) {
-      const p = provider.toLowerCase();
-      if (p.includes("pahe")) resolvedProvider = "pahe";
-      else if (p.includes("anikoto")) resolvedProvider = "anikoto";
-      else if (p.includes("anineko")) resolvedProvider = "anineko";
-      else if (p.includes("weebcentral")) resolvedProvider = "weebcentral";
-      else if (p.includes("allmanga")) resolvedProvider = "allmanga";
-    }
+    let resolvedProvider = provider || null;
 
     if (resolvedProvider) {
       if (!targetMalID) {

@@ -26,10 +26,17 @@ const USER_EVENTS = {
 class WatchTogetherClient {
   constructor() {
     this.ws = null;
-    const stored = localStorage.getItem("strawverse_wt_server");
-    this.serverUrl = stored
-      ? this.formatUrl(stored)
-      : "wss://strawverse-wt.theyogmehta.online/ws";
+    this.serverUrl = "wss://strawverse-wt.theyogmehta.online/ws";
+    if (typeof window !== "undefined" && window.sharedStateAPI && window.sharedStateAPI.getSettings) {
+      window.sharedStateAPI
+        .getSettings(["strawverse_wt_server"])
+        .then((res) => {
+          if (res?.settings?.strawverse_wt_server) {
+            this.serverUrl = this.formatUrl(res.settings.strawverse_wt_server);
+          }
+        })
+        .catch(() => {});
+    }
     this.isConnected = false;
     this.roomCode = null;
     this.isHost = false;
@@ -63,7 +70,9 @@ class WatchTogetherClient {
   setServerUrl(url) {
     const formatted = this.formatUrl(url);
     this.serverUrl = formatted;
-    localStorage.setItem("strawverse_wt_server", formatted);
+    if (typeof window !== "undefined" && window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+      window.sharedStateAPI.updateSetting("strawverse_wt_server", formatted).catch(() => {});
+    }
   }
 
   getServerUrl() {

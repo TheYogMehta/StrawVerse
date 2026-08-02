@@ -335,11 +335,18 @@ try {
     .all()
     .map((col) => col.name);
   if (subOrDubCheck.includes("subOrDub")) {
-    global.db.exec("ALTER TABLE Anime DROP COLUMN subOrDub");
-    logger.info("[db] Dropped unused subOrDub column from Anime table");
+    try {
+      global.db.exec("ALTER TABLE Anime DROP COLUMN subOrDub");
+      logger.info("[db] Dropped unused subOrDub column from Anime table");
+    } catch (dropErr) {
+      logger.warn(
+        "[db] Skipping subOrDub column drop (SQLite engine limitation): " +
+          dropErr.message,
+      );
+    }
   }
 } catch (e) {
-  logger.error("[db] Failed to drop subOrDub column: " + e.message);
+  logger.warn("[db] Failed to check or drop subOrDub column: " + e.message);
 }
 
 try {

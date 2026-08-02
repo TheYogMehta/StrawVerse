@@ -45,155 +45,17 @@ async function reconcileActiveProvider(Type) {
 }
 
 // update the settings
-async function settingupdate({
-  quality = null,
-  mal_on_off = null,
-  status = null,
-  malToken = null,
-  CustomDownloadLocation = null,
-  Animeprovider = null,
-  Mangaprovider = null,
-  Pagination = null,
-  autoLoadNextChapter = null,
-  mergeSubtitles = null,
-  subtitleFormat = null,
-  imageCacheSizeLimit = null,
-  developerMode = null,
-  autoSkipIntro = null,
-  autoPlayNextEpisode = null,
-  mangaReaderLayout = null,
-  mangaReaderWidth = null,
-  infoSortOrder = null,
-  upscalePreset = null,
-  forceHighPerformanceGpu = null,
-}) {
-  const currentSettings = config;
-
-  if (mal_on_off === "logout") {
-    mal_on_off = false;
-    malToken = null;
-  } else {
-    if (malToken === null) malToken = currentSettings?.malToken || null;
-    if (malToken !== null) {
-      mal_on_off = true;
-    } else {
-      mal_on_off = false;
+async function settingupdate(newSettings = {}) {
+  if (newSettings && typeof newSettings === "object") {
+    for (const [k, v] of Object.entries(newSettings)) {
+      if (v !== undefined) {
+        config[k] = v;
+      }
     }
   }
 
-  if (status === null) status = currentSettings?.status || "watching";
-
-  if (quality === null) {
-    quality = currentSettings.quality || "1080p";
-  }
-
-  if (Animeprovider === null) {
-    Animeprovider =
-      currentSettings?.Animeprovider ||
-      Object.keys(global?.Anime_providers)?.[0] ||
-      null;
-  }
-
-  if (Mangaprovider === null) {
-    Mangaprovider =
-      currentSettings?.Mangaprovider ||
-      Object.keys(global?.Manga_providers)?.[0] ||
-      null;
-  }
-
-  if (autoLoadNextChapter === null) {
-    autoLoadNextChapter = currentSettings?.autoLoadNextChapter ?? true;
-  }
-
-  if (Pagination === null) {
-    Pagination = currentSettings?.Pagination ?? false;
-  }
-
-  if (mergeSubtitles === null) {
-    mergeSubtitles = currentSettings?.mergeSubtitles ?? false;
-  }
-
-  if (subtitleFormat === null) {
-    subtitleFormat = currentSettings?.subtitleFormat || "vtt";
-  }
-
-  if (CustomDownloadLocation === null) {
-    CustomDownloadLocation =
-      currentSettings?.CustomDownloadLocation || getDownloadsFolder();
-  }
-
-  if (imageCacheSizeLimit === null) {
-    imageCacheSizeLimit = currentSettings?.imageCacheSizeLimit ?? 5;
-  }
-
-  if (developerMode === null) {
-    developerMode = currentSettings?.developerMode ?? false;
-  }
-
-  if (autoSkipIntro === null) {
-    autoSkipIntro = currentSettings?.autoSkipIntro ?? true;
-  }
-
-  if (autoPlayNextEpisode === null) {
-    autoPlayNextEpisode = currentSettings?.autoPlayNextEpisode ?? true;
-  }
-
-  if (mangaReaderLayout === null) {
-    mangaReaderLayout = currentSettings?.mangaReaderLayout || "long-strip";
-  }
-
-  if (mangaReaderWidth === null) {
-    mangaReaderWidth = currentSettings?.mangaReaderWidth || 800;
-  }
-
-  if (infoSortOrder === null) {
-    infoSortOrder = currentSettings?.hasOwnProperty("infoSortOrder")
-      ? currentSettings.infoSortOrder
-      : null;
-  }
-
-  if (upscalePreset === null) {
-    upscalePreset = currentSettings?.upscalePreset || "off";
-  }
-
-  if (forceHighPerformanceGpu === null) {
-    forceHighPerformanceGpu = currentSettings?.forceHighPerformanceGpu ?? false;
-  }
-
-  config.quality = quality;
-  config.mal_on_off = mal_on_off;
-  config.status = status;
-  config.malToken = malToken;
-  config.CustomDownloadLocation = CustomDownloadLocation;
-  config.Animeprovider = Animeprovider;
-  config.Mangaprovider = Mangaprovider;
-  config.Pagination = Pagination;
-  config.autoLoadNextChapter = autoLoadNextChapter;
-  config.mergeSubtitles = mergeSubtitles;
-  config.subtitleFormat = subtitleFormat;
-  config.imageCacheSizeLimit = imageCacheSizeLimit;
-  config.developerMode = developerMode;
-  config.autoSkipIntro = autoSkipIntro;
-  config.autoPlayNextEpisode = autoPlayNextEpisode;
-  config.mangaReaderLayout = mangaReaderLayout;
-  config.mangaReaderWidth = mangaReaderWidth;
-  config.infoSortOrder = infoSortOrder;
-  config.upscalePreset = upscalePreset;
-  config.forceHighPerformanceGpu = forceHighPerformanceGpu;
-
   await settingSave();
-  return {
-    quality,
-    mal_on_off,
-    status,
-    Animeprovider,
-    Mangaprovider,
-    Pagination,
-    autoLoadNextChapter,
-    mergeSubtitles,
-    subtitleFormat,
-    imageCacheSizeLimit,
-  };
+  return config;
 }
 
 // returns valid settings
@@ -275,6 +137,11 @@ async function settingfetch() {
       changes = true;
     }
 
+    if (!config?.hasOwnProperty("preferredSubtitleLanguages")) {
+      config.preferredSubtitleLanguages = ["English"];
+      changes = true;
+    }
+
     if (changes) {
       await settingSave();
     }
@@ -351,8 +218,17 @@ async function SettingsLoad() {
     }
 
     if (config.malToken != null) {
-      let Tosave = await MalRefreshTokenGen(config.malToken);
-      await settingupdate(Tosave);
+      try {
+        const { MalRefreshTokenGen } = require("./mal");
+        if (typeof MalRefreshTokenGen === "function") {
+          let Tosave = await MalRefreshTokenGen(config.malToken);
+          await settingupdate(Tosave);
+        }
+      } catch (malErr) {
+        logger.error(
+          "Failed to refresh MAL token on settings load: " + malErr.message,
+        );
+      }
     }
 
     await settingSave();

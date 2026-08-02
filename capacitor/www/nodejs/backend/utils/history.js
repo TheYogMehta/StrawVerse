@@ -61,7 +61,7 @@ async function updateHistory({
       if (!exists) {
         await run(
           `
-          INSERT INTO ${mainTable} (id, title, provider, MalID, image_url, last_updated)
+          INSERT OR IGNORE INTO ${mainTable} (id, title, provider, MalID, image_url, last_updated)
           VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         `,
           [

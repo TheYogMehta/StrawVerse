@@ -481,29 +481,75 @@ async function downloadEpisodeByQuality(
     if (subdub && !epid.endsWith(`-${subdub}`) && !epid.endsWith("-both")) {
       resolvedEpid = `${epid}-${subdub}`;
     }
-    const sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
+    let sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
 
-    let selectedSource = sourcesArray?.sources?.find(
+    const extractSources = (srcObj, prefSubDub) => {
+      if (!srcObj) return [];
+      if (Array.isArray(srcObj.sources) && srcObj.sources.length > 0) {
+        return srcObj.sources;
+      }
+      if (
+        prefSubDub &&
+        Array.isArray(srcObj[prefSubDub]?.sources) &&
+        srcObj[prefSubDub].sources.length > 0
+      ) {
+        return srcObj[prefSubDub].sources;
+      }
+      if (
+        prefSubDub &&
+        Array.isArray(srcObj[prefSubDub]) &&
+        srcObj[prefSubDub].length > 0
+      ) {
+        return srcObj[prefSubDub];
+      }
+      return [
+        ...(Array.isArray(srcObj.sources) ? srcObj.sources : []),
+        ...(Array.isArray(srcObj.sub?.sources)
+          ? srcObj.sub.sources
+          : Array.isArray(srcObj.sub)
+            ? srcObj.sub
+            : []),
+        ...(Array.isArray(srcObj.dub?.sources)
+          ? srcObj.dub.sources
+          : Array.isArray(srcObj.dub)
+            ? srcObj.dub
+            : []),
+      ];
+    };
+
+    let sourcesList = extractSources(sourcesArray, subdub);
+
+    if ((!sourcesList || sourcesList.length === 0) && resolvedEpid !== epid) {
+      sourcesArray = await fetchEpisodeSources(provider, epid);
+      sourcesList = extractSources(sourcesArray, subdub);
+    }
+
+    let selectedSource = sourcesList?.find(
       (source) => source?.quality === (config?.quality ?? "1080p"),
     );
 
     if (!selectedSource) {
       for (const quality of preferredQualities) {
-        selectedSource = sourcesArray?.sources.find(
+        selectedSource = sourcesList?.find(
           (source) => source?.quality === quality,
         );
         if (selectedSource) break;
       }
     }
 
-    if (
-      !selectedSource &&
-      sourcesArray?.sources[0]?.url &&
-      sourcesArray?.sources[0]?.isM3U8
-    ) {
-      selectedSource = sourcesArray?.sources[0];
-      selectedSource.quality = "best";
+    if (!selectedSource && sourcesList?.[0]?.url) {
+      selectedSource = { ...sourcesList[0] };
+      if (!selectedSource.quality) {
+        selectedSource.quality = "best";
+      }
     }
+
+    const subtitles =
+      sourcesArray?.subtitles ||
+      sourcesArray?.[subdub]?.subtitles ||
+      sourcesArray?.sub?.subtitles ||
+      sourcesArray?.dub?.subtitles ||
+      [];
 
     if (selectedSource) {
       const dlQuality =
@@ -518,7 +564,7 @@ async function downloadEpisodeByQuality(
         dlQuality,
         Title,
         epid,
-        subdub === "hsub" ? [] : (sourcesArray?.subtitles ?? []),
+        subdub === "hsub" ? [] : subtitles,
         subdub === "hsub"
           ? false
           : config?.mergeSubtitles === true

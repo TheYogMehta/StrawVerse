@@ -39,6 +39,9 @@ router.get("/api/changelog", (req, res) => {
     if (!fs.existsSync(changelogPath)) {
       changelogPath = path.join(__dirname, "..", "CHANGELOG.md");
     }
+    if (!fs.existsSync(changelogPath)) {
+      changelogPath = path.join(__dirname, "CHANGELOG.md");
+    }
 
     if (fs.existsSync(changelogPath)) {
       const changelog = fs.readFileSync(changelogPath, "utf-8");

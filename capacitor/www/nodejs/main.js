@@ -970,6 +970,9 @@ async function boot() {
 
   appExpress.use(router);
   appExpress.get("/health", (_req, res) => res.json({ ok: true }));
+  appExpress.get("/capacitor.js", (_req, res) => {
+    res.type("application/javascript").send("// Capacitor bridge injected natively by WebView\n");
+  });
   appExpress.use(express.static(path.join(__dirname, "gui", "dist")));
 
   const routes = require("./backend/routes/index");
@@ -991,7 +994,7 @@ async function boot() {
     } catch (e) {
       logger.error("[android] mapping updater unavailable: " + e.message);
     }
-  }, 10000);
+  }, 30000);
 }
 
 boot().catch((e) => {

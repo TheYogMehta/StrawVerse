@@ -24,6 +24,7 @@ const {
 } = require("../utils/Metadata");
 const { getKeyValue, queryOne, run } = require("../utils/db");
 const ImageCacheManager = require("../utils/ImageCacheManager");
+const { getHeaders } = require("../utils/proxyHeaders");
 
 const router = express.Router();
 
@@ -973,7 +974,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 try {
                   const watchedRow = global.db
                     .prepare(
-                      "SELECT watched_episodes FROM WatchHistory WHERE anime_id = ?",
+                      "SELECT MAX(episode_number) AS watched_episodes FROM WatchHistory WHERE anime_id = ?",
                     )
                     .get(id);
                   if (watchedRow && watchedRow.watched_episodes) {
@@ -1202,7 +1203,107 @@ router.post("/api/watch", async (req, res) => {
     if (!Downloaded) {
       if (!ep) throw new Error("Episode ID Not Found");
       const Animeprovider = await providerFetch("Anime", provider);
-      const sourcesArray = await fetchEpisodeSources(Animeprovider, ep);
+      let sourcesArray = await fetchEpisodeSources(Animeprovider, ep);
+
+      if (sourcesArray) {
+        const prefSubDub = subdub || "sub";
+        let rawSources = [];
+        if (
+          prefSubDub &&
+          Array.isArray(sourcesArray[prefSubDub]?.sources) &&
+          sourcesArray[prefSubDub].sources.length > 0
+        ) {
+          rawSources = sourcesArray[prefSubDub].sources;
+        } else if (
+          prefSubDub &&
+          Array.isArray(sourcesArray[prefSubDub]) &&
+          sourcesArray[prefSubDub].length > 0
+        ) {
+          rawSources = sourcesArray[prefSubDub];
+        } else if (
+          Array.isArray(sourcesArray.sources) &&
+          sourcesArray.sources.length > 0
+        ) {
+          rawSources = sourcesArray.sources;
+        } else {
+          const subSrcs = Array.isArray(sourcesArray.sub?.sources)
+            ? sourcesArray.sub.sources
+            : Array.isArray(sourcesArray.sub)
+              ? sourcesArray.sub
+              : [];
+          const dubSrcs = Array.isArray(sourcesArray.dub?.sources)
+            ? sourcesArray.dub.sources
+            : Array.isArray(sourcesArray.dub)
+              ? sourcesArray.dub
+              : [];
+          const hsubSrcs = Array.isArray(sourcesArray.hsub?.sources)
+            ? sourcesArray.hsub.sources
+            : Array.isArray(sourcesArray.hsub)
+              ? sourcesArray.hsub
+              : [];
+
+          rawSources = [...subSrcs, ...dubSrcs, ...hsubSrcs];
+        }
+
+        const isHSub = (s) =>
+          s.isHsub ||
+          s.type === "hsub" ||
+          s.quality?.toLowerCase().includes("hsub");
+        const isDub = (s) =>
+          s.isDub ||
+          s.type === "dub" ||
+          s.quality?.toLowerCase().includes("dub");
+
+        let mainSources = rawSources;
+        if (prefSubDub === "sub") {
+          const cleanSub = rawSources.filter((s) => !isHSub(s) && !isDub(s));
+          if (cleanSub.length > 0) mainSources = cleanSub;
+        } else if (prefSubDub === "hsub") {
+          const cleanHsub = rawSources.filter((s) => isHSub(s));
+          if (cleanHsub.length > 0) mainSources = cleanHsub;
+        } else if (prefSubDub === "dub") {
+          const cleanDub = rawSources.filter((s) => isDub(s));
+          if (cleanDub.length > 0) mainSources = cleanDub;
+        }
+
+        const mainSubtitles =
+          prefSubDub === "hsub"
+            ? []
+            : [
+                ...(Array.isArray(sourcesArray.subtitles)
+                  ? sourcesArray.subtitles
+                  : []),
+                ...(Array.isArray(sourcesArray[prefSubDub]?.subtitles)
+                  ? sourcesArray[prefSubDub].subtitles
+                  : []),
+                ...(Array.isArray(sourcesArray.sub?.subtitles)
+                  ? sourcesArray.sub.subtitles
+                  : []),
+                ...(Array.isArray(sourcesArray.dub?.subtitles)
+                  ? sourcesArray.dub.subtitles
+                  : []),
+              ];
+        const uniqueSubtitles = Array.from(
+          new Map(mainSubtitles.map((s) => [s.url, s])).values(),
+        );
+
+        const formatSubtitleLabel = (sub) => {
+          return sub?.lang || sub?.label || sub?.name || "";
+        };
+
+        const formattedSubtitles = uniqueSubtitles.map((s, idx) => ({
+          ...s,
+          lang: formatSubtitleLabel(s, idx),
+          label: formatSubtitleLabel(s, idx),
+        }));
+
+        sourcesArray = {
+          ...sourcesArray,
+          sources: mainSources,
+          subtitles: formattedSubtitles,
+        };
+      }
+
       res.status(200).json(sourcesArray || { sources: [] });
     } else {
       if (!epNum) throw new Error("Episode Number Not Found");

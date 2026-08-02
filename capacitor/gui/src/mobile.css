@@ -165,6 +165,10 @@
     box-sizing: border-box !important;
   }
 
+  html .items-section {
+    padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
   html .details-grid {
     grid-template-columns: 1fr !important;
     gap: 20px !important;
@@ -255,6 +259,21 @@
     min-width: 0 !important;
     width: 100% !important;
     box-sizing: border-box !important;
+  }
+
+  html .sort-subdub-row {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 10px !important;
+    width: 100% !important;
+    align-items: center !important;
+  }
+
+  html .sort-subdub-row .u-style-43,
+  html .sort-subdub-row .u-style-46 {
+    flex: 1 !important;
+    width: 50% !important;
+    min-width: 0 !important;
   }
 
   html .custom-dropdown-trigger {
@@ -479,6 +498,75 @@
   html .settings-tab-btn {
     flex-shrink: 0;
     white-space: nowrap;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Episode card 2-line layout on mobile                              */
+  /* ---------------------------------------------------------------- */
+  html .item-card {
+    padding: 10px 12px !important;
+    gap: 8px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+  }
+
+  html .item-card-row-top {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  html .item-card-title-group {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    overflow: hidden !important;
+  }
+
+  html .item-title-sub {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    min-width: 0 !important;
+  }
+
+  html .item-card-row-bottom {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-start !important;
+    gap: 6px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    flex-wrap: wrap !important;
+  }
+
+  html .badge-and-action {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+    max-width: 100% !important;
+  }
+
+  html .badge-subdub {
+    height: 36px !important;
+    padding: 0 14px !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    border-radius: 6px !important;
+    min-width: 44px !important;
+    touch-action: manipulation !important;
+  }
+
+  html .badge-subdub:active {
+    transform: scale(0.95) !important;
   }
 
   /* ---------------------------------------------------------------- */

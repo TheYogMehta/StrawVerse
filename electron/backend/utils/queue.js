@@ -484,28 +484,103 @@ async function downloadEpisodeByQuality(
     if (subdub && !epid.endsWith(`-${subdub}`) && !epid.endsWith("-both")) {
       resolvedEpid = `${epid}-${subdub}`;
     }
-    const sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
+    let sourcesArray = await fetchEpisodeSources(provider, resolvedEpid);
 
-    let selectedSource = sourcesArray?.sources?.find(
+    const extractSources = (srcObj, prefSubDub) => {
+      if (!srcObj) return [];
+      if (Array.isArray(srcObj.sources) && srcObj.sources.length > 0) {
+        return srcObj.sources;
+      }
+      if (
+        prefSubDub &&
+        Array.isArray(srcObj[prefSubDub]?.sources) &&
+        srcObj[prefSubDub].sources.length > 0
+      ) {
+        return srcObj[prefSubDub].sources;
+      }
+      if (
+        prefSubDub &&
+        Array.isArray(srcObj[prefSubDub]) &&
+        srcObj[prefSubDub].length > 0
+      ) {
+        return srcObj[prefSubDub];
+      }
+      return [
+        ...(Array.isArray(srcObj.sources) ? srcObj.sources : []),
+        ...(Array.isArray(srcObj.sub?.sources)
+          ? srcObj.sub.sources
+          : Array.isArray(srcObj.sub)
+            ? srcObj.sub
+            : []),
+        ...(Array.isArray(srcObj.dub?.sources)
+          ? srcObj.dub.sources
+          : Array.isArray(srcObj.dub)
+            ? srcObj.dub
+            : []),
+      ];
+    };
+
+    let sourcesList = extractSources(sourcesArray, subdub);
+
+    if ((!sourcesList || sourcesList.length === 0) && resolvedEpid !== epid) {
+      sourcesArray = await fetchEpisodeSources(provider, epid);
+      sourcesList = extractSources(sourcesArray, subdub);
+    }
+
+    let selectedSource = sourcesList?.find(
       (source) => source?.quality === (config?.quality ?? "1080p"),
     );
 
     if (!selectedSource) {
       for (const quality of preferredQualities) {
-        selectedSource = sourcesArray?.sources.find(
+        selectedSource = sourcesList?.find(
           (source) => source?.quality === quality,
         );
         if (selectedSource) break;
       }
     }
 
-    if (
-      !selectedSource &&
-      sourcesArray?.sources[0]?.url &&
-      sourcesArray?.sources[0]?.isM3U8
-    ) {
-      selectedSource = sourcesArray?.sources[0];
-      selectedSource.quality = "best";
+    if (!selectedSource && sourcesList?.[0]?.url) {
+      selectedSource = { ...sourcesList[0] };
+      if (!selectedSource.quality) {
+        selectedSource.quality = "best";
+      }
+    }
+
+    const allSubtitles =
+      sourcesArray?.subtitles ||
+      sourcesArray?.[subdub]?.subtitles ||
+      sourcesArray?.sub?.subtitles ||
+      sourcesArray?.dub?.subtitles ||
+      [];
+
+    const prefLangs = Array.isArray(config?.preferredSubtitleLanguages)
+      ? config.preferredSubtitleLanguages
+      : ["English"];
+
+    let subtitles = [];
+    if (subdub !== "hsub" && prefLangs.length > 0 && allSubtitles.length > 0) {
+      subtitles = allSubtitles.filter((sub) => {
+        const raw = (sub?.lang || sub?.label || sub?.name || sub?.url || "").toLowerCase();
+        return prefLangs.some((pref) => {
+          const p = String(pref).toLowerCase().trim();
+          if (p === "english" || p === "eng" || p === "en") return raw.includes("eng") || raw.includes("english");
+          if (p === "japanese" || p === "jpn" || p === "jp") return raw.includes("jp") || raw.includes("japanese");
+          if (p === "spanish" || p === "spa" || p === "es") return raw.includes("spa") || raw.includes("spanish");
+          if (p === "french" || p === "fre" || p === "fra" || p === "fr") return raw.includes("fre") || raw.includes("fra") || raw.includes("french");
+          if (p === "german" || p === "ger" || p === "deu" || p === "de") return raw.includes("ger") || raw.includes("deu") || raw.includes("german");
+          if (p === "italian" || p === "ita" || p === "it") return raw.includes("ita") || raw.includes("italian");
+          if (p === "russian" || p === "rus" || p === "ru") return raw.includes("rus") || raw.includes("russian");
+          if (p === "portuguese" || p === "por" || p === "pt") return raw.includes("por") || raw.includes("portuguese") || raw.includes("brazilian");
+          if (p === "indonesian" || p === "ind" || p === "id") return raw.includes("ind") || raw.includes("indonesian");
+          if (p === "thai" || p === "tha" || p === "th") return raw.includes("tha") || raw.includes("thai");
+          if (p === "vietnamese" || p === "vie" || p === "vi") return raw.includes("vie") || raw.includes("vietnamese");
+          if (p === "chinese" || p === "chi" || p === "zho" || p === "zh") return raw.includes("chi") || raw.includes("zho") || raw.includes("chinese");
+          if (p === "arabic" || p === "ara" || p === "ar") return raw.includes("ara") || raw.includes("arabic");
+          if (p === "hindi" || p === "hin" || p === "hi") return raw.includes("hin") || raw.includes("hindi");
+          return raw.includes(p);
+        });
+      });
     }
 
     if (selectedSource) {
@@ -521,7 +596,7 @@ async function downloadEpisodeByQuality(
         dlQuality,
         Title,
         epid,
-        subdub === "hsub" ? [] : (sourcesArray?.subtitles ?? []),
+        subtitles,
         subdub === "hsub"
           ? false
           : config?.mergeSubtitles === true

@@ -116,60 +116,44 @@ function getHeaders(url, method = "GET") {
     "Sec-Fetch-Dest": "empty",
   };
 
-  // kwik - animepahe
-  if (url.includes("owocdn.top") || url.includes("uwucdn.top")) {
-    headers.Referer = "https://kwik.cx/";
-  } else if (url.includes("kwik.cx")) {
-    headers.Referer = "https://animepahe.pw/";
-  }
-  // animepahe
-  else if (url.includes("animepahe")) {
-    headers.Referer = "https://animepahe.pw/";
-  }
-  // weebcentral
-  else if (
-    url.includes("temp.compsci88.com") ||
-    url.startsWith("https://temp.compsci88.com/") ||
-    url.includes("weebcentral.com")
-  ) {
-    headers.Referer = "https://weebcentral.com/";
-  }
-  // megaplay - anikoto
-  else if (
-    url.includes("anikoto.to") ||
-    url.includes("anikototv.to") ||
-    url.includes("megaplay.buzz")
-  ) {
-    headers.Referer = "https://anikoto.to/";
-  } else if (
-    url.includes("watching.onl") ||
-    url.includes("nekostream.site") ||
-    url.includes("kotocdn.site") ||
-    url.includes("livedns.my") ||
-    url.includes("sugevideo.xyz") ||
-    url.includes("trycloud.pro")
-  ) {
-    headers.Referer = "https://megaplay.buzz/";
-  }
-  // anineko
-  else if (url.includes("anineko.to")) {
-    headers.Referer = "https://anineko.to/";
-  }
-  // all manga
-  else if (
-    url.includes("allmanga.to") ||
-    url.includes("allanime.day") ||
-    url.includes("youtube-anime.com")
-  ) {
-    headers.Referer = "https://allmanga.to/";
-  }
+  // 1. Prioritize dynamically learned referer headers from extensions/scrapers/player
+  try {
+    const domain = new URL(url).hostname.replace("www.", "");
+    const ref = getStoredStreamReferer(domain);
+    if (ref) headers.Referer = ref;
+  } catch (e) {}
 
+  // 2. Known static defaults (fallback if not dynamically stored yet)
   if (!headers.Referer) {
-    try {
-      const domain = new URL(url).hostname.replace("www.", "");
-      const ref = getStoredStreamReferer(domain);
-      if (ref) headers.Referer = ref;
-    } catch (e) {}
+    if (url.includes("owocdn.top") || url.includes("uwucdn.top")) {
+      headers.Referer = "https://kwik.cx/";
+    } else if (url.includes("kwik.cx") || url.includes("animepahe")) {
+      headers.Referer = "https://animepahe.pw/";
+    } else if (
+      url.includes("temp.compsci88.com") ||
+      url.includes("weebcentral")
+    ) {
+      headers.Referer = "https://weebcentral.com/";
+    } else if (url.includes("anikoto") || url.includes("megaplay.buzz")) {
+      headers.Referer = "https://anikoto.to/";
+    } else if (url.includes("anineko")) {
+      headers.Referer = "https://anineko.to/";
+    } else if (
+      url.includes("allmanga") ||
+      url.includes("allanime") ||
+      url.includes("youtube-anime.com")
+    ) {
+      headers.Referer = "https://allmanga.to/";
+    } else if (
+      url.includes("watching.onl") ||
+      url.includes("nekostream.site") ||
+      url.includes("kotocdn.site") ||
+      url.includes("livedns.my") ||
+      url.includes("sugevideo.xyz") ||
+      url.includes("trycloud.pro")
+    ) {
+      headers.Referer = "https://megaplay.buzz/";
+    }
   }
 
   if (!headers.Referer) {
