@@ -1,5 +1,16 @@
 # Changelog
 
+# [9.0.1] - 2026-08-02
+
+### Video Player & Playback
+
+- **Stream Security & Referrer Sync**: Fixed video loading and buffering errors on protected sources with automatic header and cookie management.
+- **Subtitle & Audio Track Controls**: Improved subtitle track selection and audio track switching during playback.
+
+### Settings Fixes
+
+- **Enhanced Show Information**: Added expandable show description toggle, updated language format tags (Sub, Dub, Softsub, Softdub), and improved episode download tracking accuracy.
+
 # [9.0.0] - 2026-08-02
 
 ### Native MPV Video Player

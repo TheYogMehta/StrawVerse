@@ -1,8 +1,18 @@
 # Changelog
 
-## [9.0.0] - 2026-08-02
+## [9.0.1] - 2026-08-02
 
 ### Initial Release
+
+### Playback & Streaming Improvements
+
+- **Improved Stream Protection Handling**: Automatically passes security headers and session cookies to prevent playback and buffering errors on protected video sources.
+- **Enhanced Subtitle & Track Controls**: Smooth audio track switching (Dub/Sub) and reliable subtitle track selection during playback.
+
+### Settings Fixes
+
+- **Clearer Language Tags**: Better identification of available language formats (Subbed, Dubbed, Softsub, Softdub).
+- **Expandable Show Descriptions**: Easily read long anime synopses with an expandable description toggle.
 
 ##### Native Video Player & Touch Gestures
 
