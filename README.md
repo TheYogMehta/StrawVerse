@@ -1,6 +1,6 @@
 <h6 align="right">Support Windows & Linux</h6>
 <h1 align="center">
-  <img src="https://capsule-render.vercel.app/api?type=soft&fontColor=703ee5&text=StrawVerse&height=150&fontSize=40&desc=The%20Modern%20Anime%20%26%20Manga%20Desktop%20Experience&descAlignY=75&descAlign=50&color=00000000&animation=twinkling">
+  <img src="assets/header_banner.svg" alt="StrawVerse Header" width="100%">
 </h1>
 
 <p align="center">

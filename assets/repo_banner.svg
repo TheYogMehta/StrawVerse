@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 480" width="100%" height="100%">
+  <defs>
+    <!-- Dark Gradient Background -->
+    <linearGradient id="repo-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#09080e"/>
+      <stop offset="50%" stop-color="#110e1c"/>
+      <stop offset="100%" stop-color="#08070d"/>
+    </linearGradient>
+
+    <!-- Radial Background Glows -->
+    <radialGradient id="purple-glow" cx="50%" cy="30%" r="55%">
+      <stop offset="0%" stop-color="#703ee5" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="#8b5cf6" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    
+    <radialGradient id="bottom-glow" cx="50%" cy="90%" r="45%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Title Gradient -->
+    <linearGradient id="repo-title-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#c084fc"/>
+      <stop offset="35%" stop-color="#a855f7"/>
+      <stop offset="70%" stop-color="#703ee5"/>
+      <stop offset="100%" stop-color="#e879f9"/>
+    </linearGradient>
+
+    <!-- Border Line Gradient -->
+    <linearGradient id="card-border" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a855f7" stop-opacity="0.4"/>
+      <stop offset="50%" stop-color="#703ee5" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#a855f7" stop-opacity="0.3"/>
+    </linearGradient>
+
+    <linearGradient id="badge-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1f1833" stop-opacity="0.8"/>
+      <stop offset="100%" stop-color="#140f24" stop-opacity="0.8"/>
+    </linearGradient>
+
+    <!-- Drop Shadows & Glow Filters -->
+    <filter id="repo-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Tech Grid Pattern -->
+    <pattern id="repo-grid" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#703ee5" stroke-opacity="0.06" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <style>
+    .font-main {
+      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    }
+    .hero-title {
+      font-weight: 800;
+      font-size: 64px;
+      letter-spacing: -1px;
+    }
+    .hero-subtitle {
+      font-weight: 500;
+      font-size: 22px;
+      fill: #e2e8f0;
+      letter-spacing: 0.2px;
+    }
+    .feature-title {
+      font-weight: 600;
+      font-size: 16px;
+      fill: #ffffff;
+    }
+    .feature-desc {
+      font-weight: 400;
+      font-size: 13px;
+      fill: #94a3b8;
+    }
+    .badge-text {
+      font-weight: 600;
+      font-size: 13px;
+      fill: #c084fc;
+    }
+  </style>
+
+  <!-- Background -->
+  <rect width="1200" height="480" rx="20" fill="url(#repo-bg)"/>
+  <rect width="1200" height="480" rx="20" fill="url(#repo-grid)"/>
+
+  <!-- Radial Background Lighting -->
+  <ellipse cx="600" cy="180" rx="550" ry="180" fill="url(#purple-glow)"/>
+  <ellipse cx="600" cy="440" rx="400" ry="100" fill="url(#bottom-glow)"/>
+
+  <!-- Decorative Border -->
+  <rect x="1" y="1" width="1198" height="478" rx="19" fill="none" stroke="url(#card-border)" stroke-width="1.5"/>
+
+  <!-- Header Section -->
+  <g text-anchor="middle" class="font-main">
+    <!-- Top Pill Badge -->
+    <g transform="translate(480, 45)">
+      <rect width="240" height="32" rx="16" fill="#703ee5" fill-opacity="0.15" stroke="#a855f7" stroke-opacity="0.3" stroke-width="1"/>
+      <text x="120" y="21" class="badge-text" text-anchor="middle">⚡ Modern Media Desktop Client</text>
+    </g>
+
+    <!-- Main Title -->
+    <g filter="url(#repo-glow)">
+      <text x="600" y="140" fill="url(#repo-title-grad)" class="hero-title">StrawVerse</text>
+    </g>
+
+    <!-- Tagline -->
+    <text x="600" y="182" class="hero-subtitle">Stream Anime • Read Manga • Track Progress • Watch Together</text>
+  </g>
+
+  <!-- Feature Cards Grid (5 Cards Across) -->
+  <g transform="translate(60, 240)" class="font-main">
+    
+    <!-- Card 1: Anime Streaming -->
+    <g transform="translate(0, 0)">
+      <rect width="200" height="170" rx="14" fill="url(#badge-bg)" stroke="url(#card-border)" stroke-width="1.2"/>
+      <circle cx="36" cy="38" r="18" fill="#703ee5" fill-opacity="0.25"/>
+      <text x="36" y="44" font-size="18" text-anchor="middle" fill="#c084fc">▶</text>
+      <text x="20" y="85" class="feature-title">Anime Streaming</text>
+      <text x="20" y="110" class="feature-desc">Pahe, Anikoto &amp;</text>
+      <text x="20" y="128" class="feature-desc">Anineko integrations</text>
+      <text x="20" y="150" font-size="11" font-weight="600" fill="#a855f7">1080p Multi-Audio</text>
+    </g>
+
+    <!-- Card 2: Manga Reader -->
+    <g transform="translate(220, 0)">
+      <rect width="200" height="170" rx="14" fill="url(#badge-bg)" stroke="url(#card-border)" stroke-width="1.2"/>
+      <circle cx="36" cy="38" r="18" fill="#703ee5" fill-opacity="0.25"/>
+      <text x="36" y="44" font-size="18" text-anchor="middle" fill="#c084fc">📖</text>
+      <text x="20" y="85" class="feature-title">Manga Reader</text>
+      <text x="20" y="110" class="feature-desc">WeebCentral &amp;</text>
+      <text x="20" y="128" class="feature-desc">AllManga built-in</text>
+      <text x="20" y="150" font-size="11" font-weight="600" fill="#a855f7">Webtoon / Single Page</text>
+    </g>
+
+    <!-- Card 3: Track & Sync -->
+    <g transform="translate(440, 0)">
+      <rect width="200" height="170" rx="14" fill="url(#badge-bg)" stroke="url(#card-border)" stroke-width="1.2"/>
+      <circle cx="36" cy="38" r="18" fill="#703ee5" fill-opacity="0.25"/>
+      <text x="36" y="44" font-size="18" text-anchor="middle" fill="#c084fc">🔄</text>
+      <text x="20" y="85" class="feature-title">MAL Sync</text>
+      <text x="20" y="110" class="feature-desc">Automatic tracking</text>
+      <text x="20" y="128" class="feature-desc">&amp; status updates</text>
+      <text x="20" y="150" font-size="11" font-weight="600" fill="#a855f7">MyAnimeList 2-Way</text>
+    </g>
+
+    <!-- Card 4: Watch Together -->
+    <g transform="translate(660, 0)">
+      <rect width="200" height="170" rx="14" fill="url(#badge-bg)" stroke="url(#card-border)" stroke-width="1.2"/>
+      <circle cx="36" cy="38" r="18" fill="#703ee5" fill-opacity="0.25"/>
+      <text x="36" y="44" font-size="18" text-anchor="middle" fill="#c084fc">👥</text>
+      <text x="20" y="85" class="feature-title">Watch Together</text>
+      <text x="20" y="110" class="feature-desc">Real-time room sync</text>
+      <text x="20" y="128" class="feature-desc">with friends</text>
+      <text x="20" y="150" font-size="11" font-weight="600" fill="#a855f7">Low-latency Rooms</text>
+    </g>
+
+    <!-- Card 5: Built-in MPV & Downloads -->
+    <g transform="translate(880, 0)">
+      <rect width="200" height="170" rx="14" fill="url(#badge-bg)" stroke="url(#card-border)" stroke-width="1.2"/>
+      <circle cx="36" cy="38" r="18" fill="#703ee5" fill-opacity="0.25"/>
+      <text x="36" y="44" font-size="18" text-anchor="middle" fill="#c084fc">⚡</text>
+      <text x="20" y="85" class="feature-title">MPV Player &amp; DL</text>
+      <text x="20" y="110" class="feature-desc">Hardware accelerated</text>
+      <text x="20" y="128" class="feature-desc">local offline playback</text>
+      <text x="20" y="150" font-size="11" font-weight="600" fill="#a855f7">Windows &amp; Linux</text>
+    </g>
+
+  </g>
+
+  <!-- Ambient Stars -->
+  <circle cx="120" cy="80" r="1.5" fill="#a855f7" opacity="0.6"/>
+  <circle cx="280" cy="190" r="2" fill="#c084fc" opacity="0.7"/>
+  <circle cx="950" cy="90" r="1.5" fill="#ffffff" opacity="0.8"/>
+  <circle cx="1080" cy="180" r="2" fill="#8b5cf6" opacity="0.6"/>
+</svg>
