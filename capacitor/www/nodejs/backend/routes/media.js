@@ -464,9 +464,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 const cleanOldId = id;
                 if (data.malid) {
                   mappingRow = global.mappingDb
-                    .prepare(
-                      `SELECT id, uuid, malid FROM pahe WHERE malid = ?`,
-                    )
+                    .prepare(`SELECT id, uuid, malid FROM pahe WHERE malid = ?`)
                     .get(Number(data.malid));
                 }
                 if (!mappingRow) {
@@ -766,9 +764,7 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
               LEFT JOIN anineko neko ON neko.malid = rm.malid
               LEFT JOIN anime an ON an.malid = rm.malid
             `;
-            mappingRow = global.mappingDb
-              .prepare(query)
-              .get(id, id, id, id);
+            mappingRow = global.mappingDb.prepare(query).get(id, id, id, id);
           } else {
             const query = `
               WITH resolved AS (
@@ -825,18 +821,20 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                 };
               }
 
-              if (mappingRow.anikoto_id && !linkedProvidersMap["anikoto"]) {
+              const anikotoId = mappingRow.anikoto_id || mappingRow.anineko_id;
+              if (anikotoId && !linkedProvidersMap["anikoto"]) {
                 linkedProvidersMap["anikoto"] = {
-                  id: mappingRow.anikoto_id,
+                  id: anikotoId,
                   provider: "anikoto",
                   title: data.title || "",
                   folder_name: null,
                 };
               }
 
-              if (mappingRow.anineko_id && !linkedProvidersMap["anineko"]) {
+              const aninekoId = mappingRow.anineko_id || mappingRow.anikoto_id;
+              if (aninekoId && !linkedProvidersMap["anineko"]) {
                 linkedProvidersMap["anineko"] = {
-                  id: mappingRow.anineko_id,
+                  id: aninekoId,
                   provider: "anineko",
                   title: data.title || "",
                   folder_name: null,
@@ -863,6 +861,20 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
                   folder_name: null,
                 };
               }
+            }
+
+            if (
+              data.provider &&
+              !linkedProvidersMap[data.provider] &&
+              data.provider !== "provider" &&
+              data.provider !== "local source"
+            ) {
+              linkedProvidersMap[data.provider] = {
+                id: data.id || id,
+                provider: data.provider,
+                title: data.title || "",
+                folder_name: data.folder_name || null,
+              };
             }
 
             data.linkedProviders = Object.values(linkedProvidersMap);
