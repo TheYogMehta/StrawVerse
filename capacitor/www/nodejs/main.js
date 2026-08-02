@@ -225,6 +225,9 @@ async function boot() {
 
     global.sendNativeRequest = (config) =>
       new Promise((resolve, reject) => {
+        if (global.pendingRequests.size >= 100) {
+          return reject(new Error("Too many concurrent native requests"));
+        }
         const requestId = ++nativeRequestCounter;
         let settled = false;
         const finish = (callback, value) => {
