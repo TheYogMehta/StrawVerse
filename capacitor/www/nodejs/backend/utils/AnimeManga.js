@@ -777,7 +777,8 @@ async function processServer(provider, server) {
     server.name ||
     server.quality ||
     JSON.stringify(server);
-  const cacheKey = CreateHashKey("processServer", provider?.name, serverId);
+  const providerName = provider?.provider_name || provider?.name || "unknown";
+  const cacheKey = CreateHashKey(`processServer_${providerName}_${serverId}`);
   const cachedData = cache.get(cacheKey);
   if (cachedData) {
     if (

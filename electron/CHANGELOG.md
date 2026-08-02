@@ -2,9 +2,18 @@
 
 # [9.1.1] - 2026-08-03
 
+### Anime Streaming & Video Playback
+
+- **Fixed Wrong Video Playing Bug**: Fixed a bug where clicking any anime episode kept playing the video from the last anime you watched because video link caching was mistakenly sharing one key for all videos.
+
 ### Downloads & Library Management
 
 - **Adaptive Concurrency Auto-Scaler & AnimePahe Fix**: Added dynamic per-domain download concurrency auto-scaling with SQLite persistence. Fixes AnimePahe/Kwik segment download rate limiting (429) by automatically halving worker concurrency on rate-limits and stepping up on smooth download streaks.
+
+### Settings & UI Fixes
+
+- **Watch Together Settings Cleanup**: Removed unused Watch Together server settings section and configuration controls from the Settings panel.
+- **Image Cache Stats & Import Fix**: Resolved `ImageCacheManager is not defined` backend route error and added safe numeric fallback handling for image cache usage statistics (`MB` & file count display).
 
 # [9.1.0] - 2026-08-03
 
