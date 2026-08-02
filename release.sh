@@ -44,16 +44,32 @@ TAG="v${VERSION}"
 ok "Version: ${BOLD}${VERSION}${NC}  →  Tag: ${BOLD}${TAG}${NC}"
 
 # ── 3. Extract release notes ─────────────────────────────
-log "Extracting release notes..."
+log "Extracting release notes from Desktop & Mobile changelogs..."
 
-BODY=$(awk '
-  /^# \[/ { count++; if (count == 2) exit; next }
-  count == 1 { print }
-' "$CHANGELOG")
+extract_notes() {
+  local file="$1"
+  if [ ! -f "$file" ]; then echo ""; return; fi
+  node -e "
+    const fs = require('fs');
+    const file = process.argv[1];
+    const ver = process.argv[2];
+    if (!fs.existsSync(file)) process.exit(0);
+    const lines = fs.readFileSync(file, 'utf8').split('\n');
+    let found = false;
+    const result = [];
+    for (const line of lines) {
+      if (/^#+\s*\[/.test(line)) {
+        if (found) break;
+        if (line.includes('[' + ver + ']')) { found = true; continue; }
+      }
+      if (found) result.push(line);
+    }
+    console.log(result.join('\n').trim());
+  " "$file" "$VERSION"
+}
 
-[ -z "$BODY" ] && fail "Could not extract release notes for ${TAG}"
-BODY=$(echo "$BODY" | sed -e '/./,$!d' -e :a -e '/^\s*$/{ $d; N; ba; }')
-ok "Extracted $(echo "$BODY" | wc -l) lines of release notes"
+DESKTOP_NOTES=$(extract_notes "$ELECTRON_DIR/CHANGELOG.md")
+MOBILE_NOTES=$(extract_notes "$CAPACITOR_DIR/www/nodejs/CHANGELOG.md")
 
 # ── 4. Find previous tag ─────────────────────────────────
 PREV_TAG=$(git -C "$SCRIPT_DIR" tag --list 'v*' --sort=-v:refname | grep -v "^${TAG}$" | head -1)
@@ -64,8 +80,19 @@ else
 fi
 
 # ── 5. Assemble release body ─────────────────────────────
-RELEASE_BODY="$BODY"
-RELEASE_BODY+=$'\n'
+RELEASE_BODY=""
+
+if [ -n "$DESKTOP_NOTES" ]; then
+  RELEASE_BODY+=$'# 💻 Desktop\n\n'"$DESKTOP_NOTES"$'\n\n'
+fi
+
+if [ -n "$MOBILE_NOTES" ]; then
+  RELEASE_BODY+=$'# 📱 Mobile (Android)\n\n'"$MOBILE_NOTES"$'\n\n'
+fi
+
+if [ -z "$RELEASE_BODY" ]; then
+  fail "Could not extract release notes for ${TAG}"
+fi
 
 if [ -n "$PREV_TAG" ]; then
   RELEASE_BODY+=$'\n'"**Full Changelog**: https://github.com/${REPO}/compare/${PREV_TAG}...${TAG}"
