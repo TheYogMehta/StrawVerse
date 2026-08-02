@@ -206,8 +206,27 @@ async function MetadataAdd(type, valuesToAdd) {
           valuesToAdd.image = null;
         } catch (err) {
           logger.error(`Failed to fetch and cache image from: ${Imageurl}`);
-          logger.error(`Error message: ${err.message}`);
-          logger.error(`Stack trace: ${err.stack}`);
+          const fallbackUrl =
+            valuesToAdd.scraper_image || valuesToAdd.fallback_image;
+          if (fallbackUrl && fallbackUrl !== Imageurl) {
+            try {
+              logger.info(
+                `Attempting fallback image caching from: ${fallbackUrl}`,
+              );
+              const fallbackResponse = await global.axios.get(fallbackUrl, {
+                responseType: "arraybuffer",
+              });
+              await ImageCacheManager.cacheImage(
+                fallbackUrl,
+                Buffer.from(fallbackResponse.data),
+              );
+              valuesToAdd.image_url = fallbackUrl;
+            } catch (fallbackErr) {
+              logger.error(
+                `Failed to fetch fallback image from: ${fallbackUrl}`,
+              );
+            }
+          }
           valuesToAdd.image = null;
         }
       }
@@ -1359,7 +1378,11 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         if (!malid) {
           data.malid = FoundRow?.MalID ? parseInt(FoundRow.MalID) : null;
           if (!data.malid && FoundRow?.id) {
-            const resolvedMalId = await getMalIdFromMapping(type, FoundRow.provider, FoundRow.id);
+            const resolvedMalId = await getMalIdFromMapping(
+              type,
+              FoundRow.provider,
+              FoundRow.id,
+            );
             if (resolvedMalId) {
               data.malid = parseInt(resolvedMalId);
               try {

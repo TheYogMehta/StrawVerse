@@ -27,6 +27,86 @@ const ImageCacheManager = require("../utils/ImageCacheManager");
 
 const router = express.Router();
 
+function enrichResultsWithMappingImages(results, AnimeManga) {
+  if (
+    !results ||
+    !Array.isArray(results) ||
+    results.length === 0 ||
+    !global.mappingDb
+  ) {
+    return results;
+  }
+
+  const isAnime = AnimeManga === "Anime";
+
+  for (const item of results) {
+    if (!item) continue;
+
+    const originalScraperImage =
+      item.scraper_image || item.image || item.poster || null;
+    item.scraper_image = originalScraperImage;
+
+    let malid = item.malid || item.mal_id || null;
+
+    if (!malid && item.id) {
+      try {
+        if (isAnime) {
+          const row = global.mappingDb
+            .prepare(
+              `
+            WITH resolved AS (
+              SELECT malid FROM pahe WHERE uuid = ? OR id = ?
+              UNION ALL
+              SELECT malid FROM anikoto WHERE id = ?
+              UNION ALL
+              SELECT malid FROM anineko WHERE id = ?
+            )
+            SELECT malid FROM resolved WHERE malid IS NOT NULL LIMIT 1
+          `,
+            )
+            .get(item.id, item.id, item.id, item.id);
+          if (row && row.malid) {
+            malid = parseInt(row.malid);
+          }
+        } else {
+          const row = global.mappingDb
+            .prepare(
+              `
+            WITH resolved AS (
+              SELECT malid FROM weebcentral WHERE id = ?
+              UNION ALL
+              SELECT malid FROM allmanga WHERE id = ?
+            )
+            SELECT malid FROM resolved WHERE malid IS NOT NULL LIMIT 1
+          `,
+            )
+            .get(item.id, item.id);
+          if (row && row.malid) {
+            malid = parseInt(row.malid);
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (malid) {
+      item.malid = malid;
+      try {
+        if (isAnime) {
+          const imgRow = global.mappingDb
+            .prepare("SELECT image_url FROM anime WHERE malid = ?")
+            .get(malid);
+          if (imgRow && imgRow.image_url) {
+            item.image_url = imgRow.image_url;
+            item.image = imgRow.image_url;
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  return results;
+}
+
 // Catalog listing endpoint
 router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
   const { AnimeManga, provider } = req.params;
@@ -111,6 +191,10 @@ router.post("/api/list/:AnimeManga/:provider/", async (req, res) => {
     if (!data) throw new Error(`No ${AnimeManga} Found in ${provider}`);
 
     if (data?.results && data.results.length > 0) {
+      try {
+        enrichResultsWithMappingImages(data.results, AnimeManga);
+      } catch (_) {}
+
       try {
         const orderKey = `custom_order_${AnimeManga}_${provider}_${filters?.tag || "all"}`;
         const savedOrder = getKeyValue("Settings", orderKey);
@@ -1034,6 +1118,24 @@ router.post("/api/info/:AnimeManga/:LocalMalProvider", async (req, res) => {
       }
     } catch (tagDbErr) {
       logger.error(`Failed to load CustomTag for ${id}: ${tagDbErr.message}`);
+    }
+
+    if (data) {
+      const originalScraperImage =
+        data.scraper_image || data.image || data.poster || null;
+      data.scraper_image = originalScraperImage;
+
+      if (data.malid && global.mappingDb && AnimeManga === "Anime") {
+        try {
+          const imgRow = global.mappingDb
+            .prepare("SELECT image_url FROM anime WHERE malid = ?")
+            .get(data.malid);
+          if (imgRow && imgRow.image_url) {
+            data.image_url = imgRow.image_url;
+            data.image = imgRow.image_url;
+          }
+        } catch (_) {}
+      }
     }
 
     if (!data?.id) throw new Error(`No ${AnimeManga} Found with id '${id}'`);

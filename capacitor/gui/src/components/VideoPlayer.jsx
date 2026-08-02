@@ -283,8 +283,8 @@ export default function VideoPlayer({
           const res = await window.sharedStateAPI.getSettings([
             "autoSkipIntro",
           ]);
-          if (res?.settings?.autoSkipIntro !== undefined) {
-            setAutoSkip(s.autoSkipIntro);
+          if (res?.settings?.autoSkiwpIntro !== undefined) {
+            setAutoSkip(res.settings.autoSkipIntro);
           }
         }
       } catch (err) {

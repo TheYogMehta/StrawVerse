@@ -245,9 +245,21 @@ export default function AiringCalendar({
                           <div className="schedule-row-left">
                             {ep.image ? (
                               <img
-                                src={ep.image}
+                                src={ep.image || ep.scraper_image}
                                 alt={ep.title}
                                 className="schedule-row-img"
+                                onError={(e) => {
+                                  const fallback = ep.scraper_image || ep.fallback_image;
+                                  if (
+                                    fallback &&
+                                    e.target.src !== fallback &&
+                                    e.target.src !== window.location.origin + fallback
+                                  ) {
+                                    e.target.src = fallback;
+                                  } else {
+                                    e.target.src = "/images/image-404.png";
+                                  }
+                                }}
                               />
                             ) : (
                               <div className="schedule-row-no-img">

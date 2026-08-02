@@ -70,11 +70,22 @@ export default function RecentHistory({
                   <X size={14} />
                 </button>
                 <img
-                  src={item.image || "/images/image-404.png"}
+                  src={
+                    item.image || item.scraper_image || "/images/image-404.png"
+                  }
                   alt={item.title}
                   className="continue-img"
                   onError={(e) => {
-                    e.target.src = "/images/image-404.png";
+                    const fallback = item.scraper_image || item.fallback_image;
+                    if (
+                      fallback &&
+                      e.target.src !== fallback &&
+                      e.target.src !== window.location.origin + fallback
+                    ) {
+                      e.target.src = fallback;
+                    } else {
+                      e.target.src = "/images/image-404.png";
+                    }
                   }}
                 />
                 <div className="continue-play-overlay">

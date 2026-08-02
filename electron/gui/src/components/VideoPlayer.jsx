@@ -289,7 +289,7 @@ export default function VideoPlayer({
             "autoSkipIntro",
           ]);
           if (res?.settings?.autoSkipIntro !== undefined) {
-            setAutoSkip(s.autoSkipIntro);
+            setAutoSkip(res.settings.autoSkipIntro);
           }
         }
       } catch (err) {
