@@ -1,5 +1,32 @@
 # Changelog
 
+# [9.0.0] - 2026-08-02
+
+### Native MPV Video Player
+
+- **MPV Player Integration**: Integrated native MPV player engine for Windows and Linux desktop environments, delivering smooth hardware-accelerated video playback.
+
+### Scrapers & Cloudflare Bypass Engine
+
+- **Turnstile & CF Bypass Engine**: Overhauled scraper infrastructure with automated session-based Cloudflare Turnstile challenge resolution and header persistence.
+- **Provider Reliability Fixes**: Resolved video streaming, image loading, and cookie persistence issues for Pahe, Anikoto, AniNeko, and AllManga providers.
+- **Stream Proxy Segment Fix**: Fixed stream segment proxy delivery errors for smoother buffering.
+- **Automatic Extension Selection**: Automatically selects the first installed provider extension when no default is set.
+
+### Library & Catalog Management
+
+- **MAL Cover Image Prioritization**: Media fetching and metadata routes now prioritize high-resolution MyAnimeList cover art with automatic fallback to scraper sources.
+- **Quick Tag Management**: Introduced `TagPickerModal` allowing users to quickly apply and customize tags for catalog items.
+- **Bulk Episode Selection Filters**: Added "Unwatched", "Watched", "Read", and "Unread" selection filters in InfoView to streamline bulk operations.
+- **Quick Catalog & Home Actions**: Added direct quick-delete buttons on library catalog cards and a remove button to clean up items directly from the Home view.
+- **Open Download File Location**: Added IPC handler and UI action to open downloaded media files and folders directly in the system file manager.
+- **Folder Name Sanitization**: Enhanced folder name sanitization for downloaded series to avoid invalid path errors on disk.
+- **Storage Optimization**: Removed redundant image disk caching during metadata downloads to conserve local disk space.
+
+### Architecture & Refactoring
+
+- **Workspace Decoupling**: Renamed core source directory to `/electron` to clearly isolate desktop code from mobile Capacitor builds.
+
 # [8.0.3] - 2026-07-10
 
 ### App Updates & Installer
