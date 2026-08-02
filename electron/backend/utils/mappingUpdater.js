@@ -169,7 +169,17 @@ async function checkForMappingUpdates() {
     const url = storedTag
       ? `https://strawverse.theyogmehta.online/api/mapping/updates?version=${storedTag}&last_id=${lastId}`
       : `https://strawverse.theyogmehta.online/api/mapping/updates?last_id=${lastId}`;
-    const response = await axios.get(url, { responseType: "arraybuffer" });
+    const response = await axios.get(url, {
+      responseType: "arraybuffer",
+      headers: {
+        os:
+          process.platform === "win32"
+            ? "Windows"
+            : process.platform === "darwin"
+              ? "macOS"
+              : "Linux",
+      },
+    });
     const buffer = Buffer.from(response.data);
     updateResponse = deserializeDelta(buffer);
   } catch (err) {
@@ -205,6 +215,7 @@ async function checkForMappingUpdates() {
       try {
         const vRes = await axios.get(
           "https://strawverse.theyogmehta.online/api/mapping/version",
+          { headers: clientHeaders },
         );
         latestVersion = vRes.data?.version;
       } catch (e) {
@@ -225,6 +236,7 @@ async function checkForMappingUpdates() {
       );
       const response = await axios.get(downloadUrl, {
         responseType: "arraybuffer",
+        headers: clientHeaders,
       });
       const gzippedData = Buffer.from(response.data);
 

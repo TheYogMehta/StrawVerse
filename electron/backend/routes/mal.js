@@ -201,12 +201,25 @@ router.post("/api/mal/link", async (req, res) => {
       if (targetMalID) {
         if (MalID) {
           axios
-            .post("https://strawverse.theyogmehta.online/mapping", {
-              malid: targetMalID,
-              provider: resolvedProvider,
-              id: id,
-              title: providerTitle,
-            })
+            .post(
+              "https://strawverse.theyogmehta.online/mapping",
+              {
+                malid: targetMalID,
+                provider: resolvedProvider,
+                id: id,
+                title: providerTitle,
+              },
+              {
+                headers: {
+                  os:
+                    process.platform === "win32"
+                      ? "Windows"
+                      : process.platform === "darwin"
+                        ? "macOS"
+                        : "Linux",
+                },
+              },
+            )
             .then(() =>
               logger.info(
                 `[Mapper] Successfully reported custom mapping link for MAL ID ${targetMalID}`,
@@ -220,6 +233,14 @@ router.post("/api/mal/link", async (req, res) => {
         } else {
           axios
             .delete("https://strawverse.theyogmehta.online/mapping", {
+              headers: {
+                os:
+                  process.platform === "win32"
+                    ? "Windows"
+                    : process.platform === "darwin"
+                      ? "macOS"
+                      : "Linux",
+              },
               data: {
                 malid: targetMalID,
                 provider: resolvedProvider,

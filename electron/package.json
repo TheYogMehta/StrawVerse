@@ -44,10 +44,7 @@
         "nsis"
       ],
       "artifactName": "StrawVerse.Setup.${version}.exe",
-      "icon": "assets/luffy.ico",
-      "files": [
-        "!mpv/linux/**/*"
-      ]
+      "icon": "assets/luffy.ico"
     },
     "publish": {
       "provider": "github",
@@ -70,10 +67,7 @@
         "entry": {
           "MimeType": "x-scheme-handler/strawverse;"
         }
-      },
-      "files": [
-        "!mpv/win32/**/*"
-      ]
+      }
     },
     "icon": "assets/luffy.png",
     "compression": "normal",

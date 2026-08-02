@@ -1,4 +1,4 @@
-<h6 align="right">Support Windows & Linux</h6>
+<h6 align="right">Supports Android, Windows & Linux</h6>
 <h1 align="center">
   <img src="assets/header_banner.svg" alt="StrawVerse Header" width="100%">
 </h1>
@@ -35,7 +35,7 @@
 
 ## Overview
 
-**StrawVerse** is a desktop application built with Electron, React, and Vite that allows you to stream, read, download, and track your anime and manga collections. It uses a local SQLite database to manage your library and watch history.
+**StrawVerse** is a cross-platform application built with Electron, Capacitor, React, and Vite that allows you to stream, read, download, and track your anime and manga collections. It uses a local SQLite database to manage your library and watch history.
 
 Beyond standard downloading, StrawVerse includes real-time playback synchronization with friends (Watch Together), automatic MyAnimeList synchronization, a built-in media player, and a manga reader.
 
@@ -53,9 +53,15 @@ Beyond standard downloading, StrawVerse includes real-time playback synchronizat
 
 ## System Requirements
 
-- **Operating System:** Windows & Linux
+- **Operating System:** Android, Windows & Linux
 
 ## Installation
+
+### For Android
+
+1. Go to [StrawVerse Releases](https://github.com/TheYogMehta/StrawVerse/releases).
+2. Download the APK file `StrawVerse-<version>.apk`.
+3. Open and install the APK on your Android device!
 
 ### For Windows
 
@@ -65,18 +71,8 @@ Beyond standard downloading, StrawVerse includes real-time playback synchronizat
 
 ### For Linux
 
-#### Via Quick Installer (Recommended)
-
-Run the following command in your terminal to automatically download the latest version, make it executable, download the official icon, and create a desktop application shortcut:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/TheYogMehta/StrawVerse/main/install.sh | bash
-```
-
-#### Via Manual Download
-
 1. Go to [StrawVerse Releases](https://github.com/TheYogMehta/StrawVerse/releases).
-2. Download the AppImage `StrawVerse-<version>.AppImage` or the snap package.
+2. Download the AppImage `StrawVerse-<version>.AppImage` or the snap / deb / zip package.
 3. For AppImage: Make it executable using `chmod +x StrawVerse-<version>.AppImage` and run it.
 
 ### For Other OS (macOS, etc.)
@@ -233,7 +229,7 @@ Follow these steps to build and run the application on Android:
    npm run package:android
    ```
 
-   *(Outputs signed release APK to `capacitor/android/app/build/outputs/apk/release/app-release.apk`)*
+   _(Outputs signed release APK to `capacitor/android/app/build/outputs/apk/release/app-release.apk`)_
 
 4. **Run the Application**:
    - **Option A**: Directly from the terminal:
