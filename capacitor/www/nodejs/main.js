@@ -653,15 +653,249 @@ async function boot() {
     }
   });
 
-  router.get("/api/update/check", (req, res) =>
-    res.json({ ok: true, result: null }),
-  );
-  router.post("/api/update/download", (req, res) =>
-    res.json({ ok: true, result: null }),
-  );
-  router.post("/api/update/install", (req, res) =>
-    res.json({ ok: true, result: null }),
-  );
+  let latestUpdateInfo = null;
+  let isDownloadingUpdate = false;
+  let downloadedApkPath = null;
+
+  function parseSemver(v) {
+    if (!v) return [0, 0, 0];
+    const cleaned = String(v).replace(/^v/i, "").trim();
+    const parts = cleaned.split(".").map((p) => parseInt(p, 10) || 0);
+    while (parts.length < 3) parts.push(0);
+    return parts;
+  }
+
+  function isNewerVersion(latest, current) {
+    const l = parseSemver(latest);
+    const c = parseSemver(current);
+    for (let i = 0; i < Math.max(l.length, c.length); i++) {
+      const numL = l[i] || 0;
+      const numC = c[i] || 0;
+      if (numL > numC) return true;
+      if (numL < numC) return false;
+    }
+    return false;
+  }
+
+  router.get("/api/update/check", async (req, res) => {
+    try {
+      const currentVersion =
+        process.env.STRAWVERSE_APP_VERSION || readOwnVersion() || "1.0.0";
+
+      const response = await axios.get(
+        "https://api.github.com/repos/TheYogMehta/StrawVerse/releases/latest",
+        {
+          headers: {
+            "User-Agent": "StrawVerse-App",
+            Accept: "application/vnd.github.v3+json",
+          },
+          timeout: 10000,
+        },
+      );
+
+      const release = response.data;
+      const latestVersion = (release.tag_name || "").replace(/^v/i, "").trim();
+
+      const apkAsset = release.assets?.find(
+        (a) => a.name && a.name.endsWith(".apk"),
+      );
+      const downloadUrl =
+        apkAsset?.browser_download_url ||
+        `https://github.com/TheYogMehta/StrawVerse/releases/download/${release.tag_name}/StrawVerse-${latestVersion}.apk`;
+
+      latestUpdateInfo = {
+        version: latestVersion,
+        tagName: release.tag_name,
+        downloadUrl,
+        size: apkAsset?.size || 0,
+        releaseNotes: release.body || "",
+      };
+
+      if (isNewerVersion(latestVersion, currentVersion)) {
+        setTimeout(() => {
+          broadcast("update-available", {
+            version: latestVersion,
+            downloadUrl,
+            releaseNotes: release.body,
+          });
+        }, 100);
+        return res.json({
+          ok: true,
+          result: {
+            success: true,
+            updateAvailable: true,
+            version: latestVersion,
+          },
+        });
+      } else {
+        setTimeout(() => {
+          broadcast("update-not-available", { version: currentVersion });
+        }, 100);
+        return res.json({
+          ok: true,
+          result: {
+            success: true,
+            updateAvailable: false,
+            version: currentVersion,
+          },
+        });
+      }
+    } catch (err) {
+      console.error("[main.js] Error checking for update:", err.message);
+      const errorMsg =
+        err.response?.status === 404
+          ? "No release found on GitHub."
+          : err.message || "Failed to check for updates.";
+      setTimeout(() => {
+        broadcast("update-error", { message: errorMsg });
+      }, 100);
+      return res.json({
+        ok: true,
+        result: { success: false, error: errorMsg },
+      });
+    }
+  });
+
+  router.post("/api/update/download", async (req, res) => {
+    if (isDownloadingUpdate) {
+      return res.json({
+        ok: true,
+        result: { success: false, error: "Download already in progress" },
+      });
+    }
+
+    const downloadUrl =
+      req.body?.args?.[0] ||
+      req.body?.downloadUrl ||
+      latestUpdateInfo?.downloadUrl;
+    if (!downloadUrl) {
+      return res.json({
+        ok: true,
+        result: { success: false, error: "No update download URL available" },
+      });
+    }
+
+    isDownloadingUpdate = true;
+    try {
+      const targetPath = path.join(os.homedir(), "StrawVerse-update.apk");
+      if (!fs.existsSync(path.dirname(targetPath))) {
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      }
+      if (fs.existsSync(targetPath)) {
+        try {
+          fs.unlinkSync(targetPath);
+        } catch (_) {}
+      }
+
+      const response = await axios({
+        method: "GET",
+        url: downloadUrl,
+        responseType: "stream",
+        headers: {
+          "User-Agent": "StrawVerse-App",
+        },
+        maxRedirects: 5,
+      });
+
+      const totalBytes =
+        parseInt(response.headers["content-length"] || "0", 10) ||
+        latestUpdateInfo?.size ||
+        0;
+      let downloadedBytes = 0;
+      let lastProgressTime = 0;
+      let bytesSinceLastCheck = 0;
+      let lastCheckTime = Date.now();
+      let bytesPerSecond = 0;
+
+      const writer = fs.createWriteStream(targetPath);
+
+      response.data.on("data", (chunk) => {
+        downloadedBytes += chunk.length;
+        bytesSinceLastCheck += chunk.length;
+        const now = Date.now();
+        const timeDiff = (now - lastCheckTime) / 1000;
+        if (timeDiff >= 0.5) {
+          bytesPerSecond = Math.round(bytesSinceLastCheck / timeDiff);
+          bytesSinceLastCheck = 0;
+          lastCheckTime = now;
+        }
+
+        if (now - lastProgressTime > 250) {
+          lastProgressTime = now;
+          const percent =
+            totalBytes > 0
+              ? Math.min(99, Math.floor((downloadedBytes / totalBytes) * 100))
+              : 0;
+          broadcast("update-download-progress", {
+            percent,
+            bytesPerSecond,
+            transferred: downloadedBytes,
+            total: totalBytes,
+          });
+        }
+      });
+
+      response.data.pipe(writer);
+
+      await new Promise((resolve, reject) => {
+        writer.on("finish", resolve);
+        writer.on("error", reject);
+        response.data.on("error", reject);
+      });
+
+      downloadedApkPath = targetPath;
+      isDownloadingUpdate = false;
+
+      broadcast("update-download-progress", {
+        percent: 100,
+        bytesPerSecond: 0,
+        transferred: downloadedBytes,
+        total: downloadedBytes,
+      });
+
+      setTimeout(() => {
+        broadcast("update-downloaded", { path: targetPath });
+      }, 100);
+
+      return res.json({
+        ok: true,
+        result: { success: true, path: targetPath },
+      });
+    } catch (err) {
+      isDownloadingUpdate = false;
+      console.error("[main.js] Error downloading update:", err.message);
+      setTimeout(() => {
+        broadcast("update-error", {
+          message: err.message || "Failed to download update",
+        });
+      }, 100);
+      return res.json({
+        ok: true,
+        result: {
+          success: false,
+          error: err.message || "Failed to download update",
+        },
+      });
+    }
+  });
+
+  router.post("/api/update/install", (req, res) => {
+    const apkPath =
+      req.body?.args?.[0] ||
+      req.body?.path ||
+      downloadedApkPath ||
+      path.join(os.homedir(), "StrawVerse-update.apk");
+
+    if (!fs.existsSync(apkPath)) {
+      return res.json({
+        ok: true,
+        result: { success: false, error: "Installer APK file not found." },
+      });
+    }
+
+    broadcast("trigger-install", { path: apkPath });
+    return res.json({ ok: true, result: { success: true } });
+  });
 
   router.post("/api/device/user-agent", (req, res) => {
     let ua = req.body.args?.[0];
