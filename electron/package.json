@@ -59,9 +59,9 @@
       "target": [
         "AppImage",
         "snap",
-        "zip",
         "deb"
       ],
+      "category": "Utility",
       "icon": "assets/luffy.png",
       "desktop": {
         "entry": {
