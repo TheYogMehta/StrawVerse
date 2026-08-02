@@ -17,7 +17,6 @@ import {
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../../utils/swal";
 import { apiPost } from "../../utils/common";
-import watchTogetherClient from "../../utils/watchTogetherClient";
 import SettingsRow from "./SettingsRow";
 import Dropdown from "../common/Dropdown";
 import "../css/SettingsView.css";
@@ -84,116 +83,6 @@ export default function SettingsView({
     const ext = list?.find((e) => e.name === name);
     return ext?.icon || null;
   };
-  const cleanUrlForDisplay = (url) => {
-    let cleaned = (url || "").trim();
-    cleaned = cleaned.replace(/^(wss:\/\/|ws:\/\/|https:\/\/|http:\/\/)/i, "");
-    cleaned = cleaned.replace(/\/ws$/i, "");
-    cleaned = cleaned.replace(/\/+$/, "");
-    return cleaned;
-  };
-
-  const [wtServerUrl, setWtServerUrl] = useState(
-    cleanUrlForDisplay(watchTogetherClient.getServerUrl()),
-  );
-  const [verifyingWt, setVerifyingWt] = useState(false);
-
-  const handleResetWtServer = () => {
-    const defaultDisplay = "strawverse-wt.theyogmehta.online";
-    setWtServerUrl(defaultDisplay);
-    watchTogetherClient.setServerUrl(defaultDisplay);
-    Swal.fire({
-      title: "Reset Successful",
-      text: "Watch Together server URL has been reset to default.",
-      icon: "success",
-      toast: true,
-      position: "top-end",
-      showConfirmButton: false,
-      timer: 3000,
-      background: "var(--bg-secondary)",
-      color: "var(--text-main)",
-    });
-  };
-
-  const handleVerifyWtServer = async () => {
-    let targetUrl = wtServerUrl.trim();
-    if (!targetUrl) {
-      Swal.fire({
-        title: "Invalid URL",
-        text: "Please enter a Server URL to verify.",
-        icon: "warning",
-        toast: true,
-        position: "top-end",
-        showConfirmButton: false,
-        timer: 3000,
-        background: "var(--bg-secondary)",
-        color: "var(--text-main)",
-      });
-      return;
-    }
-
-    let domain = targetUrl;
-    domain = domain.replace(/^(wss:\/\/|ws:\/\/|https:\/\/|http:\/\/)/i, "");
-    domain = domain.replace(/\/ws$/i, "");
-    domain = domain.replace(/\/health$/i, "");
-    domain = domain.replace(/\/+$/, "");
-
-    setVerifyingWt(true);
-
-    const protocols = ["https://", "http://"];
-    let success = false;
-    let serverInfo = null;
-
-    for (const proto of protocols) {
-      const healthUrl = `${proto}${domain}/health`;
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 3000);
-
-        const res = await fetch(healthUrl, { signal: controller.signal });
-        clearTimeout(timeoutId);
-
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.server === "StrawVerse Watch Together") {
-            success = true;
-            serverInfo = data;
-            break;
-          }
-        }
-      } catch (err) {
-        // Continue
-      }
-    }
-
-    setVerifyingWt(false);
-
-    if (success) {
-      Swal.fire({
-        title: "Connection Successful",
-        text: "Watch Together server verified successfully!",
-        icon: "success",
-        toast: true,
-        position: "top-end",
-        showConfirmButton: false,
-        timer: 3000,
-        background: "var(--bg-secondary)",
-        color: "var(--text-main)",
-      });
-    } else {
-      Swal.fire({
-        title: "Verification Failed",
-        text: "Could not reach a valid StrawVerse Watch Together server at this address. Make sure the domain is correct.",
-        icon: "error",
-        toast: true,
-        position: "top-end",
-        showConfirmButton: false,
-        timer: 4000,
-        background: "var(--bg-secondary)",
-        color: "var(--text-main)",
-      });
-    }
-  };
-
   const [hasChanges, setHasChanges] = useState(false);
   const [activeTab, setActiveTab] = useState(initialTab);
 
@@ -1113,52 +1002,6 @@ export default function SettingsView({
                 </SettingsRow>
               </div>
 
-              {/* Watch Together Settings */}
-              <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">
-                  Watch Together Settings
-                </h2>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">Server URL</div>
-                    <div className="settings-row-hint">
-                      The server address used to host and join Watch Together
-                      rooms with friends.
-                    </div>
-                  </div>
-                  <div className="settings-row-control u-style-68">
-                    <input
-                      type="text"
-                      className="settings-text-input"
-                      placeholder="strawverse-wt.theyogmehta.online"
-                      value={wtServerUrl}
-                      onChange={(e) => {
-                        setWtServerUrl(e.target.value);
-                        watchTogetherClient.setServerUrl(e.target.value);
-                      }}
-                    />
-                    <div className="u-style-69">
-                      <button
-                        type="button"
-                        onClick={handleVerifyWtServer}
-                        disabled={verifyingWt}
-                        className="settings-market-btn u-style-70"
-                      >
-                        {verifyingWt ? "Verifying..." : "Verify Connection"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleResetWtServer}
-                        className="settings-logout-btn u-style-71"
-                      >
-                        Reset to Default
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               {/* Storage & Cache */}
               <div className="settings-section glass-panel">
                 <h2 className="settings-section-title">Storage & Cache</h2>
@@ -1201,7 +1044,7 @@ export default function SettingsView({
                     </div>
                     <div className="settings-row-hint">
                       {cacheStats
-                        ? `${(cacheStats.sizeInBytes / (1024 * 1024)).toFixed(1)} MB (${cacheStats.filesCount} files)`
+                        ? `${((Number(cacheStats.sizeInBytes) || 0) / (1024 * 1024)).toFixed(1)} MB (${Number(cacheStats.filesCount) || 0} files)`
                         : "Calculating..."}
                     </div>
                   </div>

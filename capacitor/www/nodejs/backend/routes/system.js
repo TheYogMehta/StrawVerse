@@ -3,6 +3,7 @@ const path = require("path");
 const fs = require("fs");
 const { logger, getLogs, clearLogs } = require("../utils/AppLogger");
 const { getQueue, updateQueue } = require("../utils/queue");
+const ImageCacheManager = require("../utils/ImageCacheManager");
 const { sendToRenderer } = require("../utils/rendererIPC");
 
 const router = express.Router();
