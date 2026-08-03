@@ -1560,7 +1560,7 @@ router.get("/api/image", async (req, res) => {
         decodedUrl,
       ]);
       const cacheDir = ImageCacheManager.getImageCacheDir();
-      if (cached && fs.existsSync(path.join(cacheDir, cached.filename))) {
+      if (cached && cached.filename && fs.existsSync(path.join(cacheDir, cached.filename))) {
         run("UPDATE ImageCache SET last_accessed = ? WHERE url = ?", [
           Date.now(),
           decodedUrl,

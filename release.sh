@@ -83,11 +83,11 @@ fi
 RELEASE_BODY=""
 
 if [ -n "$DESKTOP_NOTES" ]; then
-  RELEASE_BODY+=$'# 💻 Desktop\n\n'"$DESKTOP_NOTES"$'\n\n'
+  RELEASE_BODY+=$'# Desktop\n\n'"$DESKTOP_NOTES"$'\n\n'
 fi
 
 if [ -n "$MOBILE_NOTES" ]; then
-  RELEASE_BODY+=$'# 📱 Mobile (Android)\n\n'"$MOBILE_NOTES"$'\n\n'
+  RELEASE_BODY+=$'# Android\n\n'"$MOBILE_NOTES"$'\n\n'
 fi
 
 if [ -z "$RELEASE_BODY" ]; then

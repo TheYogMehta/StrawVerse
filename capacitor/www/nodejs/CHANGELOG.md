@@ -1,5 +1,11 @@
 # Changelog
 
+# [9.1.2] - 2026-08-03
+
+### Bug Fixes
+
+- **Image Cache Crash Fix**: Fixed a startup error where stale or incomplete image cache entries with missing filenames caused repeated errors when loading thumbnails. Affected images are now silently re-fetched instead of crashing the cache reader.
+
 # [9.1.1] - 2026-08-03
 
 ### Anime Streaming & Video Playback
