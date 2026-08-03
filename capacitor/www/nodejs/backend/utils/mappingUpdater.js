@@ -58,6 +58,7 @@ function deserializeDelta(buffer) {
     6: "weebcentral",
     7: "allmanga",
     8: "next_episodes",
+    9: "domain_concurrency",
   };
   const actRevMap = { 1: "INSERT", 2: "UPDATE", 3: "DELETE" };
 
@@ -106,6 +107,21 @@ async function checkForMappingUpdates() {
   const storedTag = await getKeyValue("Settings", mappingTagKey);
 
   logger.info("[mappingUpdater] Checking for mapping database updates...");
+
+  try {
+    const concurrencyRes = await axios.get(
+      "https://strawverse.theyogmehta.online/api/concurrency",
+      { timeout: 10000 },
+    );
+    if (concurrencyRes.data && concurrencyRes.data.domains) {
+      const { applyServerDomainConcurrency } = require("./domainConcurrency");
+      await applyServerDomainConcurrency(concurrencyRes.data.domains);
+    }
+  } catch (err) {
+    logger.debug(
+      `[mappingUpdater] Domain concurrency sync skipped/failed: ${err.message}`,
+    );
+  }
 
   let missingTables = true;
   let hasNextEpisodesTable = false;
@@ -256,7 +272,7 @@ async function checkForMappingUpdates() {
       const decompressedData = zlib.gunzipSync(gzippedData);
 
       fs.writeFileSync(tempDbPath, decompressedData);
-  
+
       logger.info("[mappingUpdater] Replacing mapping database file...");
 
       try {
@@ -352,6 +368,15 @@ async function checkForMappingUpdates() {
           PRIMARY KEY (livechart_id, episode)
         )
       `);
+
+      await mappingExec(`
+        CREATE TABLE IF NOT EXISTS domain_concurrency (
+          domain TEXT PRIMARY KEY,
+          current_concurrency INTEGER NOT NULL,
+          max_concurrency INTEGER,
+          updated_at INTEGER
+        )
+      `);
     } catch (e) {
       logger.error(
         `[mappingUpdater] Failed to ensure mapping tables exist: ${e.message}`,
@@ -380,6 +405,8 @@ async function checkForMappingUpdates() {
           allmanga: "INSERT OR REPLACE INTO allmanga (id, malid) VALUES (?, ?)",
           next_episodes:
             "INSERT OR REPLACE INTO next_episodes (livechart_id, episode, date, title, image) VALUES (?, ?, ?, ?, ?)",
+          domain_concurrency:
+            "INSERT OR REPLACE INTO domain_concurrency (domain, current_concurrency, max_concurrency, updated_at) VALUES (?, ?, ?, ?)",
         };
         const changelogSql =
           "INSERT OR REPLACE INTO mapping_changelog (id, version) VALUES (?, ?)";
@@ -448,6 +475,16 @@ async function checkForMappingUpdates() {
                     parsedData.image ?? null,
                   ],
                 });
+              } else if (tbl === "domain_concurrency") {
+                ops.push({
+                  sql: stmtSqlMap.domain_concurrency,
+                  params: [
+                    parsedData.domain ?? null,
+                    parsedData.current_concurrency ?? 2,
+                    parsedData.max_concurrency ?? null,
+                    parsedData.updated_at ?? Date.now(),
+                  ],
+                });
               }
             } else if (act === "DELETE") {
               if (tbl === "anime" || tbl === "manga") {
@@ -465,6 +502,11 @@ async function checkForMappingUpdates() {
                     livechartId ?? null,
                     isNaN(episode) ? null : episode,
                   ],
+                });
+              } else if (tbl === "domain_concurrency") {
+                ops.push({
+                  sql: "DELETE FROM domain_concurrency WHERE domain = ?",
+                  params: [row_id],
                 });
               } else {
                 ops.push({
@@ -703,11 +745,41 @@ async function syncLibraryIdsWithMapping() {
         }
       }
     }
+    await syncDomainConcurrencyFromMappingDb();
   } catch (err) {
     logger.error(`[mappingUpdater] Failed to sync library IDs: ${err.message}`);
   }
 }
 
+async function syncDomainConcurrencyFromMappingDb() {
+  try {
+    const tableRow = await mappingQueryOne(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name = 'domain_concurrency'",
+    );
+    if (!tableRow) return;
+
+    const rows = await mappingQueryAll(
+      "SELECT domain, current_concurrency, max_concurrency FROM domain_concurrency",
+    );
+    if (!rows || rows.length === 0) return;
+
+    const map = {};
+    for (const r of rows) {
+      map[r.domain] = {
+        recommended_concurrency: r.current_concurrency,
+        max_concurrency: r.max_concurrency,
+      };
+    }
+    const { applyServerDomainConcurrency } = require("./domainConcurrency");
+    await applyServerDomainConcurrency(map);
+  } catch (e) {
+    logger.debug(
+      `[mappingUpdater] Sync domain_concurrency from mappingDb skipped: ${e.message}`,
+    );
+  }
+}
+
 module.exports = {
   checkForMappingUpdates,
+  syncDomainConcurrencyFromMappingDb,
 };

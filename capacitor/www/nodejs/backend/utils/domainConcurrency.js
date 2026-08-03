@@ -124,6 +124,9 @@ async function recordDomainFailure(domain, currentVal) {
       `[DomainConcurrency] Error saving failure for ${domain}: ${e.message}`,
     );
   }
+  try {
+    sendDomainConcurrencyReport(domain);
+  } catch (e) {}
 }
 
 async function recordDomainSuccess(domain, maxLimit = 16) {
@@ -165,6 +168,70 @@ async function recordDomainSuccess(domain, maxLimit = 16) {
       );
     } catch (e) {}
   }
+  try {
+    sendDomainConcurrencyReport(domain);
+  } catch (e) {}
+}
+
+const lastReported = {};
+
+async function sendDomainConcurrencyReport(domain) {
+  if (!domain || domain === "default") return;
+  const now = Date.now();
+  if (lastReported[domain] && now - lastReported[domain] < 300_000) {
+    return;
+  }
+  lastReported[domain] = now;
+
+  try {
+    const row = await queryOne(
+      "SELECT current_concurrency, max_concurrency, total_requests, failed_requests FROM DomainConcurrency WHERE domain = ? LIMIT 1",
+      [domain],
+    );
+    if (!row) return;
+
+    const axios = global.axios || require("axios");
+    await axios
+      .post(
+        "https://strawverse.theyogmehta.online/api/concurrency/report",
+        {
+          domain,
+          current_concurrency: row.current_concurrency,
+          min_concurrency: 1,
+          max_concurrency: row.max_concurrency || row.current_concurrency,
+          total_requests: row.total_requests || 0,
+          failed_requests: row.failed_requests || 0,
+        },
+        { timeout: 10000 },
+      )
+      .catch(() => {});
+  } catch (e) {}
+}
+
+async function applyServerDomainConcurrency(domainMap) {
+  if (!domainMap || typeof domainMap !== "object") return;
+  for (const [domain, stats] of Object.entries(domainMap)) {
+    if (!domain || !stats) continue;
+    const rec = Number(
+      stats.recommended_concurrency || stats.current_concurrency || 2,
+    );
+    if (rec > 0) {
+      cache[domain] = rec;
+      try {
+        await run(
+          `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
+           VALUES (?, ?, ?, 0, 0, ?)
+           ON CONFLICT(domain) DO UPDATE SET
+             current_concurrency = excluded.current_concurrency,
+             updated_at = excluded.updated_at`,
+          [domain, rec, stats.max_concurrency || rec, Date.now()],
+        );
+      } catch (e) {}
+    }
+  }
+  logger.info(
+    `[DomainConcurrency] Synced ${Object.keys(domainMap).length} crowdsourced domain concurrency rules from server.`,
+  );
 }
 
 module.exports = {
@@ -173,4 +240,6 @@ module.exports = {
   recordDomainFailure,
   recordDomainSuccess,
   isCircuitOpen,
+  sendDomainConcurrencyReport,
+  applyServerDomainConcurrency,
 };

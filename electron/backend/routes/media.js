@@ -1681,7 +1681,7 @@ router.get("/api/stream/segment", async (req, res) => {
 
     let attempts = 0;
     let resp;
-    while (attempts < 3) {
+    while (attempts < 4) {
       try {
         resp = await global.axios.get(url, {
           headers: reqHeaders,
@@ -1692,11 +1692,12 @@ router.get("/api/stream/segment", async (req, res) => {
       } catch (err) {
         attempts++;
         const status = err.response?.status;
-        if (status === 429 && attempts < 3) {
-          await new Promise((r) => setTimeout(r, 1000 * attempts));
+        if (status === 429 && attempts < 4) {
+          const delay = Math.min(6000, 1500 * Math.pow(2, attempts - 1));
+          await new Promise((r) => setTimeout(r, delay));
         } else if (
           (status === 403 || status === 503) &&
-          attempts < 3 &&
+          attempts < 4 &&
           global.cloudflarebypass
         ) {
           try {
@@ -1706,7 +1707,7 @@ router.get("/api/stream/segment", async (req, res) => {
             if (req.headers.range) fresh.range = req.headers.range;
             Object.assign(reqHeaders, fresh);
           } catch (_) {}
-        } else if (attempts >= 3) {
+        } else if (attempts >= 4) {
           throw err;
         }
       }
