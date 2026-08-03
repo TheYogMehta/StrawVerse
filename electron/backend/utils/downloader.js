@@ -19,6 +19,7 @@ const {
   recordDomainFailure,
   recordDomainSuccess,
   isCircuitOpen,
+  waitForCircuit,
 } = require("./domainConcurrency");
 
 const pipeline = promisify(stream.pipeline);
@@ -66,20 +67,54 @@ async function getFfmpegPath() {
     return resolvedFfmpegPath;
   }
 
-  // Production
-  const bundledPath =
-    typeof ffmpeg === "string" && ffmpeg
-      ? ffmpeg.replace("app.asar", "app.asar.unpacked")
-      : "";
-  if (bundledPath && fs.existsSync(bundledPath)) {
-    resolvedFfmpegPath = bundledPath;
-    return resolvedFfmpegPath;
+  const binaryName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const candidatePaths = [];
+
+  // 1. Production
+  if (typeof ffmpeg === "string" && ffmpeg) {
+    candidatePaths.push(ffmpeg.replace("app.asar", "app.asar.unpacked"));
+  }
+  if (process.resourcesPath) {
+    candidatePaths.push(
+      path.join(
+        process.resourcesPath,
+        "app.asar.unpacked",
+        "node_modules",
+        "ffmpeg-static",
+        binaryName,
+      ),
+    );
+  }
+  try {
+    if (app && typeof app.getAppPath === "function") {
+      const resourcesDir = path.dirname(app.getAppPath());
+      if (resourcesDir) {
+        candidatePaths.push(
+          path.join(
+            resourcesDir,
+            "app.asar.unpacked",
+            "node_modules",
+            "ffmpeg-static",
+            binaryName,
+          ),
+        );
+      }
+    }
+  } catch (e) {}
+
+  // 2. Development
+  if (typeof ffmpeg === "string" && ffmpeg) {
+    candidatePaths.push(ffmpeg);
   }
 
-  // Development
-  if (typeof ffmpeg === "string" && ffmpeg && fs.existsSync(ffmpeg)) {
-    resolvedFfmpegPath = ffmpeg;
-    return resolvedFfmpegPath;
+  for (const p of candidatePaths) {
+    if (p && fs.existsSync(p)) {
+      resolvedFfmpegPath = p;
+      logger.info(
+        `[FFmpeg] Resolved FFmpeg binary path: ${resolvedFfmpegPath}`,
+      );
+      return resolvedFfmpegPath;
+    }
   }
 
   throw new Error("FFmpeg binary not found.");
@@ -557,6 +592,10 @@ class downloader {
               return;
             }
             try {
+              if (isCircuitOpen(domainName)) {
+                await waitForCircuit(domainName);
+              }
+
               let Segment = this.Segments[index];
               if (!Segment) throw new Error("[ STOPPING ] Segment Missing!");
 
@@ -608,6 +647,10 @@ class downloader {
                 body = stripPngHeader(response.body);
               }
 
+              if (!body || body.length === 0) {
+                throw new Error("Received empty segment payload");
+              }
+
               await fs.promises.writeFile(segmentFile, body);
               recordDomainSuccess(domainName, 16);
               this.currentSegments++;
@@ -615,44 +658,35 @@ class downloader {
               activeDownloads--;
               startNext();
             } catch (err) {
+              if (stopDownloading || isPause) return;
               recordDomainFailure(domainName, CONCURRENCY);
               CONCURRENCY = getDomainConcurrency(domainName, 16);
-              const maxRetries = 5;
-              if (isCircuitOpen(domainName)) {
-                logger.warn(
-                  `[Download] Circuit open for '${domainName}', skipping segment ${index} to avoid further rate-limiting.`,
+
+              const RETRY_DELAYS = [10000, 30000, 60000];
+
+              if (retryCount >= RETRY_DELAYS.length) {
+                logger.error(
+                  `[Download] Segment ${index} failed after 3 retries (10s, 30s, 60s): ${err.message}`,
                 );
-                failedSegmentsCount++;
-                await fs.promises
-                  .writeFile(segmentFile, Buffer.alloc(0))
-                  .catch(() => {});
-                this.currentSegments++;
-                this.logProgress();
-                activeDownloads--;
-                startNext();
-                return;
-              }
-              if (retryCount >= maxRetries) {
-                logger.warn(
-                  `Failed to download segment ${index} after ${maxRetries} attempts: ${err.message}. Writing empty segment to continue.`,
+                stopDownloading = true;
+                return reject(
+                  new Error(
+                    `Error downloading: Segment ${index} failed after 3 retries (10s, 30s, 60s).`,
+                  ),
                 );
-                failedSegmentsCount++;
-                await fs.promises
-                  .writeFile(segmentFile, Buffer.alloc(0))
-                  .catch(() => {});
-                this.currentSegments++;
-                this.logProgress();
-                activeDownloads--;
-                startNext();
-                return;
               }
-              const baseDelay = Math.min(15000, 1000 * Math.pow(2, retryCount));
-              const jitter = Math.floor(Math.random() * 1000);
-              const delay = baseDelay + jitter;
+
+              const delay = RETRY_DELAYS[retryCount];
               this.logProgress(
-                `Failed To Download Segment ${index}! ( Retrying in ${Math.round(delay / 1000)}s )`,
+                `Download error on segment ${index}! Retrying in ${delay / 1000}s (attempt ${retryCount + 2}/4)...`,
               );
-              await new Promise((res) => setTimeout(res, delay));
+
+              if (isCircuitOpen(domainName)) {
+                await waitForCircuit(domainName);
+              } else {
+                await new Promise((res) => setTimeout(res, delay));
+              }
+
               await downloadSegment(retryCount + 1);
             }
           };

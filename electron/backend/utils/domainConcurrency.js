@@ -24,6 +24,22 @@ function resetCircuit(domain) {
   }
 }
 
+async function waitForCircuit(domain) {
+  const cb = circuitBreaker[domain];
+  if (!cb || cb.openedAt === null) return;
+  const elapsed = Date.now() - cb.openedAt;
+  const cooldown = 60_000;
+  if (elapsed < cooldown) {
+    const waitMs = cooldown - elapsed + 1000;
+    logger.warn(
+      `[DomainConcurrency] Circuit is OPEN for '${domain}'. Pausing download requests for ${Math.ceil(waitMs / 1000)}s until rate limits clear...`,
+    );
+    await new Promise((res) => setTimeout(res, waitMs));
+    cb.openedAt = null;
+    cb.failures = 0;
+  }
+}
+
 /**
  * Extract clean domain name from URL or Referer
  */
@@ -240,6 +256,7 @@ module.exports = {
   recordDomainFailure,
   recordDomainSuccess,
   isCircuitOpen,
+  waitForCircuit,
   sendDomainConcurrencyReport,
   applyServerDomainConcurrency,
 };

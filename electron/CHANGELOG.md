@@ -1,5 +1,16 @@
 # Changelog
 
+# [9.1.5] - 2026-08-03
+
+### Downloader & Queue Management
+
+- **Segment Retry Schedule (10s -> 30s -> 60s):** Eliminated segment skipping and 0-byte dummy file creation. Segment downloads now retry on a strict 10s -> 30s -> 60s schedule.
+- **Error Popup & Queue Eviction:** If all retries fail, the download gracefully stops, presents an error popup to the user, and evicts the failed item from the queue to prevent corrupted video files.
+
+### Platform Stability & FFmpeg
+
+- **FFmpeg Platform Isolation:** Strictly isolated FFmpeg resolution logic—Desktop (Electron) resolves from `app.asar.unpacked`/`ffmpeg-static`, while Android (Capacitor) resolves from APK native `libffmpeg.so`.
+
 # [9.1.4] - 2026-08-03
 
 fix(ffmpeg): FFmpeg binary resolution
