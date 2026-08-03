@@ -1,5 +1,9 @@
 # Changelog
 
+# [9.1.4] - 2026-08-03
+
+fix(ffmpeg): FFmpeg binary resolution
+
 # [9.1.3] - 2026-08-03
 
 ### Downloads & Domain Concurrency

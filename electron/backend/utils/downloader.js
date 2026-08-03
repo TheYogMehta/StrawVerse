@@ -62,68 +62,27 @@ function stripPngHeader(buffer) {
 }
 
 async function getFfmpegPath() {
-  if (resolvedFfmpegPath) {
+  if (resolvedFfmpegPath && fs.existsSync(resolvedFfmpegPath)) {
     return resolvedFfmpegPath;
   }
 
-  if (process.platform === "win32") {
-    try {
-      const resourcesDir = path.dirname(app.getAppPath());
-      const winFfmpeg = path.join(
-        resourcesDir,
-        "app.asar.unpacked",
-        "mpv",
-        "win32",
-        "ffmpeg.exe",
-      );
-      if (fs.existsSync(winFfmpeg)) {
-        resolvedFfmpegPath = winFfmpeg;
-        return resolvedFfmpegPath;
-      }
-    } catch (e) {}
-  }
-
-  const defaultPath = ffmpeg.replace("app.asar", "app.asar.unpacked");
-  if (fs.existsSync(defaultPath)) {
-    resolvedFfmpegPath = defaultPath;
+  // Production
+  const bundledPath =
+    typeof ffmpeg === "string" && ffmpeg
+      ? ffmpeg.replace("app.asar", "app.asar.unpacked")
+      : "";
+  if (bundledPath && fs.existsSync(bundledPath)) {
+    resolvedFfmpegPath = bundledPath;
     return resolvedFfmpegPath;
   }
 
-  let userDataDir;
-  try {
-    userDataDir = app.getPath("userData");
-  } catch (e) {
-    userDataDir = path.join(os.homedir(), ".strawverse");
-  }
-
-  const binDir = path.join(userDataDir, "bin");
-  const localFfmpegPath = path.join(
-    binDir,
-    process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
-  );
-
-  if (fs.existsSync(localFfmpegPath)) {
-    resolvedFfmpegPath = localFfmpegPath;
+  // Development
+  if (typeof ffmpeg === "string" && ffmpeg && fs.existsSync(ffmpeg)) {
+    resolvedFfmpegPath = ffmpeg;
     return resolvedFfmpegPath;
   }
 
-  const isGlobalAvailable = await new Promise((resolve) => {
-    const child = spawn("ffmpeg", ["-version"], { stdio: "ignore" });
-    child.on("close", (code) => resolve(code === 0));
-    child.on("error", () => resolve(false));
-  });
-
-  if (isGlobalAvailable) {
-    logger.info(
-      "FFmpeg not found in package but found globally in system PATH.",
-    );
-    resolvedFfmpegPath = "ffmpeg";
-    return resolvedFfmpegPath;
-  }
-
-  throw new Error(
-    "FFmpeg binary not found in application bundle or system PATH.",
-  );
+  throw new Error("FFmpeg binary not found.");
 }
 
 class downloader {

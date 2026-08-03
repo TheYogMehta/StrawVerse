@@ -61,109 +61,56 @@ function stripPngHeader(buffer) {
 }
 
 async function getFfmpegPath() {
-  if (resolvedFfmpegPath) {
+  if (resolvedFfmpegPath && fs.existsSync(resolvedFfmpegPath)) {
     return resolvedFfmpegPath;
   }
 
-  const defaultPath = ffmpeg
-    ? ffmpeg.replace("app.asar", "app.asar.unpacked")
-    : null;
-  if (defaultPath && fs.existsSync(defaultPath)) {
-    resolvedFfmpegPath = defaultPath;
-    return resolvedFfmpegPath;
+  const candidateNativeDirs = [];
+
+  if (process.env.NATIVE_LIB_DIR) {
+    candidateNativeDirs.push(process.env.NATIVE_LIB_DIR);
   }
 
-  const isAndroid =
-    process.platform === "android" ||
-    (process.platform === "linux" && fs.existsSync("/system/build.prop"));
-
-  if (isAndroid) {
-    const candidateNativeDirs = [];
-
-    if (process.env.NATIVE_LIB_DIR) {
-      candidateNativeDirs.push(process.env.NATIVE_LIB_DIR);
+  try {
+    const maps = fs.readFileSync("/proc/self/maps", "utf-8");
+    const soMatch = maps.match(/\s(\/data\/app\/[^\s]+\/lib\/[^\s/]+)\//);
+    if (soMatch && soMatch[1]) {
+      candidateNativeDirs.push(soMatch[1]);
     }
+    const soMatch2 = maps.match(
+      /\s(\/data\/app\/~~[^/]+\/app\.strawverse\.android-[^/]+\/lib\/[^\s/]+)\//,
+    );
+    if (soMatch2 && soMatch2[1]) {
+      candidateNativeDirs.push(soMatch2[1]);
+    }
+  } catch (e) {
+    logger.warn(`[FFmpeg] Could not read /proc/self/maps: ${e.message}`);
+  }
 
-    try {
-      const maps = fs.readFileSync("/proc/self/maps", "utf-8");
-      const soMatch = maps.match(/\s(\/data\/app\/[^\s]+\/lib\/[^\s/]+)\//);
-      if (soMatch && soMatch[1]) {
-        candidateNativeDirs.push(soMatch[1]);
-      }
-      const soMatch2 = maps.match(
-        /\s(\/data\/app\/~~[^/]+\/app\.strawverse\.android-[^/]+\/lib\/[^\s/]+)\//,
+  candidateNativeDirs.push("/data/data/app.strawverse.android/lib");
+  candidateNativeDirs.push("/data/user/0/app.strawverse.android/lib");
+
+  const userDataDir = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
+  candidateNativeDirs.push(path.join(userDataDir, "bin"));
+
+  const seen = new Set();
+  for (const dir of candidateNativeDirs) {
+    if (!dir || seen.has(dir)) continue;
+    seen.add(dir);
+    const ffmpegPath = path.join(dir, "libffmpeg.so");
+    if (fs.existsSync(ffmpegPath)) {
+      logger.info(
+        `FFmpeg binary found in native library directory: ${ffmpegPath}`,
       );
-      if (soMatch2 && soMatch2[1]) {
-        candidateNativeDirs.push(soMatch2[1]);
-      }
-    } catch (e) {
-      logger.warn(`[FFmpeg] Could not read /proc/self/maps: ${e.message}`);
-    }
-
-    candidateNativeDirs.push("/data/data/app.strawverse.android/lib");
-    candidateNativeDirs.push("/data/user/0/app.strawverse.android/lib");
-
-    const seen = new Set();
-    for (const dir of candidateNativeDirs) {
-      if (!dir || seen.has(dir)) continue;
-      seen.add(dir);
-      const ffmpegPath = path.join(dir, "libffmpeg.so");
-      if (fs.existsSync(ffmpegPath)) {
-        logger.info(
-          `FFmpeg binary found in native library directory: ${ffmpegPath}`,
-        );
-        resolvedFfmpegPath = ffmpegPath;
-        return resolvedFfmpegPath;
-      }
-    }
-
-    const isGlobalAvailable = await new Promise((resolve) => {
-      const child = spawn("ffmpeg", ["-version"], { stdio: "ignore" });
-      child.on("close", (code) => resolve(code === 0));
-      child.on("error", () => resolve(false));
-    });
-    if (isGlobalAvailable) {
-      resolvedFfmpegPath = "ffmpeg";
+      resolvedFfmpegPath = ffmpegPath;
       return resolvedFfmpegPath;
     }
-
-    throw new Error(
-      "FFmpeg binary (libffmpeg.so) not found in APK. " +
-        "Rebuild the app with 'node capacitor/scripts/fetch-ffmpeg.mjs' " +
-        "to bundle FFmpeg, then reinstall. " +
-        "On modern Android, downloaded binaries cannot be executed due to SELinux restrictions.",
-    );
-  }
-
-  // ── Desktop / non-Android path ──
-  const userDataDir = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
-  const binDir = path.join(userDataDir, "bin");
-  const localFfmpegPath = path.join(
-    binDir,
-    process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg",
-  );
-
-  if (fs.existsSync(localFfmpegPath)) {
-    resolvedFfmpegPath = localFfmpegPath;
-    return resolvedFfmpegPath;
-  }
-
-  const isGlobalAvailable = await new Promise((resolve) => {
-    const child = spawn("ffmpeg", ["-version"], { stdio: "ignore" });
-    child.on("close", (code) => resolve(code === 0));
-    child.on("error", () => resolve(false));
-  });
-
-  if (isGlobalAvailable) {
-    logger.info(
-      "FFmpeg not found in package but found globally in system PATH.",
-    );
-    resolvedFfmpegPath = "ffmpeg";
-    return resolvedFfmpegPath;
   }
 
   throw new Error(
-    "FFmpeg binary not found in application bundle or system PATH.",
+    "FFmpeg binary (libffmpeg.so) not found in APK. " +
+      "Rebuild the app with 'node capacitor/scripts/fetch-ffmpeg.mjs' " +
+      "to bundle FFmpeg, then reinstall.",
   );
 }
 
