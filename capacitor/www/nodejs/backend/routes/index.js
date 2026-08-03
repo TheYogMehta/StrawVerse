@@ -6,6 +6,7 @@ const malRouter = require("./mal");
 const downloadsRouter = require("./downloads");
 const mediaRouter = require("./media");
 const libraryRouter = require("./library");
+const updateRouter = require("./update");
 
 const router = express.Router();
 
@@ -15,6 +16,7 @@ router.use(malRouter);
 router.use(downloadsRouter);
 router.use(mediaRouter);
 router.use(libraryRouter);
+router.use(updateRouter);
 
 // SPA fallback routes
 const SPA_ROUTES = [
