@@ -857,3 +857,21 @@
   right: 0;
 }
 
+/* Hide UI elements smoothly on toggle */
+.player-controls-header,
+.player-custom-controls,
+.player-controls-footer,
+.player-big-play-btn {
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.player-wrapper.hide-ui .player-controls-header,
+.player-wrapper.hide-ui .player-custom-controls,
+.player-wrapper.hide-ui .player-controls-footer,
+.player-wrapper.hide-ui .player-big-play-btn,
+.player-custom-controls.hide-ui {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
+

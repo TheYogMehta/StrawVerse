@@ -920,6 +920,60 @@ export default function Catalog({
     fetchData(1, activeFilters, "", null);
   };
 
+  const fetchHistoryData = useCallback(async () => {
+    if (provider !== "local") return;
+    try {
+      const statsRes = await fetch("/api/history/stats");
+      if (statsRes.ok) {
+        const sData = await statsRes.json();
+        setStats(sData);
+      }
+    } catch (err) {
+      console.error("Failed to fetch history stats:", err);
+    }
+
+    try {
+      const listRes = await fetch("/api/history/list?limit=15");
+      if (listRes.ok) {
+        const hData = await listRes.json();
+        const filtered = (hData || []).filter((item) => item.type === type);
+        const getGroupKey = (item) => {
+          if (item.mal_id) {
+            return `mal_${item.mal_id}`;
+          }
+          const cleanTitle = (item.title || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+          return `title_${cleanTitle}`;
+        };
+
+        const grouped = {};
+        for (const item of filtered) {
+          const key = getGroupKey(item);
+          const currentNum = Number(item.number) || 0;
+          if (
+            !grouped[key] ||
+            currentNum > (Number(grouped[key].number) || 0)
+          ) {
+            grouped[key] = item;
+          }
+        }
+        const unique = [];
+        const added = new Set();
+        for (const item of filtered) {
+          const key = getGroupKey(item);
+          if (!added.has(key)) {
+            added.add(key);
+            unique.push(grouped[key]);
+          }
+        }
+        setRecentHistory(unique);
+      }
+    } catch (err) {
+      console.error("Failed to fetch history list:", err);
+    }
+  }, [type, provider]);
+
   useEffect(() => {
     const cacheKey = `${type}_${provider}`;
     const cache = window.catalogCache[cacheKey];

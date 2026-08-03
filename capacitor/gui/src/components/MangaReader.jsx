@@ -89,6 +89,7 @@ export default function MangaReader({
   const [readerLayout, setReaderLayout] = useState("long-strip");
   const [readerDirection, setReaderDirection] = useState("rtl");
   const [activeItemIndex, setActiveItemIndex] = useState(0);
+  const [showUI, setShowUI] = useState(true);
 
   const saveWidthTimeoutRef = useRef(null);
   const saveReaderWidthToSettings = (val) => {
@@ -290,11 +291,14 @@ export default function MangaReader({
       e.target.closest("button") ||
       e.target.closest("a") ||
       e.target.closest(".header-nav") ||
+      e.target.closest(".reader-header") ||
       e.target.closest(".bottom-controls-panel") ||
       e.target.closest(".append-loading-container")
     ) {
       return;
     }
+
+    setShowUI((prev) => !prev);
 
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
@@ -867,7 +871,7 @@ export default function MangaReader({
       `}</style>
 
       {/* Top Header controls */}
-      <div className="reader-header glass-panel">
+      <div className={`reader-header glass-panel ${!showUI ? "hide-ui" : ""}`}>
         <div className="header-left-section">
           <button onClick={onBack} className="btn-reader-back">
             <ArrowLeft size={18} />
@@ -1069,7 +1073,9 @@ export default function MangaReader({
             {readerLayout === "long-strip" &&
               sortedChapters.length > 0 &&
               !appendingLoading && (
-                <div className="bottom-controls-panel glass-panel">
+                <div
+                  className={`bottom-controls-panel glass-panel ${!showUI ? "hide-ui" : ""}`}
+                >
                   <p className="bottom-controls-title">
                     You've reached the end of Chapter{" "}
                     {getCleanChapterNum(activeChapterInView, chapterNumOrId)}

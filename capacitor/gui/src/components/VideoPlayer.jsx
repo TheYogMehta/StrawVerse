@@ -220,12 +220,38 @@ export default function VideoPlayer({
   const durationRef = useRef(0);
   const isRemoteSync = useRef(false);
   const lastZoneTapRef = useRef({ time: 0, side: null });
+  const clickTimerRef = useRef(null);
+
+  const toggleUI = () => {
+    setShowUI((prev) => {
+      const next = !prev;
+      if (uiTimeoutRef.current) {
+        clearTimeout(uiTimeoutRef.current);
+      }
+      if (
+        next &&
+        videoRef.current &&
+        !videoRef.current.paused &&
+        !showSettings &&
+        !showWTOverlayPanel
+      ) {
+        uiTimeoutRef.current = setTimeout(() => {
+          setShowUI(false);
+        }, 3000);
+      }
+      return next;
+    });
+  };
 
   const handleZoneDoubleTap = (side, e) => {
     e.stopPropagation();
     const now = Date.now();
     const last = lastZoneTapRef.current;
     if (last.side === side && now - last.time < 350) {
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+        clickTimerRef.current = null;
+      }
       const video = videoRef.current;
       if (!video) return;
       if (watchTogetherClient.roomCode && !isHost) return;
@@ -245,7 +271,39 @@ export default function VideoPlayer({
       lastZoneTapRef.current = { time: 0, side: null };
     } else {
       lastZoneTapRef.current = { time: now, side };
+      if (clickTimerRef.current) {
+        clearTimeout(clickTimerRef.current);
+      }
+      clickTimerRef.current = setTimeout(() => {
+        clickTimerRef.current = null;
+        lastZoneTapRef.current = { time: 0, side: null };
+        toggleUI();
+      }, 350);
     }
+  };
+
+  const handleViewportClick = (e) => {
+    if (
+      e.target.closest("button") ||
+      e.target.closest("input") ||
+      e.target.closest("select") ||
+      e.target.closest("a") ||
+      e.target.closest(".player-controls-header") ||
+      e.target.closest(".player-custom-controls") ||
+      e.target.closest(".player-controls-footer") ||
+      e.target.closest(".player-settings-dropdown") ||
+      e.target.closest(".player-status-overlay") ||
+      e.target.closest(".wt-overlay-panel") ||
+      e.target.closest(".player-touch-zone")
+    ) {
+      return;
+    }
+
+    if (clickTimerRef.current) {
+      clearTimeout(clickTimerRef.current);
+      clickTimerRef.current = null;
+    }
+    toggleUI();
   };
 
   useEffect(() => {
@@ -1710,17 +1768,15 @@ export default function VideoPlayer({
       </div>
 
       {/* Main player viewport */}
-      <div className="player-viewport">
+      <div className="player-viewport" onClick={handleViewportClick}>
         {/* Double tap / click 10s seek target zones (left & right) */}
         <div
           className="player-touch-zone left"
           onClick={(e) => handleZoneDoubleTap("left", e)}
-          onDoubleClick={(e) => handleZoneDoubleTap("left", e)}
         />
         <div
           className="player-touch-zone right"
           onClick={(e) => handleZoneDoubleTap("right", e)}
-          onDoubleClick={(e) => handleZoneDoubleTap("right", e)}
         />
 
         {indicator.icon && (

@@ -762,3 +762,16 @@
     text-align: center !important;
   }
 }
+
+/* Hide UI elements smoothly on toggle */
+.reader-header,
+.bottom-controls-panel {
+  transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.reader-header.hide-ui,
+.bottom-controls-panel.hide-ui {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  visibility: hidden !important;
+}
