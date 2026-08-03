@@ -1,5 +1,16 @@
 # Changelog
 
+# [9.1.3] - 2026-08-03
+
+### Downloads & Domain Concurrency
+
+- **Crowdsourced Domain Concurrency (`mapping.db`):** Implemented server aggregation of client rate-limit telemetry into `mapping.db` (table #9 `domain_concurrency`). Client apps automatically receive optimal domain rules during mapping database updates.
+- **Kwik/AnimePahe Rate-Limit Fix:** Lowered default starting concurrency for `kwik.cx`/`animepahe` to 2 and added exponential backoff (up to 4 retries) on HTTP 429 errors in StreamProxy.
+
+### Core Backend & Stability
+
+- **Startup Race Condition Fix:** Resolved `Missing Provider!` error by adding scraper loading retry handling in `providerFetch`.
+
 # [9.1.2] - 2026-08-03
 
 ### Video Player & Playback
@@ -11,8 +22,6 @@
 
 - **Stream Proxy & Range Header Support:** Refactored `/api/stream/segment` proxy to forward HTTP `Range` request headers and stream video data directly using Node streams, reducing memory overhead and resolving buffering/playback errors.
 - **Net Adapter Stream Handling:** Extended Electron net adapter in scraper utilities to handle `stream` response types via Node `Readable` streams.
-
-
 
 # [9.1.1] - 2026-08-03
 
