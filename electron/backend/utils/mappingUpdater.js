@@ -215,7 +215,16 @@ async function checkForMappingUpdates() {
       try {
         const vRes = await axios.get(
           "https://strawverse.theyogmehta.online/api/mapping/version",
-          { headers: clientHeaders },
+          {
+            headers: {
+              os:
+                process.platform === "win32"
+                  ? "Windows"
+                  : process.platform === "darwin"
+                    ? "macOS"
+                    : "Linux",
+            },
+          },
         );
         latestVersion = vRes.data?.version;
       } catch (e) {
@@ -236,7 +245,14 @@ async function checkForMappingUpdates() {
       );
       const response = await axios.get(downloadUrl, {
         responseType: "arraybuffer",
-        headers: clientHeaders,
+        headers: {
+          os:
+            process.platform === "win32"
+              ? "Windows"
+              : process.platform === "darwin"
+                ? "macOS"
+                : "Linux",
+        },
       });
       const gzippedData = Buffer.from(response.data);
 

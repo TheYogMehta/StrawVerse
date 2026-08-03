@@ -350,12 +350,19 @@ export default function VideoPlayer({
             "playerMuted",
             "playerSubtitlePref",
             "playerSubsEnabled",
+            "playerSpeed",
           ]);
           if (res?.settings?.autoSkipIntro !== undefined) {
             setAutoSkip(res.settings.autoSkipIntro);
           }
-          if (res?.settings?.playerVolume !== undefined) setVolume(parseFloat(res.settings.playerVolume) ?? 1);
-          if (res?.settings?.playerMuted !== undefined) setIsMuted(Boolean(res.settings.playerMuted));
+          if (res?.settings?.playerVolume !== undefined)
+            setVolume(parseFloat(res.settings.playerVolume) ?? 1);
+          if (res?.settings?.playerMuted !== undefined)
+            setIsMuted(Boolean(res.settings.playerMuted));
+          if (res?.settings?.playerSpeed !== undefined) {
+            const spd = parseFloat(res.settings.playerSpeed);
+            if (!isNaN(spd) && spd > 0) setPlaybackSpeed(spd);
+          }
         }
       } catch (err) {
         console.error("Failed to load settings:", err);
@@ -363,6 +370,13 @@ export default function VideoPlayer({
     };
     fetchSettings();
   }, []);
+
+  const changePlaybackSpeed = (speed) => {
+    setPlaybackSpeed(speed);
+    if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+      window.sharedStateAPI.updateSetting("playerSpeed", speed);
+    }
+  };
 
   useEffect(() => {
     if (!subtitles || subtitles.length === 0) return;
@@ -580,12 +594,14 @@ export default function VideoPlayer({
       if (autoSkip && skipTimes.length > 0) {
         const match = skipTimes.find(
           (st) =>
-            ct >= st.interval.start_time && ct < st.interval.end_time - 0.5,
+            ct >= st.interval.start_time - 0.2 &&
+            ct < st.interval.end_time - 0.5,
         );
         if (match) {
-          videoRef.current.currentTime = match.interval.end_time;
-          currentTimeRef.current = match.interval.end_time;
-          setCurrentTime(match.interval.end_time);
+          const targetTime = match.interval.end_time + 0.5;
+          videoRef.current.currentTime = targetTime;
+          currentTimeRef.current = targetTime;
+          setCurrentTime(targetTime);
           showIndicator(
             ChevronRight,
             `Skipped ${match.skip_type === "op" || match.skip_type === "mixed-op" ? "Opening" : "Ending"}`,
@@ -630,8 +646,14 @@ export default function VideoPlayer({
       setVolume(videoRef.current.volume);
       setIsMuted(videoRef.current.muted);
       if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
-        window.sharedStateAPI.updateSetting("playerVolume", videoRef.current.volume);
-        window.sharedStateAPI.updateSetting("playerMuted", videoRef.current.muted);
+        window.sharedStateAPI.updateSetting(
+          "playerVolume",
+          videoRef.current.volume,
+        );
+        window.sharedStateAPI.updateSetting(
+          "playerMuted",
+          videoRef.current.muted,
+        );
       }
     }
   };
@@ -1027,13 +1049,19 @@ export default function VideoPlayer({
       } else {
         const subSrcs = Array.isArray(data?.sub?.sources)
           ? data.sub.sources
-          : Array.isArray(data?.sub) ? data.sub : [];
+          : Array.isArray(data?.sub)
+            ? data.sub
+            : [];
         const dubSrcs = Array.isArray(data?.dub?.sources)
           ? data.dub.sources
-          : Array.isArray(data?.dub) ? data.dub : [];
+          : Array.isArray(data?.dub)
+            ? data.dub
+            : [];
         const hsubSrcs = Array.isArray(data?.hsub?.sources)
           ? data.hsub.sources
-          : Array.isArray(data?.hsub) ? data.hsub : [];
+          : Array.isArray(data?.hsub)
+            ? data.hsub
+            : [];
         const baseSrcs = Array.isArray(data?.sources) ? data.sources : [];
 
         rawSources = [...baseSrcs, ...subSrcs, ...dubSrcs, ...hsubSrcs];
@@ -1044,9 +1072,7 @@ export default function VideoPlayer({
         s.type === "hsub" ||
         s.quality?.toLowerCase().includes("hsub");
       const isDub = (s) =>
-        s.isDub ||
-        s.type === "dub" ||
-        s.quality?.toLowerCase().includes("dub");
+        s.isDub || s.type === "dub" || s.quality?.toLowerCase().includes("dub");
 
       let fetchedSources = rawSources;
       if (playerSubDub === "sub") {
@@ -1502,7 +1528,7 @@ export default function VideoPlayer({
             const idx = speeds.indexOf(playbackSpeed);
             if (idx !== -1 && idx < speeds.length - 1) {
               const nextSpeed = speeds[idx + 1];
-              setPlaybackSpeed(nextSpeed);
+              changePlaybackSpeed(nextSpeed);
               showIndicator(Settings, `${nextSpeed}x Speed`);
             }
           }
@@ -1516,7 +1542,7 @@ export default function VideoPlayer({
             const idx = speeds.indexOf(playbackSpeed);
             if (idx > 0) {
               const nextSpeed = speeds[idx - 1];
-              setPlaybackSpeed(nextSpeed);
+              changePlaybackSpeed(nextSpeed);
               showIndicator(Settings, `${nextSpeed}x Speed`);
             }
           }
@@ -1539,6 +1565,22 @@ export default function VideoPlayer({
       if (indicatorTimeoutRef.current)
         clearTimeout(indicatorTimeoutRef.current);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch (e) {}
+        hlsRef.current = null;
+      }
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.removeAttribute("src");
+          videoRef.current.load();
+        } catch (e) {}
+      }
     };
   }, []);
 
@@ -1634,6 +1676,39 @@ export default function VideoPlayer({
 
       {/* Main player viewport */}
       <div className="player-viewport">
+        {/* Double click 5s seek target zones (left & right) */}
+        <div
+          className="player-touch-zone left"
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            const video = videoRef.current;
+            if (!video) return;
+            if (watchTogetherClient.roomCode && !isHost) return;
+            const nextTime = Math.max(0, video.currentTime - 5);
+            video.currentTime = nextTime;
+            currentTimeRef.current = nextTime;
+            setCurrentTime(nextTime);
+            showIndicator(ChevronLeft, "-5s");
+          }}
+        />
+        <div
+          className="player-touch-zone right"
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            const video = videoRef.current;
+            if (!video) return;
+            if (watchTogetherClient.roomCode && !isHost) return;
+            const nextTime = Math.min(
+              video.duration || 0,
+              video.currentTime + 5,
+            );
+            video.currentTime = nextTime;
+            currentTimeRef.current = nextTime;
+            setCurrentTime(nextTime);
+            showIndicator(ChevronRight, "+5s");
+          }}
+        />
+
         {indicator.icon && (
           <div
             className={`player-indicator-overlay ${indicator.visible ? "visible" : ""}`}
@@ -1839,7 +1914,7 @@ export default function VideoPlayer({
                                   <button
                                     key={speed}
                                     onClick={() => {
-                                      setPlaybackSpeed(speed);
+                                      changePlaybackSpeed(speed);
                                       setSettingsActiveMenu("main");
                                       setShowSettings(false);
                                     }}

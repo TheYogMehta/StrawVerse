@@ -17,6 +17,7 @@ const {
   getDomainConcurrency,
   recordDomainFailure,
   recordDomainSuccess,
+  isCircuitOpen,
 } = require("./domainConcurrency");
 
 const pipeline = promisify(stream.pipeline);
@@ -688,6 +689,20 @@ class downloader {
               await recordDomainFailure(domainName, CONCURRENCY);
               CONCURRENCY = await getDomainConcurrency(domainName, 16);
               const maxRetries = 5;
+              if (isCircuitOpen(domainName)) {
+                logger.warn(
+                  `[Download] Circuit open for '${domainName}', skipping segment ${index} to avoid further rate-limiting.`,
+                );
+                failedSegmentsCount++;
+                await fs.promises
+                  .writeFile(segmentFile, Buffer.alloc(0))
+                  .catch(() => {});
+                this.currentSegments++;
+                this.logProgress();
+                activeDownloads--;
+                startNext();
+                return;
+              }
               if (retryCount >= maxRetries) {
                 logger.warn(
                   `Failed to download segment ${index} after ${maxRetries} attempts: ${err.message}. Writing empty segment to continue.`,

@@ -221,7 +221,11 @@ async function checkForMappingUpdates() {
       try {
         const vRes = await axios.get(
           "https://strawverse.theyogmehta.online/api/mapping/version",
-          { headers: clientHeaders },
+          {
+            headers: {
+              os: "Android",
+            },
+          },
         );
         latestVersion = vRes.data?.version;
       } catch (e) {
@@ -242,7 +246,9 @@ async function checkForMappingUpdates() {
       );
       const response = await axios.get(downloadUrl, {
         responseType: "arraybuffer",
-        headers: clientHeaders,
+        headers: {
+          os: "Android",
+        },
       });
       const gzippedData = Buffer.from(response.data);
 
@@ -250,7 +256,7 @@ async function checkForMappingUpdates() {
       const decompressedData = zlib.gunzipSync(gzippedData);
 
       fs.writeFileSync(tempDbPath, decompressedData);
-
+  
       logger.info("[mappingUpdater] Replacing mapping database file...");
 
       try {

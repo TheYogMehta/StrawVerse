@@ -250,9 +250,16 @@ try {
 
 try {
   global.db.exec("DROP TABLE IF EXISTS next_episodes");
-  global.db.exec(
-    "DELETE FROM Settings WHERE key = 'last_livechart_schedule_run'",
-  );
+  const hasSettings = global.db
+    .prepare(
+      "SELECT count(*) as cnt FROM sqlite_master WHERE type='table' AND name='Settings'",
+    )
+    .get();
+  if (hasSettings && hasSettings.cnt > 0) {
+    global.db.exec(
+      "DELETE FROM Settings WHERE key = 'last_livechart_schedule_run'",
+    );
+  }
 } catch (e) {
   logger.error(
     "[db] Failed to drop next_episodes table from global.db: " + e.message,

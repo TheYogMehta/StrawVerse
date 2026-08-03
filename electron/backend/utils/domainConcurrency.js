@@ -4,6 +4,26 @@ const { logger } = require("./AppLogger");
 const cache = {};
 const successStreak = {};
 
+const circuitBreaker = {};
+
+function isCircuitOpen(domain) {
+  const cb = circuitBreaker[domain];
+  if (!cb || cb.openedAt === null) return false;
+  if (Date.now() - cb.openedAt > 60_000) {
+    cb.openedAt = null;
+    cb.failures = 0;
+    return false;
+  }
+  return true;
+}
+
+function resetCircuit(domain) {
+  if (circuitBreaker[domain]) {
+    circuitBreaker[domain].failures = 0;
+    circuitBreaker[domain].openedAt = null;
+  }
+}
+
 /**
  * Extract clean domain name from URL or Referer
  */
@@ -18,7 +38,9 @@ function extractDomain(urlStr, refererStr) {
 
   if (!domain && refererStr) {
     try {
-      domain = new URL(refererStr).hostname.replace(/^www\./i, "").toLowerCase();
+      domain = new URL(refererStr).hostname
+        .replace(/^www\./i, "")
+        .toLowerCase();
     } catch (e) {}
   }
 
@@ -58,10 +80,6 @@ function getDomainConcurrency(domain, defaultMax = 5) {
   return cache[domain];
 }
 
-/**
- * Record a rate-limit failure (HTTP 429 / 403 / connection drop)
- * Halves current concurrency for the domain (down to min 1) and saves to DB.
- */
 function recordDomainFailure(domain, currentVal) {
   if (!domain) return;
   const current = currentVal || cache[domain] || 5;
@@ -69,9 +87,26 @@ function recordDomainFailure(domain, currentVal) {
   cache[domain] = newConcurrency;
   successStreak[domain] = 0;
 
-  logger.warn(
-    `[DomainConcurrency] Rate limit/failure on domain '${domain}'. Reduced concurrency from ${current} -> ${newConcurrency}`,
-  );
+  if (current === 1 && newConcurrency === 1) {
+    if (!circuitBreaker[domain])
+      circuitBreaker[domain] = { failures: 0, openedAt: null };
+    const cb = circuitBreaker[domain];
+    cb.failures++;
+    if (cb.failures >= 3 && cb.openedAt === null) {
+      cb.openedAt = Date.now();
+      logger.warn(
+        `[DomainConcurrency] Circuit OPEN for '${domain}' after ${cb.failures} consecutive failures at min concurrency. Suppressing retries for ${60_000 / 1000}s.`,
+      );
+    } else if (cb.openedAt === null) {
+      logger.warn(
+        `[DomainConcurrency] Rate limit/failure on domain '${domain}'. Already at min concurrency (1). Failure ${cb.failures}/3.`,
+      );
+    }
+  } else {
+    logger.warn(
+      `[DomainConcurrency] Rate limit/failure on domain '${domain}'. Reduced concurrency from ${current} -> ${newConcurrency}`,
+    );
+  }
 
   try {
     run(
@@ -85,16 +120,15 @@ function recordDomainFailure(domain, currentVal) {
       [domain, newConcurrency, newConcurrency, Date.now()],
     );
   } catch (e) {
-    logger.error(`[DomainConcurrency] Error saving failure for ${domain}: ${e.message}`);
+    logger.error(
+      `[DomainConcurrency] Error saving failure for ${domain}: ${e.message}`,
+    );
   }
 }
 
-/**
- * Record a successful segment request.
- * Ramps concurrency back up by +1 after 20 consecutive successful requests up to maxLimit.
- */
 function recordDomainSuccess(domain, maxLimit = 5) {
   if (!domain) return;
+  resetCircuit(domain);
   const current = cache[domain] || 2;
   successStreak[domain] = (successStreak[domain] || 0) + 1;
 
@@ -138,4 +172,5 @@ module.exports = {
   getDomainConcurrency,
   recordDomainFailure,
   recordDomainSuccess,
+  isCircuitOpen,
 };

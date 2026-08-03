@@ -1497,7 +1497,11 @@ router.get("/api/image", async (req, res) => {
         decodedUrl,
       ]);
       const cacheDir = ImageCacheManager.getImageCacheDir();
-      if (cached && cached.filename && fs.existsSync(path.join(cacheDir, cached.filename))) {
+      if (
+        cached &&
+        cached.filename &&
+        fs.existsSync(path.join(cacheDir, cached.filename))
+      ) {
         run("UPDATE ImageCache SET last_accessed = ? WHERE url = ?", [
           Date.now(),
           decodedUrl,
@@ -1579,16 +1583,53 @@ router.get("/api/image", async (req, res) => {
 // Proxy for m3u8 playlist
 router.get("/api/stream/m3u8", async (req, res) => {
   const url = req.query.url;
+  const customReferer = req.query.referer;
   if (!url) return res.status(400).send("No URL");
   try {
+    if (customReferer && global.setDynamicReferer) {
+      global.setDynamicReferer(url, customReferer);
+    }
     const port = global.PORT || 3000;
     const reqHeaders = getHeaders(url);
-    const { data } = await global.axios.get(url, {
-      headers: reqHeaders,
-      responseType: "text",
-      timeout: 15000,
-    });
+    if (customReferer) {
+      reqHeaders.Referer = customReferer;
+    }
+    let data;
+    try {
+      const resp = await global.axios.get(url, {
+        headers: reqHeaders,
+        responseType: "text",
+        timeout: 15000,
+      });
+      data = resp.data;
+    } catch (fetchErr) {
+      if (
+        fetchErr.response &&
+        (fetchErr.response.status === 403 ||
+          fetchErr.response.status === 503) &&
+        global.cloudflarebypass
+      ) {
+        try {
+          await global.cloudflarebypass(url, true);
+          const freshHeaders = getHeaders(url);
+          if (customReferer) freshHeaders.Referer = customReferer;
+          const retry = await global.axios.get(url, {
+            headers: freshHeaders,
+            responseType: "text",
+            timeout: 15000,
+          });
+          data = retry.data;
+        } catch (bypassErr) {
+          throw bypassErr;
+        }
+      } else {
+        throw fetchErr;
+      }
+    }
     const base = url.substring(0, url.lastIndexOf("/") + 1);
+    const refParam = customReferer
+      ? `&referer=${encodeURIComponent(customReferer)}`
+      : "";
     const segProxy = `http://127.0.0.1:${port}/api/stream/segment?url=`;
     const m3u8Proxy = `http://127.0.0.1:${port}/api/stream/m3u8?url=`;
 
@@ -1602,13 +1643,13 @@ router.get("/api/stream/m3u8", async (req, res) => {
             ? t.replace(/URI="([^"]+)"/, (_, u) => {
                 const abs = u.startsWith("http") ? u : base + u;
                 const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
-                return `URI="${proxy}${encodeURIComponent(abs)}"`;
+                return `URI="${proxy}${encodeURIComponent(abs)}${refParam}"`;
               })
             : line;
         }
         const abs = t.startsWith("http") ? t : base + t;
         const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
-        return `${proxy}${encodeURIComponent(abs)}`;
+        return `${proxy}${encodeURIComponent(abs)}${refParam}`;
       })
       .join("\n");
 
@@ -1623,9 +1664,16 @@ router.get("/api/stream/m3u8", async (req, res) => {
 // Proxy for m3u8 video segment
 router.get("/api/stream/segment", async (req, res) => {
   const url = req.query.url;
+  const customReferer = req.query.referer;
   if (!url) return res.status(400).send("No URL");
   try {
+    if (customReferer && global.setDynamicReferer) {
+      global.setDynamicReferer(url, customReferer);
+    }
     const reqHeaders = getHeaders(url);
+    if (customReferer) {
+      reqHeaders.Referer = customReferer;
+    }
     let attempts = 0;
     let data, headers;
     while (attempts < 3) {
@@ -1640,8 +1688,22 @@ router.get("/api/stream/segment", async (req, res) => {
         break;
       } catch (err) {
         attempts++;
-        if (err.response?.status === 429 && attempts < 3) {
-          await new Promise((r) => setTimeout(r, 200 * attempts));
+        const status = err.response?.status;
+        if (status === 429 && attempts < 3) {
+          // Respect rate-limit: back off progressively
+          await new Promise((r) => setTimeout(r, 1000 * attempts));
+        } else if (
+          (status === 403 || status === 503) &&
+          attempts < 3 &&
+          global.cloudflarebypass
+        ) {
+          // Cloudflare challenge — try bypass then refresh headers
+          try {
+            await global.cloudflarebypass(url, true);
+            const fresh = getHeaders(url);
+            if (customReferer) fresh.Referer = customReferer;
+            Object.assign(reqHeaders, fresh);
+          } catch (_) {}
         } else if (attempts >= 3) {
           throw err;
         }

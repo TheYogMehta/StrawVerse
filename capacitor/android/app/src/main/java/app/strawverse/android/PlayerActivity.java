@@ -929,7 +929,7 @@ public class PlayerActivity extends Activity {
                         case androidx.media3.common.Player.STATE_READY:
                             stateString = "STATE_READY";
                             if (selectedSubtitleIndex >= 0) {
-                                selectSubtitle(selectedSubtitleIndex);
+                                selectSubtitle(selectedSubtitleIndex, false);
                             }
                             break;
                         case androidx.media3.common.Player.STATE_ENDED:
@@ -1174,8 +1174,8 @@ public class PlayerActivity extends Activity {
                 if (interval != null) {
                     double start = interval.optDouble("start_time", 0.0);
                     double end = interval.optDouble("end_time", 0.0);
-                    if (currentSecs >= start && currentSecs < end) {
-                        final double skipTarget = end;
+                    if (currentSecs >= start - 0.2 && currentSecs < end - 0.5) {
+                        final double skipTarget = end + 0.5;
                         if (autoSkipIntro) {
                             if (player != null) {
                                 player.seekTo((long) (skipTarget * 1000));
@@ -1387,6 +1387,10 @@ public class PlayerActivity extends Activity {
     }
 
     private void selectSubtitle(int index) {
+        selectSubtitle(index, true);
+    }
+
+    private void selectSubtitle(int index, boolean showToast) {
         selectedSubtitleIndex = index;
         if (player == null) return;
         if (index == -1) {
@@ -1397,7 +1401,9 @@ public class PlayerActivity extends Activity {
                             .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                             .build()
             );
-            Toast.makeText(this, "Subtitles turned off", Toast.LENGTH_SHORT).show();
+            if (showToast) {
+                Toast.makeText(this, "Subtitles turned off", Toast.LENGTH_SHORT).show();
+            }
         } else {
             try {
                 String targetTrackId = "sub_" + index;
@@ -1456,7 +1462,9 @@ public class PlayerActivity extends Activity {
 
                 String label = targetLang.isEmpty() ? "Subtitles" : targetLang;
                 Log.d("PlayerActivity", "selectSubtitle index=" + index + ", overrideApplied=" + overrideApplied + ", label=" + label);
-                Toast.makeText(this, "Subtitles: " + label, Toast.LENGTH_SHORT).show();
+                if (showToast) {
+                    Toast.makeText(this, "Subtitles: " + label, Toast.LENGTH_SHORT).show();
+                }
             } catch (Exception e) {
                 Log.e("PlayerActivity", "Failed selecting subtitle track: " + e.getMessage());
             }
@@ -2467,11 +2475,8 @@ public class PlayerActivity extends Activity {
             try {
                 reportProgress();
                 player.pause();
-                player.stop();
-                player.release();
-                player = null;
             } catch (Exception e) {
-                Log.e("PlayerActivity", "Error releasing player onStop: " + e.getMessage());
+                Log.e("PlayerActivity", "Error pausing player onStop: " + e.getMessage());
             }
         }
     }

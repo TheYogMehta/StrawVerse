@@ -839,3 +839,21 @@
   -webkit-box-orient: vertical;
   margin-top: 2px;
 }
+
+/* Double-tap 5s seek touch zones */
+.player-touch-zone {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 40%;
+  z-index: 2;
+}
+
+.player-touch-zone.left {
+  left: 0;
+}
+
+.player-touch-zone.right {
+  right: 0;
+}
+

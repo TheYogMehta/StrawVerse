@@ -1653,11 +1653,33 @@ router.get("/api/stream/m3u8", async (req, res) => {
     if (customReferer) {
       reqHeaders.Referer = customReferer;
     }
-    const { data } = await global.axios.get(url, {
-      headers: reqHeaders,
-      responseType: "text",
-      timeout: 15000,
-    });
+    let data;
+    try {
+      const resp = await global.axios.get(url, {
+        headers: reqHeaders,
+        responseType: "text",
+        timeout: 15000,
+      });
+      data = resp.data;
+    } catch (fetchErr) {
+      if (
+        fetchErr.response &&
+        (fetchErr.response.status === 403 || fetchErr.response.status === 503) &&
+        global.cloudflarebypass
+      ) {
+        await global.cloudflarebypass(url, true);
+        const freshHeaders = getHeaders(url);
+        if (customReferer) freshHeaders.Referer = customReferer;
+        const retry = await global.axios.get(url, {
+          headers: freshHeaders,
+          responseType: "text",
+          timeout: 15000,
+        });
+        data = retry.data;
+      } else {
+        throw fetchErr;
+      }
+    }
     const base = url.substring(0, url.lastIndexOf("/") + 1);
     const refParam = customReferer
       ? `&referer=${encodeURIComponent(customReferer)}`
@@ -1720,8 +1742,20 @@ router.get("/api/stream/segment", async (req, res) => {
         break;
       } catch (err) {
         attempts++;
-        if (err.response?.status === 429 && attempts < 3) {
-          await new Promise((r) => setTimeout(r, 200 * attempts));
+        const status = err.response?.status;
+        if (status === 429 && attempts < 3) {
+          await new Promise((r) => setTimeout(r, 1000 * attempts));
+        } else if (
+          (status === 403 || status === 503) &&
+          attempts < 3 &&
+          global.cloudflarebypass
+        ) {
+          try {
+            await global.cloudflarebypass(url, true);
+            const fresh = getHeaders(url);
+            if (customReferer) fresh.Referer = customReferer;
+            Object.assign(reqHeaders, fresh);
+          } catch (_) {}
         } else if (attempts >= 3) {
           throw err;
         }

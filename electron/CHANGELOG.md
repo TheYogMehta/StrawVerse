@@ -2,9 +2,19 @@
 
 # [9.1.2] - 2026-08-03
 
-### Bug Fixes
+### Player & Playback
 
-- **Image Cache Crash Fix**: Fixed a startup error where stale or incomplete image cache entries with missing filenames caused repeated errors when loading thumbnails. Affected images are now silently re-fetched instead of crashing the cache reader.
+- **Double-Tap to Seek:** Double-tap the left or right side of the screen to jump **5 seconds** backward or forward without opening full player controls.
+- **Saved Playback Speed:** Your preferred speed (1.25x, 1.5x, 2x, etc.) is now saved and automatically applied across episodes and new series.
+- **Smoother Auto-Skip:** Fixed an issue where auto-skipping intros or outros got stuck looping near the end of the skip window.
+- **Reliable Streaming & Playback:** Fixed video playback failures (specifically on Windows using MPV player) and eliminated black screens or frozen video when switching apps mid-watch.
+- **Background Audio Cleanup:** Exiting an episode while it is still loading will no longer leave mystery audio playing in the background.
+
+### Downloads & Stability
+
+- **Better Download Reliability:** Downloads from sources like Kwik will no longer get stuck in endless retry loops when hit with temporary blocks or rate limits—the queue now keeps moving cleanly.
+- **Cleaner Notifications:** Subtitles no longer re-download or spam notifications every time you scrub through the video timeline.
+- **App Setup & Image Fixes:** Resolved app startup crashes caused by corrupt image thumbnail caches and fixed errors during initial setup or database syncs.
 
 # [9.1.1] - 2026-08-03
 
