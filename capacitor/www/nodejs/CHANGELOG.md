@@ -2,15 +2,15 @@
 
 # [9.1.2] - 2026-08-03
 
-### Native Player & Touch Gestures
+### Video Player & Playback
 
-- **Double-Tap to Seek (10s):** Added native `GestureDetector` in Android (`PlayerActivity`) and touch zone handlers in the web player for 10-second forward/backward double-tap seeking with animated HUD overlays (`-10s` / `+10s`).
-- **Saved Playback Speed:** Your preferred playback speed (1.25x, 1.5x, 2x, etc.) is now saved to local settings and automatically reapplied upon starting new episodes.
+- **Saved Playback Speed:** Your preferred playback speed (1.25x, 1.5x, 2x, etc.) is now saved to local settings and automatically reapplied across episodes and new series in MPV player sessions.
+- **MPV Process Logging & Subtitle Fixes:** Subtitle tracks now load reliably with explicit `--sid` flags, process `stderr` output is logged for easier debugging, and script options are cleanly passed using `--script-opts-add=`.
 
-### App Lifecycle & Settings API
+### Stream Proxy & Core Backend
 
-- **Auto-Refreshing Progress & History:** Added `appStateChange`, `focus`, and `visibilitychange` listeners to automatically refresh watch history and progress indicators when resuming the app or exiting the video player.
-- **Flexible Settings API:** Enhanced `/api/settings/update` and `/api/settings/update-multiple` backend endpoints to accept direct key-value JSON payload objects alongside array parameters.
+- **Stream Proxy & Range Header Support:** Refactored `/api/stream/segment` proxy to forward HTTP `Range` request headers and stream video data directly using Node streams, reducing memory overhead and resolving buffering/playback errors.
+- **Net Adapter Stream Handling:** Extended Electron net adapter in scraper utilities to handle `stream` response types via Node `Readable` streams.
 
 
 
