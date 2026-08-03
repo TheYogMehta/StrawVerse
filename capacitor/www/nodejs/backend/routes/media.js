@@ -26,6 +26,7 @@ const {
 const { getKeyValue, queryOne, run } = require("../utils/db");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getHeaders } = require("../utils/proxyHeaders");
+const { MalFetchList } = require("../utils/mal");
 
 const router = express.Router();
 
@@ -1560,7 +1561,11 @@ router.get("/api/image", async (req, res) => {
         decodedUrl,
       ]);
       const cacheDir = ImageCacheManager.getImageCacheDir();
-      if (cached && cached.filename && fs.existsSync(path.join(cacheDir, cached.filename))) {
+      if (
+        cached &&
+        cached.filename &&
+        fs.existsSync(path.join(cacheDir, cached.filename))
+      ) {
         run("UPDATE ImageCache SET last_accessed = ? WHERE url = ?", [
           Date.now(),
           decodedUrl,
@@ -1664,7 +1669,8 @@ router.get("/api/stream/m3u8", async (req, res) => {
     } catch (fetchErr) {
       if (
         fetchErr.response &&
-        (fetchErr.response.status === 403 || fetchErr.response.status === 503) &&
+        (fetchErr.response.status === 403 ||
+          fetchErr.response.status === 503) &&
         global.cloudflarebypass
       ) {
         await global.cloudflarebypass(url, true);

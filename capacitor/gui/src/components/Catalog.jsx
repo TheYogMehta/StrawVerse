@@ -998,61 +998,39 @@ export default function Catalog({
     }
 
     if (provider === "local") {
-      fetch(`/api/local/tags/view/${type}`)
+      fetch("/api/local/tags")
         .then((res) => res.json())
-        .then((tags) => {
-          if (Array.isArray(tags)) setLocalTags(tags);
+        .then((tData) => {
+          if (Array.isArray(tData)) setLocalTags(tData);
         })
         .catch((err) => console.error("Failed to fetch local tags:", err));
 
-      fetch("/api/history/stats")
-        .then((res) => res.json())
-        .then((sData) => setStats(sData))
-        .catch((err) => console.error("Failed to fetch history stats:", err));
+      fetchHistoryData();
+      window.refreshCatalogHistory = fetchHistoryData;
 
-      fetch("/api/history/list?limit=15")
-        .then((res) => res.json())
-        .then((hData) => {
-          const filtered = (hData || []).filter((item) => item.type === type);
-          const getGroupKey = (item) => {
-            if (item.mal_id) {
-              return `mal_${item.mal_id}`;
-            }
-            const cleanTitle = (item.title || "")
-              .toLowerCase()
-              .replace(/[^a-z0-9]/g, "");
-            return `title_${cleanTitle}`;
-          };
+      const handleFocus = () => fetchHistoryData();
+      const handleVisibility = () => {
+        if (!document.hidden) fetchHistoryData();
+      };
 
-          const grouped = {};
-          for (const item of filtered) {
-            const key = getGroupKey(item);
-            const currentNum = Number(item.number) || 0;
-            if (
-              !grouped[key] ||
-              currentNum > (Number(grouped[key].number) || 0)
-            ) {
-              grouped[key] = item;
-            }
-          }
-          const unique = [];
-          const added = new Set();
-          for (const item of filtered) {
-            const key = getGroupKey(item);
-            if (!added.has(key)) {
-              added.add(key);
-              unique.push(grouped[key]);
-            }
-          }
-          setRecentHistory(unique);
-        })
-        .catch((err) => console.error("Failed to fetch history list:", err));
+      window.addEventListener("focus", handleFocus);
+      document.addEventListener("visibilitychange", handleVisibility);
+      const timer = setInterval(fetchHistoryData, 4000);
+
+      return () => {
+        window.removeEventListener("focus", handleFocus);
+        document.removeEventListener("visibilitychange", handleVisibility);
+        clearInterval(timer);
+        if (window.refreshCatalogHistory === fetchHistoryData) {
+          delete window.refreshCatalogHistory;
+        }
+      };
     } else {
       setLocalTags([]);
       setStats(null);
       setRecentHistory([]);
     }
-  }, [type, provider]);
+  }, [type, provider, fetchHistoryData]);
 
   const handleDismissHistory = async (item) => {
     setRecentHistory((prev) =>

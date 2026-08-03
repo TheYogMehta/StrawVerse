@@ -21,6 +21,7 @@ import android.os.Looper;
 import android.provider.Settings;
 import android.util.Log;
 import android.view.Gravity;
+import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -90,6 +91,7 @@ public class PlayerActivity extends Activity {
     private android.widget.ImageButton skipButton;
 
     // Gesture variables
+    private GestureDetector gestureDetector;
     private float startX = 0f;
     private float startY = 0f;
     private float startVal = 0f;
@@ -118,6 +120,7 @@ public class PlayerActivity extends Activity {
     private long lastReportTimeMs = 0;
     private boolean autoSkipIntro = true;
     private boolean autoPlayNextEpisode = true;
+    private float savedSpeed = 1.0f;
     private double lastProgressTimeSecs = -1;
     private boolean hasSeekedToProgress = false;
 
@@ -228,6 +231,43 @@ public class PlayerActivity extends Activity {
         }
 
         // Programmatic Layout construction
+        gestureDetector = new GestureDetector(this, new GestureDetector.SimpleOnGestureListener() {
+            @Override
+            public boolean onDoubleTap(MotionEvent e) {
+                if (player == null) return false;
+                int width = getResources().getDisplayMetrics().widthPixels;
+                float touchX = e.getX();
+                long currentPos = player.getCurrentPosition();
+                long duration = player.getDuration();
+                long seekMs = 10000L;
+
+                if (touchX < width / 2f) {
+                    long targetMs = Math.max(0, currentPos - seekMs);
+                    player.seekTo(targetMs);
+                    showHudOverlay("-10s", R.drawable.ic_rewind);
+                } else {
+                    long targetMs = duration > 0 ? Math.min(duration, currentPos + seekMs) : currentPos + seekMs;
+                    player.seekTo(targetMs);
+                    showHudOverlay("+10s", R.drawable.ic_forward);
+                }
+                hudHandler.removeCallbacks(hudRunnable);
+                hudHandler.postDelayed(hudRunnable, 800);
+                return true;
+            }
+
+            @Override
+            public boolean onSingleTapConfirmed(MotionEvent e) {
+                if (playerView != null) {
+                    if (playerView.isControllerFullyVisible()) {
+                        playerView.hideController();
+                    } else {
+                        playerView.showController();
+                    }
+                }
+                return true;
+            }
+        });
+
         FrameLayout rootLayout = new FrameLayout(this);
         rootLayout.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -928,6 +968,9 @@ public class PlayerActivity extends Activity {
                             break;
                         case androidx.media3.common.Player.STATE_READY:
                             stateString = "STATE_READY";
+                            if (savedSpeed > 0 && player != null) {
+                                player.setPlaybackSpeed(savedSpeed);
+                            }
                             if (selectedSubtitleIndex >= 0) {
                                 selectSubtitle(selectedSubtitleIndex, false);
                             }
@@ -1477,6 +1520,10 @@ public class PlayerActivity extends Activity {
         int width = getResources().getDisplayMetrics().widthPixels;
         int height = getResources().getDisplayMetrics().heightPixels;
 
+        if (gestureDetector != null && gestureDetector.onTouchEvent(event)) {
+            return true;
+        }
+
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
                 startX = event.getX();
@@ -1849,6 +1896,8 @@ public class PlayerActivity extends Activity {
                 public void onClick(View v) {
                     if (player != null) {
                         player.setPlaybackSpeed(speed);
+                        savedSpeed = speed;
+                        saveSetting("playerSpeed", speed);
                         if (txtSpeed != null) {
                             txtSpeed.setText(speed == 1.0f ? "Normal (1.0x)" : String.format("%.2fx", speed));
                         }
@@ -2255,6 +2304,35 @@ public class PlayerActivity extends Activity {
         });
     }
 
+    private void saveSetting(final String key, final float value) {
+        Executors.newSingleThreadExecutor().execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL("http://127.0.0.1:3459/api/settings/update");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                    conn.setDoOutput(true);
+                    conn.setConnectTimeout(3000);
+                    conn.setReadTimeout(3000);
+
+                    JSONObject payload = new JSONObject();
+                    payload.put(key, value);
+
+                    try (OutputStream os = conn.getOutputStream()) {
+                        byte[] input = payload.toString().getBytes("utf-8");
+                        os.write(input, 0, input.length);
+                    }
+                    conn.getResponseCode();
+                    conn.disconnect();
+                } catch (Exception e) {
+                    Log.e("PlayerActivity", "Failed updating setting " + key + ": " + e.getMessage());
+                }
+            }
+        });
+    }
+
     private synchronized void applyResumePosition() {
         if (player == null || hasSeekedToProgress || lastProgressTimeSecs <= 0) return;
         long seekPosMs = (long) (Math.max(0.0, lastProgressTimeSecs - 5.0) * 1000);
@@ -2298,6 +2376,22 @@ public class PlayerActivity extends Activity {
                             if (settings != null) {
                                 autoSkipIntro = settings.optBoolean("autoSkipIntro", true);
                                 autoPlayNextEpisode = settings.optBoolean("autoPlayNextEpisode", true);
+                                if (settings.has("playerSpeed")) {
+                                    try {
+                                        float spd = (float) settings.getDouble("playerSpeed");
+                                        if (spd > 0) {
+                                            savedSpeed = spd;
+                                            runOnUiThread(new Runnable() {
+                                                @Override
+                                                public void run() {
+                                                    if (player != null) {
+                                                        player.setPlaybackSpeed(savedSpeed);
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    } catch (Exception e) {}
+                                }
                             }
                         }
                     }

@@ -219,6 +219,34 @@ export default function VideoPlayer({
   const bufferedRef = useRef(0);
   const durationRef = useRef(0);
   const isRemoteSync = useRef(false);
+  const lastZoneTapRef = useRef({ time: 0, side: null });
+
+  const handleZoneDoubleTap = (side, e) => {
+    e.stopPropagation();
+    const now = Date.now();
+    const last = lastZoneTapRef.current;
+    if (last.side === side && now - last.time < 350) {
+      const video = videoRef.current;
+      if (!video) return;
+      if (watchTogetherClient.roomCode && !isHost) return;
+      if (side === "left") {
+        const nextTime = Math.max(0, video.currentTime - 10);
+        video.currentTime = nextTime;
+        currentTimeRef.current = nextTime;
+        setCurrentTime(nextTime);
+        showIndicator(ChevronLeft, "-10s");
+      } else {
+        const nextTime = Math.min(video.duration || 0, video.currentTime + 10);
+        video.currentTime = nextTime;
+        currentTimeRef.current = nextTime;
+        setCurrentTime(nextTime);
+        showIndicator(ChevronRight, "+10s");
+      }
+      lastZoneTapRef.current = { time: 0, side: null };
+    } else {
+      lastZoneTapRef.current = { time: now, side };
+    }
+  };
 
   useEffect(() => {
     const handleRemotePlayPause = ({ isPlaying: remotePlaying, timestamp }) => {
@@ -376,6 +404,11 @@ export default function VideoPlayer({
     if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
       window.sharedStateAPI.updateSetting("playerSpeed", speed);
     }
+    fetch("/api/settings/update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ playerSpeed: speed }),
+    }).catch(() => {});
   };
 
   useEffect(() => {
@@ -914,6 +947,8 @@ export default function VideoPlayer({
           provider,
           malid,
         });
+        window.refreshInfoViewProgress?.();
+        window.refreshCatalogHistory?.();
       } catch (err) {
         console.error("Failed to save watch progress:", err);
       }
@@ -1676,37 +1711,16 @@ export default function VideoPlayer({
 
       {/* Main player viewport */}
       <div className="player-viewport">
-        {/* Double click 5s seek target zones (left & right) */}
+        {/* Double tap / click 10s seek target zones (left & right) */}
         <div
           className="player-touch-zone left"
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            const video = videoRef.current;
-            if (!video) return;
-            if (watchTogetherClient.roomCode && !isHost) return;
-            const nextTime = Math.max(0, video.currentTime - 5);
-            video.currentTime = nextTime;
-            currentTimeRef.current = nextTime;
-            setCurrentTime(nextTime);
-            showIndicator(ChevronLeft, "-5s");
-          }}
+          onClick={(e) => handleZoneDoubleTap("left", e)}
+          onDoubleClick={(e) => handleZoneDoubleTap("left", e)}
         />
         <div
           className="player-touch-zone right"
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            const video = videoRef.current;
-            if (!video) return;
-            if (watchTogetherClient.roomCode && !isHost) return;
-            const nextTime = Math.min(
-              video.duration || 0,
-              video.currentTime + 5,
-            );
-            video.currentTime = nextTime;
-            currentTimeRef.current = nextTime;
-            setCurrentTime(nextTime);
-            showIndicator(ChevronRight, "+5s");
-          }}
+          onClick={(e) => handleZoneDoubleTap("right", e)}
+          onDoubleClick={(e) => handleZoneDoubleTap("right", e)}
         />
 
         {indicator.icon && (

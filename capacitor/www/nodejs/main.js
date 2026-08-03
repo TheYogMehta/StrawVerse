@@ -630,11 +630,26 @@ async function boot() {
         return res.json({ ok: true, result: null });
       }
 
-      const changelogPath = path.join(__dirname, "CHANGELOG.md");
+      let changelogPath = path.join(__dirname, "CHANGELOG.md");
       if (!fs.existsSync(changelogPath)) {
+        changelogPath = path.join(__dirname, "..", "CHANGELOG.md");
+      }
+      let changelog = "";
+      if (fs.existsSync(changelogPath)) {
+        changelog = fs.readFileSync(changelogPath, "utf-8");
+        const parts = changelog.split(
+          /(?:^|\n)#+\s*\[\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\][^\n]*/,
+        );
+        if (parts.length > 1) {
+          const match = changelog.match(
+            /(?:^|\n)(#+\s*\[\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\]\s*-\s*\d{4}-\d{2}-\d{2})/,
+          );
+          const versionHeader = match ? match[1].trim() : "# What's New";
+          changelog = `${versionHeader}\n\n${parts[1].trim()}`;
+        }
+      } else {
         return res.json({ ok: true, result: null });
       }
-      const changelog = fs.readFileSync(changelogPath, "utf-8");
 
       await setKeyValue("Settings", "whatsNewSeenVersion", appVersion);
       res.json({ ok: true, result: { version: appVersion, changelog } });
@@ -1166,9 +1181,16 @@ async function boot() {
 
   router.post("/api/settings/update", async (req, res) => {
     try {
-      const [key, value] = req.body.args || [];
+      let updatePayload = {};
+      if (Array.isArray(req.body.args) && req.body.args.length >= 2) {
+        updatePayload = { [req.body.args[0]]: req.body.args[1] };
+      } else if (req.body.key !== undefined && req.body.value !== undefined) {
+        updatePayload = { [req.body.key]: req.body.value };
+      } else if (req.body && typeof req.body === "object") {
+        updatePayload = req.body;
+      }
       const { settingupdate } = require("./backend/utils/settings");
-      await settingupdate({ [key]: value });
+      await settingupdate(updatePayload);
       res.json({ ok: true, result: { success: true } });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
@@ -1177,7 +1199,8 @@ async function boot() {
 
   router.post("/api/settings/update-multiple", async (req, res) => {
     try {
-      const [settingsObj] = req.body.args || [];
+      const settingsObj =
+        (Array.isArray(req.body.args) ? req.body.args[0] : req.body) || {};
       const { settingupdate } = require("./backend/utils/settings");
       await settingupdate(settingsObj);
       res.json({ ok: true, result: { success: true } });

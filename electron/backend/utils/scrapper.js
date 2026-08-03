@@ -2,6 +2,7 @@ const { app, BrowserWindow, net, session } = require("electron");
 const axios = require("axios");
 const fs = require("fs");
 const path = require("path");
+const { Readable } = require("stream");
 const { getHeaders } = require("./proxyHeaders");
 const { run, queryAll, queryOne } = require("./db");
 
@@ -920,9 +921,19 @@ async function electronNetAdapter(config) {
         });
 
         let responseData;
-        if (responseType === "arraybuffer") {
+        if (responseType === "arraybuffer" || responseType === "buffer") {
           const buffer = await res.arrayBuffer();
           responseData = Buffer.from(buffer);
+        } else if (responseType === "stream") {
+          if (res.body && typeof res.body.pipe === "function") {
+            responseData = res.body;
+          } else if (res.body && typeof Readable.fromWeb === "function") {
+            responseData = Readable.fromWeb(res.body);
+          } else if (res.body && typeof Readable.from === "function") {
+            responseData = Readable.from(res.body);
+          } else {
+            responseData = res.body;
+          }
         } else {
           const contentType = responseHeaders["content-type"] || "";
           if (contentType.includes("application/json")) {

@@ -413,13 +413,15 @@ const createWindow = () => {
         }
         if (fs.existsSync(changelogPath)) {
           changelogContent = fs.readFileSync(changelogPath, "utf8");
-          const parts = changelogContent.split(/## \[\d+\.\d+\.\d+\][^\n]*/);
+          const parts = changelogContent.split(
+            /(?:^|\n)#+\s*\[\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\][^\n]*/,
+          );
           if (parts.length > 1) {
             const match = changelogContent.match(
-              /## (\[\d+\.\d+\.\d+\]\s*-\s*\d{4}-\d{2}-\d{2})/,
+              /(?:^|\n)(#+\s*\[\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?\]\s*-\s*\d{4}-\d{2}-\d{2})/,
             );
-            const versionHeader = match ? match[1] : "What's New";
-            changelogContent = `## ${versionHeader}\n\n${parts[1].trim()}`;
+            const versionHeader = match ? match[1].trim() : "# What's New";
+            changelogContent = `${versionHeader}\n\n${parts[1].trim()}`;
           }
         }
         disableWhatsNew();

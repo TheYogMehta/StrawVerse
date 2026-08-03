@@ -627,12 +627,7 @@ export default function InfoView({
 
       // Fetch history progress
       try {
-        const progressRes = await fetch(
-          `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=${type}`,
-        );
-        const progressData = await progressRes.json();
-        setHasProgress(progressData.hasProgress || false);
-        setHistoryProgress(progressData);
+        await fetchHistoryProgress();
       } catch (err) {
         console.error("Failed to fetch history progress:", err);
       }
@@ -812,6 +807,45 @@ export default function InfoView({
       );
     }
   };
+
+  const fetchHistoryProgress = useCallback(async () => {
+    if (!id || !type) return;
+    try {
+      const progressRes = await fetch(
+        `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=${type}`,
+      );
+      if (progressRes.ok) {
+        const progressData = await progressRes.json();
+        setHasProgress(progressData.hasProgress || false);
+        setHistoryProgress(progressData);
+      }
+    } catch (err) {
+      console.error("Failed to fetch history progress:", err);
+    }
+  }, [id, type]);
+
+  useEffect(() => {
+    fetchHistoryProgress();
+    window.refreshInfoViewProgress = fetchHistoryProgress;
+
+    const handleFocus = () => fetchHistoryProgress();
+    const handleVisibility = () => {
+      if (!document.hidden) fetchHistoryProgress();
+    };
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    const timer = setInterval(fetchHistoryProgress, 3000);
+
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+      clearInterval(timer);
+      if (window.refreshInfoViewProgress === fetchHistoryProgress) {
+        delete window.refreshInfoViewProgress;
+      }
+    };
+  }, [fetchHistoryProgress]);
 
   useEffect(() => {
     setId(propId);

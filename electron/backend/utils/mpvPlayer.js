@@ -111,7 +111,8 @@ function filterPreselectedSubtitle(subs, preferredLang = "english") {
 }
 
 function sortSourcesByPreferredQuality(sources, preferredQuality = "highest") {
-  if (!sources || !Array.isArray(sources) || sources.length <= 1) return sources;
+  if (!sources || !Array.isArray(sources) || sources.length <= 1)
+    return sources;
 
   const parseQualNum = (s) => {
     const qStr = (s.quality || s.name || "").toLowerCase();
@@ -278,14 +279,16 @@ const resolvePathOrUrl = (rawUrl) => {
 };
 
 // Proxy external URLs through local Express → Electron's net stack (bypasses Cloudflare).
-const toProxyUrl = (url) => {
+const toProxyUrl = (url, customHeaders) => {
   if (!url || !url.startsWith("http")) return url;
   const port = global.PORT || 3000;
   const base = `http://127.0.0.1:${port}/api/stream`;
+  const ref = customHeaders?.Referer || customHeaders?.referer || "";
+  const refParam = ref ? `&referer=${encodeURIComponent(ref)}` : "";
   if (url.includes(".m3u8")) {
-    return `${base}/m3u8?url=${encodeURIComponent(url)}`;
+    return `${base}/m3u8?url=${encodeURIComponent(url)}${refParam}`;
   }
-  return `${base}/segment?url=${encodeURIComponent(url)}`;
+  return `${base}/segment?url=${encodeURIComponent(url)}${refParam}`;
 };
 
 async function playInMpv(window, options) {
@@ -324,6 +327,12 @@ async function playInMpv(window, options) {
         autoSkipIntro = settings.autoSkipIntro;
       if (settings.autoPlayNextEpisode !== undefined)
         autoPlayNextEpisode = settings.autoPlayNextEpisode;
+      if (settings.playerSpeed !== undefined && !options.speed) {
+        const spd = parseFloat(settings.playerSpeed);
+        if (!isNaN(spd) && spd > 0) {
+          options.speed = spd;
+        }
+      }
     }
   } catch (e) {
     logger.error("Failed to load settings in mpvPlayer: " + e.message);
@@ -495,7 +504,9 @@ async function playInMpv(window, options) {
 
   const resolvedUrl = resolvePathOrUrl(playTargetUrl);
   const isExternal = resolvedUrl.startsWith("http");
-  const playUrl = isExternal ? toProxyUrl(resolvedUrl) : resolvedUrl;
+  const playUrl = isExternal
+    ? toProxyUrl(resolvedUrl, activeSources[0]?.headers)
+    : resolvedUrl;
   const ipcPath = getIpcPath();
   const configDir = getMpvConfigDir();
   let shortTitle = title || "Anime";
@@ -524,7 +535,6 @@ async function playInMpv(window, options) {
     `--volume=${options.volume !== undefined ? Math.floor(options.volume) : 100}`,
     `--speed=${options.speed || 1.0}`,
     `--sub-visibility=${options.subsEnabled === false ? "no" : "yes"}`,
-    `--sub=${options.subsEnabled === false ? "no" : String((options.selectedSubIndex !== undefined && options.selectedSubIndex >= 0 ? options.selectedSubIndex : 0) + 1)}`,
     `--brightness=${options.brightness || 0}`,
   ];
 
@@ -591,9 +601,31 @@ async function playInMpv(window, options) {
       const subUrl = rawUrl.startsWith("http") ? toProxyUrl(rawUrl) : rawUrl;
       args.push(`--sub-file=${subUrl}`);
     });
+
+    if (validSubs.length > 0 && options.subsEnabled !== false) {
+      const selectedIndex =
+        options.selectedSubIndex !== undefined &&
+        options.selectedSubIndex >= 0 &&
+        options.selectedSubIndex < validSubs.length
+          ? options.selectedSubIndex
+          : 0;
+      args.push(`--sid=${selectedIndex + 1}`);
+    } else if (options.subsEnabled === false) {
+      args.push("--sid=no");
+    } else {
+      args.push("--sid=auto");
+    }
+  } else {
+    if (options.subsEnabled === false) {
+      args.push("--sid=no");
+    } else {
+      args.push("--sid=auto");
+    }
   }
 
-  args.push(`--script-opts=${scriptOpts.join(",")}`);
+  scriptOpts.forEach((opt) => {
+    args.push(`--script-opts-add=${opt}`);
+  });
 
   if (startSeek > 0) {
     args.push(`--start=${Math.floor(startSeek)}`);
@@ -629,6 +661,14 @@ async function playInMpv(window, options) {
   try {
     mpvProcess = spawn(mpvExe, args);
     global.activeMpvProcess = mpvProcess;
+    if (mpvProcess.stderr) {
+      mpvProcess.stderr.on("data", (chunk) => {
+        const errStr = chunk.toString().trim();
+        if (errStr) {
+          logger.error(`[MPV Stderr] ${errStr}`);
+        }
+      });
+    }
     mpvProcess.on("error", (err) => {
       logger.error(`[MPV Spawn Error] ${err.message}`, err);
       if (window && window.webContents) {
@@ -935,6 +975,9 @@ async function playInMpv(window, options) {
               name: "speed",
               value: msg.data,
             });
+            try {
+              setKeyValue("Settings", "playerSpeed", msg.data);
+            } catch (_) {}
           } else if (msg.name === "sub-visibility" && msg.data !== undefined) {
             const isVisible =
               msg.data === true || msg.data === "yes" || msg.data === 1;

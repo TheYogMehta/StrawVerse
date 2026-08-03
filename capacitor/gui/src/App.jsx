@@ -347,14 +347,27 @@ export default function App() {
 
   useEffect(() => {
     let backListener = null;
+    let appStateListener = null;
 
     const setupBackButton = async () => {
       try {
         const { App: CapApp } = await import("@capacitor/app");
+        appStateListener = await CapApp.addListener(
+          "appStateChange",
+          ({ isActive }) => {
+            if (isActive) {
+              window.refreshInfoViewProgress?.();
+              window.refreshCatalogHistory?.();
+            }
+          },
+        );
+
         backListener = await CapApp.addListener("backButton", () => {
           // If video player is open, close it first
           if (activePlayerRef.current) {
             setActivePlayerParams(null);
+            window.refreshInfoViewProgress?.();
+            window.refreshCatalogHistory?.();
             return;
           }
 
@@ -381,6 +394,9 @@ export default function App() {
     return () => {
       if (backListener) {
         backListener.remove();
+      }
+      if (appStateListener) {
+        appStateListener.remove();
       }
     };
   }, []);

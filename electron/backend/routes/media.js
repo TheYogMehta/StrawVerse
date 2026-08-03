@@ -26,6 +26,7 @@ const {
 const { getKeyValue, queryOne, run } = require("../utils/db");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getHeaders } = require("../utils/proxyHeaders");
+const { MalFetchList } = require("../utils/mal");
 
 const router = express.Router();
 
@@ -1661,7 +1662,7 @@ router.get("/api/stream/m3u8", async (req, res) => {
   }
 });
 
-// Proxy for m3u8 video segment
+// Proxy for m3u8 video segment & video streams
 router.get("/api/stream/segment", async (req, res) => {
   const url = req.query.url;
   const customReferer = req.query.referer;
@@ -1674,34 +1675,35 @@ router.get("/api/stream/segment", async (req, res) => {
     if (customReferer) {
       reqHeaders.Referer = customReferer;
     }
+    if (req.headers.range) {
+      reqHeaders.range = req.headers.range;
+    }
+
     let attempts = 0;
-    let data, headers;
+    let resp;
     while (attempts < 3) {
       try {
-        const resp = await global.axios.get(url, {
+        resp = await global.axios.get(url, {
           headers: reqHeaders,
-          responseType: "arraybuffer",
+          responseType: "stream",
           timeout: 30000,
         });
-        data = resp.data;
-        headers = resp.headers;
         break;
       } catch (err) {
         attempts++;
         const status = err.response?.status;
         if (status === 429 && attempts < 3) {
-          // Respect rate-limit: back off progressively
           await new Promise((r) => setTimeout(r, 1000 * attempts));
         } else if (
           (status === 403 || status === 503) &&
           attempts < 3 &&
           global.cloudflarebypass
         ) {
-          // Cloudflare challenge — try bypass then refresh headers
           try {
             await global.cloudflarebypass(url, true);
             const fresh = getHeaders(url);
             if (customReferer) fresh.Referer = customReferer;
+            if (req.headers.range) fresh.range = req.headers.range;
             Object.assign(reqHeaders, fresh);
           } catch (_) {}
         } else if (attempts >= 3) {
@@ -1710,38 +1712,29 @@ router.get("/api/stream/segment", async (req, res) => {
       }
     }
 
-    let buffer = Buffer.from(data);
-
-    if (
-      buffer.length >= 8 &&
-      buffer[0] === 0x89 &&
-      buffer[1] === 0x50 &&
-      buffer[2] === 0x4e &&
-      buffer[3] === 0x47 &&
-      buffer[4] === 0x0d &&
-      buffer[5] === 0x0a &&
-      buffer[6] === 0x1a &&
-      buffer[7] === 0x0a
-    ) {
-      for (let i = 0; i < Math.min(buffer.length - 3, 1024); i++) {
-        if (
-          buffer[i] === 0x49 &&
-          buffer[i + 1] === 0x45 &&
-          buffer[i + 2] === 0x4e &&
-          buffer[i + 3] === 0x44
-        ) {
-          buffer = buffer.subarray(i + 8);
-          break;
-        }
+    res.status(resp.status || 200);
+    const forwardHeaders = [
+      "content-type",
+      "content-length",
+      "content-range",
+      "accept-ranges",
+    ];
+    forwardHeaders.forEach((h) => {
+      if (resp.headers[h]) {
+        res.setHeader(h, resp.headers[h]);
       }
-    }
+    });
 
-    const ct = headers?.["content-type"] || "application/octet-stream";
-    res.setHeader("Content-Type", ct.includes("image") ? "video/mp2t" : ct);
-    res.send(buffer);
+    if (resp.data && typeof resp.data.pipe === "function") {
+      resp.data.pipe(res);
+    } else {
+      res.send(resp.data);
+    }
   } catch (err) {
     logger.error(`[StreamProxy] segment error: ${err.message}`);
-    res.status(502).send(err.message);
+    if (!res.headersSent) {
+      res.status(502).send(err.message);
+    }
   }
 });
 
