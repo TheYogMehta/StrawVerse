@@ -1,6 +1,6 @@
 {
   "name": "strawverse-capacitor",
-  "version": "9.1.1",
+  "version": "9.1.2",
   "private": true,
   "description": "StrawVerse Android app (Capacitor shell around the shared backend + GUI)",
   "scripts": {

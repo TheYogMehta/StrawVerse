@@ -55,7 +55,7 @@ function extractDomain(urlStr, refererStr) {
 /**
  * Get current optimal concurrency for a domain (from DB/cache or initial default max limit)
  */
-function getDomainConcurrency(domain, defaultMax = 5) {
+function getDomainConcurrency(domain, defaultMax = 16) {
   if (!domain) return defaultMax;
   if (cache[domain] !== undefined) {
     return cache[domain];
@@ -73,7 +73,7 @@ function getDomainConcurrency(domain, defaultMax = 5) {
   } catch (e) {}
 
   if (/animepahe|pahe|kwik|owocdn|uwucdn/i.test(domain)) {
-    cache[domain] = 2;
+    cache[domain] = 8;
   } else {
     cache[domain] = defaultMax;
   }
@@ -126,14 +126,14 @@ function recordDomainFailure(domain, currentVal) {
   }
 }
 
-function recordDomainSuccess(domain, maxLimit = 5) {
+function recordDomainSuccess(domain, maxLimit = 16) {
   if (!domain) return;
   resetCircuit(domain);
-  const current = cache[domain] || 2;
+  const current = cache[domain] || 8;
   successStreak[domain] = (successStreak[domain] || 0) + 1;
 
-  if (successStreak[domain] >= 20 && current < maxLimit) {
-    const newConcurrency = Math.min(maxLimit, current + 1);
+  if (successStreak[domain] >= 8 && current < maxLimit) {
+    const newConcurrency = Math.min(maxLimit, current + 2);
     cache[domain] = newConcurrency;
     successStreak[domain] = 0;
 

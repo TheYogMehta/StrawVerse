@@ -66,6 +66,23 @@ async function getFfmpegPath() {
     return resolvedFfmpegPath;
   }
 
+  if (process.platform === "win32") {
+    try {
+      const resourcesDir = path.dirname(app.getAppPath());
+      const winFfmpeg = path.join(
+        resourcesDir,
+        "app.asar.unpacked",
+        "mpv",
+        "win32",
+        "ffmpeg.exe",
+      );
+      if (fs.existsSync(winFfmpeg)) {
+        resolvedFfmpegPath = winFfmpeg;
+        return resolvedFfmpegPath;
+      }
+    } catch (e) {}
+  }
+
   const defaultPath = ffmpeg.replace("app.asar", "app.asar.unpacked");
   if (fs.existsSync(defaultPath)) {
     resolvedFfmpegPath = defaultPath;
@@ -495,7 +512,7 @@ class downloader {
         this.headers?.Referer || this.headers?.referer,
       );
 
-      let CONCURRENCY = getDomainConcurrency(domainName, 5);
+      let CONCURRENCY = getDomainConcurrency(domainName, 16);
       let activeDownloads = 0;
       let currentIndex = 0;
       let stopDownloading = false;
@@ -633,14 +650,14 @@ class downloader {
               }
 
               await fs.promises.writeFile(segmentFile, body);
-              recordDomainSuccess(domainName, 5);
+              recordDomainSuccess(domainName, 16);
               this.currentSegments++;
               this.logProgress();
               activeDownloads--;
               startNext();
             } catch (err) {
               recordDomainFailure(domainName, CONCURRENCY);
-              CONCURRENCY = getDomainConcurrency(domainName, 5);
+              CONCURRENCY = getDomainConcurrency(domainName, 16);
               const maxRetries = 5;
               if (isCircuitOpen(domainName)) {
                 logger.warn(
