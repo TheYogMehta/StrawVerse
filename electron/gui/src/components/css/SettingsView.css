@@ -643,12 +643,13 @@
 /* Tag Management Styles */
 .tags-management-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: flex-start;
   border-bottom: 1px solid var(--border);
   padding-bottom: 16px;
   margin-bottom: 20px;
   gap: 16px;
+  flex-wrap: wrap;
 }
 
 .tag-type-toggle {
@@ -658,6 +659,7 @@
   border-radius: 10px;
   border: 1px solid var(--border);
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .tag-type-btn {
@@ -680,6 +682,8 @@
 
 .create-tag-container {
   margin-bottom: 24px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .create-tag-input-group {
@@ -691,6 +695,8 @@
   border-radius: 10px;
   padding: 6px 6px 6px 14px;
   transition: border-color 0.2s ease;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .create-tag-input-group:focus-within {
@@ -703,7 +709,9 @@
 }
 
 .create-tag-input {
-  flex: 1;
+  flex: 1 1 0px;
+  min-width: 0;
+  width: 0;
   background: transparent;
   border: none !important;
   padding: 8px 0;
@@ -726,6 +734,7 @@
   cursor: pointer;
   transition: all 0.2s ease;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .btn-create-tag:hover:not(:disabled) {

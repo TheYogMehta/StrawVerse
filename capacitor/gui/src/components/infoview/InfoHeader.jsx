@@ -9,6 +9,7 @@ export default function InfoHeader({
   episodesOrChapters,
   selectedItems,
   onDownloadSelected,
+  onExpandImage,
 }) {
   const isAnime = type === "Anime";
 
@@ -39,7 +40,11 @@ export default function InfoHeader({
       </div>
 
       <div className="info-hero-content">
-        <div className="info-cover-wrapper">
+        <div
+          className="info-cover-wrapper"
+          onClick={() => onExpandImage && onExpandImage()}
+          style={{ cursor: onExpandImage ? "pointer" : "default" }}
+        >
           <img
             src={
               details?.image ||

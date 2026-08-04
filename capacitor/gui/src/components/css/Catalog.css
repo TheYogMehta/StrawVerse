@@ -510,6 +510,7 @@
   gap: 10px;
   margin-bottom: 20px;
   width: 100%;
+  box-sizing: border-box;
   overflow-x: auto;
 }
 
@@ -520,13 +521,14 @@
 .library-stat-card {
   display: flex;
   align-items: center;
-  padding: 10px 14px;
-  flex: 1;
+  padding: 10px 12px;
+  flex: 1 1 0px;
   min-width: 0;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--glass);
-  gap: 10px;
+  gap: 8px;
+  box-sizing: border-box;
 }
 
 .stat-icon-wrapper {
@@ -584,11 +586,14 @@
 }
 
 .stat-value {
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   color: #ffffff;
   margin-top: 1px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 /* Continue Shelf */

@@ -500,6 +500,69 @@
     white-space: nowrap;
   }
 
+  html .tags-management-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 12px !important;
+  }
+
+  html .tag-type-toggle {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
+  html .tag-type-btn {
+    flex: 1 !important;
+    text-align: center !important;
+  }
+
+  html .create-tag-container {
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  html .create-tag-input-group {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 6px 6px 6px 12px !important;
+    gap: 8px !important;
+  }
+
+  html .create-tag-input {
+    flex: 1 1 0px !important;
+    min-width: 0 !important;
+    width: 0 !important;
+  }
+
+  html .btn-create-tag {
+    padding: 8px 12px !important;
+    font-size: 12px !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Library stats container mobile optimization */
+  html .library-stats-container {
+    gap: 8px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  html .library-stat-card {
+    padding: 8px 10px !important;
+    gap: 6px !important;
+    min-width: 0 !important;
+    flex: 1 1 0px !important;
+    box-sizing: border-box !important;
+  }
+
+  html .stat-value {
+    font-size: 13px !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    min-width: 0 !important;
+  }
+
   /* ---------------------------------------------------------------- */
   /* Episode card 2-line layout on mobile                              */
   /* ---------------------------------------------------------------- */

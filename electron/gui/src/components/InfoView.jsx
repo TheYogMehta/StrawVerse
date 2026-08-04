@@ -337,6 +337,7 @@ export default function InfoView({
   const providerDropdownRef = useRef(null);
   const [isMalStatusDropdownOpen, setIsMalStatusDropdownOpen] = useState(false);
   const malStatusDropdownRef = useRef(null);
+  const [isImageExpanded, setIsImageExpanded] = useState(false);
   const [installedExtensions, setInstalledExtensions] = useState(null);
   const [sortDirection, setSortDirection] = useState(() =>
     sortOrder === "desc" ? "desc" : "asc",
@@ -2042,7 +2043,11 @@ export default function InfoView({
 
       {/* Main Details Panel */}
       <div className="details-grid glass-panel">
-        <div className="cover-wrapper">
+        <div
+          className="cover-wrapper"
+          onClick={() => details?.image && setIsImageExpanded(true)}
+          style={{ cursor: details?.image ? "pointer" : "default" }}
+        >
           <img
             src={details?.image}
             alt={details?.title}
@@ -3264,6 +3269,27 @@ export default function InfoView({
               )}
             </div>
           </div>
+        </div>
+      )}
+      {/* Image Expansion Modal */}
+      {isImageExpanded && details?.image && (
+        <div
+          className="image-expand-modal-overlay"
+          onClick={() => setIsImageExpanded(false)}
+        >
+          <button
+            className="image-expand-close-btn"
+            onClick={() => setIsImageExpanded(false)}
+            aria-label="Close"
+          >
+            <X size={24} />
+          </button>
+          <img
+            src={details.image}
+            alt={details?.title || "Expanded Cover"}
+            className="image-expand-modal-content"
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>
