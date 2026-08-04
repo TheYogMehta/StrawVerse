@@ -42,12 +42,60 @@ function getCurrentAppVersion() {
   return process.env.STRAWVERSE_APP_VERSION || "9.1.2";
 }
 
+// Helper to get /Strawverse/apk target directory
+function getApkStorageDir() {
+  let targetDir = "/storage/emulated/0/Strawverse/apk";
+  if (!fs.existsSync(targetDir)) {
+    try {
+      fs.mkdirSync(targetDir, { recursive: true });
+    } catch (_) {
+      targetDir = path.join(process.cwd(), "apk");
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+  }
+  return targetDir;
+}
+
+// Clean up older or same version APK files from /Strawverse/apk directory
+function cleanupOldApks(currentVersion) {
+  try {
+    const dir = getApkStorageDir();
+    if (!fs.existsSync(dir)) return;
+
+    const files = fs.readdirSync(dir);
+    for (const file of files) {
+      if (!file.endsWith(".apk")) continue;
+      const filePath = path.join(dir, file);
+
+      const match = file.match(/v?(\d+\.\d+(?:\.\d+)?)/i);
+      if (match && match[1]) {
+        const fileVersion = match[1];
+        if (!isNewerVersion(currentVersion, fileVersion)) {
+          logger.info(
+            `[AutoUpdater] Cleaning up old/matching APK: ${file} (file v${fileVersion} <= installed v${currentVersion})`,
+          );
+          fs.unlinkSync(filePath);
+        }
+      } else {
+        if (!cachedUpdateInfo?.updateAvailable && !isDownloading) {
+          logger.info(`[AutoUpdater] Cleaning up obsolete APK file: ${file}`);
+          fs.unlinkSync(filePath);
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn(`[AutoUpdater] Cleanup old APKs failed: ${err.message}`);
+  }
+}
+
 // Check for updates via GitHub API
 async function checkForUpdateLogic() {
   const currentVersion = getCurrentAppVersion();
   logger.info(
     `[AutoUpdater] Checking for updates... Current version: ${currentVersion}`,
   );
+
+  cleanupOldApks(currentVersion);
 
   try {
     const response = await axios.get(
@@ -82,8 +130,12 @@ async function checkForUpdateLogic() {
       downloadUrl: apkAsset ? apkAsset.browser_download_url : null,
       releaseNotes: data.body || "",
       releaseUrl: data.html_url || "",
-      apkName: apkAsset ? apkAsset.name : "StrawVerse.apk",
+      apkName: apkAsset ? apkAsset.name : `StrawVerse_v${latestVersion}.apk`,
     };
+
+    if (!updateAvailable) {
+      cleanupOldApks(currentVersion);
+    }
 
     if (updateAvailable && apkAsset) {
       logger.info(`[AutoUpdater] New update available: ${latestVersion}`);
@@ -92,6 +144,7 @@ async function checkForUpdateLogic() {
         releaseNotes: cachedUpdateInfo.releaseNotes,
         releaseUrl: cachedUpdateInfo.releaseUrl,
         downloadUrl: cachedUpdateInfo.downloadUrl,
+        apkName: cachedUpdateInfo.apkName,
       });
       return { success: true, version: latestVersion, updateAvailable: true };
     } else {
@@ -143,17 +196,9 @@ router.post("/api/update/download", async (req, res) => {
   logger.info(`[AutoUpdater] Starting download from: ${downloadUrl}`);
 
   try {
-    let targetDir = "/storage/emulated/0/Strawverse/.cache";
-    if (!fs.existsSync(targetDir)) {
-      try {
-        fs.mkdirSync(targetDir, { recursive: true });
-      } catch (_) {
-        targetDir = path.join(process.cwd(), "cache");
-        fs.mkdirSync(targetDir, { recursive: true });
-      }
-    }
-
-    const apkPath = path.join(targetDir, "update.apk");
+    const targetDir = getApkStorageDir();
+    const apkFileName = cachedUpdateInfo.apkName || "StrawVerse.apk";
+    const apkPath = path.join(targetDir, apkFileName);
     const writer = fs.createWriteStream(apkPath);
 
     const response = await axios({
@@ -192,6 +237,8 @@ router.post("/api/update/download", async (req, res) => {
           bytesPerSecond,
           transferred: transferredBytes,
           total: totalBytes,
+          apkName: apkFileName,
+          version: cachedUpdateInfo.latestVersion,
         });
       }
     });
@@ -213,9 +260,15 @@ router.post("/api/update/download", async (req, res) => {
       bytesPerSecond: 0,
       transferred: totalBytes || transferredBytes,
       total: totalBytes || transferredBytes,
+      apkName: apkFileName,
+      version: cachedUpdateInfo.latestVersion,
     });
 
-    sendToRenderer("update-downloaded", { path: apkPath });
+    sendToRenderer("update-downloaded", {
+      path: apkPath,
+      version: cachedUpdateInfo.latestVersion,
+      apkName: apkFileName,
+    });
 
     res.json({ ok: true, result: { success: true, path: apkPath } });
   } catch (err) {
@@ -228,9 +281,22 @@ router.post("/api/update/download", async (req, res) => {
 
 // POST /api/update/install
 router.post("/api/update/install", (req, res) => {
-  const apkPath =
-    downloadedApkPath || "/storage/emulated/0/Strawverse/.cache/update.apk";
-  if (!fs.existsSync(apkPath)) {
+  let apkPath = req.body?.args?.[0] || req.body?.path || downloadedApkPath;
+
+  if (!apkPath || !fs.existsSync(apkPath)) {
+    const dir = getApkStorageDir();
+    const defaultApk = path.join(dir, "update.apk");
+    if (fs.existsSync(defaultApk)) {
+      apkPath = defaultApk;
+    } else if (fs.existsSync(dir)) {
+      const apks = fs.readdirSync(dir).filter((f) => f.endsWith(".apk"));
+      if (apks.length > 0) {
+        apkPath = path.join(dir, apks[0]);
+      }
+    }
+  }
+
+  if (!apkPath || !fs.existsSync(apkPath)) {
     const errStr = `APK file not found at path: ${apkPath}`;
     logger.error(`[AutoUpdater] Install error: ${errStr}`);
     sendToRenderer("update-error", { message: errStr });
@@ -241,7 +307,7 @@ router.post("/api/update/install", (req, res) => {
     `[AutoUpdater] Triggering native package installer for: ${apkPath}`,
   );
   sendToRenderer("trigger-install", { path: apkPath });
-  res.json({ ok: true, result: { success: true } });
+  res.json({ ok: true, result: { success: true, path: apkPath } });
 });
 
 // Auto check trigger on startup (delay 10s)

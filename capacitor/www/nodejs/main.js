@@ -895,13 +895,21 @@ async function boot() {
   });
 
   router.post("/api/update/install", (req, res) => {
-    const apkPath =
-      req.body?.args?.[0] ||
-      req.body?.path ||
-      downloadedApkPath ||
-      path.join(os.homedir(), "StrawVerse-update.apk");
+    let apkPath = req.body?.args?.[0] || req.body?.path || downloadedApkPath;
 
-    if (!fs.existsSync(apkPath)) {
+    if (!apkPath || !fs.existsSync(apkPath)) {
+      const targetDir = "/storage/emulated/0/Strawverse/apk";
+      if (fs.existsSync(targetDir)) {
+        const apks = fs
+          .readdirSync(targetDir)
+          .filter((f) => f.endsWith(".apk"));
+        if (apks.length > 0) {
+          apkPath = path.join(targetDir, apks[0]);
+        }
+      }
+    }
+
+    if (!apkPath || !fs.existsSync(apkPath)) {
       return res.json({
         ok: true,
         result: { success: false, error: "Installer APK file not found." },

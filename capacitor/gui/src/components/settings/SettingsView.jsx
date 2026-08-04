@@ -74,6 +74,50 @@ export default function SettingsView({
   const [cacheStats, setCacheStats] = useState(null);
   const [clearingCache, setClearingCache] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const [updateStatus, setUpdateStatus] = useState("idle");
+  const [updateProgress, setUpdateProgress] = useState(null);
+  const [updateErrorMsg, setUpdateErrorMsg] = useState("");
+
+  useEffect(() => {
+    if (!window.sharedStateAPI || !window.sharedStateAPI.on) return;
+
+    const u1 = window.sharedStateAPI.on("update-available", (data) => {
+      setUpdateStatus("downloading");
+      setUpdateProgress({ version: data?.version, percent: 0 });
+      window.sharedStateAPI.downloadUpdate?.().catch(() => {});
+    });
+
+    const u2 = window.sharedStateAPI.on("update-download-progress", (prog) => {
+      setUpdateStatus(prog.percent >= 100 ? "ready" : "downloading");
+      setUpdateProgress(prog);
+    });
+
+    const u3 = window.sharedStateAPI.on("update-downloaded", (data) => {
+      setUpdateStatus("ready");
+      setUpdateProgress((prev) => ({
+        ...(prev || {}),
+        percent: 100,
+        version: data?.version,
+      }));
+    });
+
+    const u4 = window.sharedStateAPI.on("update-not-available", () => {
+      setUpdateStatus("up-to-date");
+    });
+
+    const u5 = window.sharedStateAPI.on("update-error", (err) => {
+      setUpdateStatus("error");
+      setUpdateErrorMsg(err?.message || "Update error");
+    });
+
+    return () => {
+      if (u1) u1();
+      if (u2) u2();
+      if (u3) u3();
+      if (u4) u4();
+      if (u5) u5();
+    };
+  }, []);
   const getProviderIcon = (name, type) => {
     if (!name || !settings?.installedExtensions) return null;
     const list =
@@ -658,198 +702,17 @@ export default function SettingsView({
   };
 
   const handleCheckForUpdates = async () => {
-    Swal.fire({
-      title: "Checking for updates...",
-      html: `
-        <p style="color: var(--text-muted); font-size: 14px; margin-bottom: 10px;">
-          Please wait while we check the registry.
-        </p>
-        <div class="custom-swal-spinner"></div>
-      `,
-      allowOutsideClick: false,
-      showConfirmButton: false,
-      background: "var(--bg-secondary)",
-      color: "var(--text-main)",
-    });
-
+    setUpdateStatus("checking");
+    setUpdateErrorMsg("");
     try {
-      const updateListener = window.sharedStateAPI.on(
-        "update-available",
-        (info) => {
-          const targetVersion = info?.version || "New Version";
-          Swal.fire({
-            title: "Update Available!",
-            text: `A new version (v${targetVersion}) is available. Would you like to download it?`,
-            icon: "info",
-            showCancelButton: true,
-            confirmButtonText: "Download & Install",
-            cancelButtonText: "Later",
-            confirmButtonColor: "var(--accent)",
-            cancelButtonColor: "var(--bg-tertiary)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-main)",
-          }).then(async (result) => {
-            if (result.isConfirmed) {
-              Swal.fire({
-                title: "Downloading Update...",
-                html: `
-                <div style="margin: 15px 0;">
-                  <div style="background: var(--bg-tertiary); border-radius: 4px; height: 10px; overflow: hidden; width: 100%;">
-                    <div id="update-progress-bar" style="background: var(--accent); height: 100%; width: 0%; transition: width 0.2s ease;"></div>
-                  </div>
-                  <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 13px; color: var(--text-muted);">
-                    <span id="update-progress-percent">0%</span>
-                    <span id="update-progress-speed">0 MB/s</span>
-                  </div>
-                </div>
-              `,
-                allowOutsideClick: false,
-                showConfirmButton: false,
-                background: "var(--bg-secondary)",
-                color: "var(--text-main)",
-              });
-
-              const progressListener = window.sharedStateAPI.on(
-                "update-download-progress",
-                (progress) => {
-                  const bar = document.getElementById("update-progress-bar");
-                  const text = document.getElementById(
-                    "update-progress-percent",
-                  );
-                  const speed = document.getElementById(
-                    "update-progress-speed",
-                  );
-                  if (bar) bar.style.width = `${progress.percent}%`;
-                  if (text) text.innerText = `${progress.percent}%`;
-                  if (speed) {
-                    const mbSpeed = (
-                      progress.bytesPerSecond /
-                      (1024 * 1024)
-                    ).toFixed(2);
-                    speed.innerText = `${mbSpeed} MB/s`;
-                  }
-                },
-              );
-
-              const downloadedListener = window.sharedStateAPI.on(
-                "update-downloaded",
-                () => {
-                  progressListener();
-                  downloadedListener();
-                  errorListener();
-
-                  Swal.fire({
-                    title: "Update Ready!",
-                    text: "A new version has been downloaded. Would you like to restart the application now to apply the update?",
-                    icon: "success",
-                    showCancelButton: true,
-                    confirmButtonText: "Restart Now",
-                    cancelButtonText: "Later",
-                    confirmButtonColor: "var(--accent)",
-                    cancelButtonColor: "var(--bg-tertiary)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-main)",
-                  }).then((restartResult) => {
-                    if (restartResult.isConfirmed) {
-                      window.sharedStateAPI.installUpdate();
-                    }
-                  });
-                },
-              );
-
-              const errorListener = window.sharedStateAPI.on(
-                "update-error",
-                (err) => {
-                  progressListener();
-                  downloadedListener();
-                  errorListener();
-                  Swal.fire({
-                    title: "Download Failed",
-                    text: err.message || "Failed to download the update.",
-                    icon: "error",
-                    confirmButtonColor: "var(--accent)",
-                    background: "var(--bg-secondary)",
-                    color: "var(--text-main)",
-                  });
-                },
-              );
-
-              const res = await window.sharedStateAPI.downloadUpdate();
-              if (!res.success) {
-                progressListener();
-                downloadedListener();
-                errorListener();
-                Swal.fire({
-                  title: "Download Failed",
-                  text: res.error || "Could not trigger update download.",
-                  icon: "error",
-                  confirmButtonColor: "var(--accent)",
-                  background: "var(--bg-secondary)",
-                  color: "var(--text-main)",
-                });
-              }
-            }
-          });
-          updateListener();
-          noUpdateListener();
-          errorListener();
-        },
-      );
-
-      const noUpdateListener = window.sharedStateAPI.on(
-        "update-not-available",
-        () => {
-          Swal.fire({
-            title: "Up to Date",
-            text: "You are already using the latest version of StrawVerse.",
-            icon: "success",
-            confirmButtonColor: "var(--accent)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-main)",
-          });
-          updateListener();
-          noUpdateListener();
-          errorListener();
-        },
-      );
-
-      const errorListener = window.sharedStateAPI.on("update-error", (err) => {
-        Swal.fire({
-          title: "Update Error",
-          text: err.message || "Failed to check for updates.",
-          icon: "error",
-          confirmButtonColor: "var(--accent)",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-        });
-        updateListener();
-        noUpdateListener();
-        errorListener();
-      });
-
       const res = await window.sharedStateAPI.checkForUpdate();
-      if (!res.success) {
-        updateListener();
-        noUpdateListener();
-        errorListener();
-        Swal.fire({
-          title: "Check Failed",
-          text: res.error || "Failed to check for updates.",
-          icon: "error",
-          confirmButtonColor: "var(--accent)",
-          background: "var(--bg-secondary)",
-          color: "var(--text-main)",
-        });
+      if (!res?.success) {
+        setUpdateStatus("error");
+        setUpdateErrorMsg(res?.error || "Failed to check for updates");
       }
-    } catch (e) {
-      Swal.fire({
-        title: "Error",
-        text: e.message || "An unexpected error occurred.",
-        icon: "error",
-        confirmButtonColor: "var(--accent)",
-        background: "var(--bg-secondary)",
-        color: "var(--text-main)",
-      });
+    } catch (err) {
+      setUpdateStatus("error");
+      setUpdateErrorMsg(err.message || "Update check failed");
     }
   };
 
@@ -2037,18 +1900,185 @@ export default function SettingsView({
                 </p>
               </div>
 
-              <div className="settings-update-card">
-                <span style={{ color: "var(--text-muted)", fontSize: "14px" }}>
-                  Version: <strong>v{appVersion || "8.0.2"}</strong>
-                </span>
-                <button
-                  type="button"
-                  onClick={handleCheckForUpdates}
-                  className="update-btn-premium"
+              <div
+                className="settings-update-card"
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "flex-start",
+                  gap: "12px",
+                  padding: "16px",
+                  background: "var(--bg-tertiary)",
+                  borderRadius: "12px",
+                  border: "1px solid var(--border)",
+                  marginTop: "16px",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justify: "space-between",
+                    width: "100%",
+                    alignItems: "center",
+                  }}
                 >
-                  <RefreshCw size={13} />
-                  Check for Updates
-                </button>
+                  <span
+                    style={{ color: "var(--text-muted)", fontSize: "14px" }}
+                  >
+                    Version: <strong>v{appVersion || "9.1.2"}</strong>
+                  </span>
+
+                  {updateStatus === "idle" && (
+                    <button
+                      type="button"
+                      onClick={handleCheckForUpdates}
+                      className="update-btn-premium"
+                    >
+                      <RefreshCw size={13} />
+                      Check for Updates
+                    </button>
+                  )}
+
+                  {updateStatus === "checking" && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        color: "var(--accent)",
+                        fontSize: "13px",
+                        fontWeight: 600,
+                      }}
+                    >
+                      <RefreshCw
+                        size={14}
+                        style={{ animation: "spin 1s linear infinite" }}
+                      />
+                      <span>Checking for updates...</span>
+                    </div>
+                  )}
+
+                  {updateStatus === "up-to-date" && (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "10px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: "var(--success)",
+                          fontSize: "13px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Up to date
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleCheckForUpdates}
+                        className="update-btn-premium"
+                        style={{ padding: "4px 10px", fontSize: "12px" }}
+                      >
+                        Check Again
+                      </button>
+                    </div>
+                  )}
+
+                  {updateStatus === "ready" && (
+                    <button
+                      type="button"
+                      onClick={() => window.sharedStateAPI.installUpdate?.()}
+                      className="update-btn-premium"
+                      style={{
+                        background: "var(--success)",
+                        borderColor: "var(--success)",
+                        color: "#fff",
+                      }}
+                    >
+                      <CheckCircle2 size={14} />
+                      Install Update v{updateProgress?.version || ""}
+                    </button>
+                  )}
+
+                  {updateStatus === "error" && (
+                    <button
+                      type="button"
+                      onClick={handleCheckForUpdates}
+                      className="update-btn-premium"
+                    >
+                      Retry Check
+                    </button>
+                  )}
+                </div>
+
+                {/* Inline Loading Progress Bar inside Settings tab */}
+                {updateStatus === "downloading" && updateProgress && (
+                  <div
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px",
+                      marginTop: "4px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        justify: "space-between",
+                        fontSize: "12px",
+                        color: "var(--text-muted)",
+                      }}
+                    >
+                      <span>
+                        Downloading v{updateProgress.version || ""}...
+                      </span>
+                      <span>
+                        {Math.min(
+                          100,
+                          Math.max(0, updateProgress.percent || 0),
+                        ).toFixed(0)}
+                        %
+                        {updateProgress.bytesPerSecond > 0 &&
+                          ` (${(
+                            updateProgress.bytesPerSecond /
+                            (1024 * 1024)
+                          ).toFixed(2)} MB/s)`}
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "8px",
+                        background: "var(--bg-primary)",
+                        borderRadius: "4px",
+                        overflow: "hidden",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            Math.max(0, updateProgress.percent || 0),
+                          )}%`,
+                          height: "100%",
+                          background:
+                            "linear-gradient(90deg, var(--accent) 0%, var(--accent-hover) 100%)",
+                          borderRadius: "4px",
+                          transition: "width 0.2s ease",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {updateStatus === "error" && updateErrorMsg && (
+                  <div style={{ color: "var(--danger)", fontSize: "12px" }}>
+                    {updateErrorMsg}
+                  </div>
+                )}
               </div>
             </div>
           )}
