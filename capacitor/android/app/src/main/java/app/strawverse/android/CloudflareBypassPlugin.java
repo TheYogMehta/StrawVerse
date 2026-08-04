@@ -524,26 +524,50 @@ public class CloudflareBypassPlugin extends Plugin {
                 file
             );
 
-            Intent intent = new Intent(Intent.ACTION_VIEW);
-            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
             if (file.isDirectory() || openFolder) {
                 File dir = file.isDirectory() ? file : file.getParentFile();
+                if (dir == null) dir = file;
+
                 Uri dirUri = FileProvider.getUriForFile(
                     context,
                     context.getPackageName() + ".fileprovider",
-                    dir != null ? dir : file
+                    dir
                 );
-                intent.setDataAndType(dirUri, "*/*");
+
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+                intent.setDataAndType(dirUri, "vnd.android.document/directory");
+
+                if (intent.resolveActivity(context.getPackageManager()) == null) {
+                    intent.setDataAndType(dirUri, "resource/folder");
+                }
+
+                if (intent.resolveActivity(context.getPackageManager()) == null) {
+                    Uri rawUri = Uri.parse(dir.getAbsolutePath());
+                    intent.setDataAndType(rawUri, "vnd.android.document/directory");
+                }
+
+                if (intent.resolveActivity(context.getPackageManager()) == null) {
+                    intent.setDataAndType(dirUri, "*/*");
+                }
+
+                Intent chooser = Intent.createChooser(intent, "Open Folder");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(chooser);
             } else {
+                Intent intent = new Intent(Intent.ACTION_VIEW);
+                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
                 String mimeType = getMimeType(filePath);
                 intent.setDataAndType(fileUri, mimeType != null ? mimeType : "*/*");
-            }
 
-            Intent chooser = Intent.createChooser(intent, "Open with");
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            context.startActivity(chooser);
+                Intent chooser = Intent.createChooser(intent, "Open with");
+                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(chooser);
+            }
             call.resolve();
         } catch (Exception e) {
             call.reject("Failed to open file: " + e.getMessage());
