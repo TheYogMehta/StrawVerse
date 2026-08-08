@@ -714,7 +714,16 @@ async function androidNativeAdapter(config) {
             error.config = config;
             reject(error);
           } else {
-            reject(err);
+            logger.warn(
+              `[scrapper] Native request failed for ${url} (${err.message}). Falling back to direct HTTP fetch...`,
+            );
+            try {
+              resolve(await directHttpRequest(config, requestHeaders));
+              return;
+            } catch (fallbackErr) {
+              reject(err);
+              return;
+            }
           }
           return;
         }

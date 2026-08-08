@@ -98,9 +98,13 @@ public class CloudflareBypassPlugin extends Plugin {
         Boolean isPaused = call.getBoolean("isPaused", false);
 
         try {
-            if (currentSegments >= totalSegments || totalSegments <= 0 || "Nothing in progress".equals(caption)) {
+            if ("Nothing in progress".equals(caption)) {
                 DownloadNotificationManager.getInstance(getContext()).cancelNotification();
+                DownloadForegroundService.stop(getContext());
             } else {
+                if (!DownloadForegroundService.isRunning()) {
+                    DownloadForegroundService.start(getContext());
+                }
                 DownloadNotificationManager.getInstance(getContext()).updateProgress(caption, currentSegments, totalSegments, epid, isPaused != null ? isPaused : false);
             }
             call.resolve();
@@ -117,6 +121,32 @@ public class CloudflareBypassPlugin extends Plugin {
             call.resolve();
         } catch (Exception e) {
             call.reject("Failed to set download notification setting: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void requestBatteryOptimizationExclusion(PluginCall call) {
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+                android.os.PowerManager pm = (android.os.PowerManager) getContext().getSystemService(android.content.Context.POWER_SERVICE);
+                String packageName = getContext().getPackageName();
+                if (pm != null && !pm.isIgnoringBatteryOptimizations(packageName)) {
+                    android.content.Intent intent = new android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                    intent.setData(android.net.Uri.parse("package:" + packageName));
+                    intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                    getContext().startActivity(intent);
+                    JSObject ret = new JSObject();
+                    ret.put("prompted", true);
+                    call.resolve(ret);
+                    return;
+                }
+            }
+            JSObject ret = new JSObject();
+            ret.put("prompted", false);
+            call.resolve(ret);
+        } catch (Exception e) {
+            Log.e("StrawVerseBypass", "Failed to request battery optimization exclusion: " + e.getMessage());
+            call.reject("Failed to request battery optimization exclusion: " + e.getMessage());
         }
     }
 
@@ -367,10 +397,55 @@ public class CloudflareBypassPlugin extends Plugin {
                         }
 
                         @Override
-                        public void onPageFinished(WebView view, String finishedUrl) {
+                        public void onPageFinished(final WebView view, final String finishedUrl) {
                             super.onPageFinished(view, finishedUrl);
                             Log.i("StrawVerseBypass", "WebView loaded page: " + finishedUrl);
                             handler.post(cookiePoller);
+
+                            if (finished[0]) return;
+
+                            view.evaluateJavascript(
+                                "(function() {\n" +
+                                "  var title = (document.title || '').toLowerCase();\n" +
+                                "  var html = (document.documentElement ? document.documentElement.outerHTML : '').toLowerCase();\n" +
+                                "  return title.includes('just a moment') || title.includes('cloudflare') || title.includes('attention required') || html.includes('cf-challenge') || html.includes('turnstile') || html.includes('challenge-platform') || html.includes('verify you are human');\n" +
+                                "})()",
+                                new ValueCallback<String>() {
+                                    @Override
+                                    public void onReceiveValue(String value) {
+                                        if (finished[0]) return;
+                                        boolean isChallenge = "true".equals(value);
+                                        Log.i("StrawVerseBypass", "Page finished. Is Cloudflare challenge page: " + isChallenge);
+                                        if (isChallenge) {
+                                            if (!dialog.isShowing()) {
+                                                dialog.show();
+                                            }
+                                        } else {
+                                            Log.i("StrawVerseBypass", "No Cloudflare challenge detected on loaded page. Resolving bypass automatically!");
+                                            finished[0] = true;
+                                            handler.removeCallbacks(cookiePoller);
+                                            CookieManager.getInstance().flush();
+
+                                            String cookieString = CookieManager.getInstance().getCookie(finalUrl);
+                                            JSObject ret = new JSObject();
+                                            ret.put("cookies", cookieString != null ? cookieString : "");
+                                            ret.put("userAgent", effectiveUserAgent);
+
+                                            JSObject hints = new JSObject();
+                                            for (Map.Entry<String, String> entry : capturedClientHints.entrySet()) {
+                                                hints.put(entry.getKey(), entry.getValue());
+                                            }
+                                            ret.put("clientHints", hints);
+
+                                            call.resolve(ret);
+                                            if (dialog.isShowing()) {
+                                                dialog.dismiss();
+                                            }
+                                            view.destroy();
+                                        }
+                                    }
+                                }
+                            );
                         }
 
                         @Override
@@ -381,26 +456,52 @@ public class CloudflareBypassPlugin extends Plugin {
                             finished[0] = true;
                             handler.removeCallbacks(cookiePoller);
                             call.reject("WebView load error: " + description);
-                            dialog.dismiss();
+                            if (dialog.isShowing()) dialog.dismiss();
                             view.destroy();
                         }
                     });
 
-                     Map<String, String> extraHeaders = new java.util.HashMap<>();
-                     String finalRef = (referer != null && !referer.isEmpty()) ? referer : null;
-                      if (finalRef == null) {
-                          Map<String, String> rules = AppDatabase.getHeadersForUrl(getContext(), finalChallengeUrl);
-                          if (rules.containsKey("Referer")) {
-                              finalRef = rules.get("Referer");
-                          }
-                      }
-                     if (finalRef != null && !finalRef.isEmpty()) {
-                         extraHeaders.put("Referer", finalRef);
-                     }
-                     Log.i("StrawVerseBypass", "Loading challenge URL in WebView and showing Dialog with extra headers: " + extraHeaders);
-                     webView.loadUrl(finalChallengeUrl, extraHeaders);
-                    dialog.show();
+                    Map<String, String> extraHeaders = new java.util.HashMap<>();
+                    String finalRef = (referer != null && !referer.isEmpty()) ? referer : null;
+                    if (finalRef == null) {
+                        Map<String, String> rules = AppDatabase.getHeadersForUrl(getContext(), finalChallengeUrl);
+                        if (rules.containsKey("Referer")) {
+                            finalRef = rules.get("Referer");
+                        }
+                    }
+                    if (finalRef != null && !finalRef.isEmpty()) {
+                        extraHeaders.put("Referer", finalRef);
+                    }
+                    Log.i("StrawVerseBypass", "Loading challenge URL in WebView with extra headers: " + extraHeaders);
+                    webView.loadUrl(finalChallengeUrl, extraHeaders);
                     handler.post(cookiePoller);
+
+                    // 15-second safety fallback timer
+                    handler.postDelayed(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (finished[0]) return;
+                            Log.w("StrawVerseBypass", "Bypass 15s safety timer expired. Resolving with current cookies.");
+                            finished[0] = true;
+                            handler.removeCallbacks(cookiePoller);
+                            CookieManager.getInstance().flush();
+
+                            String cookieString = CookieManager.getInstance().getCookie(finalUrl);
+                            JSObject ret = new JSObject();
+                            ret.put("cookies", cookieString != null ? cookieString : "");
+                            ret.put("userAgent", effectiveUserAgent);
+
+                            JSObject hints = new JSObject();
+                            for (Map.Entry<String, String> entry : capturedClientHints.entrySet()) {
+                                hints.put(entry.getKey(), entry.getValue());
+                            }
+                            ret.put("clientHints", hints);
+
+                            call.resolve(ret);
+                            if (dialog.isShowing()) dialog.dismiss();
+                            webView.destroy();
+                        }
+                    }, 15000);
 
                 } catch (Exception e) {
                     Log.e("StrawVerseBypass", "Error building dialog", e);
@@ -518,59 +619,39 @@ public class CloudflareBypassPlugin extends Plugin {
             }
 
             Context context = getContext();
-            Uri fileUri = FileProvider.getUriForFile(
+
+            File dir = file.isDirectory() ? file : file.getParentFile();
+            if (dir == null) dir = file;
+
+            Uri dirUri = FileProvider.getUriForFile(
                 context,
                 context.getPackageName() + ".fileprovider",
-                file
+                dir
             );
 
-            if (file.isDirectory() || openFolder) {
-                File dir = file.isDirectory() ? file : file.getParentFile();
-                if (dir == null) dir = file;
+            Intent intent = new Intent(Intent.ACTION_VIEW);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.setDataAndType(dirUri, "vnd.android.document/directory");
 
-                Uri dirUri = FileProvider.getUriForFile(
-                    context,
-                    context.getPackageName() + ".fileprovider",
-                    dir
-                );
-
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-                intent.setDataAndType(dirUri, "vnd.android.document/directory");
-
-                if (intent.resolveActivity(context.getPackageManager()) == null) {
-                    intent.setDataAndType(dirUri, "resource/folder");
+            try {
+                context.startActivity(intent);
+            } catch (Exception e1) {
+                try {
+                    Intent filesIntent = new Intent(Intent.ACTION_VIEW);
+                    filesIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    filesIntent.setDataAndType(dirUri, "*/*");
+                    context.startActivity(filesIntent);
+                } catch (Exception e2) {
+                    Intent chooser = Intent.createChooser(intent, "Open File Location");
+                    chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    context.startActivity(chooser);
                 }
-
-                if (intent.resolveActivity(context.getPackageManager()) == null) {
-                    Uri rawUri = Uri.parse(dir.getAbsolutePath());
-                    intent.setDataAndType(rawUri, "vnd.android.document/directory");
-                }
-
-                if (intent.resolveActivity(context.getPackageManager()) == null) {
-                    intent.setDataAndType(dirUri, "*/*");
-                }
-
-                Intent chooser = Intent.createChooser(intent, "Open Folder");
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(chooser);
-            } else {
-                Intent intent = new Intent(Intent.ACTION_VIEW);
-                intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
-                String mimeType = getMimeType(filePath);
-                intent.setDataAndType(fileUri, mimeType != null ? mimeType : "*/*");
-
-                Intent chooser = Intent.createChooser(intent, "Open with");
-                chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                context.startActivity(chooser);
             }
             call.resolve();
         } catch (Exception e) {
-            call.reject("Failed to open file: " + e.getMessage());
+            Log.e("StrawVerseBypass", "Failed to open file or folder: " + e.getMessage(), e);
+            call.reject("Failed to open file or folder: " + e.getMessage());
         }
     }
 
@@ -620,17 +701,18 @@ public class CloudflareBypassPlugin extends Plugin {
         JSObject headers = call.getObject("headers");
 
         boolean isMedia = false;
+        boolean isDownloadServiceRunning = DownloadForegroundService.isRunning();
         if (url != null) {
             String lowerUrl = url.toLowerCase();
             isMedia = lowerUrl.contains(".m3u8") || lowerUrl.contains(".ts") || lowerUrl.contains("owocdn.top") || lowerUrl.contains("uwucdn.top") || lowerUrl.contains("kotocdn.site") || lowerUrl.contains("megaplay.buzz");
         }
 
-        if (!isMedia) {
+        if (!isMedia && !isDownloadServiceRunning) {
             executeWebViewRequest(url, call.getString("method"), headers, call.getString("body"), call);
             return;
         }
 
-        final boolean finalIsMedia = isMedia;
+
 
         new Thread(new Runnable() {
             @Override
@@ -648,8 +730,8 @@ public class CloudflareBypassPlugin extends Plugin {
                     java.net.URL urlObj = new java.net.URL(url);
                     conn = (java.net.HttpURLConnection) urlObj.openConnection();
                     conn.setRequestMethod(method.toUpperCase());
-                    conn.setConnectTimeout(15000);
-                    conn.setReadTimeout(15000);
+                    conn.setConnectTimeout(30000);
+                    conn.setReadTimeout(30000);
                     conn.setDoInput(true);
                     conn.setRequestProperty("Accept-Encoding", "identity");
 
@@ -792,6 +874,8 @@ public class CloudflareBypassPlugin extends Plugin {
                 backgroundWebView = new WebView(getActivity());
                 backgroundWebView.getSettings().setJavaScriptEnabled(true);
                 backgroundWebView.getSettings().setDomStorageEnabled(true);
+                backgroundWebView.resumeTimers();
+                backgroundWebView.onResume();
                 
                 String webViewUA = android.webkit.WebSettings.getDefaultUserAgent(getContext());
                 backgroundWebView.getSettings().setUserAgentString(webViewUA);

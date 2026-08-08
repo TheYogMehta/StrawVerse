@@ -235,8 +235,8 @@
 
 .content-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-  gap: 24px;
+  grid-template-columns: repeat(auto-fill, minmax(105px, 1fr));
+  gap: 12px;
   width: 100%;
   margin-bottom: 40px;
 }
@@ -245,8 +245,13 @@
 :root[style*="--catalog-columns: 3"] .content-grid,
 :root[style*="--catalog-columns: 4"] .content-grid,
 :root[style*="--catalog-columns: 5"] .content-grid,
-:root[style*="--catalog-columns: 6"] .content-grid {
-  grid-template-columns: repeat(var(--catalog-columns), 1fr);
+:root[style*="--catalog-columns: 6"] .content-grid,
+html[style*="--catalog-columns: 2"] .content-grid,
+html[style*="--catalog-columns: 3"] .content-grid,
+html[style*="--catalog-columns: 4"] .content-grid,
+html[style*="--catalog-columns: 5"] .content-grid,
+html[style*="--catalog-columns: 6"] .content-grid {
+  grid-template-columns: repeat(var(--catalog-columns), 1fr) !important;
 }
 
 .media-card {

@@ -275,6 +275,7 @@ public class MainActivity extends BridgeActivity {
         super.onDestroy();
         try {
             DownloadNotificationManager.getInstance(this).cancelNotification();
+            DownloadForegroundService.stop(this);
         } catch (Exception e) {
             Log.w(TAG, "Failed to cancel download notification on destroy: " + e.getMessage());
         }

@@ -119,10 +119,10 @@ function extractDomain(urlStr, refererStr) {
   return hostname;
 }
 
-function getDomainConcurrency(domain, defaultInitial = 2) {
-  if (!domain) return Math.max(1, defaultInitial);
+function getDomainConcurrency(domain, defaultInitial = 4) {
+  if (!domain) return Math.max(3, defaultInitial);
   if (cache[domain] !== undefined) {
-    return Math.max(1, cache[domain]);
+    return Math.max(isCoolingDown(domain) ? 1 : 3, cache[domain]);
   }
 
   try {
@@ -131,23 +131,23 @@ function getDomainConcurrency(domain, defaultInitial = 2) {
       [domain],
     );
     if (row) {
-      let avgConcurrency = defaultInitial;
+      let avgConcurrency = Math.max(4, defaultInitial);
       if (row.current_concurrency && row.max_concurrency) {
         avgConcurrency = Math.max(
-          1,
+          3,
           Math.round(
             (Number(row.current_concurrency) + Number(row.max_concurrency)) / 2,
           ),
         );
       } else if (row.current_concurrency) {
-        avgConcurrency = Math.max(1, Number(row.current_concurrency));
+        avgConcurrency = Math.max(3, Number(row.current_concurrency));
       }
       cache[domain] = avgConcurrency;
       return cache[domain];
     }
   } catch (e) {}
 
-  cache[domain] = Math.max(1, defaultInitial);
+  cache[domain] = Math.max(3, defaultInitial);
   return cache[domain];
 }
 
@@ -240,8 +240,11 @@ function recordDomainFailure(domain, currentVal, statusCode = null) {
 function recordDomainBatchSuccess(domain, batchThroughput = null) {
   if (!domain) return;
   resetCircuit(domain);
-  const current = cache[domain] || 1;
+  const current = cache[domain] || 4;
   let newConcurrency = current;
+
+  const maxCap = domainMaxCap[domain] || 8;
+  const targetProbe = Math.min(maxCap, 4);
 
   if (batchThroughput && batchThroughput > 0) {
     const prevThroughput = throughputCache[domain] || null;
@@ -249,13 +252,16 @@ function recordDomainBatchSuccess(domain, batchThroughput = null) {
       const speedDiffRatio =
         (batchThroughput - prevThroughput) / prevThroughput;
 
-      if (speedDiffRatio > 0.08) {
+      if (
+        speedDiffRatio > 0.05 ||
+        (current < targetProbe && !isCoolingDown(domain))
+      ) {
         newConcurrency = current + 1;
         logger.info(
-          `[DomainConcurrency] Download speed improved (+${(speedDiffRatio * 100).toFixed(1)}%, ${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s). Scaled up concurrency on '${domain}' from ${current} -> ${newConcurrency}`,
+          `[DomainConcurrency] Download speed ${speedDiffRatio > 0.05 ? `improved (+${(speedDiffRatio * 100).toFixed(1)}%)` : "probing higher concurrency"}. Scaled up concurrency on '${domain}' from ${current} -> ${newConcurrency}`,
         );
-      } else if (speedDiffRatio < -0.2 && current > 1) {
-        newConcurrency = Math.max(1, current - 1);
+      } else if (speedDiffRatio < -0.25 && current > 2) {
+        newConcurrency = Math.max(2, current - 1);
         logger.warn(
           `[DomainConcurrency] Speed degraded (${(speedDiffRatio * 100).toFixed(1)}%, ${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s) on '${domain}'. Stepped down concurrency from ${current} -> ${newConcurrency}`,
         );
@@ -268,13 +274,13 @@ function recordDomainBatchSuccess(domain, batchThroughput = null) {
       throughputCache[domain] = 0.4 * batchThroughput + 0.6 * prevThroughput;
     } else {
       throughputCache[domain] = batchThroughput;
-      newConcurrency = current;
+      newConcurrency = Math.max(current, targetProbe);
       logger.info(
-        `[DomainConcurrency] Initial speed sample (${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s). Concurrency on '${domain}' set to ${current}`,
+        `[DomainConcurrency] Initial speed sample (${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s). Concurrency on '${domain}' set to ${newConcurrency}`,
       );
     }
   } else {
-    newConcurrency = current;
+    newConcurrency = Math.max(current, targetProbe);
   }
 
   if (domainMaxCap[domain]) {

@@ -47,6 +47,7 @@ async function reconcileActiveProvider(Type) {
 // update the settings
 async function settingupdate(newSettings = {}) {
   if (newSettings && typeof newSettings === "object") {
+    delete newSettings.CustomDownloadLocation;
     for (const [k, v] of Object.entries(newSettings)) {
       if (v !== undefined) {
         config[k] = v;
@@ -54,6 +55,7 @@ async function settingupdate(newSettings = {}) {
     }
   }
 
+  config.CustomDownloadLocation = getDownloadsFolder();
   await settingSave();
   return config;
 }
@@ -74,8 +76,6 @@ async function settingfetch() {
         await ensureDirectoryExists(config?.CustomDownloadLocation);
       } catch (error) {
         console.log(error);
-        config.CustomDownloadLocation = getDownloadsFolder();
-        changes = true;
       }
     }
     // checking Animeprovider is valid
@@ -198,6 +198,8 @@ async function SettingsLoad() {
     if (config && !config.hasOwnProperty("imageCacheSizeLimit")) {
       config.imageCacheSizeLimit = 5;
     }
+
+    config.CustomDownloadLocation = getDownloadsFolder();
 
     if (config && !config.hasOwnProperty("developerMode")) {
       config.developerMode = false;

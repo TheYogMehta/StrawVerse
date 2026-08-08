@@ -154,7 +154,9 @@ async function removeQueue(AnimeEpId) {
     removedItem = AnimeQueue[indexToRemove];
     AnimeQueue.splice(indexToRemove, 1);
   }
-  resetDomainConcurrency();
+  if (AnimeQueue.length === 0) {
+    resetDomainConcurrency();
+  }
   if (global.updatePowerSaveBlocker) {
     global.updatePowerSaveBlocker();
   }
@@ -176,14 +178,18 @@ async function removeQueue(AnimeEpId) {
         item.totalSegments > 0 ||
         (item.caption && item.caption.includes("Downloading")),
     );
+    const hasItemsInQueue = AnimeQueue.length > 0;
+    const fallbackCaption = hasItemsInQueue
+      ? "Preparing next episode..."
+      : "Nothing in progress";
     sendToRenderer("download-logger", {
       queue: nextItem
         ? AnimeQueue.filter((item) => item.epid !== nextItem.epid)
         : AnimeQueue,
-      caption: nextItem ? nextItem.caption : "Nothing in progress",
+      caption: nextItem ? nextItem.caption : fallbackCaption,
       totalSegments: nextItem ? nextItem.totalSegments : 0,
       currentSegments: nextItem ? nextItem.currentSegments : 0,
-      epid: nextItem ? nextItem.epid : null,
+      epid: nextItem ? nextItem.epid : AnimeQueue[0]?.epid || null,
       isPaused: isQueuePaused(),
     });
   } catch (ipcErr) {}

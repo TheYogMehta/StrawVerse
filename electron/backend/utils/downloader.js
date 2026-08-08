@@ -1,5 +1,20 @@
+const http = require("http");
+const https = require("https");
 const { spawn } = require("child_process");
 const { logger } = require("./AppLogger");
+
+const keepAliveAgent = {
+  http: new http.Agent({
+    keepAlive: true,
+    maxSockets: 128,
+    keepAliveMsecs: 30000,
+  }),
+  https: new https.Agent({
+    keepAlive: true,
+    maxSockets: 128,
+    keepAliveMsecs: 30000,
+  }),
+};
 const ffmpeg = require("ffmpeg-static");
 const iso6391 = require("iso-639-1");
 const path = require("path");
@@ -523,7 +538,7 @@ class downloader {
         this.headers?.Referer || this.headers?.referer,
       );
 
-      let CONCURRENCY = getDomainConcurrency(domainName, 1);
+      let CONCURRENCY = getDomainConcurrency(domainName, 4);
       let currentIndex = 0;
       let stopDownloading = false;
       let failedSegmentsCount = 0;
@@ -616,6 +631,11 @@ class downloader {
 
           if (!body || body.length === 0) {
             throw new Error("Received empty segment payload");
+          }
+
+          const segDir = path.dirname(segmentFile);
+          if (!fs.existsSync(segDir)) {
+            fs.mkdirSync(segDir, { recursive: true });
           }
 
           await fs.promises.writeFile(segmentFile, body);

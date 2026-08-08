@@ -157,6 +157,15 @@ function ensureEventSource() {
         dispatchNativeRequest(data);
       }
 
+      if (channel === "request-battery-optimization") {
+        const CloudflareBypass = window.Capacitor?.Plugins?.CloudflareBypass;
+        if (CloudflareBypass?.requestBatteryOptimizationExclusion) {
+          CloudflareBypass.requestBatteryOptimizationExclusion().catch(
+            () => {},
+          );
+        }
+      }
+
       if (channel === "native-cancel" && Array.isArray(data?.requestIds)) {
         cancelInFlightNativeRequests(data.requestIds);
       }

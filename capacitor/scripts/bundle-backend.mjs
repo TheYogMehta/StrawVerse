@@ -23,6 +23,32 @@ try {
   execSync(esbuildCmd, { cwd: nodejsDir, stdio: "inherit" });
   console.log("[bundle] Successfully created main.bundle.js");
 
+  const bundlePath = path.join(nodejsDir, "main.bundle.js");
+  if (fs.existsSync(bundlePath)) {
+    let bundleContent = fs.readFileSync(bundlePath, "utf8");
+    const originalLength = bundleContent.length;
+    bundleContent = bundleContent
+      .replaceAll("/^[$_\\p{ID_Start}]$/u", "/^[a-zA-Z_$]$/")
+      .replaceAll(
+        "/^[$\\u200c\\u200d\\p{ID_Continue}]$/u",
+        "/^[a-zA-Z0-9_$\\u200c\\u200d]$/",
+      )
+      .replaceAll(
+        "/^[$_\\p{ID_Start}][$\\u200c\\u200d\\p{ID_Continue}]*$/u",
+        "/^[a-zA-Z_$][a-zA-Z0-9_$\\u200c\\u200d]*$/",
+      );
+
+    if (
+      bundleContent.length !== originalLength ||
+      bundleContent.includes("/^[a-zA-Z_$]$/")
+    ) {
+      fs.writeFileSync(bundlePath, bundleContent, "utf8");
+      console.log(
+        "[bundle] Sanitized Unicode property escapes for Android Node.js compatibility.",
+      );
+    }
+  }
+
   const pkgPath = path.join(nodejsDir, "package.json");
   if (fs.existsSync(pkgPath)) {
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));

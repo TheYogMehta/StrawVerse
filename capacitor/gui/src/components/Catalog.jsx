@@ -1052,7 +1052,7 @@ export default function Catalog({
     }
 
     if (provider === "local") {
-      fetch("/api/local/tags")
+      fetch(`/api/local/tags/view/${type || "Anime"}`)
         .then((res) => res.json())
         .then((tData) => {
           if (Array.isArray(tData)) setLocalTags(tData);

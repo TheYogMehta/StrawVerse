@@ -14,55 +14,53 @@ function sanitizeFolderName(title) {
 }
 
 // Helper to resolve or create a unique directory for an anime/manga by title and mediaId
-async function getOrCreateMediaDir(parentDir, title, mediaId) {
-  const baseName = sanitizeFolderName(title);
-  let folderName = baseName;
-  let counter = 1;
-
-  while (true) {
-    const candidatePath = path.join(parentDir, folderName);
-    const metaFile = path.join(candidatePath, ".strawverse_id");
-
-    if (fs.existsSync(candidatePath)) {
-      if (fs.existsSync(metaFile)) {
-        try {
-          const content = fs.readFileSync(metaFile, "utf-8");
-          const data = JSON.parse(content);
-          if (
-            !mediaId ||
-            String(data.mediaId) === String(mediaId) ||
-            data.title === title
-          ) {
-            return candidatePath;
-          }
-        } catch (_) {}
-      } else {
-        if (mediaId) {
-          try {
-            fs.writeFileSync(
-              metaFile,
-              JSON.stringify({ mediaId, title }, null, 2),
-            );
-          } catch (_) {}
-        }
-        return candidatePath;
+async function getOrCreateMediaDir(
+  parentDir,
+  title,
+  mediaId,
+  mediaType = "Anime",
+) {
+  let existingFolderName = null;
+  if (mediaId && global.db) {
+    try {
+      const tableName = mediaType === "Manga" ? "Manga" : "Anime";
+      const row = global.db
+        .prepare(
+          `SELECT folder_name FROM ${tableName} WHERE id = ? OR LOWER(id) = LOWER(?) LIMIT 1`,
+        )
+        .get(mediaId, mediaId);
+      if (row && row.folder_name) {
+        existingFolderName = row.folder_name;
       }
-
-      counter++;
-      folderName = `${baseName} (${counter})`;
-    } else {
-      await fs.promises.mkdir(candidatePath, { recursive: true });
-      if (mediaId) {
-        try {
-          fs.writeFileSync(
-            metaFile,
-            JSON.stringify({ mediaId, title }, null, 2),
-          );
-        } catch (_) {}
-      }
-      return candidatePath;
-    }
+    } catch (_) {}
   }
+
+  if (existingFolderName) {
+    const targetDir = path.join(parentDir, existingFolderName);
+    if (!fs.existsSync(targetDir)) {
+      await fs.promises.mkdir(targetDir, { recursive: true });
+    }
+    return targetDir;
+  }
+
+  const folderName = sanitizeFolderName(title);
+  const targetDir = path.join(parentDir, folderName);
+  if (!fs.existsSync(targetDir)) {
+    await fs.promises.mkdir(targetDir, { recursive: true });
+  }
+
+  if (mediaId && global.db) {
+    try {
+      const tableName = mediaType === "Manga" ? "Manga" : "Anime";
+      global.db
+        .prepare(
+          `UPDATE ${tableName} SET folder_name = ? WHERE id = ? AND (folder_name IS NULL OR folder_name = '')`,
+        )
+        .run(folderName, mediaId);
+    } catch (_) {}
+  }
+
+  return targetDir;
 }
 
 // Anime Dir Maker

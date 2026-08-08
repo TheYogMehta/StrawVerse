@@ -36,6 +36,13 @@ function getReservedTags(type) {
 }
 
 // View tags for Anime/Manga in custom user order
+router.get("/api/local/tags", (req, res) => {
+  const type = req.query.type === "Manga" ? "Manga" : "Anime";
+  res.redirect(
+    `/api/local/tags/view/${type}${req.query.includeHidden ? "?includeHidden=true" : ""}`,
+  );
+});
+
 router.get("/api/local/tags/view/:type", async (req, res) => {
   try {
     const { type } = req.params;

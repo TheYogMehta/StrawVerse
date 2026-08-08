@@ -110,6 +110,8 @@ public class PlayerActivity extends Activity {
     private JSONArray skipTimesArray = new JSONArray();
     private int currentSourceIndex = 0;
     private int selectedSubtitleIndex = -1; // -1 means disabled/off by default
+    private String preferredSubtitleLang = "english";
+    private String preferredQuality = "highest";
 
     // History tracking fields
     private String animeId = "";
@@ -702,6 +704,130 @@ public class PlayerActivity extends Activity {
         }).start();
     }
 
+    private String normalizeLangCode(String str) {
+        if (str == null) return "";
+        String s = str.toLowerCase().trim();
+        if (s.equals("en") || s.equals("eng") || s.contains("english")) return "english";
+        if (s.equals("jp") || s.equals("jpn") || s.contains("japanese")) return "japanese";
+        if (s.equals("es") || s.equals("spa") || s.contains("spanish")) return "spanish";
+        if (s.equals("fr") || s.equals("fra") || s.equals("fre") || s.contains("french")) return "french";
+        if (s.equals("de") || s.equals("deu") || s.equals("ger") || s.contains("german")) return "german";
+        if (s.equals("it") || s.equals("ita") || s.contains("italian")) return "italian";
+        if (s.equals("ru") || s.equals("rus") || s.contains("russian")) return "russian";
+        if (s.equals("pt") || s.equals("por") || s.contains("portuguese") || s.contains("brazilian")) return "portuguese";
+        if (s.equals("zh") || s.equals("zho") || s.contains("chinese")) return "chinese";
+        if (s.equals("ar") || s.equals("ara") || s.contains("arabic")) return "arabic";
+        if (s.equals("id") || s.equals("ind") || s.contains("indonesian")) return "indonesian";
+        if (s.equals("th") || s.equals("tha") || s.contains("thai")) return "thai";
+        if (s.equals("vi") || s.equals("vie") || s.contains("vietnamese")) return "vietnamese";
+        return s;
+    }
+
+    private void applyPreferredSubtitleLanguage() {
+        if (subtitlesArray == null || subtitlesArray.length() == 0) {
+            selectedSubtitleIndex = -1;
+            return;
+        }
+
+        String prefNorm = normalizeLangCode(preferredSubtitleLang);
+        if (prefNorm.equals("off") || prefNorm.equals("false") || prefNorm.equals("none")) {
+            selectedSubtitleIndex = -1;
+            return;
+        }
+
+        int matchedIdx = -1;
+        int englishIdx = -1;
+
+        for (int i = 0; i < subtitlesArray.length(); i++) {
+            JSONObject subObj = subtitlesArray.optJSONObject(i);
+            if (subObj == null) continue;
+            String lang = normalizeLangCode(subObj.optString("lang", ""));
+            String label = normalizeLangCode(subObj.optString("label", ""));
+            String name = normalizeLangCode(subObj.optString("name", ""));
+            String url = normalizeLangCode(subObj.optString("url", ""));
+
+            if (!prefNorm.isEmpty()) {
+                if (lang.contains(prefNorm) || label.contains(prefNorm) || name.contains(prefNorm) || url.contains(prefNorm)) {
+                    matchedIdx = i;
+                    break;
+                }
+            }
+            if (englishIdx == -1) {
+                if (lang.contains("english") || label.contains("english") || name.contains("english") || url.contains("english")
+                        || lang.equals("en") || lang.equals("eng")) {
+                    englishIdx = i;
+                }
+            }
+        }
+
+        if (matchedIdx != -1) {
+            selectedSubtitleIndex = matchedIdx;
+        } else if (englishIdx != -1) {
+            selectedSubtitleIndex = englishIdx;
+        } else {
+            selectedSubtitleIndex = 0;
+        }
+    }
+
+    private void sortSourcesByPreferredQuality(String preferredQual) {
+        if (sourcesArray == null || sourcesArray.length() <= 1) return;
+
+        try {
+            List<JSONObject> list = new ArrayList<>();
+            for (int i = 0; i < sourcesArray.length(); i++) {
+                list.add(sourcesArray.getJSONObject(i));
+            }
+
+            java.util.Collections.sort(list, new Comparator<JSONObject>() {
+                private int parseQualityNum(JSONObject s) {
+                    String q = (s.optString("quality", "") + " " + s.optString("name", "")).toLowerCase();
+                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("(\\d+)p").matcher(q);
+                    if (m.find()) {
+                        try { return Integer.parseInt(m.group(1)); } catch (Exception e) {}
+                    }
+                    if (q.contains("1080")) return 1080;
+                    if (q.contains("720")) return 720;
+                    if (q.contains("480")) return 480;
+                    if (q.contains("360")) return 360;
+                    return 0;
+                }
+
+                @Override
+                public int compare(JSONObject a, JSONObject b) {
+                    return Integer.compare(parseQualityNum(b), parseQualityNum(a));
+                }
+            });
+
+            String prefNorm = preferredQual != null ? preferredQual.toLowerCase().trim() : "highest";
+            if (!prefNorm.equals("highest") && !prefNorm.equals("auto") && !prefNorm.equals("default")) {
+                int prefNum = 0;
+                try {
+                    String numStr = prefNorm.replaceAll("\\D+", "");
+                    if (!numStr.isEmpty()) prefNum = Integer.parseInt(numStr);
+                } catch (Exception ignored) {}
+
+                if (prefNum > 0) {
+                    for (int i = 0; i < list.size(); i++) {
+                        String q = list.get(i).optString("quality", "").toLowerCase();
+                        if (q.contains(String.valueOf(prefNum))) {
+                            JSONObject matched = list.remove(i);
+                            list.add(0, matched);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            JSONArray sorted = new JSONArray();
+            for (JSONObject item : list) {
+                sorted.put(item);
+            }
+            sourcesArray = sorted;
+        } catch (Exception e) {
+            Log.e("PlayerActivity", "Failed sorting sources by quality: " + e.getMessage());
+        }
+    }
+
     private void onSourcesFetched(JSONObject data) {
         try {
             hudTextView.setVisibility(View.GONE);
@@ -716,56 +842,19 @@ public class PlayerActivity extends Activity {
             if (subtitlesArray == null) {
                 subtitlesArray = new JSONArray();
             }
-            if (selectedSubtitleIndex == -1 && subtitlesArray.length() > 0) {
-                int defaultIdx = 0;
-                for (int i = 0; i < subtitlesArray.length(); i++) {
-                    String lang = subtitlesArray.getJSONObject(i).optString("lang", "").toLowerCase();
-                    if (lang.contains("english") || lang.equals("en") || lang.contains("eng")) {
-                        defaultIdx = i;
-                        break;
-                    }
-                }
-                selectedSubtitleIndex = defaultIdx;
-            }
             if (skipTimesArray == null) {
                 skipTimesArray = new JSONArray();
             }
+
+            sortSourcesByPreferredQuality(preferredQuality);
+            applyPreferredSubtitleLanguage();
 
             if (sourcesArray.length() == 0) {
                 showErrorAndFinish("No video sources found for this episode.");
                 return;
             }
 
-            // Choose preferred source
-            int preferredIndex = 0;
-            for (int i = 0; i < sourcesArray.length(); i++) {
-                String q = sourcesArray.getJSONObject(i).optString("quality", "");
-                if ("1080p".equalsIgnoreCase(q)) {
-                    preferredIndex = i;
-                    break;
-                }
-            }
-            if (preferredIndex == 0) {
-                for (int i = 0; i < sourcesArray.length(); i++) {
-                    String q = sourcesArray.getJSONObject(i).optString("quality", "");
-                    if ("720p".equalsIgnoreCase(q)) {
-                        preferredIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            currentSourceIndex = preferredIndex;
-            final JSONObject sourceObj = sourcesArray.getJSONObject(preferredIndex);
-            boolean isUnresolved = sourceObj.optBoolean("isUnresolved", false) || !sourceObj.has("url") || sourceObj.optString("url", "").isEmpty();
-
-            if (isUnresolved) {
-                resolveServerNatively(provider, sourceObj);
-            } else {
-                currentVideoUrl = sourceObj.optString("url", "");
-                final Map<String, String> headersMap = extractHeadersForSource(sourceObj);
-                initializePlayer(currentVideoUrl, headersMap);
-            }
+            resolveServerWithFallback(0);
 
         } catch (Exception e) {
             Log.e("PlayerActivity", "Error processing fetched sources: " + e.getMessage());
@@ -815,8 +904,34 @@ public class PlayerActivity extends Activity {
         return headersMap;
     }
 
-    private void resolveServerNatively(final String providerName, final JSONObject sourceObj) {
-        showHudOverlay("Resolving stream server...");
+    private void resolveServerWithFallback(final int startIndex) {
+        if (sourcesArray == null || startIndex >= sourcesArray.length()) {
+            showErrorAndFinish("No video sources found for this episode.");
+            return;
+        }
+
+        currentSourceIndex = startIndex;
+        final JSONObject sourceObj;
+        try {
+            sourceObj = sourcesArray.getJSONObject(startIndex);
+        } catch (Exception e) {
+            showErrorAndFinish("Failed reading source data: " + e.getMessage());
+            return;
+        }
+
+        boolean isUnresolved = sourceObj.optBoolean("isUnresolved", false) 
+                || !sourceObj.has("url") 
+                || sourceObj.optString("url", "").isEmpty();
+
+        if (!isUnresolved) {
+            currentVideoUrl = sourceObj.optString("url", "");
+            final Map<String, String> headersMap = extractHeadersForSource(sourceObj);
+            initializePlayer(currentVideoUrl, headersMap);
+            return;
+        }
+
+        String serverLabel = getServerLabel(sourceObj, startIndex);
+        showHudOverlay("Resolving " + serverLabel + "...");
         if (hudTextView != null) hudTextView.setVisibility(View.VISIBLE);
 
         new Thread(new Runnable() {
@@ -824,7 +939,7 @@ public class PlayerActivity extends Activity {
             public void run() {
                 try {
                     JSONObject body = new JSONObject();
-                    body.put("provider", providerName != null ? providerName : provider);
+                    body.put("provider", provider != null && !provider.isEmpty() ? provider : "Anime");
                     body.put("server", sourceObj);
                     if (subdub != null) {
                         body.put("subdub", subdub);
@@ -856,44 +971,45 @@ public class PlayerActivity extends Activity {
                         final JSONObject resolved = new JSONObject(response.toString());
                         final String resUrl = resolved.optString("url", "");
 
-                        runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (hudTextView != null) hudTextView.setVisibility(View.GONE);
-                                if (resUrl.isEmpty()) {
-                                    showErrorAndFinish("Failed to resolve server stream.");
-                                    return;
-                                }
-                                try {
-                                    sourceObj.put("url", resUrl);
-                                    sourceObj.put("isUnresolved", false);
-                                    JSONObject resHeaders = resolved.optJSONObject("headers");
-                                    if (resHeaders != null) {
-                                        sourceObj.put("headers", resHeaders);
-                                    }
-                                    JSONArray resSubs = resolved.optJSONArray("subtitles");
-                                    if (resSubs != null && resSubs.length() > 0) {
-                                        subtitlesArray = resSubs;
-                                        if (selectedSubtitleIndex == -1) {
-                                            selectedSubtitleIndex = 0;
+                        if (!resUrl.isEmpty()) {
+                            runOnUiThread(new Runnable() {
+                                @Override
+                                public void run() {
+                                    if (hudTextView != null) hudTextView.setVisibility(View.GONE);
+                                    try {
+                                        sourceObj.put("url", resUrl);
+                                        sourceObj.put("isUnresolved", false);
+                                        JSONObject resHeaders = resolved.optJSONObject("headers");
+                                        if (resHeaders != null) {
+                                            sourceObj.put("headers", resHeaders);
                                         }
-                                    }
-                                } catch (Exception ignored) {}
-                                currentVideoUrl = resUrl;
-                                final Map<String, String> headersMap = extractHeadersForSource(sourceObj);
-                                initializePlayer(currentVideoUrl, headersMap);
-                            }
-                        });
-                    } else {
-                        throw new Exception("HTTP error " + code);
+                                        JSONArray resSubs = resolved.optJSONArray("subtitles");
+                                        if (resSubs != null && resSubs.length() > 0) {
+                                            subtitlesArray = resSubs;
+                                            applyPreferredSubtitleLanguage();
+                                        }
+                                    } catch (Exception ignored) {}
+                                    currentVideoUrl = resUrl;
+                                    final Map<String, String> headersMap = extractHeadersForSource(sourceObj);
+                                    initializePlayer(currentVideoUrl, headersMap);
+                                }
+                            });
+                            return;
+                        }
                     }
+                    throw new Exception("Server resolution returned empty stream URL (HTTP " + code + ")");
                 } catch (final Exception e) {
-                    Log.e("PlayerActivity", "Failed resolving server: " + e.getMessage());
+                    Log.w("PlayerActivity", "Server #" + (startIndex + 1) + " resolution failed: " + e.getMessage());
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            if (hudTextView != null) hudTextView.setVisibility(View.GONE);
-                            showErrorAndFinish("Failed to resolve server stream: " + e.getMessage());
+                            if (startIndex + 1 < sourcesArray.length()) {
+                                Log.i("PlayerActivity", "Falling back to next server #" + (startIndex + 2));
+                                resolveServerWithFallback(startIndex + 1);
+                            } else {
+                                if (hudTextView != null) hudTextView.setVisibility(View.GONE);
+                                showErrorAndFinish("Failed to resolve stream servers: " + e.getMessage());
+                            }
                         }
                     });
                 }
@@ -997,6 +1113,16 @@ public class PlayerActivity extends Activity {
                 @Override
                 public void onPlayerError(androidx.media3.common.PlaybackException error) {
                     Log.e("PlayerActivity", "ExoPlayer playback error: " + error.getMessage(), error);
+                    if (sourcesArray != null && currentSourceIndex + 1 < sourcesArray.length()) {
+                        Log.i("PlayerActivity", "Playback error on source " + currentSourceIndex + ", switching to fallback source...");
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                Toast.makeText(PlayerActivity.this, "Stream error, switching to fallback server...", Toast.LENGTH_SHORT).show();
+                                switchSource(currentSourceIndex + 1);
+                            }
+                        });
+                    }
                 }
             });
             player.setTrackSelectionParameters(
@@ -1065,14 +1191,14 @@ public class PlayerActivity extends Activity {
                 } catch (Exception ignored) {}
             }
 
-            String playUrl = videoUrl;
-            Log.d("PlayerActivity", "initializePlayer: direct playUrl=" + playUrl);
+            String playUrl = toProxyUrl(videoUrl, headers);
+            Log.d("PlayerActivity", "initializePlayer: videoUrl=" + videoUrl + " -> proxied playUrl=" + playUrl);
 
             // Wrap with KwikDataSource to strip PNG headers from obfuscated segments and handle M3U8 IV rewriting
             DataSource.Factory kwikFactory = () -> new KwikDataSource(resolvingFactory.createDataSource());
 
             List<MediaItem.SubtitleConfiguration> subtitleConfigurations = getSubtitleConfigurations();
-            boolean isHls = (videoUrl != null && videoUrl.contains(".m3u8"));
+            boolean isHls = (videoUrl != null && videoUrl.contains(".m3u8")) || (playUrl != null && playUrl.contains("/m3u8"));
 
             MediaItem.Builder mediaItemBuilder = new MediaItem.Builder()
                     .setUri(Uri.parse(playUrl))
@@ -1124,8 +1250,22 @@ public class PlayerActivity extends Activity {
             if (ref == null) ref = headers.get("Origin");
             if (ref == null) ref = headers.get("origin");
         }
+        if (ref == null || ref.isEmpty()) {
+            try {
+                Map<String, String> dbHdrs = AppDatabase.getHeadersForUrl(this, url);
+                if (dbHdrs != null) {
+                    ref = dbHdrs.get("Referer");
+                    if (ref == null) ref = dbHdrs.get("referer");
+                    if (ref == null) ref = dbHdrs.get("Origin");
+                    if (ref == null) ref = dbHdrs.get("origin");
+                }
+            } catch (Exception ignored) {}
+        }
+        if (ref == null || ref.isEmpty()) {
+            ref = "https://megaplay.buzz/";
+        }
         String base = "http://127.0.0.1:3459/api/stream";
-        String refParam = (ref != null && !ref.isEmpty()) ? "&referer=" + Uri.encode(ref) : "";
+        String refParam = "&referer=" + Uri.encode(ref);
         if (url.contains(".m3u8")) {
             return base + "/m3u8?url=" + Uri.encode(url) + refParam;
         }
@@ -1168,6 +1308,8 @@ public class PlayerActivity extends Activity {
                     String fullUrl = url;
                     if (fullUrl.startsWith("/")) {
                         fullUrl = "http://127.0.0.1:3459" + fullUrl;
+                    } else if (fullUrl.startsWith("http://") || fullUrl.startsWith("https://")) {
+                        fullUrl = toProxyUrl(fullUrl);
                     }
 
                     String mimeType = MimeTypes.TEXT_VTT;
@@ -1280,7 +1422,7 @@ public class PlayerActivity extends Activity {
             boolean isUnresolved = sourceObj.optBoolean("isUnresolved", false) || !sourceObj.has("url") || sourceObj.optString("url", "").isEmpty();
 
             if (isUnresolved) {
-                resolveServerNatively(provider, sourceObj);
+                resolveServerWithFallback(index);
                 return;
             }
 
@@ -2376,6 +2518,17 @@ public class PlayerActivity extends Activity {
                             if (settings != null) {
                                 autoSkipIntro = settings.optBoolean("autoSkipIntro", true);
                                 autoPlayNextEpisode = settings.optBoolean("autoPlayNextEpisode", true);
+                                if (settings.has("subtitleLang")) {
+                                    preferredSubtitleLang = settings.optString("subtitleLang", "english");
+                                } else if (settings.has("preferredSubtitleLanguages")) {
+                                    JSONArray arr = settings.optJSONArray("preferredSubtitleLanguages");
+                                    if (arr != null && arr.length() > 0) {
+                                        preferredSubtitleLang = arr.optString(0, "english");
+                                    }
+                                }
+                                if (settings.has("quality")) {
+                                    preferredQuality = settings.optString("quality", "highest");
+                                }
                                 if (settings.has("playerSpeed")) {
                                     try {
                                         float spd = (float) settings.getDouble("playerSpeed");

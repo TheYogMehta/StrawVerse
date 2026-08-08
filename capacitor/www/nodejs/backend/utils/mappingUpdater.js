@@ -671,7 +671,9 @@ async function syncLibraryIdsWithMapping() {
         }
       }
     }
-    await syncDomainConcurrencyFromMappingDb();
+    if (typeof syncDomainConcurrencyFromMappingDb === "function") {
+      await syncDomainConcurrencyFromMappingDb();
+    }
   } catch (err) {
     logger.error(`[mappingUpdater] Failed to sync library IDs: ${err.message}`);
   }

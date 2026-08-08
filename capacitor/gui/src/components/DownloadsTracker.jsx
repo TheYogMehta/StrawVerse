@@ -176,8 +176,8 @@ export default function DownloadsTracker() {
   return (
     <div className="downloads-tracker-container">
       <header className="tracker-header">
-        <div>
-          <h1 className="u-style-26">Downloads</h1>
+        <div className="tracker-title-group">
+          <h1 className="u-style-26 tracker-main-title">Downloads</h1>
           <p className="tracker-subtitle">
             Manage your active and queued downloads
           </p>
@@ -188,18 +188,18 @@ export default function DownloadsTracker() {
             onClick={handleTogglePause}
             className={`btn-pause-toggle ${isPaused ? "resume" : "pause"}`}
           >
-            {isPaused ? <Play size={16} /> : <Pause size={16} />}
+            {isPaused ? <Play size={15} /> : <Pause size={15} />}
             <span>{isPaused ? "Resume Queue" : "Pause Queue"}</span>
           </button>
 
           <button onClick={fetchDownloads} className="btn-refresh">
-            <RefreshCw size={16} />
+            <RefreshCw size={15} />
             <span>Refresh</span>
           </button>
 
           {(activeTasks.length > 0 || queue.length > 0) && (
             <button onClick={handleClearQueue} className="btn-clear-all">
-              <Trash2 size={16} />
+              <Trash2 size={15} />
               <span>Clear Queue</span>
             </button>
           )}
@@ -306,15 +306,17 @@ export default function DownloadsTracker() {
           })}
         </div>
       ) : (
-        <div className="idle-panel">
-          <HardDrive size={36} color="var(--text-muted)" />
-          <h3 className="u-style-28">
-            {isPaused ? "Queue is paused" : "No active downloads"}
+        <div className="idle-panel glass-panel">
+          <div className="idle-icon-box">
+            <HardDrive size={28} />
+          </div>
+          <h3 className="idle-title">
+            {isPaused ? "Queue is Paused" : "No Active Downloads"}
           </h3>
-          <p className="u-style-29">
+          <p className="idle-subtitle">
             {isPaused
-              ? "Click Start Queue to resume downloading."
-              : "Ready for tasks."}
+              ? "Click Resume Queue to continue downloading."
+              : "Downloads added from Discovery will appear here."}
           </p>
         </div>
       )}

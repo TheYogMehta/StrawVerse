@@ -229,6 +229,9 @@ async function boot() {
 
     global.sendNativeRequest = (config) =>
       new Promise((resolve, reject) => {
+        if (sseClients.size === 0) {
+          return reject(new Error("SSE bridge unattached"));
+        }
         const requestId = ++nativeRequestCounter;
         let settled = false;
         const finish = (callback, value) => {
@@ -238,10 +241,11 @@ async function boot() {
           global.pendingRequests.delete(requestId);
           callback(value);
         };
+        const reqTimeout = config.bridgeTimeout || 3000;
         const timeout = setTimeout(() => {
           broadcast("native-cancel", { requestIds: [requestId] });
           finish(reject, new Error(`Native request timeout for ${config.url}`));
-        }, 30000);
+        }, reqTimeout);
 
         global.pendingRequests.set(requestId, {
           resolve: (response) => finish(resolve, response),
@@ -277,7 +281,8 @@ async function boot() {
 
     const nativeAxiosAdapter = async (config) => {
       if (
-        config.strawverseDirectHttp === true &&
+        (config.strawverseDirectHttp === true ||
+          global.__isBackgroundDownload?.()) &&
         config._forceNativeBridge !== true
       ) {
         return defaultAdapter(config);
@@ -335,15 +340,14 @@ async function boot() {
             throw error;
           }
         } catch (err) {
-          const isBridgeTimeout = String(err?.message || "").startsWith(
-            "Native request timeout",
+          console.warn(
+            `[nativeAxiosAdapter] Native request failed for ${config.url} (${err.message}). Falling back to Node default HTTP adapter...`,
           );
-          const method = String(config.method || "GET").toUpperCase();
-          if (isBridgeTimeout && method === "GET" && !config._nativeRetry) {
-            config._nativeRetry = true;
-            return nativeAxiosAdapter(config);
+          try {
+            return await defaultAdapter(config);
+          } catch (fallbackErr) {
+            throw err;
           }
-          throw err;
         }
       }
       return defaultAdapter(config);
@@ -1211,6 +1215,7 @@ async function boot() {
       } else if (req.body && typeof req.body === "object") {
         updatePayload = req.body;
       }
+      delete updatePayload.CustomDownloadLocation;
       const { settingupdate } = require("./backend/utils/settings");
       await settingupdate(updatePayload);
       res.json({ ok: true, result: { success: true } });
@@ -1223,6 +1228,7 @@ async function boot() {
     try {
       const settingsObj =
         (Array.isArray(req.body.args) ? req.body.args[0] : req.body) || {};
+      delete settingsObj.CustomDownloadLocation;
       const { settingupdate } = require("./backend/utils/settings");
       await settingupdate(settingsObj);
       res.json({ ok: true, result: { success: true } });
@@ -1255,6 +1261,17 @@ async function boot() {
 
   appExpress.use(router);
   appExpress.get("/health", (_req, res) => res.json({ ok: true }));
+  appExpress.get("/api/internal/download-progress", (_req, res) => {
+    res.json(
+      global.__latestDownloadProgress || {
+        caption: "Nothing in progress",
+        totalSegments: 0,
+        currentSegments: 0,
+        epid: null,
+        isPaused: false,
+      },
+    );
+  });
   appExpress.get("/capacitor.js", (_req, res) => {
     res
       .type("application/javascript")
@@ -1279,18 +1296,16 @@ async function boot() {
     );
   }
 
-  setTimeout(() => {
-    try {
-      const {
-        checkForMappingUpdates,
-      } = require("./backend/utils/mappingUpdater");
-      checkForMappingUpdates().catch((e) =>
-        logger.error("[android] mapping update failed: " + e.message),
-      );
-    } catch (e) {
-      logger.error("[android] mapping updater unavailable: " + e.message);
-    }
-  }, 30000);
+  try {
+    const {
+      checkForMappingUpdates,
+    } = require("./backend/utils/mappingUpdater");
+    checkForMappingUpdates().catch((e) =>
+      logger.error("[android] mapping update failed: " + e.message),
+    );
+  } catch (e) {
+    logger.error("[android] mapping updater unavailable: " + e.message);
+  }
 }
 
 boot().catch((e) => {

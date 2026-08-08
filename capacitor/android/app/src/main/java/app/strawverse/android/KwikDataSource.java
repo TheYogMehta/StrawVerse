@@ -152,19 +152,24 @@ public class KwikDataSource implements DataSource {
         String[] lines = content.split("\n");
         StringBuilder sb = new StringBuilder();
         String currentKeyUri = null;
+        String currentKeyTag = null;
 
         for (String line : lines) {
             String trimmed = line.trim();
             if (trimmed.startsWith("#EXT-X-KEY:")) {
+                if (trimmed.contains("IV=") || trimmed.contains("iv=")) {
+                    sb.append(line).append("\n");
+                    continue;
+                }
                 // Parse key URI
                 int uriIndex = trimmed.indexOf("URI=\"");
                 if (uriIndex != -1) {
                     int endQuote = trimmed.indexOf("\"", uriIndex + 5);
                     if (endQuote != -1) {
                         currentKeyUri = trimmed.substring(uriIndex + 5, endQuote);
+                        currentKeyTag = trimmed;
                     }
                 }
-                // We drop the original tag to avoid duplicate declarations since we inject per-segment
                 continue;
             }
 
@@ -180,7 +185,13 @@ public class KwikDataSource implements DataSource {
                           .append("\",IV=0x")
                           .append(hexIv)
                           .append("\n");
+                    } else if (currentKeyTag != null) {
+                        sb.append(currentKeyTag).append("\n");
+                        currentKeyTag = null;
                     }
+                } else if (currentKeyTag != null) {
+                    sb.append(currentKeyTag).append("\n");
+                    currentKeyTag = null;
                 }
             }
 

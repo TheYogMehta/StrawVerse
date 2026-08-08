@@ -743,25 +743,126 @@ async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
 }
 
 async function resolveDownloadFolder(type, id, subdub, baseDir) {
-  let typeDir = path.join(baseDir, type, id);
-  if (fs.existsSync(typeDir)) return typeDir;
+  baseDir =
+    typeof baseDir === "string" && baseDir.trim()
+      ? baseDir
+      : getDownloadsFolder();
+
+  let typeDir = path.join(baseDir, type, id || "");
+  if (id && fs.existsSync(typeDir)) return typeDir;
 
   let record = null;
 
   try {
     if (global.db) {
-      record = global.db.prepare(`SELECT * FROM ${type} WHERE id = ?`).get(id);
+      record = global.db
+        .prepare(
+          `SELECT * FROM ${type} WHERE id = ? OR folder_name = ? OR LOWER(id) = LOWER(?) OR LOWER(folder_name) = LOWER(?) OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?) LIMIT 1`,
+        )
+        .get(id, id, id, id, id);
     } else {
-      record = await queryOne(`SELECT * FROM ${type} WHERE id = ?`, [id]);
+      record = await queryOne(
+        `SELECT * FROM ${type} WHERE id = ? OR folder_name = ? OR LOWER(id) = LOWER(?) OR LOWER(folder_name) = LOWER(?) OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?) LIMIT 1`,
+        [id, id, id, id, id],
+      );
     }
   } catch (_) {}
+
+  if (!record && id) {
+    try {
+      let qRecord = null;
+      if (global.db) {
+        qRecord = global.db
+          .prepare(
+            `SELECT * FROM DownloadQueue WHERE id = ? OR epid LIKE ? LIMIT 1`,
+          )
+          .get(id, `%${id}%`);
+      } else {
+        qRecord = await queryOne(
+          `SELECT * FROM DownloadQueue WHERE id = ? OR epid LIKE ? LIMIT 1`,
+          [id, `%${id}%`],
+        );
+      }
+      if (qRecord && qRecord.Title) {
+        record = {
+          title: qRecord.Title,
+          folder_name: sanitizeFolderName(qRecord.Title),
+        };
+      }
+    } catch (_) {}
+  }
+
+  if (!record && id) {
+    try {
+      const histTable = type === "Anime" ? "WatchHistory" : "ReadHistory";
+      const colId = type === "Anime" ? "anime_id" : "manga_id";
+      const colTitle = type === "Anime" ? "anime_title" : "manga_title";
+      let hRecord = null;
+      if (global.db) {
+        hRecord = global.db
+          .prepare(
+            `SELECT * FROM ${histTable} WHERE ${colId} = ? ORDER BY id DESC LIMIT 1`,
+          )
+          .get(id);
+      } else {
+        hRecord = await queryOne(
+          `SELECT * FROM ${histTable} WHERE ${colId} = ? ORDER BY id DESC LIMIT 1`,
+          [id],
+        );
+      }
+      if (hRecord && hRecord[colTitle]) {
+        record = {
+          title: hRecord[colTitle],
+          folder_name: sanitizeFolderName(hRecord[colTitle]),
+        };
+      }
+    } catch (_) {}
+  }
 
   if (record) {
     await migrateLegacyFolderIfNeeded(type, record, baseDir);
     const folderName =
       record.folder_name ||
       (record.title ? sanitizeFolderName(record.title) : id);
-    return path.join(baseDir, type, folderName);
+    const resolvedPath = path.join(baseDir, type, folderName);
+    if (fs.existsSync(resolvedPath)) return resolvedPath;
+  }
+
+  if (id) {
+    const sanitizedId = sanitizeFolderName(id);
+    const candidates = [
+      id,
+      sanitizedId,
+      String(id).replace(/[^a-zA-Z0-9]/g, "_"),
+      String(id).replace(/-/g, " "),
+      sanitizeFolderName(String(id).replace(/-/g, " ")),
+    ].filter(Boolean);
+
+    for (const cand of candidates) {
+      const candPath = path.join(baseDir, type, cand);
+      if (fs.existsSync(candPath)) return candPath;
+    }
+
+    try {
+      const parentDir = path.join(baseDir, type);
+      if (fs.existsSync(parentDir)) {
+        const dirs = await fs.promises.readdir(parentDir, {
+          withFileTypes: true,
+        });
+        const cleanId = id.toLowerCase().replace(/[^a-z0-9]/g, "");
+        for (const d of dirs) {
+          if (d.isDirectory()) {
+            const cleanDirName = d.name.toLowerCase().replace(/[^a-z0-9]/g, "");
+            if (
+              cleanId.length > 5 &&
+              (cleanDirName.includes(cleanId) || cleanId.includes(cleanDirName))
+            ) {
+              return path.join(parentDir, d.name);
+            }
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   return typeDir;

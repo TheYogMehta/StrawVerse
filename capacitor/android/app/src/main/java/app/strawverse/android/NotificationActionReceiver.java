@@ -54,7 +54,7 @@ public class NotificationActionReceiver extends BroadcastReceiver {
                 }
             } else {
                 try (java.io.OutputStream os = conn.getOutputStream()) {
-                    os.write(0);
+                    os.write("{}".getBytes("UTF-8"));
                 }
             }
             int responseCode = conn.getResponseCode();

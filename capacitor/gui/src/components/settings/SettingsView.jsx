@@ -13,7 +13,6 @@ import {
   Plus,
   Eye,
   EyeOff,
-  FolderOpen,
   Check,
 } from "lucide-react";
 import Swal from "sweetalert2";
@@ -136,7 +135,6 @@ export default function SettingsView({
   const [saving, setSaving] = useState(false);
 
   // Form states
-  const [downloadLocation, setDownloadLocation] = useState("");
   const [animeProvider, setAnimeProvider] = useState("");
   const [quality, setQuality] = useState("1080p");
   const [mangaProvider, setMangaProvider] = useState("");
@@ -608,7 +606,6 @@ export default function SettingsView({
 
         // Load values into form states
         const s = data.settings;
-        setDownloadLocation(s.CustomDownloadLocation || "");
         setAnimeProvider(s.Animeprovider || "");
         setQuality(s.quality || "1080p");
         setMangaProvider(s.Mangaprovider || "");
@@ -705,7 +702,6 @@ export default function SettingsView({
     }, 400);
     return () => clearTimeout(timer);
   }, [
-    downloadLocation,
     animeProvider,
     quality,
     mangaProvider,
@@ -798,8 +794,6 @@ export default function SettingsView({
     const isValidLimit = !isNaN(finalLimit) && finalLimit >= 5;
 
     const dirty = {};
-    if (downloadLocation !== (settings.CustomDownloadLocation || ""))
-      dirty.CustomDownloadLocation = downloadLocation;
     if (animeProvider !== (settings.Animeprovider || ""))
       dirty.Animeprovider = animeProvider;
     if (quality !== (settings.quality || "1080p")) dirty.quality = quality;
@@ -907,12 +901,10 @@ export default function SettingsView({
         if (onSettingsSaved) {
           onSettingsSaved(dirty);
         }
-
-        toastSuccess("Settings saved successfully!");
       }
     } catch (err) {
       console.error("Failed to save settings:", err);
-      toastError("Failed to save settings: " + err.message);
+      swalError("Error Saving Settings", err.message);
     } finally {
       setSaving(false);
     }
@@ -925,7 +917,6 @@ export default function SettingsView({
     const isValidLimit = !isNaN(finalLimit) && finalLimit >= 5;
 
     const changed =
-      downloadLocation !== (settings.CustomDownloadLocation || "") ||
       animeProvider !== (settings.Animeprovider || "") ||
       quality !== (settings.quality || "1080p") ||
       mangaProvider !== (settings.Mangaprovider || "") ||
@@ -951,7 +942,6 @@ export default function SettingsView({
       return () => clearTimeout(timer);
     }
   }, [
-    downloadLocation,
     animeProvider,
     quality,
     mangaProvider,
@@ -1122,56 +1112,6 @@ export default function SettingsView({
               {/* General Settings */}
               <div className="settings-section glass-panel">
                 <h2 className="settings-section-title">General Settings</h2>
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">Download Location</div>
-                    <div className="settings-row-hint">
-                      Directory path where your downloaded media files will be
-                      saved.
-                    </div>
-                  </div>
-                  <div
-                    className="settings-row-control"
-                    style={{
-                      display: "flex",
-                      gap: "8px",
-                      alignItems: "center",
-                    }}
-                  >
-                    <input
-                      type="text"
-                      value={downloadLocation}
-                      onChange={(e) => setDownloadLocation(e.target.value)}
-                      className="settings-text-input"
-                      placeholder="Downloads directory path"
-                    />
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await apiPost("/api/local/open", {
-                            customPath: downloadLocation,
-                            action: "open_folder",
-                          });
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }}
-                      className="btn-pause-queue"
-                      title="Open Download Folder in File Explorer"
-                      style={{
-                        height: "38px",
-                        whiteSpace: "nowrap",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px",
-                      }}
-                    >
-                      <FolderOpen size={16} />
-                      <span>Open</span>
-                    </button>
-                  </div>
-                </div>{" "}
                 <SettingsRow
                   label="Download Notifications"
                   desc="Show active download progress notification in the Android status bar."
@@ -1293,7 +1233,7 @@ export default function SettingsView({
                     style={{
                       gridTemplateColumns:
                         catalogColumns === "auto"
-                          ? "repeat(auto-fill, minmax(170px, 1fr))"
+                          ? "repeat(auto-fill, minmax(105px, 1fr))"
                           : `repeat(${catalogColumns}, 1fr)`,
                     }}
                   >
@@ -2489,34 +2429,15 @@ export default function SettingsView({
                 </p>
               </div>
 
-              <div
-                className="settings-update-card"
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  gap: "12px",
-                  padding: "16px",
-                  background: "var(--bg-tertiary)",
-                  borderRadius: "12px",
-                  border: "1px solid var(--border)",
-                  marginTop: "16px",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    justify: "space-between",
-                    width: "100%",
-                    alignItems: "center",
-                  }}
-                >
-                  <span
-                    style={{ color: "var(--text-muted)", fontSize: "14px" }}
-                  >
-                    Version: <strong>v{appVersion || "9.1.2"}</strong>
+              <div className="settings-update-card">
+                <div className="settings-version-info">
+                  <span className="settings-version-label">Version</span>
+                  <span className="settings-version-value">
+                    v{appVersion || "9.5.0"}
                   </span>
+                </div>
 
+                <div className="settings-update-action">
                   {updateStatus === "idle" && (
                     <button
                       type="button"
@@ -2524,51 +2445,26 @@ export default function SettingsView({
                       className="update-btn-premium"
                     >
                       <RefreshCw size={13} />
-                      Check for Updates
+                      <span>Check for Updates</span>
                     </button>
                   )}
 
                   {updateStatus === "checking" && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        color: "var(--accent)",
-                        fontSize: "13px",
-                        fontWeight: 600,
-                      }}
-                    >
-                      <RefreshCw
-                        size={14}
-                        style={{ animation: "spin 1s linear infinite" }}
-                      />
+                    <div className="update-status-checking">
+                      <RefreshCw size={14} className="update-spin-icon" />
                       <span>Checking for updates...</span>
                     </div>
                   )}
 
                   {updateStatus === "up-to-date" && (
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "10px",
-                      }}
-                    >
-                      <span
-                        style={{
-                          color: "var(--success)",
-                          fontSize: "13px",
-                          fontWeight: 600,
-                        }}
-                      >
-                        Up to date
+                    <div className="update-status-uptodate">
+                      <span className="update-uptodate-badge">
+                        <Check size={14} /> Up to date
                       </span>
                       <button
                         type="button"
                         onClick={handleCheckForUpdates}
-                        className="update-btn-premium"
-                        style={{ padding: "4px 10px", fontSize: "12px" }}
+                        className="update-btn-secondary"
                       >
                         Check Again
                       </button>
@@ -2579,48 +2475,33 @@ export default function SettingsView({
                     <button
                       type="button"
                       onClick={() => window.sharedStateAPI.installUpdate?.()}
-                      className="update-btn-premium"
-                      style={{
-                        background: "var(--success)",
-                        borderColor: "var(--success)",
-                        color: "#fff",
-                      }}
+                      className="update-btn-ready"
                     >
-                      <CheckCircle2 size={14} />
-                      Install Update v{updateProgress?.version || ""}
+                      <CheckCircle size={14} />
+                      <span>
+                        Install Update v{updateProgress?.version || ""}
+                      </span>
                     </button>
                   )}
 
                   {updateStatus === "error" && (
-                    <button
-                      type="button"
-                      onClick={handleCheckForUpdates}
-                      className="update-btn-premium"
-                    >
-                      Retry Check
-                    </button>
+                    <div className="update-status-error">
+                      <span className="update-error-text">Check failed</span>
+                      <button
+                        type="button"
+                        onClick={handleCheckForUpdates}
+                        className="update-btn-secondary"
+                      >
+                        Retry
+                      </button>
+                    </div>
                   )}
                 </div>
 
                 {/* Inline Loading Progress Bar inside Settings tab */}
                 {updateStatus === "downloading" && updateProgress && (
-                  <div
-                    style={{
-                      width: "100%",
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: "6px",
-                      marginTop: "4px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        justify: "space-between",
-                        fontSize: "12px",
-                        color: "var(--text-muted)",
-                      }}
-                    >
+                  <div className="update-progress-container">
+                    <div className="update-progress-header">
                       <span>
                         Downloading v{updateProgress.version || ""}...
                       </span>
@@ -2637,34 +2518,27 @@ export default function SettingsView({
                           ).toFixed(2)} MB/s)`}
                       </span>
                     </div>
-                    <div
-                      style={{
-                        width: "100%",
-                        height: "8px",
-                        background: "var(--bg-primary)",
-                        borderRadius: "4px",
-                        overflow: "hidden",
-                      }}
-                    >
+                    <div className="update-progress-bar-bg">
                       <div
+                        className="update-progress-bar-fill"
                         style={{
                           width: `${Math.min(
                             100,
                             Math.max(0, updateProgress.percent || 0),
                           )}%`,
-                          height: "100%",
-                          background:
-                            "linear-gradient(90deg, var(--accent) 0%, var(--accent-hover) 100%)",
-                          borderRadius: "4px",
-                          transition: "width 0.2s ease",
                         }}
                       />
                     </div>
                   </div>
                 )}
-
                 {updateStatus === "error" && updateErrorMsg && (
-                  <div style={{ color: "var(--danger)", fontSize: "12px" }}>
+                  <div
+                    style={{
+                      color: "var(--danger)",
+                      fontSize: "12px",
+                      marginTop: "8px",
+                    }}
+                  >
                     {updateErrorMsg}
                   </div>
                 )}
