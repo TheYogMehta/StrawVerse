@@ -13,7 +13,6 @@
 - **Manual Mapping & Linking Tool:** Search and link titles directly to MyAnimeList / central mapping entries from the InfoView details panel. Automatically resolves provider IDs and updates local watch/read history and intro skip references.
 - **Smart Library Deletion & Disk Cleanup:** Removing a title from your library now prompts with an optional confirmation to delete all downloaded files, episode folders on disk, and database entries in one clean action.
 - **Live Download Status Sync:** InfoView episode and chapter lists now reflect active and queued download statuses in real-time with quick actions to view or open completed files.
-- **UI Overflow Fixes:** Resolved text clipping and layout boundary overflows in home library statistics cards and the tag creation bar in Settings.
 
 ### Downloader & Download Tracker
 
@@ -21,15 +20,6 @@
 - **Dynamic Speed-Aware Concurrency & Root-Domain Normalization:** Segment concurrency now automatically auto-tunes per domain based on real-time WiFi download throughput (MB/s) rather than scaling up blindly. Automatically holds concurrency at optimal levels when user connection bandwidth is saturated, steps down on socket congestion, and normalizes CDN subdomains (e.g. `s1.megap.mikora.top` -> `mikora.top`) so subdomains share rate limits across identical server IPs.
 - **Live Segment Retry Countdown:** Displays a live countdown indicator (e.g. "Retrying in X s") when segment downloads fail or encounter rate limits.
 - **Active Task Telemetry & Concurrency Info:** Active download cards now show live worker concurrency, last tested concurrency limits, and dynamic scaling metrics.
-
-### Android
-
-- **Files App Folder Selector:** Fixed the folder opening intent on Android devices to show the native Files app chooser cleanly.
-- **Mobile Touch Optimization:** Responsive modal layout touch controls and UI polish for mobile devices.
-
-### Updates & System Info
-
-- **Auto-Updater Polish:** Improved auto-update verification and notification handling across Desktop and Mobile platforms.
 
 # [9.1.5] - 2026-08-03
 
