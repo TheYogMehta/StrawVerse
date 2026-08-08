@@ -87,7 +87,14 @@ export default function Sidebar({
               className={`sidebar-item ${isActive ? "active" : ""}`}
               title={item.label}
             >
-              <Icon size={22} color={isActive ? "#a78bfa" : "#9ca3af"} />
+              <Icon
+                size={22}
+                color={
+                  isActive
+                    ? "var(--sidebar-active-color, var(--accent))"
+                    : "#9ca3af"
+                }
+              />
             </button>
           );
         })}
@@ -104,7 +111,14 @@ export default function Sidebar({
                 className={`sidebar-item ${isActive ? "active" : ""}`}
                 title={settingsItem.label}
               >
-                <Icon size={22} color={isActive ? "#a78bfa" : "#9ca3af"} />
+                <Icon
+                  size={22}
+                  color={
+                    isActive
+                      ? "var(--sidebar-active-color, var(--accent))"
+                      : "#9ca3af"
+                  }
+                />
               </button>
             </div>
           );

@@ -3,6 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { logger } = require("./AppLogger");
+const { sanitizeFolderName } = require("./DirectoryMaker");
 const {
   getKeyValue,
   setKeyValue,
@@ -27,6 +28,21 @@ async function dropAllTriggers() {
     }
   } catch (e) {
     logger.error(`[mappingUpdater] Failed to drop triggers: ${e.message}`);
+  }
+}
+
+async function ensureMappingTablesExist() {
+  try {
+    await mappingExec(`
+      CREATE TABLE IF NOT EXISTS mapping_changelog (
+        id INTEGER PRIMARY KEY,
+        version TEXT
+      )
+    `);
+  } catch (e) {
+    logger.error(
+      `[mappingUpdater] Failed to ensure mapping_changelog table exists: ${e.message}`,
+    );
   }
 }
 
@@ -56,9 +72,9 @@ function deserializeDelta(buffer) {
     4: "anineko",
     5: "manga",
     6: "weebcentral",
-    7: "allmanga",
-    8: "next_episodes",
-    9: "domain_concurrency",
+    7: "next_episodes",
+    8: "allmanga",
+    9: "provider_metadata",
   };
   const actRevMap = { 1: "INSERT", 2: "UPDATE", 3: "DELETE" };
 
@@ -74,7 +90,15 @@ function deserializeDelta(buffer) {
 
     const tblVal = buffer.readUInt8(offset);
     offset += 1;
-    const tbl = tblRevMap[tblVal] || "anime";
+    let tbl = tblRevMap[tblVal];
+    if (!tbl || tblVal === 255) {
+      if (buffer.length < offset + 1) return { action: "full_sync" };
+      const tblLen = buffer.readUInt8(offset);
+      offset += 1;
+      if (buffer.length < offset + tblLen) return { action: "full_sync" };
+      tbl = buffer.toString("utf8", offset, offset + tblLen);
+      offset += tblLen;
+    }
 
     if (buffer.length < offset + 2) return { action: "full_sync" };
     const rowIdLen = buffer.readUInt16BE(offset);
@@ -104,51 +128,22 @@ function deserializeDelta(buffer) {
 async function checkForMappingUpdates() {
   const userDataPath = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
   const mappingTagKey = "mapping_release_tag";
-  const storedTag = await getKeyValue("Settings", mappingTagKey);
+  let storedTag = await getKeyValue("Settings", mappingTagKey);
 
-  logger.info("[mappingUpdater] Checking for mapping database updates...");
+  logger.info(
+    `[mappingUpdater] Checking for mapping database updates... (local version: ${storedTag || "none"})`,
+  );
 
-  try {
-    const concurrencyRes = await axios.get(
-      "https://strawverse.theyogmehta.online/api/concurrency",
-      { timeout: 10000 },
-    );
-    if (concurrencyRes.data && concurrencyRes.data.domains) {
-      const { applyServerDomainConcurrency } = require("./domainConcurrency");
-      await applyServerDomainConcurrency(concurrencyRes.data.domains);
-    }
-  } catch (err) {
-    logger.debug(
-      `[mappingUpdater] Domain concurrency sync skipped/failed: ${err.message}`,
-    );
-  }
-
-  let missingTables = true;
   let hasNextEpisodesTable = false;
   let hasMappingChangelogTable = false;
   try {
     const tablesList = await mappingQueryAll(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('anime', 'pahe', 'anikoto', 'anineko', 'manga', 'weebcentral', 'allmanga', 'next_episodes', 'mapping_changelog')",
+      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('next_episodes', 'mapping_changelog')",
     );
     const tableNames = tablesList.map((t) => t.name);
-    const tableExists = (name) => tableNames.includes(name);
-
-    // Check if the core 8 tables exist (excluding changelog)
-    missingTables =
-      !tableExists("anime") ||
-      !tableExists("pahe") ||
-      !tableExists("anikoto") ||
-      !tableExists("anineko") ||
-      !tableExists("manga") ||
-      !tableExists("weebcentral") ||
-      !tableExists("allmanga") ||
-      !tableExists("next_episodes");
-
     hasNextEpisodesTable = tableNames.includes("next_episodes");
     hasMappingChangelogTable = tableNames.includes("mapping_changelog");
-  } catch (e) {
-    missingTables = true;
-  }
+  } catch (e) {}
 
   let hasTriggers = false;
   try {
@@ -191,6 +186,35 @@ async function checkForMappingUpdates() {
     } catch (e) {}
   }
 
+  let latestVersion = null;
+  try {
+    const vRes = await axios.get(
+      "https://strawverse.theyogmehta.online/api/mapping/version",
+      {
+        headers: {
+          os: "Android",
+        },
+      },
+    );
+    latestVersion = vRes.data?.version;
+  } catch (e) {
+    logger.error(`[mappingUpdater] Failed to get latest version: ${e.message}`);
+  }
+
+  if (
+    storedTag &&
+    latestVersion &&
+    storedTag === latestVersion &&
+    !hasTriggers
+  ) {
+    logger.info(
+      `[mappingUpdater] Local mapping database is up to date at version ${storedTag}. Skipping download.`,
+    );
+    dropAllTriggers(global.mappingDb);
+    ensureMappingTablesExist(global.mappingDb);
+    return;
+  }
+
   let updateResponse = null;
   try {
     const url = storedTag
@@ -210,47 +234,24 @@ async function checkForMappingUpdates() {
     );
   }
 
-  let action = "full_sync";
-  let latestVersion = null;
-  let updates = [];
-
-  if (updateResponse) {
-    action = updateResponse.action;
+  let action = updateResponse?.action || "full_sync";
+  if (!latestVersion && updateResponse?.version) {
     latestVersion = updateResponse.version;
-    updates = updateResponse.updates || [];
+  }
+  let updates = updateResponse?.updates || [];
 
-    const MAX_DELTA_THRESHOLD = 10000;
-    if (action === "delta" && updates.length > MAX_DELTA_THRESHOLD) {
-      logger.info(
-        `[mappingUpdater] Delta update contains ${updates.length} records (threshold: ${MAX_DELTA_THRESHOLD}). Forcing full sync...`,
-      );
-      action = "full_sync";
-    }
+  if (action === "delta" && updates.length > 10000) {
+    logger.info(
+      `[mappingUpdater] Delta update contains ${updates.length} records. Forcing full sync...`,
+    );
+    action = "full_sync";
   }
 
-  if (missingTables || hasTriggers || (isNextEpisodesEmpty && storedTag)) {
+  if (hasTriggers) {
     action = "full_sync";
   }
 
   if (action === "full_sync") {
-    if (!latestVersion) {
-      try {
-        const vRes = await axios.get(
-          "https://strawverse.theyogmehta.online/api/mapping/version",
-          {
-            headers: {
-              os: "Android",
-            },
-          },
-        );
-        latestVersion = vRes.data?.version;
-      } catch (e) {
-        logger.error(
-          `[mappingUpdater] Failed to get latest version: ${e.message}`,
-        );
-      }
-    }
-
     const downloadUrl =
       "https://strawverse.theyogmehta.online/api/mapping/download";
     const tempDbPath = path.join(userDataPath, "data", "mapping_temp.db");
@@ -288,19 +289,7 @@ async function checkForMappingUpdates() {
 
       await openDb("mapping");
       await dropAllTriggers();
-
-      try {
-        await mappingExec(`
-          CREATE TABLE IF NOT EXISTS mapping_changelog (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            version TEXT,
-            action TEXT,
-            tbl TEXT,
-            row_id TEXT,
-            data TEXT
-          )
-        `);
-      } catch (e) {}
+      await ensureMappingTablesExist();
 
       if (latestVersion) {
         await setKeyValue("Settings", mappingTagKey, latestVersion);
@@ -329,59 +318,7 @@ async function checkForMappingUpdates() {
     }
   } else {
     await dropAllTriggers();
-    try {
-      await mappingExec(`
-        CREATE TABLE IF NOT EXISTS anime (
-          malid INTEGER PRIMARY KEY,
-          livechart_id TEXT UNIQUE,
-          image_url TEXT
-        )
-      `);
-
-      const animeColsList = await mappingQueryAll("PRAGMA table_info(anime)");
-      const animeCols = (animeColsList || []).map((c) => c.name);
-      if (animeCols.length > 0 && !animeCols.includes("image_url")) {
-        await mappingExec("ALTER TABLE anime ADD COLUMN image_url TEXT");
-        logger.info(
-          "[mappingUpdater] Added missing image_url column to anime table in mapping.db",
-        );
-      }
-
-      await mappingExec(`
-        CREATE TABLE IF NOT EXISTS mapping_changelog (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          version TEXT,
-          action TEXT,
-          tbl TEXT,
-          row_id TEXT,
-          data TEXT
-        )
-      `);
-
-      await mappingExec(`
-        CREATE TABLE IF NOT EXISTS next_episodes (
-          livechart_id TEXT,
-          episode INTEGER,
-          date INTEGER,
-          title TEXT,
-          image TEXT,
-          PRIMARY KEY (livechart_id, episode)
-        )
-      `);
-
-      await mappingExec(`
-        CREATE TABLE IF NOT EXISTS domain_concurrency (
-          domain TEXT PRIMARY KEY,
-          current_concurrency INTEGER NOT NULL,
-          max_concurrency INTEGER,
-          updated_at INTEGER
-        )
-      `);
-    } catch (e) {
-      logger.error(
-        `[mappingUpdater] Failed to ensure mapping tables exist: ${e.message}`,
-      );
-    }
+    await ensureMappingTablesExist();
 
     if (action === "delta" && updates.length > 0) {
       logger.info(
@@ -419,72 +356,41 @@ async function checkForMappingUpdates() {
           for (const update of updateChunk) {
             const { id, action: act, tbl, row_id, data } = update;
 
+            const tableCheck = await mappingQueryOne(
+              "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
+              [tbl],
+            );
+
+            if (!tableCheck) {
+              ops.push({
+                sql: "INSERT OR REPLACE INTO mapping_changelog (id, version) VALUES (?, ?)",
+                params: [id, latestVersion],
+              });
+              continue;
+            }
+
             if (act === "INSERT" || act === "UPDATE") {
-              const parsedData = JSON.parse(data);
-              if (tbl === "anime") {
-                ops.push({
-                  sql: stmtSqlMap.anime,
-                  params: [
-                    parsedData.malid ?? null,
-                    parsedData.livechart_id ?? null,
-                    parsedData.image_url ?? null,
-                  ],
-                });
-              } else if (tbl === "manga") {
-                ops.push({
-                  sql: stmtSqlMap.manga,
-                  params: [parsedData.malid ?? null],
-                });
-              } else if (tbl === "pahe") {
-                ops.push({
-                  sql: stmtSqlMap.pahe,
-                  params: [
-                    parsedData.id ?? null,
-                    parsedData.uuid ?? null,
-                    parsedData.malid ?? null,
-                  ],
-                });
-              } else if (tbl === "anikoto") {
-                ops.push({
-                  sql: stmtSqlMap.anikoto,
-                  params: [parsedData.id ?? null, parsedData.malid ?? null],
-                });
-              } else if (tbl === "anineko") {
-                ops.push({
-                  sql: stmtSqlMap.anineko,
-                  params: [parsedData.id ?? null, parsedData.malid ?? null],
-                });
-              } else if (tbl === "weebcentral") {
-                ops.push({
-                  sql: stmtSqlMap.weebcentral,
-                  params: [parsedData.id ?? null, parsedData.malid ?? null],
-                });
-              } else if (tbl === "allmanga") {
-                ops.push({
-                  sql: stmtSqlMap.allmanga,
-                  params: [parsedData.id ?? null, parsedData.malid ?? null],
-                });
-              } else if (tbl === "next_episodes") {
-                ops.push({
-                  sql: stmtSqlMap.next_episodes,
-                  params: [
-                    parsedData.livechart_id ?? null,
-                    parsedData.episode ?? null,
-                    parsedData.date ?? null,
-                    parsedData.title ?? null,
-                    parsedData.image ?? null,
-                  ],
-                });
-              } else if (tbl === "domain_concurrency") {
-                ops.push({
-                  sql: stmtSqlMap.domain_concurrency,
-                  params: [
-                    parsedData.domain ?? null,
-                    parsedData.current_concurrency ?? 2,
-                    parsedData.max_concurrency ?? null,
-                    parsedData.updated_at ?? Date.now(),
-                  ],
-                });
+              if (data) {
+                const parsedData = JSON.parse(data);
+                const tableColsRes = await mappingQueryAll(
+                  `PRAGMA table_info(${tbl})`,
+                );
+                const validCols = new Set(
+                  (tableColsRes || []).map((c) => c.name),
+                );
+                const validKeys = Object.keys(parsedData).filter((k) =>
+                  validCols.has(k),
+                );
+
+                if (validKeys.length > 0) {
+                  const cols = validKeys.join(", ");
+                  const placeholders = validKeys.map(() => "?").join(", ");
+                  const values = validKeys.map((k) => parsedData[k] ?? null);
+                  ops.push({
+                    sql: `INSERT OR REPLACE INTO ${tbl} (${cols}) VALUES (${placeholders})`,
+                    params: values,
+                  });
+                }
               }
             } else if (act === "DELETE") {
               if (tbl === "anime" || tbl === "manga") {
@@ -503,9 +409,9 @@ async function checkForMappingUpdates() {
                     isNaN(episode) ? null : episode,
                   ],
                 });
-              } else if (tbl === "domain_concurrency") {
+              } else if (tbl === "provider_metadata") {
                 ops.push({
-                  sql: "DELETE FROM domain_concurrency WHERE domain = ?",
+                  sql: "DELETE FROM provider_metadata WHERE table_name = ?",
                   params: [row_id],
                 });
               } else {
@@ -566,7 +472,7 @@ async function syncLibraryIdsWithMapping() {
   try {
     // 1. Sync Anime
     const localAnimeList = await queryAll(
-      "SELECT id, malid, provider FROM Anime",
+      "SELECT id, malid, provider, title, folder_name FROM Anime",
     );
     for (const anime of localAnimeList) {
       let malid = anime.malid ? Number(anime.malid) : null;
@@ -634,6 +540,16 @@ async function syncLibraryIdsWithMapping() {
             ? targetRow.uuid || targetRow.id
             : targetRow.id;
           if (latestId && latestId !== anime.id) {
+            const existingFolder =
+              anime.folder_name ||
+              (anime.title ? sanitizeFolderName(anime.title) : anime.id);
+            try {
+              await run(
+                "UPDATE Anime SET folder_name = COALESCE(NULLIF(folder_name, ''), ?) WHERE id = ? OR id LIKE ?",
+                [existingFolder, anime.id, `${anime.id}-%`],
+              );
+            } catch (_) {}
+
             await run(
               "UPDATE OR REPLACE Anime SET id = REPLACE(id, ?, ?) WHERE id = ? OR id LIKE ?",
               [anime.id, latestId, anime.id, `${anime.id}-%`],
@@ -670,7 +586,7 @@ async function syncLibraryIdsWithMapping() {
 
     // 2. Sync Manga
     const localMangaList = await queryAll(
-      "SELECT id, malid, provider FROM Manga",
+      "SELECT id, malid, provider, title, folder_name FROM Manga",
     );
     for (const manga of localMangaList) {
       let malid = manga.malid ? Number(manga.malid) : null;
@@ -724,6 +640,16 @@ async function syncLibraryIdsWithMapping() {
         if (targetRow) {
           const latestId = targetRow.id;
           if (latestId && latestId !== manga.id) {
+            const existingFolder =
+              manga.folder_name ||
+              (manga.title ? sanitizeFolderName(manga.title) : manga.id);
+            try {
+              await run(
+                "UPDATE Manga SET folder_name = COALESCE(NULLIF(folder_name, ''), ?) WHERE id = ?",
+                [existingFolder, manga.id],
+              );
+            } catch (_) {}
+
             await run(
               "UPDATE OR REPLACE Manga SET id = REPLACE(id, ?, ?) WHERE id = ?",
               [manga.id, latestId, manga.id],
@@ -751,35 +677,6 @@ async function syncLibraryIdsWithMapping() {
   }
 }
 
-async function syncDomainConcurrencyFromMappingDb() {
-  try {
-    const tableRow = await mappingQueryOne(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name = 'domain_concurrency'",
-    );
-    if (!tableRow) return;
-
-    const rows = await mappingQueryAll(
-      "SELECT domain, current_concurrency, max_concurrency FROM domain_concurrency",
-    );
-    if (!rows || rows.length === 0) return;
-
-    const map = {};
-    for (const r of rows) {
-      map[r.domain] = {
-        recommended_concurrency: r.current_concurrency,
-        max_concurrency: r.max_concurrency,
-      };
-    }
-    const { applyServerDomainConcurrency } = require("./domainConcurrency");
-    await applyServerDomainConcurrency(map);
-  } catch (e) {
-    logger.debug(
-      `[mappingUpdater] Sync domain_concurrency from mappingDb skipped: ${e.message}`,
-    );
-  }
-}
-
 module.exports = {
   checkForMappingUpdates,
-  syncDomainConcurrencyFromMappingDb,
 };

@@ -171,6 +171,8 @@ import {
   ListVideo,
   Users,
   X,
+  AlertTriangle,
+  Check,
 } from "lucide-react";
 import "./css/VideoPlayer.css";
 
@@ -1796,7 +1798,7 @@ export default function VideoPlayer({
           </div>
         ) : errorMsg ? (
           <div className="player-status-overlay">
-            <span className="error-icon">⚠️</span>
+            <AlertTriangle className="error-icon" size={32} />
             <p className="error-msg">{errorMsg}</p>
             <button onClick={fetchStreamData} className="player-retry-btn">
               Retry
@@ -1994,7 +1996,7 @@ export default function VideoPlayer({
                                       {speed === 1 ? "Normal" : `${speed}x`}
                                     </span>
                                     {playbackSpeed === speed && (
-                                      <span className="checkmark">✓</span>
+                                      <Check size={14} className="checkmark" />
                                     )}
                                   </button>
                                 ),

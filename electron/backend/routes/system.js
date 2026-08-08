@@ -57,7 +57,14 @@ router.get("/api/changelog", (req, res) => {
 
 // Handles Download Progress & Sends To FrontEnd
 router.post("/api/logger", async (req, res) => {
-  const { caption, totalSegments, currentSegments, epid } = req.body;
+  const {
+    caption,
+    totalSegments,
+    currentSegments,
+    epid,
+    concurrency,
+    lastTestedConcurrency,
+  } = req.body;
   try {
     const currentQueue = (await getQueue()) ?? [];
     const exists = currentQueue.some((item) => item.epid === epid);
@@ -68,22 +75,49 @@ router.post("/api/logger", async (req, res) => {
     let queue =
       (await updateQueue(epid, totalSegments, currentSegments, caption)) ?? [];
 
-    if (currentSegments < totalSegments) {
-      sendToRenderer("download-logger", {
-        caption,
-        totalSegments,
-        currentSegments,
-        epid,
-        isPaused: isQueuePaused(),
-        queue: queue.filter((item) => item?.currentSegments === 0),
-      });
-    } else {
-      sendToRenderer("download-logger", {
-        caption: "Nothing in progress",
-        isPaused: isQueuePaused(),
-        queue,
-      });
-    }
+    let activeItem = queue.find(
+      (item) =>
+        item.totalSegments > 0 ||
+        (item.caption && item.caption.includes("Downloading")),
+    );
+    let activeTasksItems = activeItem ? [activeItem] : [];
+    let upcomingQueue = activeItem
+      ? queue.filter((item) => item?.epid !== activeItem.epid)
+      : queue;
+
+    const activeTaskItem = currentQueue.find((item) => item.epid === epid);
+
+    sendToRenderer("download-logger", {
+      caption,
+      totalSegments,
+      currentSegments,
+      epid,
+      id: activeTaskItem?.id,
+      malid: activeTaskItem?.malid,
+      EpNum: activeTaskItem?.EpNum,
+      Title: activeTaskItem?.Title,
+      Type: activeTaskItem?.Type,
+      concurrency,
+      lastTestedConcurrency,
+      isPaused: isQueuePaused(),
+      activeTasks: activeTasksItems.map((task) => ({
+        caption: task.caption,
+        totalSegments: task.totalSegments,
+        currentSegments: task.currentSegments,
+        epid: task.epid,
+        id: task.id,
+        malid: task.malid,
+        EpNum: task.EpNum,
+        Title: task.Title,
+        Type: task.Type,
+        concurrency: task.epid === epid ? concurrency : task.concurrency,
+        lastTestedConcurrency:
+          task.epid === epid
+            ? lastTestedConcurrency
+            : task.lastTestedConcurrency,
+      })),
+      queue: upcomingQueue,
+    });
 
     res.status(200).json({ message: "Download progress received" });
   } catch (err) {

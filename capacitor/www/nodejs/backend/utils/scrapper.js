@@ -896,38 +896,48 @@ global.axios.interceptors.response.use(
     return response;
   },
   async (error) => {
-    const shouldBypassUrl = (urlStr) => {
-      if (!urlStr) return false;
-      const url = urlStr.toLowerCase();
+    const shouldBypassUrl = (urlStr, refererStr) => {
+      if (!urlStr && !refererStr) return false;
+      const url = (urlStr || "").toLowerCase();
+      const ref = (refererStr || "").toLowerCase();
       return (
         url.includes("animepahe") ||
         url.includes("kwik.cx") ||
         url.includes("anikoto") ||
         url.includes("anineko") ||
         url.includes("allmanga") ||
-        url.includes("weebcentral")
+        url.includes("weebcentral") ||
+        url.includes("megaplay") ||
+        url.includes("vidplay") ||
+        url.includes("vidstream") ||
+        url.includes("vidtub") ||
+        url.includes("megap.") ||
+        ref.includes("anikoto") ||
+        ref.includes("animepahe")
       );
     };
 
     const { config, response } = error;
+    const reqReferer =
+      config?.headers?.Referer ||
+      config?.headers?.referer ||
+      (config?.headers?.get && config.headers.get("referer")) ||
+      "";
+
     if (
       response &&
       (response.status === 403 || response.status === 503) &&
       config &&
       !config._retry &&
       global?.cloudflarebypass &&
-      shouldBypassUrl(config.url)
+      shouldBypassUrl(config.url, reqReferer)
     ) {
       config._retry = true;
       console.log(
         `Cloudflare challenge detected (status: ${response.status}) for ${config.url}. Retrying with bypass...`,
       );
       try {
-        const referer =
-          config.headers?.Referer ||
-          config.headers?.referer ||
-          (config.headers?.get && config.headers.get("referer")) ||
-          "";
+        const referer = reqReferer;
         await global.cloudflarebypass(config.url, true, referer);
         config.headers = rebuildHeadersAfterBypass(
           config.headers,

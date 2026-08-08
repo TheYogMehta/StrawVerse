@@ -1,10 +1,10 @@
 {
   "name": "strawverse-capacitor",
-  "version": "9.1.5",
+  "version": "9.5.0",
   "private": true,
   "description": "StrawVerse Android app (Capacitor shell around the shared backend + GUI)",
   "scripts": {
-    "sync:android": "cd gui && npm run build && cd .. && node scripts/sync.mjs && cap sync android",
+    "sync:android": "cd gui && npm run build && cd .. && node scripts/sync.mjs && cap sync android && node scripts/patch-gradle.mjs",
     "package:android": "npm run sync:android && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {

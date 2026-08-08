@@ -54,10 +54,12 @@
   transform: scale(1.08);
 }
 .sidebar-item.active {
-  background: rgba(124, 58, 237, 0.18);
+  background: var(--sidebar-active-bg, rgba(139, 92, 246, 0.20));
+  color: var(--sidebar-active-color, var(--accent));
+  box-shadow: 0 0 12px var(--sidebar-active-glow, rgba(139, 92, 246, 0.30));
 }
 .sidebar-item.active:hover {
-  background: rgba(124, 58, 237, 0.28);
+  background: var(--sidebar-active-bg-hover, rgba(139, 92, 246, 0.32));
 }
 
 /* Tooltip on hover */

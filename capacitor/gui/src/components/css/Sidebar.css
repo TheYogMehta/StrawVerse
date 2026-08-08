@@ -87,12 +87,13 @@
   color: var(--text-main);
 }
 .sidebar-item.active {
-  background: rgba(124, 58, 237, 0.15);
-  color: #f3f4f6;
+  background: var(--sidebar-active-bg, rgba(139, 92, 246, 0.2));
+  color: var(--sidebar-active-color, var(--accent));
   font-weight: 600;
+  box-shadow: 0 0 12px var(--sidebar-active-glow, rgba(139, 92, 246, 0.3));
 }
 .sidebar-item.active:hover {
-  background: rgba(124, 58, 237, 0.25);
+  background: var(--sidebar-active-bg-hover, rgba(139, 92, 246, 0.32));
 }
 .sidebar.collapsed .sidebar-item {
   justify-content: center;

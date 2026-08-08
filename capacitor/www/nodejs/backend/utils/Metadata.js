@@ -69,67 +69,57 @@ function getEpisodeNumberFromFilename(filename) {
   return match ? parseFloat(match[0]) : null;
 }
 
+async function getProviderKeyField(table) {
+  try {
+    if (global.mappingDb) {
+      const meta = await mappingQueryOne(
+        "SELECT primary_key_field FROM provider_metadata WHERE table_name = ?",
+        [table],
+      );
+      if (meta && meta.primary_key_field) return meta.primary_key_field;
+    }
+  } catch (e) {}
+  return table === "pahe" ? "uuid" : "id";
+}
+
 async function getMalIdFromMapping(type, providerName, cleanId) {
   if (!cleanId) return null;
   const name = (providerName || "").toLowerCase();
   try {
-    let row = null;
-    if (type === "Anime") {
-      if (name.includes("pahe")) {
-        row = await mappingQueryOne(
-          "SELECT malid FROM pahe WHERE id = ? OR uuid = ? LIMIT 1",
-          [cleanId, cleanId],
+    let providers = [];
+    try {
+      if (global.mappingDb) {
+        const rows = await mappingQueryAll(
+          "SELECT table_name, media_type, primary_key_field FROM provider_metadata",
         );
-      } else if (name.includes("anikoto")) {
-        row = await mappingQueryOne(
-          "SELECT malid FROM anikoto WHERE id = ? OR id LIKE ? LIMIT 1",
-          [cleanId, `${cleanId}%`],
-        );
-      } else if (name.includes("anineko")) {
-        row = await mappingQueryOne(
-          "SELECT malid FROM anineko WHERE id = ? OR id LIKE ? LIMIT 1",
-          [cleanId, `${cleanId}%`],
+        providers = (rows || []).filter(
+          (r) =>
+            r.media_type &&
+            r.media_type.toLowerCase() === (type || "").toLowerCase(),
         );
       }
+    } catch (e) {}
 
-      if (!row) {
-        row = await mappingQueryOne(
-          `
-            SELECT malid FROM pahe WHERE id = ? OR uuid = ?
-            UNION
-            SELECT malid FROM anikoto WHERE id = ? OR id LIKE ?
-            UNION
-            SELECT malid FROM anineko WHERE id = ? OR id LIKE ?
-            LIMIT 1
-          `,
-          [cleanId, cleanId, cleanId, `${cleanId}%`, cleanId, `${cleanId}%`],
-        );
-      }
-    } else if (type === "Manga") {
-      if (name.includes("weebcentral")) {
-        row = await mappingQueryOne(
-          "SELECT malid FROM weebcentral WHERE id = ? OR id LIKE ? LIMIT 1",
-          [cleanId, `${cleanId}%`],
-        );
-      } else if (name.includes("allmanga")) {
-        row = await mappingQueryOne(
-          "SELECT malid FROM allmanga WHERE id = ? OR id LIKE ? LIMIT 1",
-          [cleanId, `${cleanId}%`],
-        );
-      }
+    if (providers.length === 0) return null;
 
-      if (!row) {
-        row = await mappingQueryOne(
-          `
-            SELECT malid FROM weebcentral WHERE id = ? OR id LIKE ?
-            UNION
-            SELECT malid FROM allmanga WHERE id = ? OR id LIKE ?
-            LIMIT 1
-          `,
-          [cleanId, `${cleanId}%`, cleanId, `${cleanId}%`],
-        );
-      }
+    const matchedProvider = providers.find((p) =>
+      name.includes(p.table_name.toLowerCase()),
+    );
+    if (matchedProvider) {
+      const keyField = matchedProvider.primary_key_field;
+      const tbl = matchedProvider.table_name;
+      const sql = `SELECT malid FROM ${tbl} WHERE ${keyField} = ? OR ${keyField} LIKE ? LIMIT 1`;
+      const row = await mappingQueryOne(sql, [cleanId, `${cleanId}%`]);
+      if (row && row.malid) return row.malid;
     }
+
+    const unionQueries = providers.map(
+      (p) =>
+        `SELECT malid FROM ${p.table_name} WHERE ${p.primary_key_field} = ? OR ${p.primary_key_field} LIKE ?`,
+    );
+    const sql = unionQueries.join("\n UNION \n") + " LIMIT 1";
+    const unionParams = providers.flatMap((_) => [cleanId, `${cleanId}%`]);
+    const row = await mappingQueryOne(sql, unionParams);
     return row?.malid || null;
   } catch (e) {
     logger.error(`Error in getMalIdFromMapping: ${e.message}`);
@@ -1084,70 +1074,6 @@ async function getAllMetadata(type, baseDir, page = 1, tag = null) {
 
         if (hasFiles || inQueue) {
           validResults.push(item);
-        } else {
-          // 0 files downloaded and 0 items in queue -> auto-clean ghost DB record
-          let tags = [];
-          if (item.CustomTag) {
-            try {
-              const parsed = JSON.parse(item.CustomTag);
-              if (Array.isArray(parsed)) tags = parsed;
-              else if (typeof parsed === "string") tags = [parsed];
-            } catch (_) {
-              tags = [item.CustomTag];
-            }
-          }
-          const hasDownloadTag = tags.some(
-            (t) => t && t.toLowerCase() === "downloads",
-          );
-          if (hasDownloadTag) {
-            const remainingTags = tags.filter(
-              (t) => t && t.toLowerCase() !== "downloads",
-            );
-            if (remainingTags.length > 0) {
-              try {
-                run(`UPDATE ${type} SET CustomTag = ? WHERE id = ?`, [
-                  JSON.stringify(remainingTags),
-                  item.id,
-                ]);
-              } catch (_) {}
-            } else {
-              try {
-                if (!item.MalID) {
-                  run(`DELETE FROM ${type} WHERE id = ?`, [item.id]);
-                } else {
-                  run(`UPDATE ${type} SET CustomTag = ? WHERE id = ?`, [
-                    "[]",
-                    item.id,
-                  ]);
-                }
-              } catch (_) {}
-            }
-            logger.info(
-              `[Auto-Clean DB] Cleaned ghost download DB record for ${type} id=${item.id}`,
-            );
-          }
-
-          const folderName =
-            item.folder_name ||
-            (item.title ? sanitizeFolderName(item.title) : item.id);
-          if (folderName) {
-            const targetFolderPath = path.join(baseDir, type, folderName);
-            try {
-              if (fs.existsSync(targetFolderPath)) {
-                const remFiles = await fs.promises.readdir(targetFolderPath);
-                const visibleFiles = remFiles.filter((f) => !f.startsWith("."));
-                if (visibleFiles.length === 0) {
-                  await fs.promises.rm(targetFolderPath, {
-                    recursive: true,
-                    force: true,
-                  });
-                  logger.info(
-                    `[Auto-Clean DB] Removed empty folder on disk: ${targetFolderPath}`,
-                  );
-                }
-              }
-            } catch (_) {}
-          }
         }
       }
       finalResults = validResults;
@@ -1295,6 +1221,14 @@ async function getSourceById(type, baseDir, id, number, subdub) {
       if (type === "Anime") {
         const files = fs.readdirSync(fPath);
         const match = files.find((f) => {
+          if (
+            f.startsWith(".") ||
+            f.includes(".temp") ||
+            f.endsWith(".tmp") ||
+            f.endsWith(".part")
+          ) {
+            return false;
+          }
           const num = getEpisodeNumberFromFilename(f);
           return num !== null && num === parseFloat(number);
         });
@@ -1317,15 +1251,14 @@ async function getSourceById(type, baseDir, id, number, subdub) {
         );
 
         linked.forEach((r) => {
-          if (r.folder_name !== folder_name) {
-            dirsToSearch.push(path.join(baseDir, type, r.folder_name));
+          if (r.folder_name && r.folder_name !== folder_name) {
+            const p = path.join(baseDir, type, r.folder_name);
+            if (!dirsToSearch.includes(p)) {
+              dirsToSearch.push(p);
+            }
           }
         });
-      } catch (err) {
-        if (!dirsToSearch.includes(folderPath)) {
-          dirsToSearch.push(folderPath);
-        }
-      }
+      } catch (err) {}
     } else {
       if (!dirsToSearch.includes(folderPath)) {
         dirsToSearch.push(folderPath);

@@ -9,15 +9,18 @@ import {
   RefreshCw,
   Pause,
   Play,
+  Zap,
+  AlertTriangle,
 } from "lucide-react";
 import { apiPost } from "../utils/common";
 import "./css/DownloadsTracker.css";
 
 export default function DownloadsTracker() {
-  const [activeTask, setActiveTask] = useState(null);
+  const [activeTasks, setActiveTasks] = useState([]);
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isPaused, setIsPaused] = useState(false);
+  const [retryCountdown, setRetryCountdown] = useState(null);
 
   const fetchDownloads = async () => {
     try {
@@ -31,16 +34,27 @@ export default function DownloadsTracker() {
   };
 
   const updateStates = (data) => {
-    if (data.totalSegments && data.totalSegments > 0) {
-      setActiveTask({
-        caption: data.caption,
-        totalSegments: data.totalSegments,
-        currentSegments: data.currentSegments,
-        epid: data.epid,
-      });
-    } else {
-      setActiveTask(null);
+    let tasks = [];
+    if (Array.isArray(data.activeTasks) && data.activeTasks.length > 0) {
+      tasks = data.activeTasks;
+    } else if (data.totalSegments && data.totalSegments > 0) {
+      tasks = [
+        {
+          caption: data.caption,
+          totalSegments: data.totalSegments,
+          currentSegments: data.currentSegments,
+          epid: data.epid,
+          id: data.id,
+          malid: data.malid,
+          EpNum: data.EpNum,
+          Title: data.Title,
+          Type: data.Type,
+          concurrency: data.concurrency,
+          lastTestedConcurrency: data.lastTestedConcurrency,
+        },
+      ];
     }
+    setActiveTasks(tasks);
     setQueue(data.queue || []);
     if (data.isPaused !== undefined) {
       setIsPaused(!!data.isPaused);
@@ -50,20 +64,50 @@ export default function DownloadsTracker() {
   useEffect(() => {
     fetchDownloads();
 
+    // Listen to real-time Electron IPC download events
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       window.sharedStateAPI.on("download-logger", (data) => {
-        if (data.totalSegments && data.totalSegments > 0) {
-          setActiveTask({
-            caption: data.caption,
-            totalSegments: data.totalSegments,
-            currentSegments: data.currentSegments,
-            epid: data.epid,
-          });
-        } else {
-          setActiveTask(null);
+        let incomingTasks = [];
+        if (Array.isArray(data.activeTasks) && data.activeTasks.length > 0) {
+          incomingTasks = data.activeTasks;
+        } else if (data.totalSegments && data.totalSegments > 0) {
+          incomingTasks = [
+            {
+              caption: data.caption,
+              totalSegments: data.totalSegments,
+              currentSegments: data.currentSegments,
+              epid: data.epid,
+              id: data.id,
+              malid: data.malid,
+              EpNum: data.EpNum,
+              Title: data.Title,
+              Type: data.Type,
+              concurrency: data.concurrency,
+              lastTestedConcurrency: data.lastTestedConcurrency,
+            },
+          ];
         }
+
+        setActiveTasks((prevTasks) => {
+          return incomingTasks.map((task) => {
+            const prev = prevTasks.find((t) => t.epid === task.epid);
+            return {
+              ...task,
+              id: task.id ?? prev?.id,
+              malid: task.malid ?? prev?.malid,
+              EpNum: task.EpNum ?? prev?.EpNum,
+              Title: task.Title ?? prev?.Title,
+              Type: task.Type ?? prev?.Type,
+              concurrency: task.concurrency ?? prev?.concurrency,
+              lastTestedConcurrency:
+                task.lastTestedConcurrency ?? prev?.lastTestedConcurrency,
+            };
+          });
+        });
+
         if (data.queue) {
-          setQueue(data.queue);
+          const activeEpids = new Set(incomingTasks.map((t) => t.epid));
+          setQueue(data.queue.filter((item) => !activeEpids.has(item?.epid)));
         }
         if (data.isPaused !== undefined) {
           setIsPaused(!!data.isPaused);
@@ -71,6 +115,30 @@ export default function DownloadsTracker() {
       });
     }
   }, []);
+
+  useEffect(() => {
+    const rawCaption = activeTasks[0]?.caption || "";
+    const retryMatch = rawCaption.match(/Retrying in (\d+)s/i);
+
+    if (retryMatch) {
+      const initialSeconds = parseInt(retryMatch[1], 10);
+      setRetryCountdown(initialSeconds);
+
+      const interval = setInterval(() => {
+        setRetryCountdown((prev) => {
+          if (prev === null || prev <= 1) {
+            clearInterval(interval);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => clearInterval(interval);
+    } else {
+      setRetryCountdown(null);
+    }
+  }, [activeTasks[0]?.caption]);
 
   const handleTogglePause = async () => {
     try {
@@ -96,41 +164,41 @@ export default function DownloadsTracker() {
     }
   };
 
-  const calculateProgress = () => {
-    if (!activeTask || !activeTask.totalSegments) return 0;
-    return Math.floor(
-      (activeTask.currentSegments / activeTask.totalSegments) * 100,
-    );
+  const handleClearQueue = async () => {
+    try {
+      await apiPost("/api/download/remove", {});
+      fetchDownloads();
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   return (
-    <div className="tracker-wrapper">
+    <div className="downloads-tracker-container">
       <header className="tracker-header">
-        <h1 className="tracker-title">Download Queue</h1>
-        <div className="tracker-actions">
-          {(queue.length > 0 || activeTask || isPaused) && (
-            <button
-              onClick={handleTogglePause}
-              className={`btn-pause-queue ${isPaused ? "paused" : ""}`}
-              title={isPaused ? "Start / Resume Queue" : "Pause Queue"}
-            >
-              {isPaused ? <Play size={16} /> : <Pause size={16} />}
-              <span>{isPaused ? "Start Queue" : "Pause Queue"}</span>
-            </button>
-          )}
+        <div>
+          <h1 className="u-style-26">Downloads</h1>
+          <p className="tracker-subtitle">
+            Manage your active and queued downloads
+          </p>
+        </div>
 
+        <div className="header-actions">
           <button
-            onClick={fetchDownloads}
-            className="btn-refresh"
-            title="Force Refresh"
+            onClick={handleTogglePause}
+            className={`btn-pause-toggle ${isPaused ? "resume" : "pause"}`}
           >
-            <RefreshCw size={16} />
+            {isPaused ? <Play size={16} /> : <Pause size={16} />}
+            <span>{isPaused ? "Resume Queue" : "Pause Queue"}</span>
           </button>
-          {queue.length > 0 && (
-            <button
-              onClick={() => handleRemoveItem(null)}
-              className="btn-clear-all"
-            >
+
+          <button onClick={fetchDownloads} className="btn-refresh">
+            <RefreshCw size={16} />
+            <span>Refresh</span>
+          </button>
+
+          {(activeTasks.length > 0 || queue.length > 0) && (
+            <button onClick={handleClearQueue} className="btn-clear-all">
               <Trash2 size={16} />
               <span>Clear Queue</span>
             </button>
@@ -139,44 +207,103 @@ export default function DownloadsTracker() {
       </header>
 
       {/* Active Downloading Progress */}
-      {activeTask ? (
-        <div className="active-panel glass-panel">
-          <div className="active-header">
-            <div className="u-style-27">
-              {isPaused ? (
-                <Pause size={20} color="var(--warning, #f59e0b)" />
-              ) : (
-                <Loader2 size={20} className="spin" color="var(--accent)" />
-              )}
-              <span className="active-caption">
-                {isPaused
-                  ? `[PAUSED] ${activeTask.caption}`
-                  : activeTask.caption}
-              </span>
-            </div>
-            <span className="active-percentage">{calculateProgress()}%</span>
-          </div>
+      {activeTasks.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {activeTasks.map((activeTask) => {
+            const progressPct = activeTask.totalSegments
+              ? Math.floor(
+                  (activeTask.currentSegments / activeTask.totalSegments) * 100,
+                )
+              : 0;
+            const rawCaption = activeTask.caption || "";
+            let mainTitle = rawCaption;
+            let subStatus = null;
 
-          {/* Progress bar wrapper */}
-          <div className="progress-bg">
-            <div
-              className={`progress-fill ${isPaused ? "paused-fill" : ""}`}
-              style={{ width: `${calculateProgress()}%` }}
-            />
-          </div>
+            const errorMatch = rawCaption.match(
+              /(Download error on segment[\s\S]+|Error downloading[\s\S]+|Retrying in[\s\S]+)/i,
+            );
+            if (errorMatch && errorMatch.index > 0) {
+              mainTitle = rawCaption.substring(0, errorMatch.index).trim();
+              subStatus = errorMatch[0].trim();
+            } else {
+              const match = rawCaption.match(
+                /^(Downloading\s+(?:EP|CHP)\s+[\d\.]+\s+.*?\(\s*\d+p\s*\))/i,
+              );
+              if (match) {
+                mainTitle = match[1].trim();
+                if (rawCaption.length > mainTitle.length) {
+                  subStatus = rawCaption.substring(mainTitle.length).trim();
+                }
+              }
+            }
 
-          <div className="active-footer">
-            <span>
-              Downloaded {activeTask.currentSegments} of{" "}
-              {activeTask.totalSegments} segments
-            </span>
-            <button
-              onClick={() => handleRemoveItem(activeTask.epid)}
-              className="btn-cancel-dl"
-            >
-              Cancel Download
-            </button>
-          </div>
+            return (
+              <div key={activeTask.epid} className="active-panel glass-panel">
+                <div className="active-header">
+                  <div className="active-title-block">
+                    <div className="active-title-row">
+                      {isPaused ? (
+                        <Pause size={16} color="var(--warning, #f59e0b)" />
+                      ) : (
+                        <Loader2
+                          size={16}
+                          className="spin"
+                          color="var(--accent)"
+                        />
+                      )}
+                      <span className="active-caption">
+                        {isPaused ? `[PAUSED] ${mainTitle}` : mainTitle}
+                      </span>
+                    </div>
+                    {subStatus && (
+                      <div className="active-substatus">
+                        {retryCountdown !== null
+                          ? subStatus.replace(
+                              /Retrying in \d+s/i,
+                              `Retrying in ${retryCountdown}s`,
+                            )
+                          : subStatus}
+                      </div>
+                    )}
+                  </div>
+                  <span className="active-percentage">{progressPct}%</span>
+                </div>
+
+                <div className="progress-bg">
+                  <div
+                    className={`progress-fill ${isPaused ? "paused-fill" : ""}`}
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+
+                <div className="active-footer">
+                  <div className="active-footer-left">
+                    <span>
+                      Downloaded {activeTask.currentSegments} of{" "}
+                      {activeTask.totalSegments} segments
+                    </span>
+                    {activeTask.concurrency && (
+                      <span className="badge-concurrent">
+                        <Zap size={11} /> {activeTask.concurrency} Concurrent
+                      </span>
+                    )}
+                    {subStatus && activeTask.lastTestedConcurrency && (
+                      <span className="badge-warning">
+                        <AlertTriangle size={11} /> Last tested:{" "}
+                        {activeTask.lastTestedConcurrency} concurrent
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleRemoveItem(activeTask.epid)}
+                    className="btn-cancel-dl"
+                  >
+                    Cancel Download
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ) : (
         <div className="idle-panel">
@@ -211,6 +338,10 @@ export default function DownloadsTracker() {
                   item.Type === "Anime"
                     ? `EP ${item.EpNum} ${item.Title}${qualStr}`
                     : `CHP ${item.EpNum} ${item.Title}${qualStr}`;
+                const isItemCooling =
+                  item.caption &&
+                  (item.caption.includes("Retrying in") ||
+                    item.caption.includes("Rate limited"));
                 return (
                   <div
                     key={item.epid || idx}
@@ -218,9 +349,26 @@ export default function DownloadsTracker() {
                   >
                     <div className="queue-item-info">
                       <span className="queue-title-text">{displayTitle}</span>
-                      <span className="queue-meta">
-                        {item.Type.toUpperCase()}
-                      </span>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          marginTop: "2px",
+                        }}
+                      >
+                        <span className="queue-meta">
+                          {item.Type.toUpperCase()}
+                        </span>
+                        {isItemCooling && (
+                          <span
+                            className="badge-warning"
+                            style={{ fontSize: "10px", padding: "1px 6px" }}
+                          >
+                            <AlertTriangle size={10} /> Cooldown (Retrying soon)
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       onClick={() => handleRemoveItem(item.epid)}

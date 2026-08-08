@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Loader2,
   LogOut,
@@ -13,13 +13,97 @@ import {
   Plus,
   Eye,
   EyeOff,
+  Check,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../../utils/swal";
-import { apiPost } from "../../utils/common";
+import { apiPost, applyThemeVars, hexToRgba } from "../../utils/common";
 import SettingsRow from "./SettingsRow";
 import Dropdown from "../common/Dropdown";
 import "../css/SettingsView.css";
+
+const DiscordIcon = ({ size = 16, className = "" }) => (
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="currentColor"
+    className={className}
+    style={{ display: "inline-block", verticalAlign: "middle" }}
+  >
+    <path d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994.021-.041.001-.09-.041-.106a13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.893.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.956-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418z" />
+  </svg>
+);
+
+const SETTINGS_TABS = [
+  "general",
+  "anime_manga",
+  "tags",
+  "history",
+  "changelog",
+  "about",
+];
+
+const PREVIEW_SAMPLE_CARDS = [
+  {
+    id: 1,
+    title:
+      "Backstabbed in a Backwater Dungeon: My Trusted Companions Tried to Kill Me, but Thanks to the Gift of an Unlimited Gacha I Got LVL 9999 Friends and Am Out for Revenge on My Former Party Members and the World",
+  },
+  { id: 2, title: "One Peice" },
+  { id: 3, title: "Frieren: Beyond Journey's End" },
+  { id: 4, title: "fullmetal alchemist: brotherhood" },
+  { id: 5, title: "Demon Slayer: Kimetsu no Yaiba Hashira Training Arc" },
+  { id: 6, title: "KochiKame: Tokyo Beat Cops" },
+];
+
+const PRESET_THEMES = [
+  {
+    id: "default",
+    name: "Midnight Obsidian",
+    primary: "#8b5cf6",
+    secondary: "#3b82f6",
+    sidebarActive: "#ec4899",
+    text: "#f3f4f6",
+    bg: "#0f0d19",
+  },
+  {
+    id: "cyberpunk",
+    name: "Cyberpunk Neon",
+    primary: "#00f0ff",
+    secondary: "#ff0055",
+    sidebarActive: "#ffe600",
+    text: "#e2f8ff",
+    bg: "#070b19",
+  },
+  {
+    id: "emerald",
+    name: "Emerald Forest",
+    primary: "#10b981",
+    secondary: "#34d399",
+    sidebarActive: "#fbbf24",
+    text: "#e6f9f3",
+    bg: "#051a14",
+  },
+  {
+    id: "sunset",
+    name: "Sunset Romance",
+    primary: "#ff6b6b",
+    secondary: "#ffa502",
+    sidebarActive: "#ff4757",
+    text: "#ffeef2",
+    bg: "#1e0a1c",
+  },
+  {
+    id: "crimson",
+    name: "Crimson Blood",
+    primary: "#e11d48",
+    secondary: "#9333ea",
+    sidebarActive: "#f43f5e",
+    text: "#ffe8eb",
+    bg: "#180509",
+  },
+];
 
 const ALL_SUBTITLE_LANGUAGES = [
   "English",
@@ -71,9 +155,72 @@ export default function SettingsView({
   ]);
   const [mangaReaderLayout, setMangaReaderLayout] = useState("long-strip");
   const [mangaReaderWidth, setMangaReaderWidth] = useState(800);
+  const [catalogTitleFontSize, setCatalogTitleFontSize] = useState(14);
+  const [catalogTitleLines, setCatalogTitleLines] = useState(2);
+  const [catalogColumns, setCatalogColumns] = useState("auto");
+  const [themePreset, setThemePreset] = useState("default");
+  const [themeAccentColor, setThemeAccentColor] = useState("#8b5cf6");
+  const [themeSecondaryColor, setThemeSecondaryColor] = useState("#3b82f6");
+  const [themeSidebarColor, setThemeSidebarColor] = useState("#ec4899");
+  const [themeTextColor, setThemeTextColor] = useState("#f3f4f6");
+  const [themeBgColor, setThemeBgColor] = useState("#0f0d19");
+
   const [cacheStats, setCacheStats] = useState(null);
   const [clearingCache, setClearingCache] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+
+  const handleSelectThemePreset = (theme) => {
+    setThemePreset(theme.id);
+    setThemeAccentColor(theme.primary);
+    setThemeSecondaryColor(theme.secondary);
+    setThemeSidebarColor(theme.sidebarActive);
+    setThemeTextColor(theme.text);
+    setThemeBgColor(theme.bg);
+    applyThemeVars({
+      themeAccentColor: theme.primary,
+      themeSecondaryColor: theme.secondary,
+      themeSidebarColor: theme.sidebarActive,
+      themeTextColor: theme.text,
+      themeBgColor: theme.bg,
+    });
+  };
+
+  const handleColorChange = (key, value) => {
+    setThemePreset("custom");
+    if (key === "primary") {
+      setThemeAccentColor(value);
+      applyThemeVars({ themeAccentColor: value });
+    } else if (key === "secondary") {
+      setThemeSecondaryColor(value);
+      applyThemeVars({ themeSecondaryColor: value });
+    } else if (key === "sidebar") {
+      setThemeSidebarColor(value);
+      applyThemeVars({ themeSidebarColor: value });
+    } else if (key === "text") {
+      setThemeTextColor(value);
+      applyThemeVars({ themeTextColor: value });
+    } else if (key === "bg") {
+      setThemeBgColor(value);
+      applyThemeVars({ themeBgColor: value });
+    }
+  };
+
+  const handleCatalogTitleFontSizeChange = (val) => {
+    const size = parseInt(val, 10) || 14;
+    setCatalogTitleFontSize(size);
+    applyThemeVars({ catalogTitleFontSize: size });
+  };
+
+  const handleCatalogTitleLinesChange = (val) => {
+    const lines = parseInt(val, 10) || 2;
+    setCatalogTitleLines(lines);
+    applyThemeVars({ catalogTitleLines: lines });
+  };
+
+  const handleCatalogColumnsChange = (val) => {
+    setCatalogColumns(val);
+    applyThemeVars({ catalogColumns: val });
+  };
   const getProviderIcon = (name, type) => {
     if (!name || !settings?.installedExtensions) return null;
     const list =
@@ -385,6 +532,44 @@ export default function SettingsView({
 
         const widthVal = parseInt(s.mangaReaderWidth, 10) || 800;
         setMangaReaderWidth(widthVal);
+
+        const fontSizeVal =
+          s.catalogTitleFontSize !== undefined
+            ? parseInt(s.catalogTitleFontSize, 10)
+            : 14;
+        const linesVal =
+          s.catalogTitleLines !== undefined
+            ? parseInt(s.catalogTitleLines, 10)
+            : 2;
+        const columnsVal = s.catalogColumns || "auto";
+        const presetVal = s.themePreset || "default";
+        const accentVal = s.themeAccentColor || "#8b5cf6";
+        const secVal = s.themeSecondaryColor || s.themeSubColor || "#3b82f6";
+        const sidebarVal = s.themeSidebarColor || "#ec4899";
+        const textVal = s.themeTextColor || "#f3f4f6";
+        const bgVal = s.themeBgColor || "#0f0d19";
+
+        setCatalogTitleFontSize(fontSizeVal);
+        setCatalogTitleLines(linesVal);
+        setCatalogColumns(columnsVal);
+        setThemePreset(presetVal);
+        setThemeAccentColor(accentVal);
+        setThemeSecondaryColor(secVal);
+        setThemeSidebarColor(sidebarVal);
+        setThemeTextColor(textVal);
+        setThemeBgColor(bgVal);
+
+        applyThemeVars({
+          themeAccentColor: accentVal,
+          themeSecondaryColor: secVal,
+          themeSidebarColor: sidebarVal,
+          themeTextColor: textVal,
+          themeBgColor: bgVal,
+          catalogTitleFontSize: fontSizeVal,
+          catalogTitleLines: linesVal,
+          catalogColumns: columnsVal,
+        });
+
         if (window.sharedStateAPI && window.sharedStateAPI.getAppVersion) {
           window.sharedStateAPI.getAppVersion().then(setAppVersion);
         }
@@ -409,6 +594,43 @@ export default function SettingsView({
       });
     }
   }, []);
+
+  const isInitialMount = useRef(true);
+  useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    const timer = setTimeout(() => {
+      autoSaveSettings();
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [
+    downloadLocation,
+    animeProvider,
+    quality,
+    mangaProvider,
+    autoLoadNextChapter,
+    pagination,
+    malStatus,
+    mergeSubtitles,
+    subtitleFormat,
+    preferredSubtitleLanguages,
+    developerMode,
+    autoSkipIntro,
+    mangaReaderLayout,
+    mangaReaderWidth,
+    catalogTitleFontSize,
+    catalogTitleLines,
+    catalogColumns,
+    themePreset,
+    themeAccentColor,
+    themeSecondaryColor,
+    themeSidebarColor,
+    themeTextColor,
+    themeBgColor,
+    imageCacheSizeLimit,
+  ]);
 
   const handleDeleteHistory = async (type, id, title, number) => {
     const result = await swalConfirm(
@@ -508,6 +730,37 @@ export default function SettingsView({
       dirty.mangaReaderLayout = mangaReaderLayout;
     if (mangaReaderWidth !== (parseInt(settings.mangaReaderWidth, 10) || 800))
       dirty.mangaReaderWidth = mangaReaderWidth;
+    if (
+      catalogTitleFontSize !==
+      (settings.catalogTitleFontSize !== undefined
+        ? parseInt(settings.catalogTitleFontSize, 10)
+        : 14)
+    )
+      dirty.catalogTitleFontSize = catalogTitleFontSize;
+    if (
+      catalogTitleLines !==
+      (settings.catalogTitleLines !== undefined
+        ? parseInt(settings.catalogTitleLines, 10)
+        : 2)
+    )
+      dirty.catalogTitleLines = catalogTitleLines;
+    if (catalogColumns !== (settings.catalogColumns || "auto"))
+      dirty.catalogColumns = catalogColumns;
+    if (themePreset !== (settings.themePreset || "default"))
+      dirty.themePreset = themePreset;
+    if (themeAccentColor !== (settings.themeAccentColor || "#8b5cf6"))
+      dirty.themeAccentColor = themeAccentColor;
+    if (
+      themeSecondaryColor !==
+      (settings.themeSecondaryColor || settings.themeSubColor || "#3b82f6")
+    )
+      dirty.themeSecondaryColor = themeSecondaryColor;
+    if (themeSidebarColor !== (settings.themeSidebarColor || "#ec4899"))
+      dirty.themeSidebarColor = themeSidebarColor;
+    if (themeTextColor !== (settings.themeTextColor || "#f3f4f6"))
+      dirty.themeTextColor = themeTextColor;
+    if (themeBgColor !== (settings.themeBgColor || "#0f0d19"))
+      dirty.themeBgColor = themeBgColor;
     if (isValidLimit && finalLimit !== (settings.imageCacheSizeLimit || 5))
       dirty.imageCacheSizeLimit = finalLimit;
 
@@ -873,7 +1126,15 @@ export default function SettingsView({
               <span>Unsaved changes...</span>
             ) : (
               <>
-                <span className="u-style-67">✓</span>
+                <Check
+                  size={14}
+                  className="u-style-67"
+                  style={{
+                    display: "inline-block",
+                    verticalAlign: "-2px",
+                    marginRight: "4px",
+                  }}
+                />
                 <span>All changes saved</span>
               </>
             )}
@@ -1002,6 +1263,265 @@ export default function SettingsView({
                 </SettingsRow>
               </div>
 
+              {/* Catalog Layout & Appearance */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">
+                  Catalog Layout & Title Customization
+                </h2>
+
+                <SettingsRow
+                  label="Catalog Items Per Row"
+                  desc="Control the density and number of cards displayed per row in the catalog grid."
+                >
+                  <div className="catalog-columns-picker">
+                    {["auto", "2", "3", "4", "5", "6"].map((col) => (
+                      <button
+                        key={col}
+                        type="button"
+                        className={`catalog-col-btn ${catalogColumns === col ? "active" : ""}`}
+                        onClick={() => handleCatalogColumnsChange(col)}
+                      >
+                        {col === "auto" ? "Auto" : col}
+                      </button>
+                    ))}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label={`Catalog Title Font Size (${catalogTitleFontSize}px)`}
+                  desc="Adjust the font size of media item titles below poster images."
+                >
+                  <div className="settings-slider-wrapper">
+                    <input
+                      type="range"
+                      min={10}
+                      max={20}
+                      step={1}
+                      value={catalogTitleFontSize}
+                      onChange={(e) =>
+                        handleCatalogTitleFontSizeChange(e.target.value)
+                      }
+                      className="settings-range-slider"
+                    />
+                    <span className="settings-slider-val">
+                      {catalogTitleFontSize}px
+                    </span>
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label={`Catalog Title Lines (${catalogTitleLines} ${catalogTitleLines === 1 ? "line" : "lines"})`}
+                  desc="Limit the maximum number of text lines shown for titles in the catalog."
+                >
+                  <div className="settings-slider-wrapper">
+                    <input
+                      type="range"
+                      min={1}
+                      max={5}
+                      step={1}
+                      value={catalogTitleLines}
+                      onChange={(e) =>
+                        handleCatalogTitleLinesChange(e.target.value)
+                      }
+                      className="settings-range-slider"
+                    />
+                    <span className="settings-slider-val">
+                      {catalogTitleLines}
+                    </span>
+                  </div>
+                </SettingsRow>
+
+                {/* Live Preview Card Container */}
+                <div className="catalog-preview-container">
+                  <div className="catalog-preview-header">
+                    Title size & layout live preview
+                  </div>
+                  <div
+                    className="catalog-preview-grid"
+                    style={{
+                      gridTemplateColumns:
+                        catalogColumns === "auto"
+                          ? "repeat(auto-fill, minmax(170px, 1fr))"
+                          : `repeat(${catalogColumns}, 1fr)`,
+                    }}
+                  >
+                    {PREVIEW_SAMPLE_CARDS.map((card) => (
+                      <div key={card.id} className="catalog-preview-card">
+                        <div className="catalog-preview-img-box">
+                          <img
+                            src="/images/image-404.png"
+                            alt="Preview Poster"
+                            className="catalog-preview-img"
+                          />
+                        </div>
+                        <div className="catalog-preview-info">
+                          <div
+                            className="catalog-preview-title"
+                            style={{
+                              fontSize: `${catalogTitleFontSize}px`,
+                              WebkitLineClamp: catalogTitleLines,
+                              maxHeight: `calc(${catalogTitleFontSize * 1.4}px * ${catalogTitleLines})`,
+                            }}
+                          >
+                            {card.title}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Custom Themes & Component Colors */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">
+                  Theme & Color Customization
+                </h2>
+
+                <div className="settings-preset-row-block">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">Preset Themes</div>
+                    <div className="settings-row-hint">
+                      Select a pre-designed dark theme to transform accent
+                      highlights, secondary elements, sidebar icons, text, and
+                      background.
+                    </div>
+                  </div>
+                  <div className="theme-preset-grid">
+                    {PRESET_THEMES.map((theme) => (
+                      <button
+                        key={theme.id}
+                        type="button"
+                        className={`theme-preset-card ${themePreset === theme.id ? "active" : ""}`}
+                        onClick={() => handleSelectThemePreset(theme)}
+                      >
+                        <div className="theme-preset-swatches">
+                          <span
+                            style={{ backgroundColor: theme.primary }}
+                            title="Primary Accent"
+                          />
+                          <span
+                            style={{ backgroundColor: theme.secondary }}
+                            title="Secondary Accent"
+                          />
+                          <span
+                            style={{ backgroundColor: theme.sidebarActive }}
+                            title="Sidebar Active"
+                          />
+                          <span
+                            style={{ backgroundColor: theme.text }}
+                            title="Text Color"
+                          />
+                          <span
+                            style={{ backgroundColor: theme.bg }}
+                            title="Background"
+                          />
+                        </div>
+                        <span className="theme-preset-name">{theme.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <SettingsRow
+                  label="Primary Accent Color"
+                  desc="Main highlight color used across buttons, active navigation, sliders, and badges."
+                >
+                  <div className="color-picker-control">
+                    <input
+                      type="color"
+                      value={themeAccentColor}
+                      onChange={(e) =>
+                        handleColorChange("primary", e.target.value)
+                      }
+                      className="settings-color-input"
+                    />
+                    <span className="color-code">{themeAccentColor}</span>
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Secondary Accent Color"
+                  desc="Complementary color used for secondary tags, sub/dub indicators, and highlights."
+                >
+                  <div className="color-picker-control">
+                    <input
+                      type="color"
+                      value={themeSecondaryColor}
+                      onChange={(e) =>
+                        handleColorChange("secondary", e.target.value)
+                      }
+                      className="settings-color-input"
+                    />
+                    <span className="color-code">{themeSecondaryColor}</span>
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Sidebar Active Accent"
+                  desc="Glowing highlight color for the active sidebar navigation item."
+                >
+                  <div className="color-picker-control">
+                    <input
+                      type="color"
+                      value={themeSidebarColor}
+                      onChange={(e) =>
+                        handleColorChange("sidebar", e.target.value)
+                      }
+                      className="settings-color-input"
+                    />
+                    <span className="color-code">{themeSidebarColor}</span>
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Main Text Color"
+                  desc="Custom font color for application titles, labels, and text elements."
+                >
+                  <div className="color-picker-control">
+                    <input
+                      type="color"
+                      value={themeTextColor}
+                      onChange={(e) =>
+                        handleColorChange("text", e.target.value)
+                      }
+                      className="settings-color-input"
+                    />
+                    <span className="color-code">{themeTextColor}</span>
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="App Background Color"
+                  desc="Overall dark background color for the application window."
+                >
+                  <div className="color-picker-control">
+                    <input
+                      type="color"
+                      value={themeBgColor}
+                      onChange={(e) => handleColorChange("bg", e.target.value)}
+                      className="settings-color-input"
+                    />
+                    <span className="color-code">{themeBgColor}</span>
+                  </div>
+                </SettingsRow>
+
+                <div
+                  className="settings-row-item"
+                  style={{ justifyContent: "flex-end", paddingTop: "8px" }}
+                >
+                  <button
+                    type="button"
+                    className="theme-reset-btn"
+                    onClick={() => handleSelectThemePreset(PRESET_THEMES[0])}
+                    title="Reset Theme Colors"
+                    aria-label="Reset Theme Colors"
+                  >
+                    <RefreshCw size={16} />
+                  </button>
+                </div>
+              </div>
+
               {/* Storage & Cache */}
               <div className="settings-section glass-panel">
                 <h2 className="settings-section-title">Storage & Cache</h2>
@@ -1086,7 +1606,7 @@ export default function SettingsView({
                       rel="noreferrer"
                       className="settings-connect-link u-style-76"
                     >
-                      <MessageSquare size={16} />
+                      <DiscordIcon size={16} />
                       <span>Join Discord</span>
                     </a>
                   </div>
@@ -1335,7 +1855,18 @@ export default function SettingsView({
                             transition: "all 0.2s ease",
                           }}
                         >
-                          {isSelected ? "✓ " : "+ "}
+                          {isSelected ? (
+                            <Check
+                              size={12}
+                              style={{
+                                display: "inline-block",
+                                verticalAlign: "-1px",
+                                marginRight: "3px",
+                              }}
+                            />
+                          ) : (
+                            "+ "
+                          )}
                           {lang}
                         </button>
                       );

@@ -11,6 +11,8 @@ import Marketplace from "./components/Marketplace";
 import WatchTogetherView from "./components/watch-together/WatchTogetherView";
 import WatchTogetherBar from "./components/watch-together/WatchTogetherBar";
 
+import { applyThemeVars } from "./utils/common";
+
 export default function App() {
   const [history, setHistory] = useState([{ view: "home", params: {} }]);
   const [contentType, setContentType] = useState("Anime");
@@ -250,13 +252,13 @@ export default function App() {
   const syncSettings = async () => {
     try {
       if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
-        const settingsData = await window.sharedStateAPI.getSettings([
-          "developerMode",
-          "infoSortOrder",
-        ]);
+        const settingsData = await window.sharedStateAPI.getSettings();
         setMalLoggedIn(settingsData.MalLoggedIn || false);
         setDeveloperMode(settingsData.settings?.developerMode);
         setInfoSortOrder(settingsData.settings?.infoSortOrder || null);
+        if (settingsData.settings) {
+          applyThemeVars(settingsData.settings);
+        }
       }
     } catch (err) {
       console.error("Failed to sync app info:", err);

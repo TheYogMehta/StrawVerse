@@ -263,13 +263,13 @@ async function fetchEpisodeSources(provider, episodeId, category = null) {
       "Missing Provider! ( try downloading from settings > marketplace )",
     );
 
-  let cleanEpisodeId = episodeId;
-  const suffixMatch = episodeId.match(/-(sub|dub|hsub|both)$/);
+  let cleanEpisodeId = String(episodeId ?? "");
+  const suffixMatch = cleanEpisodeId.match(/-(sub|dub|hsub|both)$/);
   if (suffixMatch) {
     if (!category) {
       category = suffixMatch[1] === "both" ? null : suffixMatch[1];
     }
-    cleanEpisodeId = episodeId.slice(0, -suffixMatch[0].length);
+    cleanEpisodeId = cleanEpisodeId.slice(0, -suffixMatch[0].length);
   }
 
   const cacheKey = CreateHashKey(

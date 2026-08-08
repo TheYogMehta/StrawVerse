@@ -101,36 +101,46 @@ router.post("/api/download/:AnimeManga/:singleMulti", async (req, res) => {
 router.post("/downloads", async (req, res) => {
   let queue = (await getQueue()) ?? [];
 
+  let activeItem = queue.find(
+    (item) =>
+      item.totalSegments > 0 ||
+      (item.caption && item.caption.includes("Downloading")),
+  );
+  let activeTasks = activeItem ? [activeItem] : [];
+  let upcomingQueue = activeItem
+    ? queue.filter((item) => item?.epid !== activeItem.epid)
+    : queue;
+
   let Response = {
-    caption: "Nothing in progress",
-    queue,
+    caption:
+      activeTasks.length > 0 ? activeTasks[0].caption : "Nothing in progress",
+    activeTasks: activeTasks.map((task) => ({
+      caption: task.caption,
+      totalSegments: task.totalSegments,
+      currentSegments: task.currentSegments,
+      epid: task.epid,
+      id: task.id,
+      malid: task.malid,
+      EpNum: task.EpNum,
+      Title: task.Title,
+      Type: task.Type,
+      concurrency: task.concurrency,
+      lastTestedConcurrency: task.lastTestedConcurrency,
+    })),
+    queue: upcomingQueue,
     isPaused: isQueuePaused(),
   };
 
-  let itemWithSegments = queue.find((item) => item.currentSegments > 0);
-
-  if (itemWithSegments) {
-    let caption = itemWithSegments.caption;
-    if (!caption) {
-      const qualStr = itemWithSegments.config?.quality
-        ? ` ( ${itemWithSegments.config.quality} )`
-        : "";
-      if (itemWithSegments.Type === "Anime") {
-        caption = `Downloading EP ${itemWithSegments.EpNum} ${itemWithSegments.Title}${qualStr}`;
-      } else if (itemWithSegments.Type === "Manga") {
-        caption = `Downloading CHP ${itemWithSegments.EpNum || itemWithSegments.ChapterTitle} ${itemWithSegments.Title}${qualStr}`;
-      } else {
-        caption = "Downloading...";
-      }
-    }
-    Response.caption = caption;
-    Response.totalSegments = itemWithSegments.totalSegments;
-    Response.currentSegments = itemWithSegments.currentSegments;
-    Response.epid = itemWithSegments.epid;
-    Response.id = itemWithSegments.id;
-    Response.queue = queue.filter(
-      (item) => item?.epid !== itemWithSegments?.epid,
-    );
+  if (activeTasks.length > 0) {
+    const first = activeTasks[0];
+    Response.totalSegments = first.totalSegments;
+    Response.currentSegments = first.currentSegments;
+    Response.epid = first.epid;
+    Response.id = first.id;
+    Response.malid = first.malid;
+    Response.EpNum = first.EpNum;
+    Response.Title = first.Title;
+    Response.Type = first.Type;
   }
 
   return res.json(Response);

@@ -6,13 +6,16 @@ import { Loader2 } from "lucide-react";
 export default function VideoPlayer({
   id,
   episodeNumOrId,
+  isDownloaded,
   episodes = [],
+  episodesList = [],
   animeTitle = "",
   image = "",
   provider = "",
   malid = "",
   onBack,
   playerSubDub = "sub",
+  subdub,
 }) {
   const [loading, setLoading] = useState(true);
   const [statusMsg, setStatusMsg] = useState("Initializing MPV player...");
@@ -25,7 +28,8 @@ export default function VideoPlayer({
 
     if (!isElectronMpvAvailable) return;
 
-    const currentEpisodeObj = episodes.find(
+    const allEpisodes = episodes.length > 0 ? episodes : episodesList;
+    const currentEpisodeObj = allEpisodes.find(
       (item) =>
         String(item.id) === String(episodeNumOrId) ||
         Number(item.number) === Number(episodeNumOrId),
@@ -43,19 +47,20 @@ export default function VideoPlayer({
         : 1;
 
     setLoading(true);
-    setStatusMsg("Fetching episode stream links & opening MPV...");
+    setStatusMsg("Opening MPV player...");
 
     window.sharedStateAPI
       .playInMpv({
         mediaId: id,
         episodeId: targetEpId,
         episode: targetEpNum,
+        isDownloaded: !!isDownloaded,
         title: animeTitle,
         image: image,
         provider: provider,
         malid: malid,
-        subdub: playerSubDub,
-        episodes: episodes,
+        subdub: subdub || playerSubDub,
+        episodes: allEpisodes,
       })
       .then((res) => {
         if (res && res.error) {

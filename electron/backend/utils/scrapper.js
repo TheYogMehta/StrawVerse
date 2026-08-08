@@ -804,16 +804,21 @@ async function electronNetAdapter(config) {
         }
       }
 
-      const shouldBypassUrl = (urlStr) => {
-        if (!urlStr) return false;
-        const urlLower = urlStr.toLowerCase();
+      const shouldBypassUrl = (urlStr, refererStr) => {
+        if (!urlStr && !refererStr) return false;
+        const urlLower = (urlStr || "").toLowerCase();
+        const refLower = (refererStr || "").toLowerCase();
         return (
           urlLower.includes("animepahe") ||
           urlLower.includes("kwik.cx") ||
           urlLower.includes("anikoto") ||
           urlLower.includes("anineko") ||
-          urlLower.includes("allmanga") ||
-          urlLower.includes("weebcentral")
+          urlLower.includes("weebcentral") ||
+          urlLower.includes("megaplay") ||
+          urlLower.includes("vidplay") ||
+          urlLower.includes("vidstream") ||
+          urlLower.includes("vidtub") ||
+          urlLower.includes("megap")
         );
       };
 
@@ -839,14 +844,16 @@ async function electronNetAdapter(config) {
 
       try {
         const domain = new URL(url).hostname.replace("www.", "");
+        const reqReferer =
+          requestHeaders.Referer || requestHeaders.referer || "";
+
         if (
-          shouldBypassUrl(url) &&
+          shouldBypassUrl(url, reqReferer) &&
           !isMediaUrl(url) &&
           global.scrapperFetch &&
           hasValidClearance(domain)
         ) {
-          const referer =
-            requestHeaders.Referer || requestHeaders.referer || "";
+          const referer = reqReferer;
           const resultText = await global.scrapperFetch(url, {
             headers: {
               ...(referer ? { Referer: referer } : {}),

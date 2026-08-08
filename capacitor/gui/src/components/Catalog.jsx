@@ -1233,11 +1233,33 @@ export default function Catalog({
   }, [type]);
 
   const handleRemoveFromLibrary = async (item) => {
+    const isDownloaded =
+      item.provider === "local source" ||
+      provider === "local source" ||
+      activeFilters?.tag?.toLowerCase() === "downloads" ||
+      activeFilters?.provider?.toLowerCase() === "local source" ||
+      (Array.isArray(item.DownloadedEpisodes) &&
+        item.DownloadedEpisodes.length > 0) ||
+      (item.DownloadedEpisodes?.sub?.length || 0) +
+        (item.DownloadedEpisodes?.dub?.length || 0) >
+        0 ||
+      (Array.isArray(item.DownloadedChapters) &&
+        item.DownloadedChapters.length > 0);
+
+    const promptTitle = isDownloaded
+      ? "Delete & Remove from Library?"
+      : "Remove from Library";
+    const promptMessage = isDownloaded
+      ? `Are you sure you want to remove "${item.title}"? This will delete all downloaded episodes/chapters and folder as well as remove the entry from your database.`
+      : `Are you sure you want to remove "${item.title}" from your library?`;
+    const confirmButtonText = isDownloaded ? "Delete & Remove" : "Remove";
+
     const confirmed = await swalConfirm(
-      "Remove from Library",
-      `Are you sure you want to remove "${item.title}" from your library?`,
-      "Remove",
+      promptTitle,
+      promptMessage,
+      confirmButtonText,
     );
+
     if (confirmed) {
       setData((prev) => ({
         ...prev,
@@ -1263,7 +1285,9 @@ export default function Catalog({
               : undefined,
           MalID: item.MalID || item.malid || item.id,
           CustomTag: "",
+          deleteFiles: isDownloaded,
         });
+
         if (!response?.error) {
           if (window.catalogCache) {
             delete window.catalogCache[`Anime_local`];
@@ -1271,7 +1295,9 @@ export default function Catalog({
           }
           swalSuccess(
             "Removed",
-            `"${item.title}" has been removed from your library.`,
+            isDownloaded
+              ? `"${item.title}" and its downloaded files have been deleted.`
+              : `"${item.title}" has been removed from your library.`,
           );
         } else {
           swalError(

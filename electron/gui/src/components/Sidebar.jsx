@@ -42,7 +42,14 @@ export default function Sidebar({
               className={`sidebar-item ${isActive ? "active" : ""}`}
               data-tooltip={item.label}
             >
-              <Icon size={20} color={isActive ? "#a78bfa" : "#9ca3af"} />
+              <Icon
+                size={20}
+                color={
+                  isActive
+                    ? "var(--sidebar-active-color, var(--accent))"
+                    : "#9ca3af"
+                }
+              />
             </button>
           );
         })}
@@ -56,7 +63,11 @@ export default function Sidebar({
         >
           <Settings
             size={20}
-            color={currentView === "settings" ? "#a78bfa" : "#9ca3af"}
+            color={
+              currentView === "settings"
+                ? "var(--sidebar-active-color, var(--accent))"
+                : "#9ca3af"
+            }
           />
         </button>
       </div>

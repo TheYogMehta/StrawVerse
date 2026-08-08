@@ -16,6 +16,10 @@ import {
   ChevronDown,
   Plus,
   FolderOpen,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw,
+  Folder,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
@@ -90,6 +94,94 @@ export default function InfoView({
   const [localMalProvider, setLocalMalProvider] =
     useState(propLocalMalProvider);
   const [details, setDetails] = useState(null);
+
+  const [mappingSearchQuery, setMappingSearchQuery] = useState(
+    propTitle || propId || "",
+  );
+  const [mappingResults, setMappingResults] = useState([]);
+  const [isSearchingMapping, setIsSearchingMapping] = useState(false);
+  const [isLinkingMapping, setIsLinkingMapping] = useState(false);
+
+  const handleMappingSearch = async (overrideQuery) => {
+    const q = (
+      overrideQuery !== undefined ? overrideQuery : mappingSearchQuery
+    ).trim();
+    if (!q) return;
+    setIsSearchingMapping(true);
+    try {
+      const apiType = type ? type.toLowerCase() : "anime";
+      const res = await fetch(
+        `https://strawverse.theyogmehta.online/api/search/${apiType}?q=${encodeURIComponent(q)}&limit=15`,
+      );
+      const data = await res.json();
+      if (data && Array.isArray(data.results)) {
+        setMappingResults(data.results);
+      } else {
+        setMappingResults([]);
+      }
+    } catch (err) {
+      console.error("Error searching mapping:", err);
+      setMappingResults([]);
+    } finally {
+      setIsSearchingMapping(false);
+    }
+  };
+
+  const handleLinkMappingItem = async (item) => {
+    setIsLinkingMapping(true);
+    try {
+      const res = await fetch("/api/local/link-mapping", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          oldId: id,
+          malId: item.malid,
+          type,
+          title: item.title,
+          image: item.image || item.image_url,
+        }),
+      });
+      const data = await res.json();
+
+      if (data && data.success && data.newId) {
+        swalSuccess(
+          "Successfully Linked!",
+          "Media linked to database mapping.",
+        );
+        const newId = data.newId;
+        setId(newId);
+        setLoading(true);
+        setDetails(null);
+
+        const currentKey = `${newId}_${type}_${localMalProvider}`;
+        lastFetchedKeyRef.current = currentKey;
+        const response = await fetch(`/api/info/${type}/${localMalProvider}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: newId }),
+        });
+        const detailsData = await response.json();
+        setDetails(detailsData);
+        setLoading(false);
+      } else {
+        swalError("Error", data?.error || "Failed to link entry");
+      }
+    } catch (err) {
+      swalError("Error", "Error linking entry: " + err.message);
+    } finally {
+      setIsLinkingMapping(false);
+    }
+  };
+
+  useEffect(() => {
+    if (details && details.error) {
+      const initialQ = propTitle || id || "";
+      if (initialQ) {
+        setMappingSearchQuery(initialQ);
+        handleMappingSearch(initialQ);
+      }
+    }
+  }, [details]);
 
   const onWatch = async (...args) => {
     const isNotInLibrary =
@@ -281,63 +373,120 @@ export default function InfoView({
     queue: [],
   });
 
-  useEffect(() => {
-    let intervalId = null;
-    const fetchDownloadsState = async () => {
-      try {
-        const res = await fetch("/downloads", { method: "POST" });
-        const data = await res.json();
-        let active = null;
-        if (data.totalSegments && data.totalSegments > 0) {
-          active = {
-            caption: data.caption,
-            totalSegments: data.totalSegments,
-            currentSegments: data.currentSegments,
-            epid: data.epid,
-            id: data.id,
-          };
-        }
-        setDownloadsState({
-          activeTask: active,
-          queue: data.queue || [],
-        });
-      } catch (err) {}
-    };
+  const pollingIntervalRef = useRef(null);
 
+  const stopPollingDownloads = useCallback(() => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+      pollingIntervalRef.current = null;
+    }
+  }, []);
+
+  const parseActiveTasksData = useCallback((data) => {
+    let activeList = [];
+    if (Array.isArray(data.activeTasks) && data.activeTasks.length > 0) {
+      activeList = data.activeTasks;
+    } else if (data.totalSegments && data.totalSegments > 0) {
+      activeList = [
+        {
+          caption: data.caption,
+          totalSegments: data.totalSegments,
+          currentSegments: data.currentSegments,
+          epid: data.epid,
+          id: data.id,
+          malid: data.malid,
+          EpNum: data.EpNum,
+          Title: data.Title,
+          Type: data.Type,
+        },
+      ];
+    }
+    return activeList;
+  }, []);
+
+  const fetchDownloadsState = useCallback(async () => {
+    try {
+      const res = await fetch("/downloads", { method: "POST" });
+      const data = await res.json();
+      const activeList = parseActiveTasksData(data);
+      const queueList = data.queue || [];
+
+      setDownloadsState({
+        activeTask: activeList[0] || null,
+        activeTasks: activeList,
+        queue: queueList,
+      });
+
+      const isDownloadingOrQueued = !!(
+        activeList.length > 0 || queueList.length > 0
+      );
+      if (isDownloadingOrQueued) {
+        if (!pollingIntervalRef.current) {
+          pollingIntervalRef.current = setInterval(() => {
+            fetchDownloadsState();
+          }, 1500);
+        }
+      } else {
+        stopPollingDownloads();
+      }
+    } catch (err) {
+      stopPollingDownloads();
+    }
+  }, [parseActiveTasksData, stopPollingDownloads]);
+
+  useEffect(() => {
     fetchDownloadsState();
-    intervalId = setInterval(fetchDownloadsState, 1500);
 
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       window.sharedStateAPI.on("download-logger", (data) => {
-        let active = null;
-        if (data.totalSegments && data.totalSegments > 0) {
-          active = {
-            caption: data.caption,
-            totalSegments: data.totalSegments,
-            currentSegments: data.currentSegments,
-            epid: data.epid,
-            id: data.id,
-          };
-        }
+        const activeList = parseActiveTasksData(data);
+        const queueList = data.queue || [];
         setDownloadsState({
-          activeTask: active,
-          queue: data.queue || [],
+          activeTask: activeList[0] || null,
+          activeTasks: activeList,
+          queue: queueList,
         });
+
+        const isDownloadingOrQueued = !!(
+          activeList.length > 0 || queueList.length > 0
+        );
+        if (isDownloadingOrQueued) {
+          if (!pollingIntervalRef.current) {
+            pollingIntervalRef.current = setInterval(() => {
+              fetchDownloadsState();
+            }, 1500);
+          }
+        } else {
+          stopPollingDownloads();
+        }
       });
     }
 
     return () => {
-      if (intervalId) clearInterval(intervalId);
+      stopPollingDownloads();
     };
-  }, []);
+  }, [fetchDownloadsState, parseActiveTasksData, stopPollingDownloads]);
 
   const getItemQueueStatus = useCallback(
     (itemNum) => {
-      const active = downloadsState.activeTask;
+      const activeList =
+        Array.isArray(downloadsState.activeTasks) &&
+        downloadsState.activeTasks.length > 0
+          ? downloadsState.activeTasks
+          : downloadsState.activeTask
+            ? [downloadsState.activeTask]
+            : [];
       const queueList = downloadsState.queue || [];
 
-      if (active) {
-        const activeNum = active.EpNum || active.episodeNumber;
+      for (const active of activeList) {
+        if (!active) continue;
+        let activeNum =
+          active.EpNum !== undefined ? active.EpNum : active.episodeNumber;
+        if (activeNum === undefined && active.caption) {
+          const capMatch = active.caption.match(/(?:EP|CHP)\s+([\d.]+)/i);
+          if (capMatch) activeNum = capMatch[1];
+        }
+
         const activeTitle = active.Title || active.title;
         const matchesTitle =
           activeTitle &&
@@ -345,9 +494,17 @@ export default function InfoView({
           activeTitle.trim().toLowerCase() ===
             details.title.trim().toLowerCase();
         const matchesId = active.id && id && String(active.id) === String(id);
+        const matchesMalid =
+          active.malid &&
+          details?.malid &&
+          String(active.malid) === String(details.malid);
+        const matchesEpid =
+          active.epid &&
+          (String(active.epid).includes(String(id)) ||
+            String(active.epid).includes(String(details?.id)));
 
         if (
-          (matchesId || matchesTitle) &&
+          (matchesId || matchesMalid || matchesTitle || matchesEpid) &&
           Number(activeNum) === Number(itemNum)
         ) {
           const total = active.totalSegments || 1;
@@ -358,15 +515,31 @@ export default function InfoView({
       }
 
       const queuedItem = queueList.find((q) => {
-        const qNum = q.EpNum || q.episodeNumber || q.number;
+        let qNum =
+          q.EpNum !== undefined ? q.EpNum : q.episodeNumber || q.number;
+        if (qNum === undefined && q.caption) {
+          const capMatch = q.caption.match(/(?:EP|CHP)\s+([\d.]+)/i);
+          if (capMatch) qNum = capMatch[1];
+        }
         const qTitle = q.Title || q.title;
         const matchesTitle =
           qTitle &&
           details?.title &&
           qTitle.trim().toLowerCase() === details.title.trim().toLowerCase();
         const matchesId = q.id && id && String(q.id) === String(id);
+        const matchesMalid =
+          q.malid &&
+          details?.malid &&
+          String(q.malid) === String(details.malid);
+        const matchesEpid =
+          q.epid &&
+          (String(q.epid).includes(String(id)) ||
+            String(q.epid).includes(String(details?.id)));
 
-        return (matchesId || matchesTitle) && Number(qNum) === Number(itemNum);
+        return (
+          (matchesId || matchesMalid || matchesTitle || matchesEpid) &&
+          Number(qNum) === Number(itemNum)
+        );
       });
 
       if (queuedItem) {
@@ -375,7 +548,7 @@ export default function InfoView({
 
       return { inProgress: false, pct: 0, isQueued: false };
     },
-    [downloadsState, id, details?.title],
+    [downloadsState, id, details?.title, details?.malid, details?.id],
   );
 
   // Custom dropdown states
@@ -386,6 +559,139 @@ export default function InfoView({
   const [isMalStatusDropdownOpen, setIsMalStatusDropdownOpen] = useState(false);
   const malStatusDropdownRef = useRef(null);
   const [isImageExpanded, setIsImageExpanded] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [zoomPos, setZoomPos] = useState({ x: 0, y: 0 });
+  const isDraggingRef = useRef(false);
+  const hasDraggedRef = useRef(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const touchDistRef = useRef(0);
+
+  useEffect(() => {
+    if (!isImageExpanded) return;
+
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape" || e.key === "Esc") {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsImageExpanded(false);
+        setZoomScale(1);
+        setZoomPos({ x: 0, y: 0 });
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+
+    let backListener = null;
+    const bindAndroidBack = async () => {
+      try {
+        if (window.Capacitor && window.Capacitor.isNativePlatform()) {
+          const { App: CapApp } = await import("@capacitor/app");
+          backListener = await CapApp.addListener("backButton", () => {
+            setIsImageExpanded(false);
+            setZoomScale(1);
+            setZoomPos({ x: 0, y: 0 });
+          });
+        }
+      } catch (err) {
+        // ignore
+      }
+    };
+    bindAndroidBack();
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      if (backListener && backListener.remove) {
+        backListener.remove();
+      }
+    };
+  }, [isImageExpanded]);
+
+  const handleWheelZoom = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.25 : -0.25;
+    setZoomScale((prev) => {
+      const next = Math.min(4, Math.max(1, prev + delta));
+      if (next === 1) setZoomPos({ x: 0, y: 0 });
+      return next;
+    });
+  };
+
+  const handleMouseDown = (e) => {
+    if (zoomScale <= 1) return;
+    e.preventDefault();
+    isDraggingRef.current = true;
+    hasDraggedRef.current = false;
+    dragStartRef.current = {
+      x: e.clientX - zoomPos.x,
+      y: e.clientY - zoomPos.y,
+    };
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDraggingRef.current || zoomScale <= 1) return;
+    e.preventDefault();
+    const dx = Math.abs(e.clientX - (dragStartRef.current.x + zoomPos.x));
+    const dy = Math.abs(e.clientY - (dragStartRef.current.y + zoomPos.y));
+    if (dx > 3 || dy > 3) {
+      hasDraggedRef.current = true;
+    }
+    setZoomPos({
+      x: e.clientX - dragStartRef.current.x,
+      y: e.clientY - dragStartRef.current.y,
+    });
+  };
+
+  const handleMouseUp = () => {
+    isDraggingRef.current = false;
+  };
+
+  const handleTouchStart = (e) => {
+    hasDraggedRef.current = false;
+    if (e.touches.length === 2) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      touchDistRef.current = dist;
+    } else if (e.touches.length === 1 && zoomScale > 1) {
+      isDraggingRef.current = true;
+      dragStartRef.current = {
+        x: e.touches[0].clientX - zoomPos.x,
+        y: e.touches[0].clientY - zoomPos.y,
+      };
+    }
+  };
+
+  const handleTouchMove = (e) => {
+    if (e.touches.length === 2 && touchDistRef.current > 0) {
+      hasDraggedRef.current = true;
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY,
+      );
+      const factor = dist / touchDistRef.current;
+      touchDistRef.current = dist;
+      setZoomScale((prev) => {
+        const next = Math.min(4, Math.max(1, prev * factor));
+        if (next === 1) setZoomPos({ x: 0, y: 0 });
+        return next;
+      });
+    } else if (
+      e.touches.length === 1 &&
+      isDraggingRef.current &&
+      zoomScale > 1
+    ) {
+      hasDraggedRef.current = true;
+      setZoomPos({
+        x: e.touches[0].clientX - dragStartRef.current.x,
+        y: e.touches[0].clientY - dragStartRef.current.y,
+      });
+    }
+  };
+
+  const handleTouchEnd = () => {
+    isDraggingRef.current = false;
+    touchDistRef.current = 0;
+  };
   const [installedExtensions, setInstalledExtensions] = useState(null);
   const [sortDirection, setSortDirection] = useState(() =>
     sortOrder === "desc" ? "desc" : "asc",
@@ -428,10 +734,12 @@ export default function InfoView({
         type === "Anime"
           ? Array.from(
               new Set(
-                [
-                  ...(details?.DownloadedEpisodes?.sub || []),
-                  ...(details?.DownloadedEpisodes?.dub || []),
-                ].map(Number),
+                Array.isArray(details?.DownloadedEpisodes)
+                  ? details.DownloadedEpisodes.map(Number)
+                  : [
+                      ...(details?.DownloadedEpisodes?.sub || []),
+                      ...(details?.DownloadedEpisodes?.dub || []),
+                    ].map(Number),
               ),
             ).sort((a, b) => a - b)
           : Array.from(
@@ -657,7 +965,7 @@ export default function InfoView({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          id: isAnime ? fetchedDetails?.dataId || id : id,
+          id: fetchedDetails?.id || id,
           page: page,
           provider: providerName || fetchedDetails?.provider || "local source",
           type: type,
@@ -887,27 +1195,57 @@ export default function InfoView({
   useEffect(() => {
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       const handleDownloadComplete = (data) => {
-        if (data.Type !== type) return;
+        if (data.Type && type && data.Type.toLowerCase() !== type.toLowerCase())
+          return;
 
         setDetails((prevDetails) => {
           if (!prevDetails) return prevDetails;
 
-          if (data.id === id || data.id === prevDetails.id) {
+          const matchesId =
+            data.id &&
+            (String(data.id) === String(id) ||
+              String(data.id) === String(prevDetails.id));
+          const matchesMalid =
+            data.malid &&
+            prevDetails.malid &&
+            String(data.malid) === String(prevDetails.malid);
+          const matchesEpid =
+            data.epid &&
+            (String(data.epid).includes(String(id)) ||
+              String(data.epid).includes(String(prevDetails.id)));
+
+          if (matchesId || matchesMalid || matchesEpid) {
             const epNum = parseFloat(data.EpNum);
             if (isNaN(epNum)) return prevDetails;
 
             const updated = { ...prevDetails };
             if (type === "Anime") {
               const subdub = data.SubDub || "sub";
-              const currentList = updated.DownloadedEpisodes?.[subdub] || [];
-              if (!currentList.includes(epNum)) {
-                updated.DownloadedEpisodes = {
-                  ...updated.DownloadedEpisodes,
-                  [subdub]: [...currentList, epNum].sort((a, b) => a - b),
-                };
+              if (Array.isArray(updated.DownloadedEpisodes)) {
+                if (!updated.DownloadedEpisodes.map(Number).includes(epNum)) {
+                  updated.DownloadedEpisodes = [
+                    ...updated.DownloadedEpisodes.map(Number),
+                    epNum,
+                  ].sort((a, b) => a - b);
+                }
+              } else if (
+                updated.DownloadedEpisodes &&
+                typeof updated.DownloadedEpisodes === "object"
+              ) {
+                const currentList = (
+                  updated.DownloadedEpisodes[subdub] || []
+                ).map(Number);
+                if (!currentList.includes(epNum)) {
+                  updated.DownloadedEpisodes = {
+                    ...updated.DownloadedEpisodes,
+                    [subdub]: [...currentList, epNum].sort((a, b) => a - b),
+                  };
+                }
+              } else {
+                updated.DownloadedEpisodes = [epNum];
               }
             } else {
-              const currentList = updated.DownloadedChapters || [];
+              const currentList = (updated.DownloadedChapters || []).map(Number);
               if (!currentList.includes(epNum)) {
                 updated.DownloadedChapters = [...currentList, epNum].sort(
                   (a, b) => a - b,
@@ -918,6 +1256,8 @@ export default function InfoView({
           }
           return prevDetails;
         });
+
+        fetchDetails(false);
       };
 
       const unsubscribe = window.sharedStateAPI.on(
@@ -1539,6 +1879,7 @@ export default function InfoView({
 
       swalSuccess("Queue Updated", data.message || "Added to download queue!");
       setSelectedItems(new Set());
+      fetchDownloadsState();
     } catch (err) {
       console.error(err);
       swalError("Error", "Failed to add to download queue.");
@@ -1997,7 +2338,7 @@ export default function InfoView({
 
   const isItemUnavailable = (item) => {
     if (type !== "Anime") return false;
-    const langs = (item.langs || []).map((l) => String(l).toLowerCase());
+    const langs = getItemLangs(item, details, dubSelect);
     if (dubSelect === "sub") return !langs.includes("sub");
     if (dubSelect === "dub") return !langs.includes("dub");
     if (dubSelect === "hsub") return !langs.includes("hsub");
@@ -2022,7 +2363,10 @@ export default function InfoView({
             <span>{backText || "Back to Collection"}</span>
           </button>
         </div>
-        <div className="glass-panel u-style-30">
+        <div
+          className="glass-panel u-style-30"
+          style={{ maxWidth: "850px", margin: "0 auto", width: "100%" }}
+        >
           <img
             src="/images/image-404.png"
             alt="404 Not Found"
@@ -2051,32 +2395,32 @@ export default function InfoView({
             >
               <span>Go Back</span>
             </button>
-            {propTitle && onSearchFallback && (
-              <button
-                onClick={() => onSearchFallback(propTitle)}
-                className="btn-back u-style-34"
-                style={{
-                  backgroundColor: "var(--accent-blue, #3b82f6)",
-                  border: "none",
-                  margin: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                }}
-              >
-                <Search size={16} />
-                <span>Search Title</span>
-              </button>
-            )}
             {currentTags && currentTags.length > 0 && (
               <button
                 onClick={async () => {
+                  const promptTitle = hasDownloads
+                    ? "Delete & Remove from Library?"
+                    : "Remove from Library";
+                  const promptMessage = hasDownloads
+                    ? `Are you sure you want to remove "${details?.title || id}"? This will delete all downloaded episodes/chapters and folder as well as remove the entry from your database.`
+                    : `Are you sure you want to remove "${details?.title || id}" from your library?`;
+                  const confirmBtn = hasDownloads
+                    ? "Delete & Remove"
+                    : "Remove";
+
                   const confirmed = await swalConfirm(
-                    "Remove from Library",
-                    "Are you sure you want to remove this entry from your library/watchlist?",
+                    promptTitle,
+                    promptMessage,
+                    confirmBtn,
                   );
                   if (confirmed) {
-                    await saveTags("");
+                    await apiPost("/api/local/tags/add", {
+                      type,
+                      id,
+                      MalID: details?.malid || details?.MalID,
+                      CustomTag: "",
+                      deleteFiles: hasDownloads,
+                    });
                     if (onBack) onBack();
                   }
                 }}
@@ -2093,6 +2437,200 @@ export default function InfoView({
                 <Trash2 size={16} />
                 <span>Remove from Library</span>
               </button>
+            )}
+          </div>
+
+          {/* SIMILAR MAPPING SEARCH & MAL LINKING SECTION */}
+          <div
+            style={{
+              marginTop: "30px",
+              borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+              paddingTop: "20px",
+              width: "100%",
+              textAlign: "left",
+            }}
+          >
+            <h3
+              style={{
+                fontSize: "1.1rem",
+                fontWeight: "600",
+                marginBottom: "6px",
+                color: "#fff",
+              }}
+            >
+              Link to Database Mapping
+            </h3>
+            <p
+              style={{
+                fontSize: "0.85rem",
+                color: "#aaa",
+                marginBottom: "15px",
+              }}
+            >
+              Search for similar titles in mapping.db to link this entry and
+              restore metadata.
+            </p>
+
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleMappingSearch();
+              }}
+              style={{ display: "flex", gap: "10px", marginBottom: "20px" }}
+            >
+              <input
+                type="text"
+                value={mappingSearchQuery}
+                onChange={(e) => setMappingSearchQuery(e.target.value)}
+                placeholder="Edit title to search..."
+                style={{
+                  flex: 1,
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255, 255, 255, 0.2)",
+                  background: "rgba(0, 0, 0, 0.4)",
+                  color: "#fff",
+                  outline: "none",
+                }}
+              />
+              <button
+                type="submit"
+                disabled={isSearchingMapping}
+                className="btn-back"
+                style={{
+                  backgroundColor: "var(--accent-blue, #3b82f6)",
+                  border: "none",
+                  margin: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "0 18px",
+                  cursor: "pointer",
+                }}
+              >
+                <Search size={16} />
+                <span>{isSearchingMapping ? "Searching..." : "Search"}</span>
+              </button>
+            </form>
+
+            {isSearchingMapping ? (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "20px",
+                  color: "#888",
+                }}
+              >
+                Searching database mappings...
+              </div>
+            ) : mappingResults.length === 0 ? (
+              <div
+                style={{
+                  textAlign: "center",
+                  padding: "15px",
+                  color: "#666",
+                  fontSize: "0.9rem",
+                }}
+              >
+                No similar mapping results found for "{mappingSearchQuery}".
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                  gap: "15px",
+                  maxHeight: "360px",
+                  overflowY: "auto",
+                  paddingRight: "5px",
+                }}
+              >
+                {mappingResults.map((item, idx) => (
+                  <div
+                    key={item.malid || item.id || idx}
+                    style={{
+                      background: "rgba(255, 255, 255, 0.05)",
+                      borderRadius: "8px",
+                      padding: "10px",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      border: "1px solid rgba(255, 255, 255, 0.1)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "160px",
+                        borderRadius: "6px",
+                        overflow: "hidden",
+                        marginBottom: "8px",
+                        background: "#111",
+                      }}
+                    >
+                      <img
+                        src={
+                          item.image || item.image_url
+                            ? `/api/image?url=${encodeURIComponent(item.image || item.image_url)}`
+                            : "/images/image-404.png"
+                        }
+                        alt={item.title}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                        }}
+                        onError={(e) => {
+                          e.target.onerror = null;
+                          e.target.src = "/images/image-404.png";
+                        }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        fontSize: "0.8rem",
+                        fontWeight: "600",
+                        color: "#fff",
+                        marginBottom: "4px",
+                        display: "-webkit-box",
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: "vertical",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {item.title || item.id}
+                    </div>
+                    {item.malid && (
+                      <div
+                        style={{
+                          fontSize: "0.7rem",
+                          color: "#3b82f6",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        MAL ID: {item.malid}
+                      </div>
+                    )}
+                    <button
+                      onClick={() => handleLinkMappingItem(item)}
+                      disabled={isLinkingMapping}
+                      style={{
+                        width: "100%",
+                        padding: "8px",
+                        borderRadius: "6px",
+                        border: "none",
+                        backgroundColor: "var(--accent-green, #10b981)",
+                        color: "#fff",
+                        fontSize: "0.75rem",
+                        fontWeight: "600",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {isLinkingMapping ? "Linking..." : "Link & Open"}
+                    </button>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -2322,77 +2860,69 @@ export default function InfoView({
               </div>
 
               {/* Source Provider selector */}
-              {details?.provider && (
-                <div
-                  className="input-group u-style-38"
-                  ref={providerDropdownRef}
-                >
-                  <label className="input-label">Source Provider</label>
-                  {details.linkedProviders &&
-                  details.linkedProviders.length > 1 ? (
-                    <>
-                      <div
-                        className={`custom-dropdown-trigger ${isProviderDropdownOpen ? "open" : ""}`}
-                        onClick={() =>
-                          setIsProviderDropdownOpen(!isProviderDropdownOpen)
-                        }
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "8px",
-                        }}
-                      >
-                        {getProviderIcon(details.provider) && (
-                          <img
-                            src={getProviderIcon(details.provider)}
-                            alt=""
-                            style={{
-                              width: "16px",
-                              height: "16px",
-                              borderRadius: "3px",
-                              objectFit: "contain",
-                            }}
-                          />
-                        )}
-                        <span
-                          className="custom-dropdown-trigger-text"
-                          style={{ flex: 1 }}
-                        >
-                          {details.provider}
-                        </span>
-                        <ChevronDown
-                          className="custom-dropdown-chevron"
-                          size={16}
-                          style={{ flexShrink: 0 }}
-                        />
-                      </div>
+              <div className="input-group u-style-38" ref={providerDropdownRef}>
+                <label className="input-label">Source Provider</label>
+                {(() => {
+                  const activeProv =
+                    details?.provider ||
+                    (details?.linkedProviders &&
+                      details.linkedProviders[0]?.provider);
+                  const validLinked = (details?.linkedProviders || []).filter(
+                    (p, index, self) =>
+                      p.provider &&
+                      p.provider !== "provider" &&
+                      p.provider !== "local source" &&
+                      self.findIndex((t) => t.provider === p.provider) ===
+                        index,
+                  );
 
-                      {isProviderDropdownOpen && (
-                        <div className="custom-dropdown-menu">
-                          {details.linkedProviders
-                            .filter(
-                              (p, index, self) =>
-                                p.provider !== "provider" &&
-                                self.findIndex(
-                                  (t) => t.provider === p.provider,
-                                ) === index,
-                            )
-                            .map((p) => (
+                  if (validLinked.length > 1) {
+                    return (
+                      <>
+                        <div
+                          className={`custom-dropdown-trigger ${isProviderDropdownOpen ? "open" : ""}`}
+                          onClick={() =>
+                            setIsProviderDropdownOpen(!isProviderDropdownOpen)
+                          }
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                          }}
+                        >
+                          {getProviderIcon(activeProv) && (
+                            <img
+                              src={getProviderIcon(activeProv)}
+                              alt=""
+                              style={{
+                                width: "16px",
+                                height: "16px",
+                                borderRadius: "3px",
+                                objectFit: "contain",
+                              }}
+                            />
+                          )}
+                          <span
+                            className="custom-dropdown-trigger-text"
+                            style={{ flex: 1 }}
+                          >
+                            {activeProv}
+                          </span>
+                          <ChevronDown
+                            className="custom-dropdown-chevron"
+                            size={16}
+                            style={{ flexShrink: 0 }}
+                          />
+                        </div>
+
+                        {isProviderDropdownOpen && (
+                          <div className="custom-dropdown-menu">
+                            {validLinked.map((p) => (
                               <div
                                 key={p.provider}
-                                className={`custom-dropdown-item ${details.provider === p.provider ? "selected" : ""}`}
+                                className={`custom-dropdown-item ${activeProv === p.provider ? "selected" : ""}`}
                                 onClick={() => {
-                                  const selectedRecord =
-                                    details.linkedProviders.find(
-                                      (record) =>
-                                        record.provider === p.provider,
-                                    );
-                                  if (selectedRecord) {
-                                    handleProviderSwitch(
-                                      selectedRecord.id,
-                                      p.provider,
-                                    );
-                                  }
+                                  handleProviderSwitch(p.id, p.provider);
                                   setIsProviderDropdownOpen(false);
                                 }}
                                 style={{
@@ -2416,18 +2946,40 @@ export default function InfoView({
                                 <span>{p.provider}</span>
                               </div>
                             ))}
-                        </div>
-                      )}
-                    </>
-                  ) : (
-                    <div className="provider-static-badge">
-                      {details.provider === "local source"
-                        ? "📁 Local Source"
-                        : details.provider}
-                    </div>
-                  )}
-                </div>
-              )}
+                          </div>
+                        )}
+                      </>
+                    );
+                  } else if (activeProv) {
+                    return (
+                      <div className="provider-static-badge">
+                        {activeProv === "local source" ? (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                            }}
+                          >
+                            <Folder size={12} /> Local Source
+                          </span>
+                        ) : (
+                          activeProv
+                        )}
+                      </div>
+                    );
+                  } else {
+                    return (
+                      <div
+                        className="provider-static-badge"
+                        style={{ opacity: 0.8, color: "var(--text-muted)" }}
+                      >
+                        No provider has this aired yet
+                      </div>
+                    );
+                  }
+                })()}
+              </div>
             </div>
           </div>
 
@@ -3392,21 +3944,71 @@ export default function InfoView({
       {isImageExpanded && details?.image && (
         <div
           className="image-expand-modal-overlay"
-          onClick={() => setIsImageExpanded(false)}
+          onClick={(e) => {
+            if (hasDraggedRef.current) {
+              hasDraggedRef.current = false;
+              return;
+            }
+            if (e.target === e.currentTarget) {
+              setIsImageExpanded(false);
+              setZoomScale(1);
+              setZoomPos({ x: 0, y: 0 });
+            }
+          }}
         >
           <button
+            type="button"
             className="image-expand-close-btn"
-            onClick={() => setIsImageExpanded(false)}
-            aria-label="Close"
+            onClick={(e) => {
+              e.stopPropagation();
+              setIsImageExpanded(false);
+              setZoomScale(1);
+              setZoomPos({ x: 0, y: 0 });
+            }}
+            aria-label="Close image view"
           >
-            <X size={24} />
+            <X size={22} />
           </button>
-          <img
-            src={details.image}
-            alt={details?.title || "Expanded Cover"}
-            className="image-expand-modal-content"
-            onClick={(e) => e.stopPropagation()}
-          />
+
+          <div
+            className="image-expand-viewport"
+            onWheel={handleWheelZoom}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (hasDraggedRef.current) {
+                hasDraggedRef.current = false;
+                return;
+              }
+              if (zoomScale === 1) {
+                setZoomScale(2.2);
+              } else {
+                setZoomScale(1);
+                setZoomPos({ x: 0, y: 0 });
+              }
+            }}
+            style={{
+              cursor: zoomScale > 1 ? "grab" : "zoom-in",
+            }}
+          >
+            <img
+              src={details.image}
+              alt={details?.title || "Expanded Cover"}
+              className="image-expand-modal-content"
+              style={{
+                transform: `translate(${zoomPos.x}px, ${zoomPos.y}px) scale(${zoomScale})`,
+                transition: isDraggingRef.current
+                  ? "none"
+                  : "transform 0.2s ease-out",
+              }}
+            />
+          </div>
         </div>
       )}
     </div>

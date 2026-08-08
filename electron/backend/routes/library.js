@@ -501,6 +501,45 @@ router.post("/api/local/tags/add", async (req, res) => {
       }
     }
 
+    if (
+      req.body.deleteFiles ||
+      (CustomTag !== undefined && (tagValue === "" || tagValue === "[]"))
+    ) {
+      try {
+        const baseDir = await getBaseDownloadDir();
+        const typeDir = await resolveDownloadFolder(type, id, null, baseDir);
+        if (typeDir && fs.existsSync(typeDir)) {
+          await fs.promises.rm(typeDir, { recursive: true, force: true });
+          logger.info(`[tags/add] Deleted download folder: ${typeDir}`);
+        }
+      } catch (errDir) {
+        logger.warn(
+          `[tags/add] Could not delete folder for ${id}: ${errDir.message}`,
+        );
+      }
+
+      if (req.body.deleteFiles && global.db) {
+        try {
+          const malIdStr = resolvedMalID ? String(resolvedMalID) : null;
+          global.db
+            .prepare(
+              `DELETE FROM ${type} WHERE id = ? OR folder_name = ?${malIdStr ? " OR MalID = ?" : ""}`,
+            )
+            .run(...(malIdStr ? [id, id, malIdStr] : [id, id]));
+
+          global.db
+            .prepare(
+              `DELETE FROM unlinked_mal_ids WHERE id = ?${malIdStr ? " OR malid = ?" : ""}`,
+            )
+            .run(...(malIdStr ? [id, malIdStr] : [id]));
+        } catch (errDb) {
+          logger.warn(
+            `[tags/add] Could not delete DB entry for ${id}: ${errDb.message}`,
+          );
+        }
+      }
+    }
+
     try {
       const resolvedProvider = await providerFetch(
         type,

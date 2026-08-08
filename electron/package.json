@@ -1,6 +1,6 @@
 {
   "name": "strawverse",
-  "version": "9.1.5",
+  "version": "9.5.0",
   "description": "Download anime in batches & its fast :3",
   "main": "gui.js",
   "scripts": {
@@ -114,5 +114,10 @@
     "form-data": "^4.0.6",
     "builder-util-runtime": "^9.7.0",
     "js-yaml": "^4.2.0"
+  },
+  "allowScripts": {
+    "ffmpeg-static@5.3.0": true,
+    "github:devsnek/node-register-scheme#e7cc9a63a1f512565da44cb57316d9fb10750e17": true,
+    "electron-winstaller@5.4.0": true
   }
 }

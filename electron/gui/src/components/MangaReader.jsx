@@ -10,6 +10,7 @@ import {
   Globe,
   Maximize2,
   Minimize2,
+  AlertTriangle,
 } from "lucide-react";
 import "./css/MangaReader.css";
 import { apiPost } from "../utils/common";
@@ -121,10 +122,13 @@ export default function MangaReader({
           ]);
           const s = res?.settings;
           if (s) {
-            if (s.autoLoadNextChapter !== undefined) setAutoLoadNext(s.autoLoadNextChapter);
+            if (s.autoLoadNextChapter !== undefined)
+              setAutoLoadNext(s.autoLoadNextChapter);
             if (s.mangaReaderLayout) setReaderLayout(s.mangaReaderLayout);
-            if (s.mangaReaderWidth) setReaderWidth(parseInt(s.mangaReaderWidth, 10));
-            if (s.mangaReaderDirection) setReaderDirection(s.mangaReaderDirection);
+            if (s.mangaReaderWidth)
+              setReaderWidth(parseInt(s.mangaReaderWidth, 10));
+            if (s.mangaReaderDirection)
+              setReaderDirection(s.mangaReaderDirection);
           }
         }
       } catch (err) {
@@ -975,7 +979,7 @@ export default function MangaReader({
           </div>
         ) : errorMsg ? (
           <div className="status-overlay">
-            <span className="error-icon">⚠️</span>
+            <AlertTriangle className="error-icon" size={32} />
             <p className="error-msg">{errorMsg}</p>
             <button
               onClick={() => fetchChapterPages(null, false)}

@@ -2,19 +2,55 @@ const { queryOne, run } = require("./db");
 const { logger } = require("./AppLogger");
 
 const cache = {};
-const successStreak = {};
-
 const circuitBreaker = {};
+const throughputCache = {};
+const domainMaxCap = {};
+const coolDownCache = {};
+
+function markCoolingDown(key, durationMs = 60000) {
+  if (!key) return;
+  const cleanKey = String(key).trim().toLowerCase();
+  coolDownCache[cleanKey] = Date.now() + durationMs;
+
+  if (cache[cleanKey]) {
+    const current = cache[cleanKey];
+    const capped = Math.max(1, Math.floor(current / 2));
+    domainMaxCap[cleanKey] = capped;
+    cache[cleanKey] = capped;
+    logger.warn(
+      `[DomainConcurrency] Rate limit hit on '${cleanKey}'. Capped max concurrency ceiling to ${capped} and set ${Math.round(durationMs / 1000)}s cooldown.`,
+    );
+  } else {
+    domainMaxCap[cleanKey] = 2;
+    cache[cleanKey] = 2;
+  }
+}
+
+function isCoolingDown(key) {
+  if (!key) return false;
+  const cleanKey = String(key).trim().toLowerCase();
+  const until = coolDownCache[cleanKey];
+  if (until && Date.now() < until) {
+    return true;
+  }
+  if (until && Date.now() >= until) {
+    delete coolDownCache[cleanKey];
+  }
+  return false;
+}
+
+function getCooldownRemaining(key) {
+  if (!key) return 0;
+  const cleanKey = String(key).trim().toLowerCase();
+  const until = coolDownCache[cleanKey];
+  if (until && Date.now() < until) {
+    return Math.ceil((until - Date.now()) / 1000);
+  }
+  return 0;
+}
 
 function isCircuitOpen(domain) {
-  const cb = circuitBreaker[domain];
-  if (!cb || cb.openedAt === null) return false;
-  if (Date.now() - cb.openedAt > 60_000) {
-    cb.openedAt = null;
-    cb.failures = 0;
-    return false;
-  }
-  return true;
+  return false;
 }
 
 function resetCircuit(domain) {
@@ -24,108 +60,171 @@ function resetCircuit(domain) {
   }
 }
 
-async function waitForCircuit(domain) {
-  const cb = circuitBreaker[domain];
-  if (!cb || cb.openedAt === null) return;
-  const elapsed = Date.now() - cb.openedAt;
-  const cooldown = 60_000;
-  if (elapsed < cooldown) {
-    const waitMs = cooldown - elapsed + 1000;
-    logger.warn(
-      `[DomainConcurrency] Circuit is OPEN for '${domain}'. Pausing download requests for ${Math.ceil(waitMs / 1000)}s until rate limits clear...`,
-    );
-    await new Promise((res) => setTimeout(res, waitMs));
-    cb.openedAt = null;
-    cb.failures = 0;
+function resetDomainConcurrency(domain) {
+  if (!domain) {
+    for (const d of Object.keys(cache)) {
+      delete cache[d];
+      delete throughputCache[d];
+      resetCircuit(d);
+    }
+    return;
   }
+  delete cache[domain];
+  delete throughputCache[domain];
+  resetCircuit(domain);
+}
+
+async function waitForCircuit(domain) {
+  resetCircuit(domain);
 }
 
 /**
- * Extract clean domain name from URL or Referer
+ * Extract clean root domain name from URL or Referer so subdomains share rate limits & speed tuning
  */
 function extractDomain(urlStr, refererStr) {
-  const combined = (urlStr || "") + " " + (refererStr || "");
-  let domain = "";
+  let hostname = "";
   try {
     if (urlStr) {
-      domain = new URL(urlStr).hostname.replace(/^www\./i, "").toLowerCase();
+      hostname = new URL(urlStr).hostname.replace(/^www\./i, "").toLowerCase();
     }
   } catch (e) {}
 
-  if (!domain && refererStr) {
+  if (!hostname && refererStr) {
     try {
-      domain = new URL(refererStr).hostname
+      hostname = new URL(refererStr).hostname
         .replace(/^www\./i, "")
         .toLowerCase();
     } catch (e) {}
   }
 
-  if (domain.includes("owocdn") || domain.includes("uwucdn")) {
-    domain = "kwik.cx";
-  } else if (domain.includes("animepahe")) {
-    domain = "animepahe.pw";
+  if (!hostname) return "default";
+
+  if (hostname.includes("owocdn") || hostname.includes("uwucdn")) {
+    return "kwik.cx";
+  } else if (hostname.includes("animepahe")) {
+    return "animepahe.pw";
   }
-  return domain || "default";
+
+  const parts = hostname.split(".");
+  if (parts.length > 2) {
+    const tld2 = parts.slice(-2).join(".");
+    if (
+      ["co.uk", "com.br", "co.jp", "net.au", "or.kr", "com.au"].includes(
+        tld2,
+      ) &&
+      parts.length > 3
+    ) {
+      return parts.slice(-3).join(".");
+    }
+    return parts.slice(-2).join(".");
+  }
+
+  return hostname;
 }
 
-/**
- * Get current optimal concurrency for a domain (from DB/cache or initial default max limit)
- */
-async function getDomainConcurrency(domain, defaultMax = 16) {
-  if (!domain) return defaultMax;
+function getDomainConcurrency(domain, defaultInitial = 2) {
+  if (!domain) return Math.max(1, defaultInitial);
   if (cache[domain] !== undefined) {
-    return cache[domain];
+    return Math.max(1, cache[domain]);
   }
 
   try {
-    const row = await queryOne(
+    const row = queryOne(
       "SELECT current_concurrency, max_concurrency FROM DomainConcurrency WHERE domain = ? LIMIT 1",
       [domain],
     );
-    if (row && row.current_concurrency) {
-      cache[domain] = Math.max(1, Number(row.current_concurrency));
+    if (row) {
+      let avgConcurrency = defaultInitial;
+      if (row.current_concurrency && row.max_concurrency) {
+        avgConcurrency = Math.max(
+          1,
+          Math.round(
+            (Number(row.current_concurrency) + Number(row.max_concurrency)) / 2,
+          ),
+        );
+      } else if (row.current_concurrency) {
+        avgConcurrency = Math.max(1, Number(row.current_concurrency));
+      }
+      cache[domain] = avgConcurrency;
       return cache[domain];
     }
   } catch (e) {}
 
-  if (/animepahe|pahe|kwik|owocdn|uwucdn/i.test(domain)) {
-    cache[domain] = 2;
-  } else {
-    cache[domain] = defaultMax;
-  }
+  cache[domain] = Math.max(1, defaultInitial);
   return cache[domain];
 }
 
-async function recordDomainFailure(domain, currentVal) {
+function setDomainErrorCap(domain, failedAtConcurrency) {
   if (!domain) return;
-  const current = currentVal || cache[domain] || 16;
-  const newConcurrency = Math.max(1, Math.floor(current / 2));
-  cache[domain] = newConcurrency;
-  successStreak[domain] = 0;
-
-  if (current === 1 && newConcurrency === 1) {
-    if (!circuitBreaker[domain])
-      circuitBreaker[domain] = { failures: 0, openedAt: null };
-    const cb = circuitBreaker[domain];
-    cb.failures++;
-    if (cb.failures >= 3 && cb.openedAt === null) {
-      cb.openedAt = Date.now();
-      logger.warn(
-        `[DomainConcurrency] Circuit OPEN for '${domain}' after ${cb.failures} consecutive failures at min concurrency. Suppressing retries for ${60_000 / 1000}s.`,
-      );
-    } else if (cb.openedAt === null) {
-      logger.warn(
-        `[DomainConcurrency] Rate limit/failure on domain '${domain}'. Already at min concurrency (1). Failure ${cb.failures}/3.`,
-      );
-    }
-  } else {
-    logger.warn(
-      `[DomainConcurrency] Rate limit/failure on domain '${domain}'. Reduced concurrency from ${current} -> ${newConcurrency}`,
-    );
+  // Back off by 15% (or at least -3) below the point where CDN dropped streams
+  const cap = Math.max(
+    1,
+    Math.min(failedAtConcurrency - 3, Math.floor(failedAtConcurrency * 0.85)),
+  );
+  if (!domainMaxCap[domain] || cap < domainMaxCap[domain]) {
+    domainMaxCap[domain] = cap;
   }
+  cache[domain] = domainMaxCap[domain];
+  logger.warn(
+    `[DomainConcurrency] Error cap set for '${domain}' at ${domainMaxCap[domain]} (failed at ${failedAtConcurrency})`,
+  );
+}
+
+function stepDownConcurrency(domain) {
+  if (!domain) return 1;
+  const current = cache[domain] || 2;
+  const targetCap = domainMaxCap[domain]
+    ? Math.min(current, domainMaxCap[domain])
+    : Math.max(1, current - 3);
+  const stepped = Math.max(1, targetCap);
+  cache[domain] = stepped;
+  logger.info(
+    `[DomainConcurrency] Stepped down concurrency for '${domain}': ${current} -> ${stepped}`,
+  );
+  return stepped;
+}
+
+function setRecoveryCap(domain) {
+  if (!domain) return;
+  const current = cache[domain] || 1;
+  const newCap = domainMaxCap[domain]
+    ? Math.min(current, domainMaxCap[domain])
+    : current;
+  domainMaxCap[domain] = newCap;
+  cache[domain] = newCap;
+  delete throughputCache[domain];
+
+  logger.warn(
+    `[DomainConcurrency] Recovery cap set for '${domain}': concurrency capped at ${newCap}. Future scaling capped at ${newCap}.`,
+  );
 
   try {
-    await run(
+    run(
+      `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
+       VALUES (?, ?, ?, 1, 0, ?)
+       ON CONFLICT(domain) DO UPDATE SET
+         current_concurrency = excluded.current_concurrency,
+         max_concurrency = excluded.max_concurrency,
+         updated_at = excluded.updated_at`,
+      [domain, newCap, newCap, Date.now()],
+    );
+  } catch (e) {}
+}
+
+function recordDomainFailure(domain, currentVal, statusCode = null) {
+  if (!domain) return;
+  const current = currentVal || cache[domain] || 2;
+  const newConcurrency = Math.max(1, Math.floor(current / 2));
+  cache[domain] = newConcurrency;
+  domainMaxCap[domain] = newConcurrency;
+  delete throughputCache[domain];
+
+  logger.warn(
+    `[DomainConcurrency] Failure/rate limit on domain '${domain}'. Reduced concurrency from ${current} -> ${newConcurrency}`,
+  );
+
+  try {
+    run(
       `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
        VALUES (?, ?, ?, 1, 1, ?)
        ON CONFLICT(domain) DO UPDATE SET
@@ -140,114 +239,70 @@ async function recordDomainFailure(domain, currentVal) {
       `[DomainConcurrency] Error saving failure for ${domain}: ${e.message}`,
     );
   }
-  try {
-    sendDomainConcurrencyReport(domain);
-  } catch (e) {}
 }
 
-async function recordDomainSuccess(domain, maxLimit = 16) {
+function recordDomainBatchSuccess(domain, batchThroughput = null) {
   if (!domain) return;
   resetCircuit(domain);
-  const current = cache[domain] || 2;
-  successStreak[domain] = (successStreak[domain] || 0) + 1;
+  const current = cache[domain] || 1;
+  let newConcurrency = current;
 
-  if (successStreak[domain] >= 20 && current < maxLimit) {
-    const newConcurrency = Math.min(maxLimit, current + 1);
-    cache[domain] = newConcurrency;
-    successStreak[domain] = 0;
+  if (batchThroughput && batchThroughput > 0) {
+    const prevThroughput = throughputCache[domain] || null;
+    if (prevThroughput) {
+      const speedDiffRatio =
+        (batchThroughput - prevThroughput) / prevThroughput;
 
-    logger.info(
-      `[DomainConcurrency] Smooth download streak on domain '${domain}'. Scaled up concurrency from ${current} -> ${newConcurrency}`,
-    );
-
-    try {
-      await run(
-        `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
-         VALUES (?, ?, ?, 1, 0, ?)
-         ON CONFLICT(domain) DO UPDATE SET
-           current_concurrency = excluded.current_concurrency,
-           max_concurrency = MAX(DomainConcurrency.max_concurrency, excluded.current_concurrency),
-           total_requests = DomainConcurrency.total_requests + 1,
-           updated_at = excluded.updated_at`,
-        [domain, newConcurrency, newConcurrency, Date.now()],
-      );
-    } catch (e) {}
-  } else {
-    try {
-      await run(
-        `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
-         VALUES (?, ?, ?, 1, 0, ?)
-         ON CONFLICT(domain) DO UPDATE SET
-           total_requests = DomainConcurrency.total_requests + 1,
-           updated_at = excluded.updated_at`,
-        [domain, current, current, Date.now()],
-      );
-    } catch (e) {}
-  }
-  try {
-    sendDomainConcurrencyReport(domain);
-  } catch (e) {}
-}
-
-const lastReported = {};
-
-async function sendDomainConcurrencyReport(domain) {
-  if (!domain || domain === "default") return;
-  const now = Date.now();
-  if (lastReported[domain] && now - lastReported[domain] < 300_000) {
-    return;
-  }
-  lastReported[domain] = now;
-
-  try {
-    const row = await queryOne(
-      "SELECT current_concurrency, max_concurrency, total_requests, failed_requests FROM DomainConcurrency WHERE domain = ? LIMIT 1",
-      [domain],
-    );
-    if (!row) return;
-
-    const axios = global.axios || require("axios");
-    await axios
-      .post(
-        "https://strawverse.theyogmehta.online/api/concurrency/report",
-        {
-          domain,
-          current_concurrency: row.current_concurrency,
-          min_concurrency: 1,
-          max_concurrency: row.max_concurrency || row.current_concurrency,
-          total_requests: row.total_requests || 0,
-          failed_requests: row.failed_requests || 0,
-        },
-        { timeout: 10000 },
-      )
-      .catch(() => {});
-  } catch (e) {}
-}
-
-async function applyServerDomainConcurrency(domainMap) {
-  if (!domainMap || typeof domainMap !== "object") return;
-  for (const [domain, stats] of Object.entries(domainMap)) {
-    if (!domain || !stats) continue;
-    const rec = Number(
-      stats.recommended_concurrency || stats.current_concurrency || 2,
-    );
-    if (rec > 0) {
-      cache[domain] = rec;
-      try {
-        await run(
-          `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
-           VALUES (?, ?, ?, 0, 0, ?)
-           ON CONFLICT(domain) DO UPDATE SET
-             current_concurrency = excluded.current_concurrency,
-             updated_at = excluded.updated_at`,
-          [domain, rec, stats.max_concurrency || rec, Date.now()],
+      if (speedDiffRatio > 0.08) {
+        newConcurrency = current + 1;
+        logger.info(
+          `[DomainConcurrency] Download speed improved (+${(speedDiffRatio * 100).toFixed(1)}%, ${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s). Scaled up concurrency on '${domain}' from ${current} -> ${newConcurrency}`,
         );
-      } catch (e) {}
+      } else if (speedDiffRatio < -0.2 && current > 1) {
+        newConcurrency = Math.max(1, current - 1);
+        logger.warn(
+          `[DomainConcurrency] Speed degraded (${(speedDiffRatio * 100).toFixed(1)}%, ${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s) on '${domain}'. Stepped down concurrency from ${current} -> ${newConcurrency}`,
+        );
+      } else {
+        newConcurrency = current;
+        logger.info(
+          `[DomainConcurrency] Bandwidth optimal (${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s). Maintaining concurrency on '${domain}' at ${current}`,
+        );
+      }
+      throughputCache[domain] = 0.4 * batchThroughput + 0.6 * prevThroughput;
+    } else {
+      throughputCache[domain] = batchThroughput;
+      newConcurrency = current;
+      logger.info(
+        `[DomainConcurrency] Initial speed sample (${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s). Concurrency on '${domain}' set to ${current}`,
+      );
     }
+  } else {
+    newConcurrency = current;
   }
-  logger.info(
-    `[DomainConcurrency] Synced ${Object.keys(domainMap).length} crowdsourced domain concurrency rules from server.`,
-  );
+
+  if (domainMaxCap[domain]) {
+    newConcurrency = Math.min(newConcurrency, domainMaxCap[domain]);
+  }
+
+  cache[domain] = newConcurrency;
+
+  try {
+    run(
+      `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
+       VALUES (?, ?, ?, 1, 0, ?)
+       ON CONFLICT(domain) DO UPDATE SET
+         current_concurrency = excluded.current_concurrency,
+         max_concurrency = MAX(DomainConcurrency.max_concurrency, excluded.current_concurrency),
+         total_requests = DomainConcurrency.total_requests + 1,
+         updated_at = excluded.updated_at`,
+      [domain, newConcurrency, newConcurrency, Date.now()],
+    );
+  } catch (e) {}
+}
+
+function recordDomainSuccess(domain) {
+  resetCircuit(domain);
 }
 
 module.exports = {
@@ -255,8 +310,14 @@ module.exports = {
   getDomainConcurrency,
   recordDomainFailure,
   recordDomainSuccess,
+  recordDomainBatchSuccess,
   isCircuitOpen,
   waitForCircuit,
-  sendDomainConcurrencyReport,
-  applyServerDomainConcurrency,
+  resetDomainConcurrency,
+  markCoolingDown,
+  isCoolingDown,
+  getCooldownRemaining,
+  setDomainErrorCap,
+  stepDownConcurrency,
+  setRecoveryCap,
 };

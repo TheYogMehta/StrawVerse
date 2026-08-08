@@ -1,5 +1,26 @@
 # Changelog
 
+# [9.5.0] - 2026-08-08
+
+### Dynamic Theme Engine & Preset Colors
+
+- **Custom Color Themes & Presets:** Added a full dynamic theme engine with selectable color presets: Midnight Obsidian (Default), Cyberpunk Neon, Emerald Forest, Sunset Romance, Crimson Royale, and Rose Gold.
+- **Custom Accent & Background Tuning:** Customize individual UI color tokens including Primary Accent, Secondary Accent, Sidebar Active item, Text color, and Background color with live preview cards.
+
+### Info View & Catalog Management
+
+- **Expandable Cover Image Modal:** View high-resolution cover art with interactive Pan & Zoom controls (Zoom In, Zoom Out, Drag/Pan, and Reset).
+- **Manual Mapping & Linking Tool:** Search and link titles directly to MyAnimeList / central mapping entries from the InfoView details panel. Automatically resolves provider IDs and updates local watch/read history and intro skip references.
+- **Smart Library Deletion & Disk Cleanup:** Removing a title from your library now prompts with an optional confirmation to delete all downloaded files, episode folders on disk, and database entries in one clean action.
+- **Live Download Status Sync:** InfoView episode and chapter lists now reflect active and queued download statuses in real-time with quick actions to view or open completed files.
+
+### Downloader & Download Tracker
+
+- **Multi-Domain Parallel Queue & Serial FFmpeg Merge Lock:** Queue items on unique server domains now download segments in parallel (up to 5 parallel downloads), while items on identical domains queue up sequentially to avoid rate limits. Heavy post-processing (file concatenation, subtitle remuxing, and FFmpeg execution) is protected by a global mutex lock and runs strictly 1 by 1.
+- **Dynamic Speed-Aware Concurrency & Root-Domain Normalization:** Segment concurrency now automatically auto-tunes per domain based on real-time WiFi download throughput (MB/s) rather than scaling up blindly. Automatically holds concurrency at optimal levels when user connection bandwidth is saturated, steps down on socket congestion, and normalizes CDN subdomains (e.g. `s1.megap.mikora.top` -> `mikora.top`) so subdomains share rate limits across identical server IPs.
+- **Live Segment Retry Countdown:** Displays a live countdown indicator (e.g. "Retrying in X s") when segment downloads fail or encounter rate limits.
+- **Active Task Telemetry & Concurrency Info:** Active download cards now show live worker concurrency, last tested concurrency limits, and dynamic scaling metrics.
+
 # [9.1.5] - 2026-08-03
 
 ### Downloader & Queue Management

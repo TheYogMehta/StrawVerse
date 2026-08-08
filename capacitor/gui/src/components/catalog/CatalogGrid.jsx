@@ -8,6 +8,7 @@ import {
   X,
   Bookmark,
   Plus,
+  SearchX,
 } from "lucide-react";
 
 export default function CatalogGrid({
@@ -51,7 +52,7 @@ export default function CatalogGrid({
   if (data?.results?.length === 0) {
     return (
       <div className="empty-center-panel">
-        <span className="u-style-24">🍉</span>
+        <SearchX size={36} className="u-style-24" />
         <h3>
           {provider === "local" ? "Empty Collection" : "No results found"}
         </h3>
@@ -208,7 +209,7 @@ export default function CatalogGrid({
             currentPage >= (data.totalPages || 1) &&
             data.results.length > 0 && (
               <div className="infinite-end-label">
-                You've reached the end ✨
+                You've reached the end
               </div>
             )}
         </div>

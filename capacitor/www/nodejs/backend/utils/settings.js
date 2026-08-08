@@ -241,12 +241,17 @@ async function SettingsLoad() {
 
 // fetch which provider
 async function providerFetch(Type = "Anime", provider) {
+  if (provider && typeof provider === "object" && provider.provider) {
+    return provider;
+  }
   const providers =
     Type === "Anime" ? global.Anime_providers : global.Manga_providers;
   const activeProvider = await reconcileActiveProvider(Type);
+  const providerKey =
+    typeof provider === "object" ? provider?.provider_name : provider;
   const providerName =
-    provider && Object.prototype.hasOwnProperty.call(providers, provider)
-      ? provider
+    providerKey && Object.prototype.hasOwnProperty.call(providers, providerKey)
+      ? providerKey
       : activeProvider;
 
   return {

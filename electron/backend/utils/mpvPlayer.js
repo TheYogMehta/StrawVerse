@@ -259,6 +259,9 @@ const connectIpc = (ipcPath, retryCount = 0) => {
 
 const resolvePathOrUrl = (rawUrl) => {
   if (!rawUrl) return "";
+  if (path.isAbsolute(rawUrl) || fs.existsSync(rawUrl)) {
+    return rawUrl;
+  }
   if (rawUrl.startsWith("http://") || rawUrl.startsWith("https://")) {
     return rawUrl;
   }
@@ -281,6 +284,14 @@ const resolvePathOrUrl = (rawUrl) => {
 // Proxy external URLs through local Express → Electron's net stack (bypasses Cloudflare).
 const toProxyUrl = (url, customHeaders) => {
   if (!url || !url.startsWith("http")) return url;
+  if (
+    url.includes("127.0.0.1") ||
+    url.includes("localhost") ||
+    path.isAbsolute(url) ||
+    fs.existsSync(url)
+  ) {
+    return url;
+  }
   const port = global.PORT || 3000;
   const base = `http://127.0.0.1:${port}/api/stream`;
   const ref = customHeaders?.Referer || customHeaders?.referer || "";
@@ -348,6 +359,79 @@ async function playInMpv(window, options) {
   let activeSubtitles = Array.isArray(options.subtitles)
     ? [...options.subtitles]
     : [];
+
+  const isLocalExplicit = options.isDownloaded || provider === "local source";
+
+  if (activeSources.length === 0 && mediaId) {
+    try {
+      const { getSourceById } = require("./Metadata");
+      const { settingfetch } = require("./settings");
+      const config = await settingfetch();
+      const localData = await getSourceById(
+        "Anime",
+        config?.CustomDownloadLocation,
+        mediaId,
+        episode,
+        subdub,
+      );
+      if (
+        localData &&
+        localData.filepath &&
+        fs.existsSync(localData.filepath)
+      ) {
+        logger.info(
+          `[MPV] Found local downloaded file for Ep ${episode}: ${localData.filepath}`,
+        );
+        activeSources = [
+          {
+            url: localData.filepath,
+            quality: "Local",
+            server: "Local",
+            provider: "Local",
+          },
+        ];
+        if (
+          Array.isArray(localData.subtitleFiles) &&
+          localData.subtitleFiles.length > 0
+        ) {
+          activeSubtitles = localData.subtitleFiles;
+        }
+      } else if (isLocalExplicit) {
+        const errMsg = `Downloaded local video file for Episode ${episode} was not found on disk.`;
+        logger.error(`[MPV Error] ${errMsg}`);
+        if (window && window.webContents) {
+          window.webContents.send("mpv-error", { message: errMsg });
+        }
+        return { error: errMsg };
+      }
+    } catch (e) {
+      logger.info(`[MPV] Error checking local file: ${e.message}`);
+      if (isLocalExplicit) {
+        const errMsg = `Failed to locate local downloaded file for Episode ${episode}: ${e.message}`;
+        logger.error(`[MPV Error] ${errMsg}`);
+        if (window && window.webContents) {
+          window.webContents.send("mpv-error", { message: errMsg });
+        }
+        return { error: errMsg };
+      }
+    }
+  }
+
+  if (isLocalExplicit && activeSources.length === 0) {
+    const errMsg = `Downloaded file for Episode ${episode} is not available on disk.`;
+    logger.error(`[MPV Error] ${errMsg}`);
+    if (window && window.webContents) {
+      window.webContents.send("mpv-error", { message: errMsg });
+    }
+    return { error: errMsg };
+  }
+
+  if (activeSources.length === 0 && url) {
+    activeSources.push({
+      url: url,
+      quality: "default",
+    });
+  }
 
   if (activeSources.length === 0 && (episodeId || episode)) {
     try {
@@ -422,41 +506,78 @@ async function playInMpv(window, options) {
   let playTargetUrl = url;
 
   if (activeSources.length > 0) {
-    const primary = activeSources[0];
-    if (primary && (primary.isUnresolved || !primary.url)) {
-      try {
-        logger.info(
-          `[MPV Startup] Resolving primary server "${primary.name || primary.quality}"...`,
-        );
-        const Animeprovider = await providerFetch("Anime", provider);
-        const resolved = await processServer(Animeprovider, primary);
-        if (resolved && resolved.url) {
-          try {
-            const streamDomain = new URL(resolved.url).hostname;
-            const ref =
-              resolved.headers?.Referer ||
-              resolved.headers?.referer ||
-              "https://megaplay.buzz/";
-            if (global.setDynamicReferer) {
-              global.setDynamicReferer(streamDomain, ref);
-              global.setFallbackReferer(ref);
+    let resolvedSuccess = false;
+    for (let i = 0; i < activeSources.length; i++) {
+      const src = activeSources[i];
+      if (!src) continue;
+      if (src.isUnresolved || !src.url) {
+        try {
+          logger.info(
+            `[MPV Startup] Resolving server #${i + 1} "${src.name || src.quality || "Server"}"...`,
+          );
+          const Animeprovider = await providerFetch("Anime", provider);
+          const resolved = await processServer(Animeprovider, src);
+          if (resolved && resolved.url) {
+            try {
+              const streamDomain = new URL(resolved.url).hostname;
+              const ref =
+                resolved.headers?.Referer ||
+                resolved.headers?.referer ||
+                "https://megaplay.buzz/";
+              if (global.setDynamicReferer) {
+                global.setDynamicReferer(streamDomain, ref);
+                global.setFallbackReferer(ref);
+              }
+            } catch (e) {}
+            if (
+              Array.isArray(resolved.subtitles) &&
+              resolved.subtitles.length > 0
+            ) {
+              activeSubtitles.push(...resolved.subtitles);
             }
-          } catch (e) {}
-          if (
-            Array.isArray(resolved.subtitles) &&
-            resolved.subtitles.length > 0
-          ) {
-            activeSubtitles.push(...resolved.subtitles);
+            activeSources[i] = { ...src, ...resolved, isUnresolved: false };
+            if (i > 0) {
+              const [resolvedSrc] = activeSources.splice(i, 1);
+              activeSources.unshift(resolvedSrc);
+            }
+            resolvedSuccess = true;
+            break;
+          } else {
+            logger.warn(
+              `[MPV Startup] Server #${i + 1} "${src.name || src.quality}" resolution failed or returned no stream URL.`,
+            );
           }
-          activeSources[0] = { ...primary, ...resolved, isUnresolved: false };
+        } catch (e) {
+          logger.error(
+            `Failed to resolve server #${i + 1} ${src.name || src.quality} for MPV: ${e.message}`,
+          );
         }
-      } catch (e) {
-        logger.error(
-          `Failed to resolve primary server ${primary.name || primary.quality} for MPV: ${e.message}`,
-        );
+      } else {
+        resolvedSuccess = true;
+        if (i > 0) {
+          const [resolvedSrc] = activeSources.splice(i, 1);
+          activeSources.unshift(resolvedSrc);
+        }
+        break;
       }
     }
-    playTargetUrl = activeSources[0]?.url || url;
+
+    if (!resolvedSuccess || !activeSources[0]?.url) {
+      const errMsg = `Failed to resolve any valid stream source for ${title} Ep ${episode}.`;
+      logger.error(`[MPV Error] ${errMsg}`);
+      if (window && window.webContents) {
+        window.webContents.send("mpv-error", { message: errMsg });
+      }
+      return { error: errMsg };
+    }
+    playTargetUrl = activeSources[0].url;
+  } else if (!url) {
+    const errMsg = `No video sources available to play for ${title} Ep ${episode}.`;
+    logger.error(`[MPV Error] ${errMsg}`);
+    if (window && window.webContents) {
+      window.webContents.send("mpv-error", { message: errMsg });
+    }
+    return { error: errMsg };
   }
 
   // Deduplicate and filter preselected subtitle track by user setting
@@ -661,11 +782,61 @@ async function playInMpv(window, options) {
   try {
     mpvProcess = spawn(mpvExe, args);
     global.activeMpvProcess = mpvProcess;
+
+    const isSpamLog = (msg) => {
+      if (!msg) return true;
+      const m = msg.toLowerCase();
+      if (
+        m.includes("av:") ||
+        m.includes("a-v:") ||
+        m.includes("parametric stereo")
+      )
+        return true;
+      if (
+        m.includes("ffmpeg/audio") ||
+        m.includes("ffmpeg/video") ||
+        m.includes("[ffmpeg]")
+      )
+        return true;
+      if (
+        m.includes("aac:") ||
+        m.includes("h264:") ||
+        m.includes("hevc:") ||
+        m.includes("mp3:")
+      )
+        return true;
+      if (m.includes("mpv is up to date") || m.includes("mpv up to date"))
+        return true;
+      if (
+        m.includes("script-opts") ||
+        m.includes("unknown key") ||
+        m.includes("modernx")
+      )
+        return true;
+      if (/^\s*\d{2}:\d{2}:\d{2}/.test(msg) || /^\s*av:\s*/i.test(msg))
+        return true;
+      return false;
+    };
+
+    if (mpvProcess.stdout) {
+      mpvProcess.stdout.on("data", (chunk) => {
+        const lines = chunk.toString().split(/\r?\n/);
+        for (const line of lines) {
+          const str = line.trim();
+          if (str && !isSpamLog(str)) {
+            logger.info(`[MPV Stdout] ${str}`);
+          }
+        }
+      });
+    }
     if (mpvProcess.stderr) {
       mpvProcess.stderr.on("data", (chunk) => {
-        const errStr = chunk.toString().trim();
-        if (errStr) {
-          logger.error(`[MPV Stderr] ${errStr}`);
+        const lines = chunk.toString().split(/\r?\n/);
+        for (const line of lines) {
+          const errStr = line.trim();
+          if (errStr && !isSpamLog(errStr)) {
+            logger.error(`[MPV Stderr] ${errStr}`);
+          }
         }
       });
     }

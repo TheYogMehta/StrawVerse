@@ -254,18 +254,19 @@ async function fetchEpisode(provider, id, page = 1) {
 }
 
 // fetch m3u8 links
-async function fetchEpisodeSources(provider, episodeId) {
+async function fetchEpisodeSources(provider, episodeId, category = null) {
   if (!provider?.provider)
     throw new Error(
       "Missing Provider! ( try downloading from settings > marketplace )",
     );
 
-  let category = null;
-  let cleanEpisodeId = episodeId;
-  const suffixMatch = episodeId.match(/-(sub|dub|hsub|both)$/);
+  let cleanEpisodeId = String(episodeId ?? "");
+  const suffixMatch = cleanEpisodeId.match(/-(sub|dub|hsub|both)$/);
   if (suffixMatch) {
-    category = suffixMatch[1] === "both" ? null : suffixMatch[1];
-    cleanEpisodeId = episodeId.slice(0, -suffixMatch[0].length);
+    if (!category) {
+      category = suffixMatch[1] === "both" ? null : suffixMatch[1];
+    }
+    cleanEpisodeId = cleanEpisodeId.slice(0, -suffixMatch[0].length);
   }
 
   const cacheKey = CreateHashKey(
