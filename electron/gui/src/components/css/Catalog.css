@@ -256,6 +256,83 @@
   flex-direction: column;
   border-radius: 12px;
   height: 100%;
+  container-type: inline-size;
+  container-name: media-card;
+  --card-btn-size: 24px;
+  --badge-font-size: 11px;
+  --badge-padding-v: 4px;
+  --badge-padding-h: 8px;
+  --badge-icon-size: 12px;
+  --corner-offset: 4px;
+}
+
+/* Scaling based on column count setting */
+:root[style*="--catalog-columns: 4"] .media-card,
+html[style*="--catalog-columns: 4"] .media-card {
+  --card-btn-size: 20px;
+  --badge-font-size: 9.5px;
+  --badge-padding-v: 3px;
+  --badge-padding-h: 6px;
+  --badge-icon-size: 10px;
+  --corner-offset: 3px;
+}
+
+:root[style*="--catalog-columns: 5"] .media-card,
+html[style*="--catalog-columns: 5"] .media-card {
+  --card-btn-size: 18px;
+  --badge-font-size: 9px;
+  --badge-padding-v: 2px;
+  --badge-padding-h: 5px;
+  --badge-icon-size: 9px;
+  --corner-offset: 3px;
+}
+
+:root[style*="--catalog-columns: 6"] .media-card,
+html[style*="--catalog-columns: 6"] .media-card,
+:root[style*="--catalog-columns: 7"] .media-card,
+html[style*="--catalog-columns: 7"] .media-card,
+:root[style*="--catalog-columns: 8"] .media-card,
+html[style*="--catalog-columns: 8"] .media-card {
+  --card-btn-size: 16px;
+  --badge-font-size: 8px;
+  --badge-padding-v: 2px;
+  --badge-padding-h: 4px;
+  --badge-icon-size: 8px;
+  --corner-offset: 2px;
+}
+
+/* Container queries for dynamic element sizing */
+@container media-card (max-width: 179px) {
+  .media-card {
+    --card-btn-size: 20px;
+    --badge-font-size: 9.5px;
+    --badge-padding-v: 3px;
+    --badge-padding-h: 6px;
+    --badge-icon-size: 10px;
+    --corner-offset: 3px;
+  }
+}
+
+@container media-card (max-width: 134px) {
+  .media-card {
+    --card-btn-size: 17px;
+    --badge-font-size: 8.5px;
+    --badge-padding-v: 2px;
+    --badge-padding-h: 4px;
+    --badge-icon-size: 8.5px;
+    --corner-offset: 2px;
+  }
+}
+
+@container media-card (max-width: 104px) {
+  .media-card {
+    --card-btn-size: 15px;
+    --badge-font-size: 7.5px;
+    --badge-padding-v: 1px;
+    --badge-padding-h: 3px;
+    --badge-icon-size: 8px;
+    --corner-offset: 2px;
+  }
 }
 
 @media (hover: hover) {
@@ -302,29 +379,37 @@
 
 .indicator-badge {
   position: absolute;
-  top: 8px;
-  left: 8px;
-  background-color: rgba(15, 15, 15, 0.85);
+  top: var(--corner-offset, 4px);
+  left: var(--corner-offset, 4px);
+  background-color: rgba(15, 15, 20, 0.5);
   color: #fff;
-  font-size: 11px;
+  font-size: var(--badge-font-size, 11px);
   font-weight: 700;
-  padding: 5px 10px;
+  padding: var(--badge-padding-v, 4px) var(--badge-padding-h, 8px);
   border-radius: 20px;
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  transition: all 0.2s ease;
+}
+
+.indicator-badge svg {
+  width: var(--badge-icon-size, 12px);
+  height: var(--badge-icon-size, 12px);
 }
 
 .card-badges-container {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: var(--corner-offset, 4px);
+  left: var(--corner-offset, 4px);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 3px;
   align-items: flex-start;
   z-index: 2;
 }
@@ -334,11 +419,11 @@
 }
 
 .indicator-badge.schedule-badge {
-  background-color: rgba(15, 15, 15, 0.85);
-  border: 1px solid rgba(52, 211, 153, 0.55);
+  background-color: rgba(15, 15, 20, 0.55);
+  border: 1px solid rgba(52, 211, 153, 0.5);
   color: #34d399;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
 .card-info {
@@ -1363,12 +1448,12 @@
 
 .card-top-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--corner-offset, 4px);
+  right: var(--corner-offset, 4px);
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 
 .card-top-actions .card-remove-btn,
@@ -1387,11 +1472,13 @@
 }
 
 .card-remove-btn {
-  background: rgba(15, 15, 15, 0.75);
+  background: rgba(15, 15, 20, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 50%;
-  width: 28px;
-  height: 28px;
+  width: var(--card-btn-size, 24px);
+  height: var(--card-btn-size, 24px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1399,27 +1486,35 @@
   cursor: pointer;
   opacity: 1;
   transform: scale(1);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   transition: all 0.2s ease;
 }
 
+.card-remove-btn svg {
+  width: 58%;
+  height: 58%;
+}
+
 .card-remove-btn:hover {
-  background: #ff4d4d;
+  background: rgba(239, 68, 68, 0.8);
   color: #ffffff;
-  box-shadow: 0 0 8px rgba(255, 77, 77, 0.5);
+  border-color: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
 }
 
 /* Card Tag Button (Browse & Search results) */
 .card-tag-btn {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--corner-offset, 4px);
+  right: var(--corner-offset, 4px);
   z-index: 10;
-  background: var(--accent);
+  background: rgba(15, 15, 20, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 50%;
-  width: 28px;
-  height: 28px;
+  width: var(--card-btn-size, 24px);
+  height: var(--card-btn-size, 24px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1427,22 +1522,36 @@
   cursor: pointer;
   opacity: 1;
   transform: scale(1);
-  box-shadow: 0 2px 8px var(--sidebar-active-glow, rgba(139, 92, 246, 0.5));
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
   transition: all 0.2s ease;
 }
 
+.card-tag-btn svg {
+  width: 58%;
+  height: 58%;
+}
+
 .card-tag-btn.is-tagged {
-  background: var(--accent-secondary, var(--accent));
-  border-color: rgba(255, 255, 255, 0.4);
-  box-shadow: 0 0 10px var(--sidebar-active-glow, rgba(124, 58, 237, 0.7));
+  background: rgba(124, 58, 237, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-color: rgba(167, 139, 250, 0.6);
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(124, 58, 237, 0.5);
 }
 
 .card-tag-btn:hover {
-  background: var(--accent-hover, var(--accent));
+  background: rgba(255, 255, 255, 0.25);
   color: #ffffff;
   border-color: rgba(255, 255, 255, 0.6);
   transform: scale(1.1);
-  box-shadow: 0 0 12px var(--sidebar-active-glow, rgba(168, 85, 247, 0.8));
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.4);
+}
+
+.card-tag-btn.is-tagged:hover {
+  background: rgba(124, 58, 237, 0.75);
+  border-color: rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 14px rgba(139, 92, 246, 0.8);
 }
 
 /* Tag Picker Modal Overlay */

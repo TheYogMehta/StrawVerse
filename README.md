@@ -1,18 +1,63 @@
 <h6 align="right">Supports Android, Windows & Linux</h6>
 <h1 align="center">
-  <img src="assets/header_banner.svg" alt="StrawVerse Header" width="100%">
+  <img src="assets/header_banner.svg" alt="StrawVerse Header - Fast Open Source Anime & Manga Downloader" width="100%">
 </h1>
 
-<p align="center">
-  <b>Your Personal Anime & Manga Hub Stream, Read, Track & Sync</b><br>
-  <sub>Watch. Read. Download. Together.</sub>
-</p>
+# StrawVerse
+
+> **Fast, open-source anime and manga downloader for Windows, Linux, and Android.**
 
 <p align="center">
+  <a href="https://github.com/TheYogMehta/StrawVerse/stargazers">
+    <img src="https://img.shields.io/github/stars/TheYogMehta/StrawVerse?style=for-the-badge&logo=github&color=gold" alt="GitHub Stars">
+  </a>
+  <a href="https://github.com/TheYogMehta/StrawVerse/releases">
+    <img src="https://img.shields.io/github/v/release/TheYogMehta/StrawVerse?style=for-the-badge&logo=github&color=blue" alt="Latest Release">
+  </a>
+  <a href="https://github.com/TheYogMehta/StrawVerse/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/TheYogMehta/StrawVerse?style=for-the-badge&color=green" alt="License">
+  </a>
   <a href="https://discord.gg/PzfUBgQ2gt">
     <img src="https://img.shields.io/discord/1514335663875555470?color=7289da&label=Discord&logo=discord&style=for-the-badge" alt="Discord">
   </a>
 </p>
+
+StrawVerse is a fast, open-source **anime downloader** and **manga downloader** designed for Windows, Linux, and Android. Built for speed, versatility, and offline media management, StrawVerse enables you to search, stream, read, and perform **batch anime downloads** and manga chapter downloads across multiple high-speed sources.
+
+Whether you want high-speed **anime download** queues in 1080p, full Sub and Dub subtitle extraction, or automatic MyAnimeList synchronization, StrawVerse brings your entire **anime & manga** library together under one powerful open-source platform.
+
+<p align="center">
+  <a href="https://github.com/TheYogMehta/StrawVerse/releases"><b>Download StrawVerse</b></a> • 
+  <a href="https://strawverse.theyogmehta.online"><b>Official Website</b></a> • 
+  <a href="https://discord.gg/PzfUBgQ2gt"><b>Join Community Discord</b></a>
+</p>
+
+---
+
+## Quick Download
+
+| Platform | Download Link | Format | OS Compatibility |
+| :--- | :--- | :--- | :--- |
+| **Windows** | [StrawVerse.Setup.exe](https://github.com/TheYogMehta/StrawVerse/releases) | Installer (`.exe`) | Windows 10, 11 (64-bit) |
+| **Linux** | [StrawVerse.AppImage](https://github.com/TheYogMehta/StrawVerse/releases) | Portable (`.AppImage` / `.snap`) | Ubuntu, Fedora, Arch, Debian |
+| **Android** | [StrawVerse.apk](https://github.com/TheYogMehta/StrawVerse/releases) | Mobile APK (`.apk`) | Android 7.0+ |
+
+---
+
+## Features
+
+- **Batch Anime Episode Downloads:** Download complete anime series, seasons, or selected episodes in bulk with parallel queue processing.
+- **Manga Chapter Downloads:** Download manga volumes and chapters into CBZ format or structured image directories for offline reading.
+- **Fast Parallel Engine:** Multi-threaded download acceleration optimized for minimum wait times and max bandwidth usage.
+- **Multiple Video Qualities:** Seamless quality selection (360p, 480p, 720p, 1080p FHD) with automatic resolution fallback.
+- **Sub & Dub Support:** Full access to Japanese audio streams with subtitles (Sub) and English Dubbed anime releases.
+- **Flexible Subtitle Handling:** Extract soft subtitles as raw `.vtt` / `.ass` files or merge them directly into `.mp4` containers.
+- **In-App Player & Reader:** Stream anime directly with a built-in HTML5 video player or read manga with customizable layouts.
+- **MyAnimeList Integration:** Authenticate via MAL OAuth to automatically track watched episodes, read chapters, and sync lists.
+- **Cross-Platform Support:** Unified desktop and mobile client experience across Windows, Linux, and Android.
+- **Free & Open Source:** 100% community-driven under GPL-3.0 without advertisements or locked features.
+
+---
 
 > [!IMPORTANT]
 > **Legal Disclaimer:** StrawVerse is an open-source local media manager and indexing application designed for developers and researchers. The developers of this application do not host, store, stream, or distribute any copyrighted media (video, audio, or images). The application functions solely as a client-side parser and downloader wrapper utilizing publicly available web resource links. We do not condone, promote, or encourage copyright infringement. By using this software, you acknowledge and agree that all download and media-access activities are conducted at your own risk and responsibility, and that you are solely responsible for ensuring compliance with all local, national, and international copyright laws and terms of service.
