@@ -1,5 +1,11 @@
 # Changelog
 
+# [9.5.2] - 2026-08-09
+
+### Stream Proxy & MPV Playback
+
+- **HLS Segment PNG Header Stripping:** Fixed MPV stream playback failure on HLS streams (e.g. Anineko, Anikoto). The local stream proxy now buffers segment responses and strips obfuscated PNG headers before sending video segments to MPV, resolving `Video: png` format misdetection and demuxer error crashes.
+
 # [9.5.1] - 2026-08-09
 
 ### UI

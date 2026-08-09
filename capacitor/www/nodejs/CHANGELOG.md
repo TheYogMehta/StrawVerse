@@ -1,5 +1,11 @@
 # Changelog
 
+# [9.5.2] - 2026-08-09
+
+### Release Notes
+
+- **Electron Only Update:** No changes for Android/mobile in this release. All updates apply strictly to the Electron (desktop) build.
+
 # [9.5.1] - 2026-08-09
 
 ### UI

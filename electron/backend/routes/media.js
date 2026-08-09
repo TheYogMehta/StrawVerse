@@ -27,6 +27,7 @@ const { getKeyValue, queryOne, run } = require("../utils/db");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getHeaders } = require("../utils/proxyHeaders");
 const { MalFetchList } = require("../utils/mal");
+const { stripPngHeader } = require("../utils/downloader");
 
 const router = express.Router();
 
@@ -1821,10 +1822,25 @@ router.get("/api/stream/segment", async (req, res) => {
       }
     }
 
+    // Buffer the response to strip fake PNG headers that some servers
+    // prepend to video segments as an anti-scraping measure.
+    // Without this, MPV/FFmpeg detects segments as PNG images and fails.
+    const chunks = [];
+    if (resp.data && typeof resp.data.pipe === "function") {
+      await new Promise((resolve, reject) => {
+        resp.data.on("data", (chunk) => chunks.push(chunk));
+        resp.data.on("end", resolve);
+        resp.data.on("error", reject);
+      });
+    } else {
+      chunks.push(Buffer.isBuffer(resp.data) ? resp.data : Buffer.from(resp.data));
+    }
+    const rawBuffer = Buffer.concat(chunks);
+    const cleanBuffer = stripPngHeader(rawBuffer);
+
     res.status(resp.status || 200);
     const forwardHeaders = [
       "content-type",
-      "content-length",
       "content-range",
       "accept-ranges",
     ];
@@ -1833,12 +1849,13 @@ router.get("/api/stream/segment", async (req, res) => {
         res.setHeader(h, resp.headers[h]);
       }
     });
-
-    if (resp.data && typeof resp.data.pipe === "function") {
-      resp.data.pipe(res);
-    } else {
-      res.send(resp.data);
+    // Set correct content-length after stripping PNG header
+    res.setHeader("content-length", cleanBuffer.length);
+    // Override content-type to avoid the client seeing image/png
+    if (url.includes(".ts") || url.includes("segment") || url.includes("seg")) {
+      res.setHeader("content-type", "video/mp2t");
     }
+    res.send(cleanBuffer);
   } catch (err) {
     logger.error(`[StreamProxy] segment error: ${err.message}`);
     if (!res.headersSent) {
