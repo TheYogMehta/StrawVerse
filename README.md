@@ -5,7 +5,7 @@
 
 # StrawVerse
 
-> **Fast, open-source anime and manga downloader for Windows, Linux, and Android.**
+> **A fast, open-source anime and manga downloader for Windows, Linux, and Android with batch downloads, subtitles, multiple sources, quality selection, and MyAnimeList integration.**
 
 <p align="center">
   <a href="https://github.com/TheYogMehta/StrawVerse/stargazers">
@@ -36,11 +36,11 @@ Whether you want high-speed **anime download** queues in 1080p, full Sub and Dub
 
 ## Quick Download
 
-| Platform | Download Link | Format | OS Compatibility |
-| :--- | :--- | :--- | :--- |
-| **Windows** | [StrawVerse.Setup.exe](https://github.com/TheYogMehta/StrawVerse/releases) | Installer (`.exe`) | Windows 10, 11 (64-bit) |
-| **Linux** | [StrawVerse.AppImage](https://github.com/TheYogMehta/StrawVerse/releases) | Portable (`.AppImage` / `.snap`) | Ubuntu, Fedora, Arch, Debian |
-| **Android** | [StrawVerse.apk](https://github.com/TheYogMehta/StrawVerse/releases) | Mobile APK (`.apk`) | Android 7.0+ |
+| Platform    | Download Link                                                              | Format                           | OS Compatibility             |
+| :---------- | :------------------------------------------------------------------------- | :------------------------------- | :--------------------------- |
+| **Windows** | [StrawVerse.Setup.exe](https://github.com/TheYogMehta/StrawVerse/releases) | Installer (`.exe`)               | Windows 10, 11 (64-bit)      |
+| **Linux**   | [StrawVerse.AppImage](https://github.com/TheYogMehta/StrawVerse/releases)  | Portable (`.AppImage` / `.snap`) | Ubuntu, Fedora, Arch, Debian |
+| **Android** | [StrawVerse.apk](https://github.com/TheYogMehta/StrawVerse/releases)       | Mobile APK (`.apk`)              | Android 7.0+                 |
 
 ---
 

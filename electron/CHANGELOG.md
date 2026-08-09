@@ -1,5 +1,15 @@
 # Changelog
 
+# [9.5.1] - 2026-08-09
+
+### UI
+
+- **Transparent Icon Styling:** Made the + icon and library icon transparent for a cleaner, more polished look.
+
+### Platform Stability
+
+- **Windows FFmpeg Fix:** Fixed FFmpeg binary not found on Windows. The build now downloads a dedicated Windows `ffmpeg.exe` during packaging, resolving cross-platform build issues when compiling from Linux.
+
 # [9.5.0] - 2026-08-08
 
 ### Dynamic Theme Engine & Preset Colors
