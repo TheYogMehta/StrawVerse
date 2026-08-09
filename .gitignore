@@ -6,6 +6,7 @@ Api/
 electron/scratch/
 electron/mpv/linux
 electron/mpv/win32
+electron/ffmpeg/
 capacitor/android/app/src/main/jniLibs/arm64-v8a/libffmpeg.so
 capacitor/www/nodejs/gui/dist/
 capacitor/www/nodejs/gui/node_modules/

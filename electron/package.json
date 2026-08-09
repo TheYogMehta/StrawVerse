@@ -73,6 +73,7 @@
     "compression": "normal",
     "asarUnpack": [
       "node_modules/ffmpeg-static/**/*",
+      "ffmpeg/**/*",
       "assets/**/*",
       "mpv/**/*"
     ]

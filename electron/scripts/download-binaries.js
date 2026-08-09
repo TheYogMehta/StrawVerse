@@ -3,12 +3,20 @@ const fs = require("fs");
 const got = require("got").default || require("got");
 const JSZip = require("jszip");
 
-const winUrl = "https://github.com/mpv-player/mpv/releases/download/v0.41.0/mpv-v0.41.0-x86_64-pc-windows-msvc.zip";
-const linuxUrl = "https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.41.0%402026-07-01_1782914175/mpv-v0.41.0-anylinux-x86_64.AppImage";
+const winUrl =
+  "https://github.com/mpv-player/mpv/releases/download/v0.41.0/mpv-v0.41.0-x86_64-pc-windows-msvc.zip";
+const linuxUrl =
+  "https://github.com/pkgforge-dev/mpv-AppImage/releases/download/v0.41.0%402026-07-01_1782914175/mpv-v0.41.0-anylinux-x86_64.AppImage";
+
+const FFMPEG_RELEASE = "b6.1.1";
+const FFMPEG_WIN_URL = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-win32-x64.gz`;
 
 const mpvDir = path.join(__dirname, "..", "mpv");
 const winDir = path.join(mpvDir, "win32");
 const linuxDir = path.join(mpvDir, "linux");
+
+const ffmpegDir = path.join(__dirname, "..", "ffmpeg");
+const ffmpegWinDir = path.join(ffmpegDir, "win32");
 
 const downloadFile = async (url, destPath, progressLabel) => {
   console.log(`Downloading ${progressLabel}...`);
@@ -84,7 +92,7 @@ const setupConfig = async () => {
     await downloadFile(
       "https://raw.githubusercontent.com/cyl0/ModernX/main/modernx.lua",
       modernxLuaPath,
-      "ModernX OSC Lua script"
+      "ModernX OSC Lua script",
     );
   } else {
     console.log("ModernX OSC script already exists, skipping download.");
@@ -94,14 +102,36 @@ const setupConfig = async () => {
     await downloadFile(
       "https://raw.githubusercontent.com/cyl0/ModernX/main/Material-Design-Iconic-Font.ttf",
       fontPath,
-      "Material Design Iconic Font"
+      "Material Design Iconic Font",
     );
   } else {
-    console.log("Material Design Iconic Font already exists, skipping download.");
+    console.log(
+      "Material Design Iconic Font already exists, skipping download.",
+    );
   }
 
   fs.writeFileSync(mpvConfPath, "osc=no\n");
   console.log("Configured isolated mpv.conf successfully.");
+};
+
+const setupFfmpegWindows = async () => {
+  const destExe = path.join(ffmpegWinDir, "ffmpeg.exe");
+
+  if (fs.existsSync(destExe) && fs.statSync(destExe).size > 0) {
+    console.log("Windows FFmpeg binary already exists, skipping download.");
+    return;
+  }
+
+  if (!fs.existsSync(ffmpegWinDir)) {
+    fs.mkdirSync(ffmpegWinDir, { recursive: true });
+  }
+
+  console.log("Downloading Windows FFmpeg binary...");
+  const response = await got(FFMPEG_WIN_URL, { responseType: "buffer" });
+  const decompressed = require("zlib").gunzipSync(response.body);
+  fs.writeFileSync(destExe, decompressed);
+
+  console.log("Downloaded and extracted Windows ffmpeg.exe successfully.");
 };
 
 const main = async () => {
@@ -109,9 +139,10 @@ const main = async () => {
     await setupWindows();
     await setupLinux();
     await setupConfig();
-    console.log("All MPV player binaries and custom skins configured successfully!");
+    await setupFfmpegWindows();
+    console.log("All binaries and custom skins configured successfully!");
   } catch (err) {
-    console.error("Failed to download pre-built MPV binaries:", err.message);
+    console.error("Failed to download pre-built binaries:", err.message);
     process.exit(1);
   }
 };

@@ -100,41 +100,37 @@ async function getFfmpegPath() {
   }
 
   const binaryName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
+  const platformDir = process.platform === "win32" ? "win32" : "linux";
   const candidatePaths = [];
 
-  // 1. Production
-  if (typeof ffmpeg === "string" && ffmpeg) {
-    candidatePaths.push(ffmpeg.replace("app.asar", "app.asar.unpacked"));
-  }
+  const resourceRoots = [];
   if (process.resourcesPath) {
-    candidatePaths.push(
-      path.join(
-        process.resourcesPath,
-        "app.asar.unpacked",
-        "node_modules",
-        "ffmpeg-static",
-        binaryName,
-      ),
-    );
+    resourceRoots.push(path.join(process.resourcesPath, "app.asar.unpacked"));
   }
   try {
     if (app && typeof app.getAppPath === "function") {
-      const resourcesDir = path.dirname(app.getAppPath());
-      if (resourcesDir) {
-        candidatePaths.push(
-          path.join(
-            resourcesDir,
-            "app.asar.unpacked",
-            "node_modules",
-            "ffmpeg-static",
-            binaryName,
-          ),
-        );
-      }
+      const dir = path.dirname(app.getAppPath());
+      if (dir) resourceRoots.push(path.join(dir, "app.asar.unpacked"));
     }
   } catch (e) {}
 
-  // 2. Development
+  for (const root of resourceRoots) {
+    candidatePaths.push(path.join(root, "ffmpeg", platformDir, binaryName));
+  }
+
+  candidatePaths.push(
+    path.join(__dirname, "..", "..", "ffmpeg", platformDir, binaryName),
+  );
+
+  if (typeof ffmpeg === "string" && ffmpeg) {
+    candidatePaths.push(ffmpeg.replace("app.asar", "app.asar.unpacked"));
+  }
+  for (const root of resourceRoots) {
+    candidatePaths.push(
+      path.join(root, "node_modules", "ffmpeg-static", binaryName),
+    );
+  }
+
   if (typeof ffmpeg === "string" && ffmpeg) {
     candidatePaths.push(ffmpeg);
   }
