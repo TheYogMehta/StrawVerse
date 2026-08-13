@@ -120,9 +120,9 @@ function extractDomain(urlStr, refererStr) {
 }
 
 function getDomainConcurrency(domain, defaultInitial = 4) {
-  if (!domain) return Math.max(3, defaultInitial);
+  if (!domain) return Math.max(1, defaultInitial);
   if (cache[domain] !== undefined) {
-    return Math.max(isCoolingDown(domain) ? 1 : 3, cache[domain]);
+    return Math.max(1, cache[domain]);
   }
 
   try {
@@ -131,38 +131,36 @@ function getDomainConcurrency(domain, defaultInitial = 4) {
       [domain],
     );
     if (row) {
-      let avgConcurrency = Math.max(4, defaultInitial);
+      let avgConcurrency = Math.max(1, defaultInitial);
       if (row.current_concurrency && row.max_concurrency) {
         avgConcurrency = Math.max(
-          3,
+          1,
           Math.round(
             (Number(row.current_concurrency) + Number(row.max_concurrency)) / 2,
           ),
         );
       } else if (row.current_concurrency) {
-        avgConcurrency = Math.max(3, Number(row.current_concurrency));
+        avgConcurrency = Math.max(1, Number(row.current_concurrency));
       }
       cache[domain] = avgConcurrency;
       return cache[domain];
     }
   } catch (e) {}
 
-  cache[domain] = Math.max(3, defaultInitial);
+  cache[domain] = Math.max(1, defaultInitial);
   return cache[domain];
 }
 
 function setDomainErrorCap(domain, failedAtConcurrency) {
   if (!domain) return;
-  const cap = Math.max(
-    1,
-    Math.min(failedAtConcurrency - 3, Math.floor(failedAtConcurrency * 0.85)),
-  );
+  const cap = Math.max(1, failedAtConcurrency - 1);
   if (!domainMaxCap[domain] || cap < domainMaxCap[domain]) {
     domainMaxCap[domain] = cap;
   }
   cache[domain] = domainMaxCap[domain];
+  delete throughputCache[domain];
   logger.warn(
-    `[DomainConcurrency] Error cap set for '${domain}' at ${domainMaxCap[domain]} (failed at ${failedAtConcurrency})`,
+    `[DomainConcurrency] 404/Rate-limit hit! Setting max speed limit for '${domain}' to ${domainMaxCap[domain]} (failed at ${failedAtConcurrency})`,
   );
 }
 
@@ -171,11 +169,11 @@ function stepDownConcurrency(domain) {
   const current = cache[domain] || 2;
   const targetCap = domainMaxCap[domain]
     ? Math.min(current, domainMaxCap[domain])
-    : Math.max(1, current - 3);
+    : Math.max(1, current - 1);
   const stepped = Math.max(1, targetCap);
   cache[domain] = stepped;
   logger.info(
-    `[DomainConcurrency] Stepped down concurrency for '${domain}': ${current} -> ${stepped}`,
+    `[DomainConcurrency] Download speed degraded. Decreasing concurrency on '${domain}' from ${current} -> ${stepped}`,
   );
   return stepped;
 }
@@ -191,7 +189,7 @@ function setRecoveryCap(domain) {
   delete throughputCache[domain];
 
   logger.warn(
-    `[DomainConcurrency] Recovery cap set for '${domain}': concurrency capped at ${newCap}. Future scaling capped at ${newCap}.`,
+    `[DomainConcurrency] 404/Rate-limit hit! Setting max speed limit for '${domain}' to ${newCap}`,
   );
 
   try {
@@ -210,13 +208,13 @@ function setRecoveryCap(domain) {
 function recordDomainFailure(domain, currentVal, statusCode = null) {
   if (!domain) return;
   const current = currentVal || cache[domain] || 2;
-  const newConcurrency = Math.max(1, Math.floor(current / 2));
+  const newConcurrency = Math.max(1, current - 1);
   cache[domain] = newConcurrency;
   domainMaxCap[domain] = newConcurrency;
   delete throughputCache[domain];
 
   logger.warn(
-    `[DomainConcurrency] Failure/rate limit on domain '${domain}'. Reduced concurrency from ${current} -> ${newConcurrency}`,
+    `[DomainConcurrency] 404/Rate-limit hit! Setting max speed limit for '${domain}' to ${newConcurrency}`,
   );
 
   try {
@@ -243,51 +241,52 @@ function recordDomainBatchSuccess(domain, batchThroughput = null) {
   const current = cache[domain] || 4;
   let newConcurrency = current;
 
-  const maxCap = domainMaxCap[domain] || 8;
-  const targetProbe = Math.min(maxCap, 4);
-
   if (batchThroughput && batchThroughput > 0) {
     const prevThroughput = throughputCache[domain] || null;
+    const mbps = (batchThroughput / (1024 * 1024)).toFixed(2) + " MB/s";
+
     if (prevThroughput) {
       const speedDiffRatio =
         (batchThroughput - prevThroughput) / prevThroughput;
 
-      if (
-        speedDiffRatio > 0.05 ||
-        (current < targetProbe && !isCoolingDown(domain))
-      ) {
+      if (speedDiffRatio > 0.05) {
         newConcurrency = current + 1;
-        logger.info(
-          `[DomainConcurrency] Download speed ${speedDiffRatio > 0.05 ? `improved (+${(speedDiffRatio * 100).toFixed(1)}%)` : "probing higher concurrency"}. Scaled up concurrency on '${domain}' from ${current} -> ${newConcurrency}`,
-        );
-      } else if (speedDiffRatio < -0.25 && current > 2) {
-        newConcurrency = Math.max(2, current - 1);
+        if (domainMaxCap[domain] && newConcurrency > domainMaxCap[domain]) {
+          newConcurrency = domainMaxCap[domain];
+          logger.info(
+            `[DomainConcurrency] 404/Rate-limit ceiling reached (${mbps}). Keeping speed constant on '${domain}' at max speed ${newConcurrency}`,
+          );
+        } else {
+          logger.info(
+            `[DomainConcurrency] Good speed (+${(speedDiffRatio * 100).toFixed(1)}%, ${mbps}). Increasing concurrency on '${domain}' from ${current} -> ${newConcurrency}`,
+          );
+        }
+      } else if (speedDiffRatio < -0.05 && current > 1) {
+        newConcurrency = Math.max(1, current - 1);
         logger.warn(
-          `[DomainConcurrency] Speed degraded (${(speedDiffRatio * 100).toFixed(1)}%, ${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s) on '${domain}'. Stepped down concurrency from ${current} -> ${newConcurrency}`,
+          `[DomainConcurrency] Bad speed (${(speedDiffRatio * 100).toFixed(1)}%, ${mbps}). Decreasing concurrency on '${domain}' from ${current} -> ${newConcurrency}`,
         );
       } else {
         newConcurrency = current;
         logger.info(
-          `[DomainConcurrency] Bandwidth optimal (${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s). Maintaining concurrency on '${domain}' at ${current}`,
+          `[DomainConcurrency] Mid speed (${mbps}). Keeping speed constant on '${domain}' at ${current}`,
         );
       }
-      throughputCache[domain] = 0.4 * batchThroughput + 0.6 * prevThroughput;
+      throughputCache[domain] = 0.3 * batchThroughput + 0.7 * prevThroughput;
     } else {
       throughputCache[domain] = batchThroughput;
-      newConcurrency = Math.max(current, targetProbe);
+      newConcurrency = Math.max(1, current);
       logger.info(
-        `[DomainConcurrency] Initial speed sample (${(batchThroughput / 1024 / 1024).toFixed(2)} MB/s). Concurrency on '${domain}' set to ${newConcurrency}`,
+        `[DomainConcurrency] Initial speed sample (${mbps}). Keeping speed constant on '${domain}' at ${newConcurrency}`,
       );
     }
-  } else {
-    newConcurrency = Math.max(current, targetProbe);
   }
 
   if (domainMaxCap[domain]) {
     newConcurrency = Math.min(newConcurrency, domainMaxCap[domain]);
   }
 
-  cache[domain] = newConcurrency;
+  cache[domain] = Math.max(1, newConcurrency);
 
   try {
     run(

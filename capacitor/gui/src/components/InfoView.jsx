@@ -1070,21 +1070,22 @@ export default function InfoView({
   };
 
   const getEpsPerPage = () => {
-    const isAnimePahe =
-      details?.provider?.toLowerCase() === "animepahe" ||
-      details?.provider?.toLowerCase() === "pahe";
-    if (isAnimePahe) {
-      return detectedPageSize;
-    }
+    const isAnimePahe = details?.provider?.toLowerCase() === "pahe";
+    if (isAnimePahe) return detectedPageSize;
     return 30;
   };
 
-  const playItem = (targetItem) => {
+  const [dubSelect, setDubSelect] = useState("sub");
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [rangeInput, setRangeInput] = useState("");
+
+  const playItem = (targetItem, overrideSubDub = null) => {
+    const activeSubDub = overrideSubDub || dubSelect;
     if (type === "Anime") {
       const dl = details?.DownloadedEpisodes;
       const isDownloadedLocal = Array.isArray(dl)
         ? dl.map(Number).includes(Number(targetItem.number))
-        : dubSelect === "dub"
+        : activeSubDub === "dub"
           ? (dl?.dub || []).map(Number).includes(Number(targetItem.number))
           : (dl?.sub || []).map(Number).includes(Number(targetItem.number));
 
@@ -1092,7 +1093,7 @@ export default function InfoView({
         id,
         isDownloadedLocal ? targetItem.number : targetItem.id,
         isDownloadedLocal,
-        dubSelect,
+        activeSubDub,
         episodesOrChapters,
         details?.DownloadedEpisodes,
         details?.title,
@@ -1127,9 +1128,14 @@ export default function InfoView({
         const progressData = await progressRes.json();
         setHasProgress(progressData.hasProgress || false);
         setHistoryProgress(progressData);
+        if (type === "Anime" && progressData.lastSubDub) {
+          setDubSelect(progressData.lastSubDub);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch history progress:", err);
+    } finally {
+      setHistoryLoading(false);
     }
   }, [id, type]);
 
@@ -1245,7 +1251,9 @@ export default function InfoView({
                 updated.DownloadedEpisodes = [epNum];
               }
             } else {
-              const currentList = (updated.DownloadedChapters || []).map(Number);
+              const currentList = (updated.DownloadedChapters || []).map(
+                Number,
+              );
               if (!currentList.includes(epNum)) {
                 updated.DownloadedChapters = [...currentList, epNum].sort(
                   (a, b) => a - b,
@@ -1531,8 +1539,10 @@ export default function InfoView({
       (item) => Number(item.number) === Number(targetNum),
     );
 
+    const activeSubDub = historyProgress?.lastSubDub || dubSelect;
+
     if (targetItem) {
-      playItem(targetItem);
+      playItem(targetItem, activeSubDub);
     } else {
       const isAnimePahe =
         details?.provider?.toLowerCase() === "animepahe" ||
@@ -1545,17 +1555,23 @@ export default function InfoView({
         setPendingPlayEpisodeNum(targetNum);
         await fetchItems(safePage);
       } else if (sorted.length > 0) {
-        playItem(sorted[0]);
+        playItem(sorted[0], activeSubDub);
       }
     }
   };
 
   useEffect(() => {
-    if (autoPlay && !loading && !itemsLoading && !hasAutoPlayed.current) {
+    if (
+      autoPlay &&
+      !loading &&
+      !itemsLoading &&
+      !historyLoading &&
+      !hasAutoPlayed.current
+    ) {
       hasAutoPlayed.current = true;
       handleContinueWatchRead();
     }
-  }, [autoPlay, loading, itemsLoading]);
+  }, [autoPlay, loading, itemsLoading, historyLoading]);
 
   const handleStartFromBegin = () => {
     const sorted = [...episodesOrChapters].sort(

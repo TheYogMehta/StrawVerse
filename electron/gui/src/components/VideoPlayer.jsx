@@ -46,6 +46,20 @@ export default function VideoPlayer({
         ? Number(episodeNumOrId)
         : 1;
 
+    const currentIdx = allEpisodes.findIndex(
+      (item) =>
+        String(item.id) === String(episodeNumOrId) ||
+        Number(item.number) === Number(targetEpNum),
+    );
+    const hasNext =
+      currentIdx !== -1
+        ? currentIdx < allEpisodes.length - 1
+        : allEpisodes.length > 0
+          ? allEpisodes.some((e) => Number(e.number) > Number(targetEpNum))
+          : true;
+    const hasPrev =
+      currentIdx !== -1 ? currentIdx > 0 : Number(targetEpNum) > 1;
+
     setLoading(true);
     setStatusMsg("Opening MPV player...");
 
@@ -61,6 +75,8 @@ export default function VideoPlayer({
         malid: malid,
         subdub: subdub || playerSubDub,
         episodes: allEpisodes,
+        hasNext,
+        hasPrev,
       })
       .then((res) => {
         if (res && res.error) {
@@ -75,6 +91,10 @@ export default function VideoPlayer({
           }).then(() => {
             if (onBack) onBack();
           });
+        } else {
+          setTimeout(() => {
+            setLoading(false);
+          }, 1200);
         }
       })
       .catch((err) => {

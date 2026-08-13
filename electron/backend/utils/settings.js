@@ -343,6 +343,44 @@ async function loadAllScrapers() {
   }
   try {
     await CheckScrapperFolderExists();
+
+    // development only
+    try {
+      const { app } = require("electron");
+      const localExtDir = path.join(
+        app.getAppPath(),
+        "..",
+        "extensions",
+        "extensions",
+      );
+      if (fs.existsSync(localExtDir)) {
+        const repoAnime = path.join(localExtDir, "Anime");
+        if (fs.existsSync(repoAnime)) {
+          const files = fs
+            .readdirSync(repoAnime)
+            .filter((f) => f.endsWith(".js"));
+          for (const f of files) {
+            fs.copyFileSync(
+              path.join(repoAnime, f),
+              path.join(ScraperAnime, f),
+            );
+          }
+        }
+        const repoManga = path.join(localExtDir, "Manga");
+        if (fs.existsSync(repoManga)) {
+          const files = fs
+            .readdirSync(repoManga)
+            .filter((f) => f.endsWith(".js"));
+          for (const f of files) {
+            fs.copyFileSync(
+              path.join(repoManga, f),
+              path.join(ScraperManga, f),
+            );
+          }
+        }
+      }
+    } catch (e) {}
+
     logger.info("Loading all scrapers...");
 
     global.Anime_providers = {};
@@ -542,70 +580,59 @@ function disableWhatsNew() {
 }
 
 function isLanguagePreferred(subLang, preferredLanguages) {
-  if (!preferredLanguages || !Array.isArray(preferredLanguages)) {
+  if (
+    !preferredLanguages ||
+    !Array.isArray(preferredLanguages) ||
+    preferredLanguages.length === 0
+  ) {
     return true;
   }
-  if (preferredLanguages.length === 0) {
-    return false;
-  }
-  if (!subLang) return false;
+  if (!subLang) return true;
   const sLower = String(subLang).toLowerCase().trim();
+  if (
+    sLower === "sub" ||
+    sLower === "softsub" ||
+    sLower === "default" ||
+    sLower === "und" ||
+    sLower === "auto" ||
+    sLower === "vtt" ||
+    sLower === "srt"
+  ) {
+    return true;
+  }
+
+  const tokens = sLower.split(/[^a-z0-9]+/).filter(Boolean);
+
+  const langMap = {
+    english: ["english", "eng", "en"],
+    spanish: ["spanish", "spa", "es"],
+    french: ["french", "fre", "fra", "fr"],
+    german: ["german", "ger", "deu", "de"],
+    italian: ["italian", "ita", "it"],
+    japanese: ["japanese", "jpn", "ja", "jp"],
+    arabic: ["arabic", "ara", "ar"],
+    portuguese: ["portuguese", "por", "pt", "brazilian"],
+    russian: ["russian", "rus", "ru"],
+    chinese: ["chinese", "chi", "zho", "zh"],
+    indonesian: ["indonesian", "ind", "id"],
+    thai: ["thai", "tha", "th"],
+    vietnamese: ["vietnamese", "vie", "vi"],
+    hindi: ["hindi", "hin", "hi"],
+  };
 
   return preferredLanguages.some((pref) => {
     const pLower = String(pref).toLowerCase().trim();
-    if (sLower === pLower) return true;
-    if (pLower.startsWith(sLower) || sLower.startsWith(pLower)) return true;
+    const targetCodes = langMap[pLower] || [pLower];
 
-    if (
-      pLower === "english" &&
-      (sLower.includes("eng") || sLower.includes("en"))
-    )
-      return true;
-    if (
-      pLower === "spanish" &&
-      (sLower.includes("spa") || sLower.includes("es"))
-    )
-      return true;
-    if (
-      pLower === "french" &&
-      (sLower.includes("fre") ||
-        sLower.includes("fra") ||
-        sLower.includes("fr"))
-    )
-      return true;
-    if (
-      pLower === "german" &&
-      (sLower.includes("ger") ||
-        sLower.includes("deu") ||
-        sLower.includes("de"))
-    )
-      return true;
-    if (
-      pLower === "italian" &&
-      (sLower.includes("ita") || sLower.includes("it"))
-    )
-      return true;
-    if (
-      pLower === "japanese" &&
-      (sLower.includes("jpn") || sLower.includes("ja"))
-    )
-      return true;
-    if (
-      pLower === "arabic" &&
-      (sLower.includes("ara") || sLower.includes("ar"))
-    )
-      return true;
-    if (
-      pLower === "portuguese" &&
-      (sLower.includes("por") || sLower.includes("pt"))
-    )
-      return true;
-    if (
-      pLower === "russian" &&
-      (sLower.includes("rus") || sLower.includes("ru"))
-    )
-      return true;
-    return false;
+    return (
+      tokens.some((t) => targetCodes.includes(t)) ||
+      targetCodes.some(
+        (code) =>
+          sLower === code ||
+          sLower.startsWith(`${code}_`) ||
+          sLower.startsWith(`${code}-`),
+      )
+    );
   });
 }
 

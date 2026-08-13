@@ -1,6 +1,20 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const http = require("http");
+const https = require("https");
+const keepAliveAgentHttp = new http.Agent({ keepAlive: true, maxSockets: 50 });
+const keepAliveAgentHttps = new https.Agent({
+  keepAlive: true,
+  maxSockets: 50,
+});
+const m3u8ManifestCache = new Map();
+function cleanupManifestCache() {
+  if (m3u8ManifestCache.size > 200) {
+    const keys = Array.from(m3u8ManifestCache.keys());
+    for (let i = 0; i < 100; i++) m3u8ManifestCache.delete(keys[i]);
+  }
+}
 const JSZip = require("jszip");
 const { logger } = require("../utils/AppLogger");
 const { settingfetch, providerFetch } = require("../utils/settings");
@@ -1695,6 +1709,15 @@ router.get("/api/stream/m3u8", async (req, res) => {
   const url = req.query.url;
   const customReferer = req.query.referer;
   if (!url) return res.status(400).send("No URL");
+  const startTime = Date.now();
+  const cacheKey = `${url}_${customReferer || ""}_${req.query.quality || ""}`;
+
+  if (m3u8ManifestCache.has(cacheKey)) {
+    const cachedManifest = m3u8ManifestCache.get(cacheKey);
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    return res.send(cachedManifest);
+  }
+
   try {
     if (customReferer && global.setDynamicReferer) {
       global.setDynamicReferer(url, customReferer);
@@ -1710,6 +1733,8 @@ router.get("/api/stream/m3u8", async (req, res) => {
         headers: reqHeaders,
         responseType: "text",
         timeout: 15000,
+        httpAgent: keepAliveAgentHttp,
+        httpsAgent: keepAliveAgentHttps,
       });
       data = resp.data;
     } catch (fetchErr) {
@@ -1727,6 +1752,8 @@ router.get("/api/stream/m3u8", async (req, res) => {
             headers: freshHeaders,
             responseType: "text",
             timeout: 15000,
+            httpAgent: keepAliveAgentHttp,
+            httpsAgent: keepAliveAgentHttps,
           });
           data = retry.data;
         } catch (bypassErr) {
@@ -1743,27 +1770,130 @@ router.get("/api/stream/m3u8", async (req, res) => {
     const segProxy = `http://127.0.0.1:${port}/api/stream/segment?url=`;
     const m3u8Proxy = `http://127.0.0.1:${port}/api/stream/m3u8?url=`;
 
-    const manifest = String(data)
+    let rawManifest = String(data);
+
+    if (rawManifest.includes("#EXT-X-STREAM-INF:")) {
+      const lines = rawManifest.split("\n");
+      const headerLines = [];
+      const mediaLines = [];
+      const variants = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const t = line.trim();
+        if (t.startsWith("#EXT-X-STREAM-INF:")) {
+          const infLine = line;
+          let urlLine = "";
+          if (i + 1 < lines.length && !lines[i + 1].trim().startsWith("#")) {
+            urlLine = lines[i + 1];
+            i++;
+          }
+          let bw = 0;
+          let resNum = 0;
+          const bwMatch = infLine.match(/BANDWIDTH=(\d+)/i);
+          if (bwMatch) bw = parseInt(bwMatch[1], 10);
+          const resMatch = infLine.match(/RESOLUTION=(\d+)x(\d+)/i);
+          if (resMatch)
+            resNum = parseInt(resMatch[1], 10) * parseInt(resMatch[2], 10);
+          variants.push({
+            infLine,
+            urlLine,
+            score: resNum || bw,
+            height: resMatch ? parseInt(resMatch[2], 10) : 0,
+          });
+        } else if (t.startsWith("#EXT-X-MEDIA:")) {
+          mediaLines.push(line);
+        } else if (
+          t.startsWith("#EXTM3U") ||
+          t.startsWith("#EXT-X-VERSION") ||
+          t.startsWith("#EXT-X-INDEPENDENT-SEGMENTS")
+        ) {
+          headerLines.push(line);
+        }
+      }
+
+      if (variants.length > 1) {
+        let prefQuality = req.query.quality || "";
+        if (!prefQuality) {
+          try {
+            const settingsPath = path.join(
+              require("electron").app.getPath("userData"),
+              "settings.json",
+            );
+            if (fs.existsSync(settingsPath)) {
+              const settings = JSON.parse(
+                fs.readFileSync(settingsPath, "utf-8"),
+              );
+              if (settings.quality) prefQuality = settings.quality;
+            }
+          } catch (e) {}
+        }
+
+        const prefNorm = String(prefQuality).toLowerCase().trim();
+        const prefNum = parseInt(prefNorm.replace(/\D/g, ""), 10);
+
+        let chosenVariant = null;
+        if (prefNum > 0) {
+          chosenVariant = variants.find((v) => {
+            const inf = v.infLine.toLowerCase();
+            return (
+              v.height === prefNum ||
+              inf.includes(`${prefNum}p`) ||
+              inf.includes(`x${prefNum}`) ||
+              inf.includes(`${prefNum}x`)
+            );
+          });
+        }
+
+        if (!chosenVariant) {
+          variants.sort((a, b) => b.score - a.score);
+          chosenVariant = variants[0];
+        }
+
+        rawManifest = [
+          ...headerLines,
+          ...mediaLines,
+          chosenVariant.infLine,
+          chosenVariant.urlLine,
+        ].join("\n");
+      }
+    }
+
+    let nextIsVariantPlaylist = false;
+    const manifest = rawManifest
       .split("\n")
       .map((line) => {
         const t = line.trim();
         if (!t) return line;
         if (t.startsWith("#")) {
+          if (t.startsWith("#EXT-X-STREAM-INF:")) {
+            nextIsVariantPlaylist = true;
+          }
           return t.includes('URI="')
             ? t.replace(/URI="([^"]+)"/, (_, u) => {
                 const abs = u.startsWith("http") ? u : base + u;
-                const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
+                const isSubOrAudio =
+                  t.includes("TYPE=SUBTITLES") || t.includes("TYPE=AUDIO");
+                const proxy =
+                  abs.includes(".m3u8") || isSubOrAudio ? m3u8Proxy : segProxy;
                 return `URI="${proxy}${encodeURIComponent(abs)}${refParam}"`;
               })
             : line;
         }
+
+        const isVariant = nextIsVariantPlaylist;
+        nextIsVariantPlaylist = false;
+
         const abs = t.startsWith("http") ? t : base + t;
-        const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
+        const proxy = isVariant || abs.includes(".m3u8") ? m3u8Proxy : segProxy;
         return `${proxy}${encodeURIComponent(abs)}${refParam}`;
       })
       .join("\n");
 
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
+    cleanupManifestCache();
+    m3u8ManifestCache.set(cacheKey, manifest);
+    setTimeout(() => m3u8ManifestCache.delete(cacheKey), 60000);
     res.send(manifest);
   } catch (err) {
     logger.error(`[StreamProxy] m3u8 error: ${err.message}`);
@@ -1790,23 +1920,24 @@ router.get("/api/stream/segment", async (req, res) => {
 
     let attempts = 0;
     let resp;
-    while (attempts < 4) {
+    while (attempts < 2) {
       try {
         resp = await global.axios.get(url, {
           headers: reqHeaders,
           responseType: "stream",
-          timeout: 30000,
+          timeout: 45000,
+          httpAgent: keepAliveAgentHttp,
+          httpsAgent: keepAliveAgentHttps,
         });
         break;
       } catch (err) {
         attempts++;
         const status = err.response?.status;
-        if (status === 429 && attempts < 4) {
-          const delay = Math.min(6000, 1500 * Math.pow(2, attempts - 1));
-          await new Promise((r) => setTimeout(r, delay));
+        if (status === 429 && attempts < 2) {
+          await new Promise((r) => setTimeout(r, 1000));
         } else if (
           (status === 403 || status === 503) &&
-          attempts < 4 &&
+          attempts < 2 &&
           global.cloudflarebypass
         ) {
           try {
@@ -1816,46 +1947,63 @@ router.get("/api/stream/segment", async (req, res) => {
             if (req.headers.range) fresh.range = req.headers.range;
             Object.assign(reqHeaders, fresh);
           } catch (_) {}
-        } else if (attempts >= 4) {
+        } else if (attempts >= 2) {
           throw err;
         }
       }
     }
 
-    // Buffer the response to strip fake PNG headers that some servers
-    // prepend to video segments as an anti-scraping measure.
-    // Without this, MPV/FFmpeg detects segments as PNG images and fails.
-    const chunks = [];
-    if (resp.data && typeof resp.data.pipe === "function") {
-      await new Promise((resolve, reject) => {
-        resp.data.on("data", (chunk) => chunks.push(chunk));
-        resp.data.on("end", resolve);
-        resp.data.on("error", reject);
-      });
-    } else {
-      chunks.push(Buffer.isBuffer(resp.data) ? resp.data : Buffer.from(resp.data));
-    }
-    const rawBuffer = Buffer.concat(chunks);
-    const cleanBuffer = stripPngHeader(rawBuffer);
-
     res.status(resp.status || 200);
-    const forwardHeaders = [
-      "content-type",
-      "content-range",
-      "accept-ranges",
-    ];
+    const forwardHeaders = ["content-type", "content-range", "accept-ranges"];
     forwardHeaders.forEach((h) => {
       if (resp.headers[h]) {
         res.setHeader(h, resp.headers[h]);
       }
     });
-    // Set correct content-length after stripping PNG header
-    res.setHeader("content-length", cleanBuffer.length);
-    // Override content-type to avoid the client seeing image/png
-    if (url.includes(".ts") || url.includes("segment") || url.includes("seg")) {
-      res.setHeader("content-type", "video/mp2t");
+
+    if (
+      url.includes(".vtt") ||
+      url.includes(".srt") ||
+      url.includes(".ass") ||
+      url.includes("subtitle")
+    ) {
+      res.setHeader("content-type", "text/vtt; charset=utf-8");
     }
-    res.send(cleanBuffer);
+
+    if (resp.data && typeof resp.data.once === "function") {
+      let headersSentLocal = false;
+      resp.data.once("data", (firstChunk) => {
+        headersSentLocal = true;
+        const cleanFirst = stripPngHeader(firstChunk);
+        if (
+          cleanFirst.length >= 7 &&
+          cleanFirst.toString("utf8", 0, 7).startsWith("#EXTM3U")
+        ) {
+          res.setHeader("content-type", "application/vnd.apple.mpegurl");
+        } else if (
+          url.includes(".ts") ||
+          url.includes("segment") ||
+          url.includes("seg") ||
+          (resp.headers["content-type"] &&
+            resp.headers["content-type"].includes("image"))
+        ) {
+          res.setHeader("content-type", "video/mp2t");
+        }
+        res.write(cleanFirst);
+        resp.data.pipe(res);
+      });
+      resp.data.on("error", (e) => {
+        if (!headersSentLocal && !res.headersSent) {
+          res.status(500).send(e.message);
+        }
+      });
+    } else {
+      const cleanBuffer = stripPngHeader(
+        Buffer.isBuffer(resp.data) ? resp.data : Buffer.from(resp.data),
+      );
+      res.setHeader("content-length", cleanBuffer.length);
+      res.send(cleanBuffer);
+    }
   } catch (err) {
     logger.error(`[StreamProxy] segment error: ${err.message}`);
     if (!res.headersSent) {

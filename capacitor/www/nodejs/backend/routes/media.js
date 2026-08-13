@@ -1751,22 +1751,33 @@ router.get("/api/stream/m3u8", async (req, res) => {
     const segProxy = `http://127.0.0.1:${port}/api/stream/segment?url=`;
     const m3u8Proxy = `http://127.0.0.1:${port}/api/stream/m3u8?url=`;
 
+    let nextIsVariantPlaylist = false;
     const manifest = String(data)
       .split("\n")
       .map((line) => {
         const t = line.trim();
         if (!t) return line;
         if (t.startsWith("#")) {
+          if (t.startsWith("#EXT-X-STREAM-INF:")) {
+            nextIsVariantPlaylist = true;
+          }
           return t.includes('URI="')
             ? t.replace(/URI="([^"]+)"/, (_, u) => {
                 const abs = u.startsWith("http") ? u : base + u;
-                const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
+                const isSubOrAudio =
+                  t.includes("TYPE=SUBTITLES") || t.includes("TYPE=AUDIO");
+                const proxy =
+                  abs.includes(".m3u8") || isSubOrAudio ? m3u8Proxy : segProxy;
                 return `URI="${proxy}${encodeURIComponent(abs)}${refParam}"`;
               })
             : line;
         }
+
+        const isVariant = nextIsVariantPlaylist;
+        nextIsVariantPlaylist = false;
+
         const abs = t.startsWith("http") ? t : base + t;
-        const proxy = abs.includes(".m3u8") ? m3u8Proxy : segProxy;
+        const proxy = isVariant || abs.includes(".m3u8") ? m3u8Proxy : segProxy;
         return `${proxy}${encodeURIComponent(abs)}${refParam}`;
       })
       .join("\n");
@@ -1794,12 +1805,12 @@ router.get("/api/stream/segment", async (req, res) => {
     }
     let attempts = 0;
     let data, headers;
-    while (attempts < 4) {
+    while (attempts < 2) {
       try {
         const resp = await global.axios.get(url, {
           headers: reqHeaders,
           responseType: "arraybuffer",
-          timeout: 30000,
+          timeout: 10000,
         });
         data = resp.data;
         headers = resp.headers;
@@ -1807,12 +1818,11 @@ router.get("/api/stream/segment", async (req, res) => {
       } catch (err) {
         attempts++;
         const status = err.response?.status;
-        if (status === 429 && attempts < 4) {
-          const delay = Math.min(6000, 1500 * Math.pow(2, attempts - 1));
-          await new Promise((r) => setTimeout(r, delay));
+        if (status === 429 && attempts < 2) {
+          await new Promise((r) => setTimeout(r, 1000));
         } else if (
           (status === 403 || status === 503) &&
-          attempts < 4 &&
+          attempts < 2 &&
           global.cloudflarebypass
         ) {
           try {
@@ -1821,7 +1831,7 @@ router.get("/api/stream/segment", async (req, res) => {
             if (customReferer) fresh.Referer = customReferer;
             Object.assign(reqHeaders, fresh);
           } catch (_) {}
-        } else if (attempts >= 4) {
+        } else if (attempts >= 2) {
           throw err;
         }
       }

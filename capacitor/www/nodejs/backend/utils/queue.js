@@ -475,15 +475,66 @@ async function continuousExecution() {
             (err.message.includes("SCRAPER_TEMPORARY_ERROR") ||
               err.message.includes("ERR_ADDRESS_UNREACHABLE") ||
               err.message.includes("429") ||
+              err.message.includes("403") ||
               err.message.includes("ETIMEDOUT") ||
               err.message.includes("ECONNREFUSED") ||
               err.message.includes("No Stream Url") ||
               err.message.includes("No source link"))
           ) {
-            logger.warn(
-              `[queueWorker] Scraper stream fetch error on task ${currentTask?.epid}: ${err.message}. Keeping item in queue, retrying in 5s...`,
-            );
-            await new Promise((resolve) => setTimeout(resolve, 5000));
+            currentTask.retryCount = (currentTask.retryCount || 0) + 1;
+            const maxRetries = 3;
+            if (currentTask.retryCount >= maxRetries) {
+              logger.error(
+                `[queueWorker] Task ${currentTask?.epid} failed after ${maxRetries} retries: ${err.message}. Removing from queue.`,
+              );
+              try {
+                const { sendToRenderer } = require("./rendererIPC");
+                const itemLabel = currentTask?.Title
+                  ? `${currentTask.Title} (${currentTask?.Type === "Manga" ? "CHP" : "EP"} ${currentTask?.EpNum || ""})`
+                  : "Download";
+                sendToRenderer("download-error", {
+                  title: "Download Failed",
+                  message: `${itemLabel}: ${err.message} (max retries exceeded)`,
+                  epid: currentTask?.epid,
+                });
+              } catch (ipcErr) {}
+              if (currentTask?.epid) {
+                await removeQueue(currentTask.epid);
+              }
+            } else {
+              const backoffMs = Math.min(
+                30000,
+                5000 * Math.pow(2, currentTask.retryCount - 1),
+              );
+              const cleanEp =
+                currentTask.EpNum !== undefined && currentTask.EpNum !== null
+                  ? String(currentTask.EpNum)
+                  : "";
+              const qualStr = currentTask.config?.quality
+                ? ` ( ${currentTask.config.quality} )`
+                : "";
+              const retryCaption = `Downloading EP ${cleanEp} ${currentTask.Title || ""}${qualStr} Retrying in ${Math.round(backoffMs / 1000)}s...`;
+              await updateQueue(currentTask.epid, 0, 0, retryCaption);
+              try {
+                const { sendToRenderer } = require("./rendererIPC");
+                sendToRenderer("download-logger", {
+                  caption: retryCaption,
+                  totalSegments: 0,
+                  currentSegments: 0,
+                  epid: currentTask.epid,
+                  isPaused: isQueuePaused(),
+                });
+              } catch (_) {}
+              logger.warn(
+                `[queueWorker] Scraper stream fetch error on task ${currentTask?.epid} (attempt ${currentTask.retryCount}/${maxRetries}): ${err.message}. Retrying in ${backoffMs / 1000}s...`,
+              );
+              const prov =
+                currentTask.config?.Animeprovider ||
+                currentTask.config?.Mangaprovider ||
+                "scraper";
+              markCoolingDown(prov, backoffMs);
+              await new Promise((resolve) => setTimeout(resolve, backoffMs));
+            }
           } else {
             logger.error(`Error message: ${err.message}`);
             logger.error(`Stack trace: ${err.stack}`);
@@ -539,13 +590,17 @@ async function downloadep(
   _bgDownloadDepth++;
   try {
     const qualStr = Videoconfig?.quality ? ` ( ${Videoconfig.quality} )` : "";
-    const initialCaption = `Downloading EP ${EpNum} ${Title}${qualStr}`;
-    await updateQueue(AnimeEpId, 1, 0, initialCaption);
+    const cleanEp =
+      EpNum !== undefined && EpNum !== null && !isNaN(Number(EpNum))
+        ? String(Number(EpNum))
+        : EpNum;
+    const initialCaption = `Resolving EP ${cleanEp} ${Title}${qualStr}...`;
+    await updateQueue(AnimeEpId, 0, 0, initialCaption);
     const { sendToRenderer } = require("./rendererIPC");
     sendToRenderer("request-battery-optimization", {});
     sendToRenderer("download-logger", {
       caption: initialCaption,
-      totalSegments: 1,
+      totalSegments: 0,
       currentSegments: 0,
       epid: AnimeEpId,
       isPaused: isQueuePaused(),
@@ -652,7 +707,7 @@ async function downloadEpisodeByQuality(
     let sourcesList = extractSources(sourcesArray, subdub);
 
     if ((!sourcesList || sourcesList.length === 0) && resolvedEpid !== epid) {
-      sourcesArray = await fetchEpisodeSources(provider, epid);
+      sourcesArray = await fetchEpisodeSources(provider, epid, subdub);
       sourcesList = extractSources(sourcesArray, subdub);
     }
 
@@ -752,6 +807,17 @@ async function downloadEpisodeByQuality(
           );
         },
       );
+      if (
+        subdub !== "hsub" &&
+        filteredSubtitles.length === 0 &&
+        Array.isArray(subtitles) &&
+        subtitles.length > 0
+      ) {
+        filteredSubtitles = subtitles.filter(({ lang, label, language }) => {
+          const subLang = lang || label || language;
+          return subLang !== "Thumbnails";
+        });
+      }
 
       await downloadVideo(
         selectedSource.url,
@@ -772,7 +838,14 @@ async function downloadEpisodeByQuality(
 
       if (malid && animeId) {
         try {
-          await updateHistory("Anime", animeId, malid, episodeNumber);
+          await updateHistory({
+            type: "Anime",
+            mediaId: animeId,
+            malid: malid,
+            number: episodeNumber,
+            currentTime: 0,
+            duration: 0,
+          });
         } catch (_) {}
         try {
           const epNum = parseFloat(episodeNumber);

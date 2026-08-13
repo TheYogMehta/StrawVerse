@@ -1,5 +1,21 @@
 # Changelog
 
+# [9.5.3] - 2026-08-14
+
+### Downloads Tracker
+
+- **Live Speed & Time Remaining:** Active download cards now show real-time download speeds (e.g. `2.4 MB/s`) and estimated time remaining (ETA).
+- **Clearer Status Messages:** Downloads now display `"Resolving stream links..."` while preparing episodes instead of showing confusing `0 of 0` segment counters.
+- **Faster Download Recovery:** Downloads automatically retry faster if your connection hiccups, reducing stuck downloads.
+
+### Video Player & Streaming Fixes
+
+- **Auto-Save Watch Progress:** Your watch progress is now automatically saved every 10 seconds, as well as whenever you seek or pause, so you won't lose your place if the app or video player closes.
+- **Fixed Video Loading & Freezing:** Resolved video loading errors on streams (such as Anikoto and Anineko) where videos would freeze or fail to load.
+- **Accurate Subtitle Track Selection:** Fixed an issue where French or other subtitle tracks were accidentally selected instead of English, and cleaned up duplicate subtitle track options.
+- **English DUB Server Fix:** Fixed English Dub servers on Anikoto and Anineko so Dub episodes load and play correctly.
+- **Automatic Extension Updates:** Extension updates now automatically apply as soon as you launch the app.
+
 # [9.5.2] - 2026-08-09
 
 ### Stream Proxy & MPV Playback

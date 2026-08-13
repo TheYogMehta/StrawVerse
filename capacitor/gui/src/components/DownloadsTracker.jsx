@@ -11,6 +11,8 @@ import {
   Play,
   Zap,
   AlertTriangle,
+  Gauge,
+  Clock,
 } from "lucide-react";
 import { apiPost } from "../utils/common";
 import "./css/DownloadsTracker.css";
@@ -37,12 +39,17 @@ export default function DownloadsTracker() {
     let tasks = [];
     if (Array.isArray(data.activeTasks) && data.activeTasks.length > 0) {
       tasks = data.activeTasks;
-    } else if (data.totalSegments && data.totalSegments > 0) {
+    } else if (
+      data.epid ||
+      (data.caption &&
+        data.caption !== "Nothing in progress" &&
+        data.caption !== "Preparing next episode...")
+    ) {
       tasks = [
         {
           caption: data.caption,
-          totalSegments: data.totalSegments,
-          currentSegments: data.currentSegments,
+          totalSegments: data.totalSegments || 0,
+          currentSegments: data.currentSegments || 0,
           epid: data.epid,
           id: data.id,
           malid: data.malid,
@@ -51,6 +58,8 @@ export default function DownloadsTracker() {
           Type: data.Type,
           concurrency: data.concurrency,
           lastTestedConcurrency: data.lastTestedConcurrency,
+          downloadSpeed: data.downloadSpeed,
+          eta: data.eta,
         },
       ];
     }
@@ -64,18 +73,23 @@ export default function DownloadsTracker() {
   useEffect(() => {
     fetchDownloads();
 
-    // Listen to real-time Electron IPC download events
+    // Listen to real-time Capacitor IPC download events
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       window.sharedStateAPI.on("download-logger", (data) => {
         let incomingTasks = [];
         if (Array.isArray(data.activeTasks) && data.activeTasks.length > 0) {
           incomingTasks = data.activeTasks;
-        } else if (data.totalSegments && data.totalSegments > 0) {
+        } else if (
+          data.epid ||
+          (data.caption &&
+            data.caption !== "Nothing in progress" &&
+            data.caption !== "Preparing next episode...")
+        ) {
           incomingTasks = [
             {
               caption: data.caption,
-              totalSegments: data.totalSegments,
-              currentSegments: data.currentSegments,
+              totalSegments: data.totalSegments || 0,
+              currentSegments: data.currentSegments || 0,
               epid: data.epid,
               id: data.id,
               malid: data.malid,
@@ -84,6 +98,8 @@ export default function DownloadsTracker() {
               Type: data.Type,
               concurrency: data.concurrency,
               lastTestedConcurrency: data.lastTestedConcurrency,
+              downloadSpeed: data.downloadSpeed,
+              eta: data.eta,
             },
           ];
         }
@@ -101,6 +117,8 @@ export default function DownloadsTracker() {
               concurrency: task.concurrency ?? prev?.concurrency,
               lastTestedConcurrency:
                 task.lastTestedConcurrency ?? prev?.lastTestedConcurrency,
+              downloadSpeed: task.downloadSpeed ?? prev?.downloadSpeed,
+              eta: task.eta ?? prev?.eta,
             };
           });
         });
@@ -279,12 +297,23 @@ export default function DownloadsTracker() {
                 <div className="active-footer">
                   <div className="active-footer-left">
                     <span>
-                      Downloaded {activeTask.currentSegments} of{" "}
-                      {activeTask.totalSegments} segments
+                      {activeTask.totalSegments > 1
+                        ? `Downloaded ${activeTask.currentSegments} of ${activeTask.totalSegments} segments`
+                        : "Resolving stream links..."}
                     </span>
                     {activeTask.concurrency && (
                       <span className="badge-concurrent">
-                        <Zap size={11} /> {activeTask.concurrency} Concurrent
+                        <Zap size={11} /> {activeTask.concurrency} Threads
+                      </span>
+                    )}
+                    {activeTask.downloadSpeed && (
+                      <span className="badge-speed">
+                        <Gauge size={11} /> {activeTask.downloadSpeed}
+                      </span>
+                    )}
+                    {activeTask.eta && (
+                      <span className="badge-eta">
+                        <Clock size={11} /> {activeTask.eta}
                       </span>
                     )}
                     {subStatus && activeTask.lastTestedConcurrency && (

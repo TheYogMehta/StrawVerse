@@ -60,6 +60,8 @@ router.post("/api/logger", async (req, res) => {
     epid,
     concurrency,
     lastTestedConcurrency,
+    downloadSpeed,
+    eta,
   } = req.body;
   try {
     const currentQueue = (await getQueue()) ?? [];
@@ -95,6 +97,8 @@ router.post("/api/logger", async (req, res) => {
       Type: activeTaskItem?.Type,
       concurrency,
       lastTestedConcurrency,
+      downloadSpeed,
+      eta,
       isPaused: isQueuePaused(),
       activeTasks: activeTasksItems.map((task) => ({
         caption: task.caption,
@@ -111,6 +115,8 @@ router.post("/api/logger", async (req, res) => {
           task.epid === epid
             ? lastTestedConcurrency
             : task.lastTestedConcurrency,
+        downloadSpeed: task.epid === epid ? downloadSpeed : task.downloadSpeed,
+        eta: task.epid === epid ? eta : task.eta,
       })),
       queue: upcomingQueue,
     });

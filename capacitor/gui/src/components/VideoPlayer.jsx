@@ -1006,6 +1006,7 @@ export default function VideoPlayer({
           image,
           provider,
           malid,
+          subdub: playerSubDub,
         });
         window.refreshInfoViewProgress?.();
         window.refreshCatalogHistory?.();
@@ -1071,17 +1072,23 @@ export default function VideoPlayer({
       saveWatchProgress(false);
     };
 
+    const handleSeeked = () => {
+      saveWatchProgress(false);
+    };
+
     const handlePlay = () => {
       lastTickTimeRef.current = Date.now();
     };
 
     video.addEventListener("pause", handlePause);
     video.addEventListener("play", handlePlay);
+    video.addEventListener("seeked", handleSeeked);
 
     return () => {
       if (video) {
         video.removeEventListener("pause", handlePause);
         video.removeEventListener("play", handlePlay);
+        video.removeEventListener("seeked", handleSeeked);
       }
     };
   }, [selectedSource, currentEpisode, currentEpisodeObj]);
@@ -1165,9 +1172,13 @@ export default function VideoPlayer({
       const isHSub = (s) =>
         s.isHsub ||
         s.type === "hsub" ||
+        s.lang === "hsub" ||
         s.quality?.toLowerCase().includes("hsub");
       const isDub = (s) =>
-        s.isDub || s.type === "dub" || s.quality?.toLowerCase().includes("dub");
+        s.isDub ||
+        s.type === "dub" ||
+        s.lang === "dub" ||
+        s.quality?.toLowerCase().includes("dub");
 
       let fetchedSources = rawSources;
       if (playerSubDub === "sub") {

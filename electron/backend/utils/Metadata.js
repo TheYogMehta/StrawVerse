@@ -1191,7 +1191,14 @@ async function extractSubtitlesFromVideo(videoPath, epNum) {
 }
 
 // Get Local Source By id
-async function getSourceById(type, baseDir, id, number, subdub) {
+async function getSourceById(
+  type,
+  baseDir,
+  id,
+  number,
+  subdub,
+  strictIdOnly = false,
+) {
   baseDir =
     typeof baseDir === "string" && baseDir.trim()
       ? baseDir
@@ -1247,7 +1254,7 @@ async function getSourceById(type, baseDir, id, number, subdub) {
     let dirsToSearch = [];
     dirsToSearch.push(folderPath);
 
-    if (malId) {
+    if (malId && !strictIdOnly) {
       try {
         const linked = queryAll(
           `SELECT folder_name FROM ${type} WHERE MalID = ?`,

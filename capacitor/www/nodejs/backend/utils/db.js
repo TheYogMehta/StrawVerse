@@ -433,6 +433,7 @@ const tables = {
     last_watched: "TEXT",
     completed_at: "TEXT",
     hidden: "INTEGER DEFAULT 0",
+    sub_dub: "TEXT",
   },
   ReadHistory: {
     id: "INTEGER PRIMARY KEY AUTOINCREMENT",

@@ -270,19 +270,24 @@ async function fetchEpisodeSources(provider, episodeId, category = null) {
   }
 
   const cacheKey = CreateHashKey(
-    `animeepisodesources_${provider.provider_name}_${cleanEpisodeId}_${category || "all"}`,
+    `animeepisodesources_${provider.provider_name}_${cleanEpisodeId}_${category ? String(category).toLowerCase() : "all"}`,
   );
 
   let sources = cache.get(cacheKey);
-  if (!sources) {
-    if (provider.provider.fetchEpisodeSources.length >= 2) {
-      sources = await provider.provider.fetchEpisodeSources(
-        cleanEpisodeId,
-        category,
-      );
-    } else {
-      sources = await provider.provider.fetchEpisodeSources(cleanEpisodeId);
+  if (sources && category) {
+    const requestedCat = String(category).toLowerCase();
+    const hasMatchingType = (sources.sources || []).some(
+      (s) => (s.type || "").toLowerCase() === requestedCat,
+    );
+    if (!hasMatchingType && (sources.sources || []).length > 0) {
+      sources = null;
     }
+  }
+  if (!sources) {
+    sources = await provider.provider.fetchEpisodeSources(
+      cleanEpisodeId,
+      category,
+    );
     if (sources) {
       cache.set(cacheKey, sources, 60);
     }
@@ -873,33 +878,53 @@ async function processServer(provider, server) {
     return server;
   }
 
-  const serverId =
+  const uniqueId =
+    server.url ||
     server.linkId ||
     server.id ||
-    server.name ||
-    server.quality ||
-    JSON.stringify(server);
+    server.rawServer?.url ||
+    server.rawServer?.linkId ||
+    server.rawServer?.id;
+
   const providerName = provider?.provider_name || provider?.name || "unknown";
-  const cacheKey = CreateHashKey(`processServer_${providerName}_${serverId}`);
-  const cachedData = cache.get(cacheKey);
-  if (cachedData) {
-    if (
-      cachedData.url &&
-      global.setDynamicReferer &&
-      cachedData.headers?.Referer
-    ) {
-      try {
-        const cdnDomain = new URL(cachedData.url).hostname;
-        global.setDynamicReferer(cdnDomain, cachedData.headers.Referer);
-        global.setFallbackReferer(cachedData.headers.Referer);
-      } catch (e) {}
+  const cacheKey = uniqueId
+    ? CreateHashKey(`processServer_${providerName}_${uniqueId}`)
+    : null;
+
+  if (cacheKey) {
+    const cachedData = cache.get(cacheKey);
+    if (cachedData) {
+      if (
+        cachedData.url &&
+        global.setDynamicReferer &&
+        cachedData.headers?.Referer
+      ) {
+        try {
+          const cdnDomain = new URL(cachedData.url).hostname;
+          global.setDynamicReferer(cdnDomain, cachedData.headers.Referer);
+          global.setFallbackReferer(cachedData.headers.Referer);
+        } catch (e) {}
+      }
+      return cachedData;
     }
-    return cachedData;
   }
 
-  const resolved = await provider.provider.processServer(
+  const resolvePromise = provider.provider.processServer(
     server.rawServer || server,
   );
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Server resolution timeout (8s)")), 8000),
+  );
+
+  let resolved = null;
+  try {
+    resolved = await Promise.race([resolvePromise, timeoutPromise]);
+  } catch (e) {
+    logger.warn(
+      `[processServer] Timeout or error resolving server ${server.name || server.quality}: ${e.message}`,
+    );
+    return null;
+  }
   if (resolved && resolved.url) {
     if (global.setDynamicReferer && resolved.headers?.Referer) {
       try {
@@ -908,7 +933,9 @@ async function processServer(provider, server) {
         global.setFallbackReferer(resolved.headers.Referer);
       } catch (e) {}
     }
-    cache.set(cacheKey, resolved, 300);
+    if (cacheKey) {
+      cache.set(cacheKey, resolved, 300);
+    }
   }
   return resolved;
 }

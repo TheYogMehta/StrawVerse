@@ -531,6 +531,8 @@ app.whenReady().then(async () => {
       logger.info(`Listening on port ${PORT}`);
       resolve();
     });
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
     server.on("error", (err) => {
       logger.error(
         `Express server failed to listen on port ${PORT}: ${err.message}`,

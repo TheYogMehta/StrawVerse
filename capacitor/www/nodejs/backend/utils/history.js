@@ -2,6 +2,38 @@ const { queryOne, queryAll, run } = require("./db");
 const { logger } = require("./AppLogger");
 const { autoTrackMAL } = require("./mal");
 
+function parseSeconds(val) {
+  if (val === null || val === undefined) return 0;
+  if (typeof val === "number") return isNaN(val) || val > 10800 ? 0 : val;
+  const str = String(val).trim();
+  if (!str) return 0;
+  if (
+    str.includes(" ") ||
+    str.includes("-") ||
+    str.includes("T") ||
+    str.includes("Z") ||
+    str.length > 12
+  ) {
+    return 0;
+  }
+
+  if (str.includes(":")) {
+    const parts = str.split(":").map((p) => parseFloat(p));
+    if (parts.some(isNaN)) return 0;
+    if (parts.length === 3) {
+      const totalSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+      return totalSec > 10800 ? 0 : totalSec;
+    } else if (parts.length === 2) {
+      const totalSec = parts[0] * 60 + parts[1];
+      return totalSec > 10800 ? 0 : totalSec;
+    }
+    return 0;
+  }
+
+  const num = parseFloat(str);
+  return isNaN(num) || num > 10800 ? 0 : num;
+}
+
 async function updateHistory({
   mediaId,
   type,
@@ -13,10 +45,13 @@ async function updateHistory({
   image,
   provider,
   malid,
+  subdub,
+  sub_dub,
 }) {
   const tSpent = parseFloat(timeSpent || 0);
   const parsedNum = parseFloat(number);
   const isAnime = type === "Anime";
+  const langSubDub = subdub || sub_dub || null;
 
   // Resolve title
   let resolvedTitle = title;
@@ -127,54 +162,86 @@ async function updateHistory({
   }
 
   const placeholders = queryIds.map(() => "?").join(",");
-  let record = await queryOne(
-    `
-    SELECT * FROM ${historyTable} 
-    WHERE ${idField} IN (${placeholders}) AND ${numberField} = ?
-  `,
-    [...queryIds, parsedNum],
-  );
+  const strNum = String(number);
+  let record = null;
 
-  if (!record && resolvedTitle && resolvedTitle !== type) {
+  if (queryIds.length > 0) {
+    if (resolvedTitle && resolvedTitle !== type) {
+      record = await queryOne(
+        `SELECT * FROM ${historyTable} WHERE (${idField} IN (${placeholders}) OR LOWER(${titleField}) = LOWER(?)) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
+        [...queryIds, resolvedTitle, parsedNum, parsedNum, strNum],
+      );
+    } else {
+      record = await queryOne(
+        `SELECT * FROM ${historyTable} WHERE ${idField} IN (${placeholders}) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
+        [...queryIds, parsedNum, parsedNum, strNum],
+      );
+    }
+  } else if (resolvedTitle && resolvedTitle !== type) {
     record = await queryOne(
-      `
-      SELECT * FROM ${historyTable} 
-      WHERE LOWER(${titleField}) = LOWER(?) AND ${numberField} = ?
-    `,
-      [resolvedTitle, parsedNum],
+      `SELECT * FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
+      [resolvedTitle, parsedNum, parsedNum, strNum],
     );
   }
 
   const curVal = isAnime
-    ? parseFloat(currentTime || 0)
+    ? parseSeconds(currentTime)
     : parseInt(currentTime || 1);
   const totVal = isAnime ? parseFloat(duration || 0) : parseInt(duration || 1);
   const isComp = totVal > 0 && curVal / totVal >= 0.75 ? 1 : 0;
+
+  const nowIso = new Date().toISOString();
 
   if (record) {
     const nextComp = record.is_completed === 1 ? 1 : isComp;
     const compAt =
       record.is_completed === 0 && nextComp === 1
-        ? new Date().toISOString()
+        ? nowIso
         : record.completed_at;
+
+    const subDubUpdate = isAnime && langSubDub ? `, sub_dub = ?` : ``;
+    const updateParams = [
+      mediaId,
+      resolvedTitle || type,
+      curVal,
+      totVal,
+      tSpent,
+      nextComp,
+      nowIso,
+      compAt,
+    ];
+    if (isAnime && langSubDub) updateParams.push(langSubDub);
+    updateParams.push(record.id);
 
     await run(
       `
       UPDATE ${historyTable} 
-      SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = CURRENT_TIMESTAMP, completed_at = ?, hidden = 0
+      SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = ?, completed_at = ?, hidden = 0${subDubUpdate}
       WHERE id = ?
     `,
-      [
-        mediaId,
-        resolvedTitle || type,
-        curVal,
-        totVal,
-        tSpent,
-        nextComp,
-        compAt,
-        record.id,
-      ],
+      updateParams,
     );
+
+    try {
+      if (queryIds.length > 0) {
+        await run(
+          `DELETE FROM ${historyTable} WHERE (LOWER(${titleField}) = LOWER(?) OR ${idField} IN (${placeholders})) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) AND id != ?`,
+          [
+            resolvedTitle || type,
+            ...queryIds,
+            parsedNum,
+            parsedNum,
+            strNum,
+            record.id,
+          ],
+        );
+      } else {
+        await run(
+          `DELETE FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) AND id != ?`,
+          [resolvedTitle || type, parsedNum, parsedNum, strNum, record.id],
+        );
+      }
+    } catch (e) {}
 
     if (record.is_completed === 0 && nextComp === 1) {
       const synced = await autoTrackMAL(type, mediaId, parsedNum);
@@ -189,23 +256,71 @@ async function updateHistory({
       }
     }
   } else {
-    const compAt = isComp === 1 ? new Date().toISOString() : null;
-    await run(
-      `
-      INSERT INTO ${historyTable} (${idField}, ${titleField}, ${numberField}, ${currentField}, ${totalField}, time_spent, is_completed, ${timeField}, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+    const compAt = isComp === 1 ? nowIso : null;
+    let newId = 0;
+    if (isAnime) {
+      const res = await run(
+        `
+      INSERT INTO ${historyTable} (${idField}, ${titleField}, ${numberField}, ${currentField}, ${totalField}, time_spent, is_completed, ${timeField}, completed_at, sub_dub)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
-      [
-        mediaId,
-        resolvedTitle || type,
-        parsedNum,
-        curVal,
-        totVal,
-        tSpent,
-        isComp,
-        compAt,
-      ],
-    );
+        [
+          mediaId,
+          resolvedTitle || type,
+          parsedNum,
+          curVal,
+          totVal,
+          tSpent,
+          isComp,
+          nowIso,
+          compAt,
+          langSubDub || "sub",
+        ],
+      );
+      newId = res?.lastInsertRowid || 0;
+    } else {
+      const res = await run(
+        `
+      INSERT INTO ${historyTable} (${idField}, ${titleField}, ${numberField}, ${currentField}, ${totalField}, time_spent, is_completed, ${timeField}, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+        [
+          mediaId,
+          resolvedTitle || type,
+          parsedNum,
+          curVal,
+          totVal,
+          tSpent,
+          isComp,
+          nowIso,
+          compAt,
+        ],
+      );
+      newId = res?.lastInsertRowid || 0;
+    }
+
+    if (newId > 0) {
+      try {
+        if (queryIds.length > 0) {
+          await run(
+            `DELETE FROM ${historyTable} WHERE (LOWER(${titleField}) = LOWER(?) OR ${idField} IN (${placeholders})) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) AND id != ?`,
+            [
+              resolvedTitle || type,
+              ...queryIds,
+              parsedNum,
+              parsedNum,
+              strNum,
+              newId,
+            ],
+          );
+        } else {
+          await run(
+            `DELETE FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) AND id != ?`,
+            [resolvedTitle || type, parsedNum, parsedNum, strNum, newId],
+          );
+        }
+      } catch (e) {}
+    }
 
     if (isComp === 1) {
       const synced = await autoTrackMAL(type, mediaId, parsedNum);

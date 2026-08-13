@@ -502,6 +502,25 @@ async function continuousExecution() {
                 30000,
                 5000 * Math.pow(2, currentTask.retryCount - 1),
               );
+              const cleanEp =
+                currentTask.EpNum !== undefined && currentTask.EpNum !== null
+                  ? String(currentTask.EpNum)
+                  : "";
+              const qualStr = currentTask.config?.quality
+                ? ` ( ${currentTask.config.quality} )`
+                : "";
+              const retryCaption = `Downloading EP ${cleanEp} ${currentTask.Title || ""}${qualStr} Retrying in ${Math.round(backoffMs / 1000)}s...`;
+              await updateQueue(currentTask.epid, 0, 0, retryCaption);
+              try {
+                const { sendToRenderer } = require("./rendererIPC");
+                sendToRenderer("download-logger", {
+                  caption: retryCaption,
+                  totalSegments: 0,
+                  currentSegments: 0,
+                  epid: currentTask.epid,
+                  isPaused: isQueuePaused(),
+                });
+              } catch (_) {}
               logger.warn(
                 `[queueWorker] Scraper stream fetch error on task ${currentTask?.epid} (attempt ${currentTask.retryCount}/${maxRetries}): ${err.message}. Retrying in ${backoffMs / 1000}s...`,
               );
@@ -572,12 +591,12 @@ async function downloadep(
       EpNum !== undefined && EpNum !== null && !isNaN(Number(EpNum))
         ? String(Number(EpNum))
         : EpNum;
-    const initialCaption = `Downloading EP ${cleanEp} ${Title}${qualStr}`;
-    await updateQueue(AnimeEpId, 1, 0, initialCaption);
+    const initialCaption = `Resolving EP ${cleanEp} ${Title}${qualStr}...`;
+    await updateQueue(AnimeEpId, 0, 0, initialCaption);
     const { sendToRenderer } = require("./rendererIPC");
     sendToRenderer("download-logger", {
       caption: initialCaption,
-      totalSegments: 1,
+      totalSegments: 0,
       currentSegments: 0,
       epid: AnimeEpId,
       isPaused: isQueuePaused(),
@@ -691,7 +710,7 @@ async function downloadEpisodeByQuality(
     let sourcesList = extractSources(sourcesArray, subdub);
 
     if ((!sourcesList || sourcesList.length === 0) && resolvedEpid !== epid) {
-      sourcesArray = await fetchEpisodeSources(provider, epid);
+      sourcesArray = await fetchEpisodeSources(provider, epid, subdub);
       sourcesList = extractSources(sourcesArray, subdub);
     }
 
@@ -748,75 +767,45 @@ async function downloadEpisodeByQuality(
     }
 
     const allSubtitles =
+      (selectedSource?.subtitles && selectedSource.subtitles.length > 0
+        ? selectedSource.subtitles
+        : null) ||
       sourcesArray?.subtitles ||
       sourcesArray?.[subdub]?.subtitles ||
       sourcesArray?.sub?.subtitles ||
       sourcesArray?.dub?.subtitles ||
       [];
 
-    const prefLangs = Array.isArray(config?.preferredSubtitleLanguages)
-      ? config.preferredSubtitleLanguages
-      : ["English"];
+    const currentSettings = (await settingfetch()) || {};
+    const preferredLangs = config?.preferredSubtitleLanguages ||
+      currentSettings?.preferredSubtitleLanguages || ["English"];
 
-    let subtitles = [];
-    if (subdub !== "hsub" && prefLangs.length > 0 && allSubtitles.length > 0) {
-      subtitles = allSubtitles.filter((sub) => {
-        const raw = (
+    let filteredSubtitles = [];
+    if (
+      subdub !== "hsub" &&
+      Array.isArray(allSubtitles) &&
+      allSubtitles.length > 0
+    ) {
+      filteredSubtitles = allSubtitles.filter((sub) => {
+        const subLang =
           sub?.lang ||
           sub?.label ||
           sub?.name ||
+          sub?.language ||
           sub?.url ||
-          ""
-        ).toLowerCase();
-        return prefLangs.some((pref) => {
-          const p = String(pref).toLowerCase().trim();
-          if (p === "english" || p === "eng" || p === "en")
-            return raw.includes("eng") || raw.includes("english");
-          if (p === "japanese" || p === "jpn" || p === "jp")
-            return raw.includes("jp") || raw.includes("japanese");
-          if (p === "spanish" || p === "spa" || p === "es")
-            return raw.includes("spa") || raw.includes("spanish");
-          if (p === "french" || p === "fre" || p === "fra" || p === "fr")
-            return (
-              raw.includes("fre") ||
-              raw.includes("fra") ||
-              raw.includes("french")
-            );
-          if (p === "german" || p === "ger" || p === "deu" || p === "de")
-            return (
-              raw.includes("ger") ||
-              raw.includes("deu") ||
-              raw.includes("german")
-            );
-          if (p === "italian" || p === "ita" || p === "it")
-            return raw.includes("ita") || raw.includes("italian");
-          if (p === "russian" || p === "rus" || p === "ru")
-            return raw.includes("rus") || raw.includes("russian");
-          if (p === "portuguese" || p === "por" || p === "pt")
-            return (
-              raw.includes("por") ||
-              raw.includes("portuguese") ||
-              raw.includes("brazilian")
-            );
-          if (p === "indonesian" || p === "ind" || p === "id")
-            return raw.includes("ind") || raw.includes("indonesian");
-          if (p === "thai" || p === "tha" || p === "th")
-            return raw.includes("tha") || raw.includes("thai");
-          if (p === "vietnamese" || p === "vie" || p === "vi")
-            return raw.includes("vie") || raw.includes("vietnamese");
-          if (p === "chinese" || p === "chi" || p === "zho" || p === "zh")
-            return (
-              raw.includes("chi") ||
-              raw.includes("zho") ||
-              raw.includes("chinese")
-            );
-          if (p === "arabic" || p === "ara" || p === "ar")
-            return raw.includes("ara") || raw.includes("arabic");
-          if (p === "hindi" || p === "hin" || p === "hi")
-            return raw.includes("hin") || raw.includes("hindi");
-          return raw.includes(p);
-        });
+          "";
+        return (
+          subLang !== "Thumbnails" &&
+          isLanguagePreferred(subLang, preferredLangs)
+        );
       });
+      if (filteredSubtitles.length === 0) {
+        filteredSubtitles = allSubtitles.filter((sub) => {
+          const subLang =
+            sub?.lang || sub?.label || sub?.name || sub?.language || "";
+          return subLang !== "Thumbnails";
+        });
+      }
     }
 
     if (selectedSource) {
@@ -824,20 +813,6 @@ async function downloadEpisodeByQuality(
         selectedSource.quality && selectedSource.quality.match(/\d+p/)
           ? selectedSource.quality
           : config?.quality || "1080p";
-
-      const currentSettings = (await settingfetch()) || {};
-      const preferredLangs = config?.preferredSubtitleLanguages ||
-        currentSettings?.preferredSubtitleLanguages || ["English"];
-
-      let filteredSubtitles = (subdub === "hsub" ? [] : subtitles || []).filter(
-        ({ lang, label, language }) => {
-          const subLang = lang || label || language;
-          return (
-            subLang !== "Thumbnails" &&
-            isLanguagePreferred(subLang, preferredLangs)
-          );
-        },
-      );
 
       await downloadVideo(
         selectedSource.url,
@@ -858,7 +833,14 @@ async function downloadEpisodeByQuality(
 
       if (malid && animeId) {
         try {
-          await updateHistory("Anime", animeId, malid, episodeNumber);
+          await updateHistory({
+            type: "Anime",
+            mediaId: animeId,
+            malid: malid,
+            number: episodeNumber,
+            currentTime: 0,
+            duration: 0,
+          });
         } catch (_) {}
         try {
           const epNum = parseFloat(episodeNumber);

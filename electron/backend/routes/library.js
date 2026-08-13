@@ -1005,6 +1005,7 @@ router.get("/api/history/progress", async (req, res) => {
           currentTime: latest.current_time,
           duration: latest.duration,
           isCompleted: latest.is_completed === 1,
+          subdub: latest.sub_dub || "sub",
         };
 
         if (latest.is_completed === 1) {
@@ -1019,6 +1020,7 @@ router.get("/api/history/progress", async (req, res) => {
         isCompleted: h.is_completed === 1,
         currentTime: h.current_time,
         duration: h.duration,
+        subdub: h.sub_dub || "sub",
       }));
     } else {
       let queryIds = [mediaId];
@@ -1088,6 +1090,7 @@ router.get("/api/history/progress", async (req, res) => {
       suggestedNumber,
       episodesStatus,
       chaptersStatus,
+      lastSubDub: lastProgress?.subdub || "sub",
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1233,6 +1236,7 @@ router.get("/api/history/list", async (req, res) => {
         w.time_spent,
         w.is_completed,
         w.last_watched AS date,
+        w.sub_dub AS subdub,
         a.image_url,
         a.provider,
         a.MalID AS mal_id,

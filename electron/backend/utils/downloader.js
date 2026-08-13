@@ -635,7 +635,7 @@ class downloader {
           }
 
           await fs.promises.writeFile(segmentFile, body);
-          return true;
+          return body.length;
         } catch (err) {
           if (
             stopDownloading ||
@@ -686,9 +686,10 @@ class downloader {
           break;
         }
 
-        CONCURRENCY = getDomainConcurrency(domainName, 2);
+        CONCURRENCY = getDomainConcurrency(domainName, 4);
+        const SAMPLE_SIZE = 4;
         const batchSize = Math.min(
-          CONCURRENCY,
+          SAMPLE_SIZE,
           this.Segments.length - currentIndex,
         );
         const batchIndices = [];
@@ -701,26 +702,59 @@ class downloader {
         let batchBytesDownloaded = 0;
         const batchStartTime = Date.now();
 
-        await Promise.all(
-          batchIndices.map(async (idx) => {
-            try {
-              const downloadedBytes = await downloadSingleSegment(idx);
-              if (downloadedBytes) {
-                batchBytesDownloaded +=
-                  typeof downloadedBytes === "number" ? downloadedBytes : 0;
-                this.currentSegments = Math.min(
-                  this.Segments.length,
-                  this.currentSegments + 1,
-                );
-                this.logProgress(null, CONCURRENCY);
-              }
-            } catch (err) {
-              batchHasError = true;
-              lastStatusCode = err.response?.statusCode;
-              if (stopDownloading) throw err;
+        const poolLimit = Math.max(1, CONCURRENCY);
+        let activePool = 0;
+        let poolIdx = 0;
+
+        await new Promise((resPool, rejPool) => {
+          let finishedInPool = 0;
+
+          const launchNextInPool = () => {
+            if (finishedInPool >= batchIndices.length || stopDownloading) {
+              if (stopDownloading) return rejPool(new Error("Queue Paused"));
+              return resPool();
             }
-          }),
-        ).catch((err) => {
+
+            while (
+              activePool < poolLimit &&
+              poolIdx < batchIndices.length &&
+              !stopDownloading
+            ) {
+              const idx = batchIndices[poolIdx++];
+              activePool++;
+
+              downloadSingleSegment(idx)
+                .then((downloadedBytes) => {
+                  activePool--;
+                  finishedInPool++;
+                  if (downloadedBytes) {
+                    batchBytesDownloaded +=
+                      typeof downloadedBytes === "number" ? downloadedBytes : 0;
+                    if (typeof downloadedBytes === "number") {
+                      this.downloadedTotalBytes =
+                        (this.downloadedTotalBytes || 0) + downloadedBytes;
+                    }
+                    this.currentSegments = Math.min(
+                      this.Segments.length,
+                      this.currentSegments + 1,
+                    );
+                    this.logProgress(null, CONCURRENCY);
+                  }
+                  launchNextInPool();
+                })
+                .catch((err) => {
+                  activePool--;
+                  finishedInPool++;
+                  batchHasError = true;
+                  lastStatusCode = err.response?.statusCode;
+                  if (stopDownloading) return rejPool(err);
+                  launchNextInPool();
+                });
+            }
+          };
+
+          launchNextInPool();
+        }).catch((err) => {
           if (stopDownloading) throw err;
         });
 
@@ -789,60 +823,14 @@ class downloader {
             );
           }
 
-          // 3. If all 3 step-down retries failed, retry every 60s until success
           if (!recovered && !stopDownloading) {
-            logger.warn(
-              `[Download] All ${MAX_STEP_RETRIES} step-down retries failed for '${domainName}'. Entering 60s retry loop...`,
+            logger.error(
+              `[Download] All ${MAX_STEP_RETRIES} step-down retries failed for '${domainName}'. Triggering link refresh via queueWorker...`,
             );
-            while (!recovered && !stopDownloading) {
-              this.logProgress(
-                `All retries failed. Waiting 60s before trying again at concurrency ${CONCURRENCY}...`,
-                CONCURRENCY,
-              );
-              await new Promise((res) => setTimeout(res, 60000));
-
-              if (stopDownloading) break;
-              if (global.isQueuePaused && global.isQueuePaused()) {
-                stopDownloading = true;
-                throw new Error("Queue Paused");
-              }
-              if (
-                global.isEpisodeInQueue &&
-                !global.isEpisodeInQueue(this.EpID)
-              ) {
-                stopDownloading = true;
-                throw new Error("Episode Cancelled");
-              }
-
-              let minuteRetryError = false;
-              await Promise.all(
-                batchIndices.map(async (idx) => {
-                  try {
-                    const downloadedBytes = await downloadSingleSegment(idx);
-                    if (downloadedBytes) {
-                      batchBytesDownloaded +=
-                        typeof downloadedBytes === "number"
-                          ? downloadedBytes
-                          : 0;
-                      this.currentSegments = Math.min(
-                        this.Segments.length,
-                        this.currentSegments + 1,
-                      );
-                      this.logProgress(null, CONCURRENCY);
-                    }
-                  } catch (err) {
-                    minuteRetryError = true;
-                    if (stopDownloading) throw err;
-                  }
-                }),
-              ).catch((err) => {
-                if (stopDownloading) throw err;
-              });
-
-              if (!minuteRetryError) {
-                recovered = true;
-              }
-            }
+            stopDownloading = true;
+            throw new Error(
+              `SCRAPER_TEMPORARY_ERROR: Segment download failed for ${domainName} (HTTP ${lastStatusCode || "timeout"})`,
+            );
           }
 
           if (recovered) {
@@ -970,7 +958,7 @@ class downloader {
           try {
             subtitleData = await got(targetUrl, {
               headers: subHeaders,
-              http2: true,
+              timeout: { request: 15000 },
             }).text();
           } catch (e) {
             try {
@@ -981,10 +969,12 @@ class downloader {
               delete cleanHeaders["origin"];
               subtitleData = await got(targetUrl, {
                 headers: cleanHeaders,
-                http2: true,
+                timeout: { request: 15000 },
               }).text();
             } catch (err) {
-              subtitleData = await got(targetUrl, { http2: true }).text();
+              subtitleData = await got(targetUrl, {
+                timeout: { request: 15000 },
+              }).text();
             }
           }
 
@@ -1267,6 +1257,65 @@ class downloader {
     this._lastLogTime = now;
     this._lastCaption = caption;
 
+    let speedStr = null;
+    let etaStr = null;
+    const totalDownloaded = this.downloadedTotalBytes || 0;
+
+    if (!this._speedStartTime) {
+      this._speedStartTime = now;
+      this._speedBytesStart = totalDownloaded;
+    }
+    const elapsedSec = (now - this._speedStartTime) / 1000;
+
+    if (elapsedSec >= 0.8 && totalDownloaded > (this._speedBytesStart || 0)) {
+      const bytesSince = totalDownloaded - (this._speedBytesStart || 0);
+      const instantSpeed = bytesSince / elapsedSec;
+      this._smoothedSpeed = this._smoothedSpeed
+        ? 0.4 * instantSpeed + 0.6 * this._smoothedSpeed
+        : instantSpeed;
+
+      const currentSpeed = this._smoothedSpeed;
+      if (currentSpeed >= 1024 * 1024) {
+        speedStr = `${(currentSpeed / (1024 * 1024)).toFixed(1)} MB/s`;
+      } else if (currentSpeed >= 1024) {
+        speedStr = `${Math.round(currentSpeed / 1024)} KB/s`;
+      } else if (currentSpeed > 0) {
+        speedStr = `${Math.round(currentSpeed)} B/s`;
+      }
+
+      if (
+        this.totalSegments > 0 &&
+        this.currentSegments > 0 &&
+        currentSpeed > 0
+      ) {
+        const remainingSegments = Math.max(
+          0,
+          this.totalSegments - this.currentSegments,
+        );
+        const avgBytesPerSeg = totalDownloaded / this.currentSegments;
+        const remainingBytes = remainingSegments * avgBytesPerSeg;
+        const remainingSec = Math.round(remainingBytes / currentSpeed);
+
+        if (remainingSec >= 0 && isFinite(remainingSec)) {
+          if (remainingSec < 60) {
+            etaStr = `~${remainingSec}s left`;
+          } else {
+            const mins = Math.floor(remainingSec / 60);
+            const secs = remainingSec % 60;
+            etaStr = `~${mins}m ${secs}s left`;
+          }
+        }
+      }
+
+      if (speedStr) this._lastSpeedStr = speedStr;
+      if (etaStr) this._lastEtaStr = etaStr;
+
+      if (elapsedSec >= 2.5) {
+        this._speedStartTime = now;
+        this._speedBytesStart = totalDownloaded;
+      }
+    }
+
     await fetch(`http://localhost:${global.PORT}/api/logger`, {
       method: "POST",
       headers: {
@@ -1279,6 +1328,8 @@ class downloader {
         epid: this.EpID,
         concurrency: currentConcurrency,
         lastTestedConcurrency: this.lastTestedConcurrency || null,
+        downloadSpeed: speedStr || this._lastSpeedStr || null,
+        eta: etaStr || this._lastEtaStr || null,
       }),
     }).catch((err) => {
       logger.error("Error updating download progress");
