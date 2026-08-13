@@ -1075,9 +1075,7 @@ export default function InfoView({
     return 30;
   };
 
-  const [dubSelect, setDubSelect] = useState("sub");
   const [historyLoading, setHistoryLoading] = useState(true);
-  const [rangeInput, setRangeInput] = useState("");
 
   const playItem = (targetItem, overrideSubDub = null) => {
     const activeSubDub = overrideSubDub || dubSelect;
