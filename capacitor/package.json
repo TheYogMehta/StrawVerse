@@ -8,7 +8,7 @@
     "package:android": "npm run sync:android && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {
-    "@capacitor/android": "^6.2.2",
+    "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^6.0.2",
     "@capacitor/browser": "^6.0.4",
     "@capacitor/core": "^6.2.0",
