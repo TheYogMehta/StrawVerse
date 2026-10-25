@@ -23,7 +23,7 @@
     "winston": "^3.19.0"
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.2.0",
+    "@capacitor/cli": "^8.5.3",
     "esbuild": "^0.25.0"
   },
   "overrides": {
