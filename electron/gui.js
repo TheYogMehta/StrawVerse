@@ -87,8 +87,7 @@ Module._resolveFilename = function (request, parent, isMain) {
       !request.startsWith(".")
     ) {
       try {
-        const fallbackPath = path.join(electronNodeModules, request);
-        return origResolve.call(this, fallbackPath, parent, isMain);
+        return require.resolve(request, { paths: [__dirname] });
       } catch (_) {}
     }
     throw err;
