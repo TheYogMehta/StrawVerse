@@ -1137,7 +1137,10 @@ async function downloadEpisodeByQuality(
         const epNum = parseFloat(episodeNumber);
         if (!isNaN(epNum)) {
           const aniskipUrl = `https://api.aniskip.com/v2/skip-times/${malid}/${Number(epNum)}?types[]=op&types[]=ed&types[]=mixed-op&types[]=mixed-ed&episodeLength=1440`;
-          const res = await axios.get(aniskipUrl);
+          // AniSkip answers 404 when no one has submitted times for this episode
+          const res = await axios.get(aniskipUrl, {
+            validateStatus: (s) => s === 200 || s === 404,
+          });
           if (res.status === 200) {
             const resData = res.data;
             if (resData && resData.found && resData.results) {
