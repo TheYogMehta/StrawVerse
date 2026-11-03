@@ -151,6 +151,7 @@ export default function SettingsView({
   const [malStatus, setMalStatus] = useState("watching");
   const [mergeSubtitles, setMergeSubtitles] = useState(false);
   const [subtitleFormat, setSubtitleFormat] = useState("vtt");
+  const [mediaServerNaming, setMediaServerNaming] = useState(false);
   const [preferredSubtitleLanguages, setPreferredSubtitleLanguages] = useState([
     "English",
   ]);
@@ -687,6 +688,7 @@ export default function SettingsView({
         setMalStatus(s.status || "watching");
         setMergeSubtitles(s.mergeSubtitles);
         setSubtitleFormat(s.subtitleFormat || "vtt");
+        setMediaServerNaming(s.mediaServerNaming === true);
         setPreferredSubtitleLanguages(
           s.preferredSubtitleLanguages || ["English"],
         );
@@ -862,6 +864,8 @@ export default function SettingsView({
       dirty.mergeSubtitles = mergeSubtitles;
     if (subtitleFormat !== (settings.subtitleFormat || "vtt"))
       dirty.subtitleFormat = subtitleFormat;
+    if (mediaServerNaming !== (settings.mediaServerNaming === true))
+      dirty.mediaServerNaming = mediaServerNaming;
     if (
       JSON.stringify(preferredSubtitleLanguages) !==
       JSON.stringify(settings.preferredSubtitleLanguages || ["English"])
@@ -1022,6 +1026,7 @@ export default function SettingsView({
       malStatus !== (settings.status || "watching") ||
       mergeSubtitles !== settings.mergeSubtitles ||
       subtitleFormat !== (settings.subtitleFormat || "vtt") ||
+      mediaServerNaming !== (settings.mediaServerNaming === true) ||
       JSON.stringify(preferredSubtitleLanguages) !==
         JSON.stringify(settings.preferredSubtitleLanguages || ["English"]) ||
       subFontSize !==
@@ -1088,6 +1093,7 @@ export default function SettingsView({
     malStatus,
     mergeSubtitles,
     subtitleFormat,
+    mediaServerNaming,
     preferredSubtitleLanguages,
     subFontSize,
     subColor,
@@ -1891,6 +1897,31 @@ export default function SettingsView({
                       options={[
                         { value: "srt", label: "SubRip (.srt)" },
                         { value: "vtt", label: "WebVTT (.vtt)" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Media Server Naming (Jellyfin / Plex)
+                    </div>
+                    <div className="settings-row-hint">
+                      Save episodes as "Show/Season 02/Show - S02E05
+                      [1080p].mp4" so Jellyfin and Plex recognize them. Pick
+                      the season and show folder on each show's page next to
+                      the download buttons. Applies to new downloads.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={String(mediaServerNaming)}
+                      onChange={(val) => setMediaServerNaming(val === "true")}
+                      options={[
+                        { value: "true", label: "On (Show - S01E05 [1080p])" },
+                        { value: "false", label: "Off (5Ep.mp4)" },
                       ]}
                       minWidth={200}
                     />

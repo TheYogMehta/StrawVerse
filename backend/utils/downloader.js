@@ -248,8 +248,10 @@ class downloader {
     headers = {},
     quality = null,
     isM3U8 = true,
+    fileBase = null,
   }) {
     this.directory = directory;
+    this.fileBase = fileBase;
     this.quality = quality;
     if (streamUrl?.url) {
       this.streamUrl = streamUrl.url;
@@ -410,8 +412,9 @@ class downloader {
       throw new Error("No Ep id found!");
     }
 
-    this.mp4 = path.join(this.directory, `${this.Epnum}Ep.mp4`);
-    this.SegmentsFile = path.join(this.directory, `${this.Epnum}Ep.ts`);
+    const base = this.fileBase || `${this.Epnum}Ep`;
+    this.mp4 = path.join(this.directory, `${base}.mp4`);
+    this.SegmentsFile = path.join(this.directory, `${base}.ts`);
 
     if (!this.streamUrl || this.streamUrl.length <= 0) {
       throw new Error("No Stream Url Provided");

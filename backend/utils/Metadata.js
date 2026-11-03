@@ -24,6 +24,7 @@ const {
   getEpisodeNumberFromFilename,
   getChapterNumberFromFilename,
   parseTags,
+  SEASON_FOLDER_RE,
 } = require("./constants");
 const { resolveMalIdFromMapping } = require("./mappingResolver");
 
@@ -409,6 +410,16 @@ async function getAllMetadata(
           const subDirPath = path.join(typeDir, dir.name);
           if (hasLocalMediaFiles(subDirPath, type)) {
             folders.push(dir.name);
+          }
+          // Media-server layout: each "<Show>/Season NN" is its own entry
+          for (const sub of fs.readdirSync(subDirPath, { withFileTypes: true })) {
+            if (
+              sub.isDirectory() &&
+              SEASON_FOLDER_RE.test(sub.name) &&
+              hasLocalMediaFiles(path.join(subDirPath, sub.name), type)
+            ) {
+              folders.push(`${dir.name}/${sub.name}`);
+            }
           }
         }
       }

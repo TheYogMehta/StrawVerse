@@ -299,6 +299,7 @@ async function SettingsLoad() {
             Pagination: false,
             enableDiscordRPC: false,
             mergeSubtitles: false,
+            mediaServerNaming: false,
             subtitleFormat: "vtt",
             malDiscordProfile: false,
             imageCacheSizeLimit: 5,

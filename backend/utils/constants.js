@@ -45,13 +45,25 @@ function isMediaFile(fileNameOrPath, type = "Anime") {
     : isMangaFile(fileNameOrPath);
 }
 
-function hasLocalMediaFiles(dirPath, type = "Anime") {
+// "Season 02" subfolders used by media-server naming (Show/Season 02/...)
+const SEASON_FOLDER_RE = /^Season \d+$/i;
+
+// includeSeasons: also count media inside "Season NN" subfolders, so a show
+// folder that only holds season folders is never treated as empty.
+function hasLocalMediaFiles(dirPath, type = "Anime", includeSeasons = false) {
   if (!dirPath || !fs.existsSync(dirPath)) return false;
   try {
-    const files = fs.readdirSync(dirPath);
-    return files.some((file) => {
-      if (file.startsWith(".")) return false;
-      return isMediaFile(file, type);
+    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    return entries.some((e) => {
+      if (e.name.startsWith(".")) return false;
+      if (e.isDirectory()) {
+        return (
+          includeSeasons &&
+          SEASON_FOLDER_RE.test(e.name) &&
+          hasLocalMediaFiles(path.join(dirPath, e.name), type, false)
+        );
+      }
+      return isMediaFile(e.name, type);
     });
   } catch (_) {
     return false;
@@ -109,7 +121,11 @@ function isUuid(str) {
 function getEpisodeNumberFromFilename(filename) {
   if (!filename || !isVideoFile(filename)) return null;
 
-  let match = filename.match(/^(\d+(\.\d+)?)/);
+  // Media-server naming: "Show - S01E05 [1080p].mp4"
+  let match = filename.match(/\bS\d{1,3}E(\d+(\.\d+)?)/i);
+  if (match) return parseFloat(match[1]);
+
+  match = filename.match(/^(\d+(\.\d+)?)/);
   if (match) return parseFloat(match[1]);
 
   match = filename.match(/(?:ep|episode|ch|chapter)\s*(\d+(\.\d+)?)/i);
@@ -117,6 +133,18 @@ function getEpisodeNumberFromFilename(filename) {
 
   match = filename.match(/\d+(\.\d+)?/);
   return match ? parseFloat(match[0]) : null;
+}
+
+// "Show - S02E05 [1080p]" (no extension), the Jellyfin/Plex episode scheme.
+// Series and season come from the "<Show>/Season NN" folder the file goes in.
+function mediaServerFileBase(directory, episode, quality) {
+  const pad = (n) => String(n).padStart(2, "0");
+  const dirName = path.basename(directory);
+  const m = dirName.match(/^Season (\d+)$/i);
+  const series = m ? path.basename(path.dirname(directory)) : dirName;
+  const season = m ? parseInt(m[1], 10) : 1;
+  const q = quality ? ` [${quality}]` : "";
+  return `${series} - S${pad(season)}E${pad(parseInt(episode, 10))}${q}`;
 }
 
 function getChapterNumberFromFilename(filename) {
@@ -320,6 +348,8 @@ module.exports = {
   isUuid,
   getEpisodeNumberFromFilename,
   getChapterNumberFromFilename,
+  mediaServerFileBase,
+  SEASON_FOLDER_RE,
   sleep,
   parseTags,
   SYSTEM_TAGS,
