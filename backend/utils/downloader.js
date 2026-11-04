@@ -248,8 +248,10 @@ class downloader {
     headers = {},
     quality = null,
     isM3U8 = true,
+    fileBase = null,
   }) {
     this.directory = directory;
+    this.fileBase = fileBase;
     this.quality = quality;
     if (streamUrl?.url) {
       this.streamUrl = streamUrl.url;
@@ -410,8 +412,9 @@ class downloader {
       throw new Error("No Ep id found!");
     }
 
-    this.mp4 = path.join(this.directory, `${this.Epnum}Ep.mp4`);
-    this.SegmentsFile = path.join(this.directory, `${this.Epnum}Ep.ts`);
+    const base = this.fileBase || `${this.Epnum}Ep`;
+    this.mp4 = path.join(this.directory, `${base}.mp4`);
+    this.SegmentsFile = path.join(this.directory, `${base}.ts`);
 
     if (!this.streamUrl || this.streamUrl.length <= 0) {
       throw new Error("No Stream Url Provided");
@@ -1736,6 +1739,17 @@ class downloader {
           );
 
           if (fs.existsSync(subtitlePath)) {
+            if (!this.MergeSubtitles && this.fileBase && this.mp4) {
+              const siblingSubPath = path.join(
+                this.directory,
+                `${path.parse(this.mp4).name}.${normalizedLang}.${finalExt}`,
+              );
+              if (!fs.existsSync(siblingSubPath)) {
+                await fs.promises
+                  .copyFile(subtitlePath, siblingSubPath)
+                  .catch(() => {});
+              }
+            }
             this.downloadedPaths.push({
               path: subtitlePath,
               lang: normalizedLang,
@@ -1795,6 +1809,15 @@ class downloader {
           }
 
           await fs.promises.writeFile(subtitlePath, subtitleData, "utf8");
+          if (!this.MergeSubtitles && this.fileBase && this.mp4) {
+            const siblingSubPath = path.join(
+              this.directory,
+              `${path.parse(this.mp4).name}.${normalizedLang}.${finalExt}`,
+            );
+            await fs.promises
+              .writeFile(siblingSubPath, subtitleData, "utf8")
+              .catch(() => {});
+          }
           this.downloadedPaths.push({
             path: subtitlePath,
             lang: normalizedLang,

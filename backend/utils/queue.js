@@ -8,7 +8,11 @@ const {
   resetDomainConcurrency,
   markCoolingDown,
 } = require("./domainConcurrency");
-const { directoryMaker, MangaDir } = require("./DirectoryMaker");
+const {
+  directoryMaker,
+  mediaServerDir,
+  MangaDir,
+} = require("./DirectoryMaker");
 const {
   MangaChapterFetch,
   DownloadChapters,
@@ -21,7 +25,10 @@ const {
   isLanguagePreferred,
   settingfetch,
 } = require("./settings");
-const { sortSourcesByPreferredQuality } = require("./constants");
+const {
+  sortSourcesByPreferredQuality,
+  mediaServerFileBase,
+} = require("./constants");
 const { verifyStreamReachability } = require("./streamVerifier");
 const { updateHistory } = require("./history");
 const { getBestProviderForMalId } = require("./mappingResolver");
@@ -197,6 +204,24 @@ async function removeQueue(AnimeEpId, isSuccess = false) {
       SubDub: removedItem.SubDub,
       epid: removedItem.epid,
     });
+
+    if (removedItem.Type === "Anime") {
+      try {
+        const { settingfetch } = require("./settings");
+        settingfetch()
+          .then((cfg) => {
+            if (cfg?.mediaServerNaming) {
+              const { onAnimeDownloadComplete } = require("./mediaServer");
+              onAnimeDownloadComplete(removedItem).catch((e) => {
+                logger.warn(
+                  `[MediaServer] Auto-NFO generation error: ${e.message}`,
+                );
+              });
+            }
+          })
+          .catch(() => {});
+      } catch (_) {}
+    }
   }
 
   try {
@@ -739,12 +764,33 @@ async function downloadep(
   animeId,
 ) {
   logger.info(`[queueWorker] ${AnimeEpId} phase: dir-start`);
-  const directoryPath = await directoryMaker(
-    Title,
-    EpNum,
-    Videoconfig?.CustomDownloadLocation,
-    animeId || AnimeEpId,
-  );
+  const liveSettings = (await settingfetch()) || {};
+  let directoryPath;
+  if (liveSettings.mediaServerNaming === true) {
+    // Season and show folder picked on the show's page (default: S1, title)
+    const show = liveSettings.mediaServerShows?.[String(animeId)] || {};
+    const season = parseInt(show.season, 10);
+    directoryPath = await mediaServerDir(
+      String(show.series || "").trim() || Title,
+      Number.isInteger(season) && season >= 0 ? season : 1,
+      Videoconfig?.CustomDownloadLocation,
+      animeId || AnimeEpId,
+    );
+    try {
+      const { generateNfoAndPosterForAnime } = require("./mediaServer");
+      generateNfoAndPosterForAnime(
+        animeId || AnimeEpId,
+        Videoconfig?.CustomDownloadLocation,
+      ).catch(() => {});
+    } catch (_) {}
+  } else {
+    directoryPath = await directoryMaker(
+      Title,
+      EpNum,
+      Videoconfig?.CustomDownloadLocation,
+      animeId || AnimeEpId,
+    );
+  }
   _bgDownloadDepth++;
   logger.info(`[queueWorker] ${AnimeEpId} phase: dir-ready ${directoryPath}`);
   try {
@@ -1119,6 +1165,9 @@ async function downloadEpisodeByQuality(
       (config?.subtitleFormat ?? "vtt") === "srt",
       selectedSource.headers ?? {},
       selectedSource.isM3U8,
+      currentSettings.mediaServerNaming === true
+        ? mediaServerFileBase(directoryName, episodeNumber, dlQuality)
+        : null,
     );
     hostSkipByEpid.delete(epid);
 
@@ -1137,7 +1186,10 @@ async function downloadEpisodeByQuality(
         const epNum = parseFloat(episodeNumber);
         if (!isNaN(epNum)) {
           const aniskipUrl = `https://api.aniskip.com/v2/skip-times/${malid}/${Number(epNum)}?types[]=op&types[]=ed&types[]=mixed-op&types[]=mixed-ed&episodeLength=1440`;
-          const res = await axios.get(aniskipUrl);
+          // AniSkip answers 404 when no one has submitted times for this episode
+          const res = await axios.get(aniskipUrl, {
+            validateStatus: (s) => s === 200 || s === 404,
+          });
           if (res.status === 200) {
             const resData = res.data;
             if (resData && resData.found && resData.results) {
@@ -1193,6 +1245,7 @@ async function downloadVideo(
   subtitleFormat = false,
   headers = {},
   isM3U8 = true,
+  fileBase = null,
 ) {
   try {
     const qualStr = quality ? ` ( ${quality} )` : "";
@@ -1214,6 +1267,7 @@ async function downloadVideo(
       ChangeTosrt: subtitleFormat,
       headers: headers,
       isM3U8: isM3U8,
+      fileBase: fileBase,
     });
   } catch (err) {
     if (err.message === "Queue Paused" || err.message === "Episode Cancelled") {

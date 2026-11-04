@@ -53,8 +53,8 @@ async function getOrCreateMediaDir(
   return targetDir;
 }
 
-// Dir GET
-async function GetDir(title, customdir, Type, mediaId = null, create = false) {
+// Downloads/<Type> root (custom location or default)
+async function getTypeDir(customdir, Type, create = false) {
   let destination;
   if (customdir) {
     try {
@@ -85,8 +85,27 @@ async function GetDir(title, customdir, Type, mediaId = null, create = false) {
       } catch (_) {}
     }
   }
+  return Directory;
+}
 
+// Dir GET
+async function GetDir(title, customdir, Type, mediaId = null, create = false) {
+  const Directory = await getTypeDir(customdir, Type, create);
   return await getOrCreateMediaDir(Directory, title, mediaId, Type, create);
+}
+
+// Media-server layout: Anime/<Series>/Season NN. Pins the entry's folder_name
+// to it so the library finds the episodes there.
+async function mediaServerDir(series, season, customdir, mediaId = null) {
+  const folderName = `${sanitizeFolderName(series)}/Season ${String(season).padStart(2, "0")}`;
+  const targetDir = path.join(await getTypeDir(customdir, "Anime", true), folderName);
+  await fs.promises.mkdir(targetDir, { recursive: true });
+  if (mediaId) {
+    try {
+      await run(`UPDATE Anime SET folder_name = ? WHERE id = ?`, [folderName, mediaId]);
+    } catch (_) {}
+  }
+  return targetDir;
 }
 
 // Anime Dir Maker
@@ -131,6 +150,7 @@ async function ensureDirectoryExists(directoryPath) {
 module.exports = {
   sanitizeFolderName,
   directoryMaker,
+  mediaServerDir,
   MangaDir,
   ensureDirectoryExists,
   getDownloadsFolder,

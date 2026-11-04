@@ -12,7 +12,11 @@ const { getHeaders } = require("./proxyHeaders");
 const { queryAll, queryOne, run } = require("./db");
 const { sanitizeFolderName, getDownloadsFolder } = require("./DirectoryMaker");
 const { verifyStreamReachability } = require("./streamVerifier");
-const { hasLocalMediaFiles, cleanAlphanumeric } = require("./constants");
+const {
+  hasLocalMediaFiles,
+  cleanAlphanumeric,
+  SEASON_FOLDER_RE,
+} = require("./constants");
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
 
@@ -810,7 +814,14 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
         });
         const cleanId = cleanAlphanumeric(id);
         for (const d of dirs) {
-          if (d.isDirectory()) {
+          // Never fuzzy-match a media-server show folder (it holds every
+          // season; deleting one entry must not take the whole show)
+          if (
+            d.isDirectory() &&
+            !fs
+              .readdirSync(path.join(parentDir, d.name))
+              .some((n) => SEASON_FOLDER_RE.test(n))
+          ) {
             const cleanDirName = cleanAlphanumeric(d.name);
             if (
               cleanId.length > 5 &&

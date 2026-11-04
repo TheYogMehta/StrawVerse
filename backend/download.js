@@ -15,7 +15,11 @@ const {
   addMultipleToQueue,
 } = require("./utils/queue");
 const { MetadataAdd, FindMapping } = require("./utils/Metadata");
-const { hasLocalMediaFiles } = require("./utils/constants");
+const path = require("path");
+const {
+  hasLocalMediaFiles,
+  SEASON_FOLDER_RE,
+} = require("./utils/constants");
 
 // Shared runner for multiple episodes/chapters download
 async function downloadMediaMulti({
@@ -511,9 +515,14 @@ async function getBaseDownloadDir() {
 async function cleanupEmptyDownloadFolder(folderPath, type, id) {
   try {
     if (fs.existsSync(folderPath)) {
-      if (!hasLocalMediaFiles(folderPath, type)) {
+      if (!hasLocalMediaFiles(folderPath, type, true)) {
         await fs.promises.rm(folderPath, { recursive: true, force: true });
         logger.info(`Removed empty download folder: ${folderPath}`);
+        // Last season of a media-server show folder gone: drop the empty
+        // show folder too (rmdir refuses if anything is left in it)
+        if (SEASON_FOLDER_RE.test(path.basename(folderPath))) {
+          await fs.promises.rmdir(path.dirname(folderPath)).catch(() => {});
+        }
         if (id) {
           if (type === "Anime") {
             try {
