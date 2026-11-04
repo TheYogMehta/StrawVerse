@@ -121,30 +121,49 @@ function isUuid(str) {
 function getEpisodeNumberFromFilename(filename) {
   if (!filename || !isVideoFile(filename)) return null;
 
-  // Media-server naming: "Show - S01E05 [1080p].mp4"
-  let match = filename.match(/\bS\d{1,3}E(\d+(\.\d+)?)/i);
+  // 1. Media-server naming: "Show - S01E05 [1080p].mp4", "S1EP05.mp4", "S01E12.5.mp4"
+  let match = filename.match(/\bS\d{1,3}E(?:p)?(\d+(?:\.\d+)?)/i);
   if (match) return parseFloat(match[1]);
 
-  match = filename.match(/^(\d+(\.\d+)?)/);
+  // 2. Compact / leading prefix: "5Ep.mp4", "1052Ep.mp4", "01.mp4"
+  match = filename.match(/^(\d+(?:\.\d+)?)(?:ep|\b)/i);
   if (match) return parseFloat(match[1]);
 
-  match = filename.match(/(?:ep|episode|ch|chapter)\s*(\d+(\.\d+)?)/i);
+  // 3. Keyword followed by episode number: "Episode 01", "Ep 1052"
+  match = filename.match(/(?:ep|episode)\s*(\d+(?:\.\d+)?)/i);
   if (match) return parseFloat(match[1]);
 
-  match = filename.match(/\d+(\.\d+)?/);
-  return match ? parseFloat(match[0]) : null;
+  // 4. Trailing episode number before extension: "One Piece - 1052.mp4"
+  match = filename.match(/[-_ ](\d+(?:\.\d+)?)\.[a-z0-9]+$/i);
+  if (match) return parseFloat(match[1]);
+
+  // 5. Fallback: match first standalone number
+  match = filename.match(/\b(\d+(?:\.\d+)?)\b/);
+  return match ? parseFloat(match[1]) : null;
 }
 
 // "Show - S02E05 [1080p]" (no extension), the Jellyfin/Plex episode scheme.
 // Series and season come from the "<Show>/Season NN" folder the file goes in.
 function mediaServerFileBase(directory, episode, quality) {
-  const pad = (n) => String(n).padStart(2, "0");
+  const pad = (n, len = 2) => String(n).padStart(len, "0");
   const dirName = path.basename(directory);
   const m = dirName.match(/^Season (\d+)$/i);
   const series = m ? path.basename(path.dirname(directory)) : dirName;
   const season = m ? parseInt(m[1], 10) : 1;
   const q = quality ? ` [${quality}]` : "";
-  return `${series} - S${pad(season)}E${pad(parseInt(episode, 10))}${q}`;
+
+  const epNum = parseFloat(episode);
+  let epStr;
+  if (isNaN(epNum)) {
+    epStr = pad(episode);
+  } else if (Number.isInteger(epNum)) {
+    epStr = epNum < 100 ? pad(epNum, 2) : String(epNum);
+  } else {
+    const [intPart, decPart] = String(epNum).split(".");
+    epStr = `${pad(intPart, 2)}.${decPart}`;
+  }
+
+  return `${series} - S${pad(season, 2)}E${epStr}${q}`;
 }
 
 function getChapterNumberFromFilename(filename) {

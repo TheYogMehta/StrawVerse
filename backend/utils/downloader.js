@@ -1739,6 +1739,17 @@ class downloader {
           );
 
           if (fs.existsSync(subtitlePath)) {
+            if (!this.MergeSubtitles && this.fileBase && this.mp4) {
+              const siblingSubPath = path.join(
+                this.directory,
+                `${path.parse(this.mp4).name}.${normalizedLang}.${finalExt}`,
+              );
+              if (!fs.existsSync(siblingSubPath)) {
+                await fs.promises
+                  .copyFile(subtitlePath, siblingSubPath)
+                  .catch(() => {});
+              }
+            }
             this.downloadedPaths.push({
               path: subtitlePath,
               lang: normalizedLang,
@@ -1798,6 +1809,15 @@ class downloader {
           }
 
           await fs.promises.writeFile(subtitlePath, subtitleData, "utf8");
+          if (!this.MergeSubtitles && this.fileBase && this.mp4) {
+            const siblingSubPath = path.join(
+              this.directory,
+              `${path.parse(this.mp4).name}.${normalizedLang}.${finalExt}`,
+            );
+            await fs.promises
+              .writeFile(siblingSubPath, subtitleData, "utf8")
+              .catch(() => {});
+          }
           this.downloadedPaths.push({
             path: subtitlePath,
             lang: normalizedLang,

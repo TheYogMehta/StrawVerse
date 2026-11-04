@@ -75,6 +75,7 @@ async function reconcileActiveProvider(Type) {
 
 // update the settings
 async function settingupdate(newSettings = {}) {
+  const wasMediaServerEnabled = Boolean(config.mediaServerNaming);
   if (newSettings && typeof newSettings === "object") {
     if (process.env.NODEJS_MOBILE_DATA_DIR) {
       delete newSettings.CustomDownloadLocation;
@@ -84,6 +85,17 @@ async function settingupdate(newSettings = {}) {
         config[k] = v;
       }
     }
+  }
+
+  if (config.mediaServerNaming === true && !wasMediaServerEnabled) {
+    try {
+      const { generateAllNfosAndPosters } = require("./mediaServer");
+      generateAllNfosAndPosters().catch((err) => {
+        logger.error(
+          `[MediaServer] Background NFO generation error: ${err.message}`,
+        );
+      });
+    } catch (_) {}
   }
 
   if (process.env.NODEJS_MOBILE_DATA_DIR) {
@@ -371,6 +383,10 @@ async function SettingsLoad() {
 
     if (config && !config.hasOwnProperty("preferredSubtitleLanguages")) {
       config.preferredSubtitleLanguages = ["English"];
+    }
+
+    if (config && !config.hasOwnProperty("mediaServerNaming")) {
+      config.mediaServerNaming = false;
     }
 
     let currentVersion = "1.0.0";

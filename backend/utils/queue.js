@@ -204,6 +204,24 @@ async function removeQueue(AnimeEpId, isSuccess = false) {
       SubDub: removedItem.SubDub,
       epid: removedItem.epid,
     });
+
+    if (removedItem.Type === "Anime") {
+      try {
+        const { settingfetch } = require("./settings");
+        settingfetch()
+          .then((cfg) => {
+            if (cfg?.mediaServerNaming) {
+              const { onAnimeDownloadComplete } = require("./mediaServer");
+              onAnimeDownloadComplete(removedItem).catch((e) => {
+                logger.warn(
+                  `[MediaServer] Auto-NFO generation error: ${e.message}`,
+                );
+              });
+            }
+          })
+          .catch(() => {});
+      } catch (_) {}
+    }
   }
 
   try {
@@ -758,6 +776,13 @@ async function downloadep(
       Videoconfig?.CustomDownloadLocation,
       animeId || AnimeEpId,
     );
+    try {
+      const { generateNfoAndPosterForAnime } = require("./mediaServer");
+      generateNfoAndPosterForAnime(
+        animeId || AnimeEpId,
+        Videoconfig?.CustomDownloadLocation,
+      ).catch(() => {});
+    } catch (_) {}
   } else {
     directoryPath = await directoryMaker(
       Title,

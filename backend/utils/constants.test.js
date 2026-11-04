@@ -16,6 +16,9 @@ test("episode number from both naming schemes", () => {
   // Leading digits in the title must not win over SxxExx
   assert.strictEqual(getEpisodeNumberFromFilename("86 Eighty-Six - S02E11 [720p].mp4"), 11);
   assert.strictEqual(getEpisodeNumberFromFilename("Show - S01E12.5 [1080p].mp4"), 12.5);
+  assert.strictEqual(getEpisodeNumberFromFilename("Show - S1EP05.mp4"), 5);
+  assert.strictEqual(getEpisodeNumberFromFilename("One Piece - 1052.mp4"), 1052);
+  assert.strictEqual(getEpisodeNumberFromFilename("Episode 04.mp4"), 4);
 });
 
 test("file name comes from the Show/Season NN folder", () => {
@@ -25,8 +28,16 @@ test("file name comes from the Show/Season NN folder", () => {
     "Kaguya-sama Love is War - S03E03 [1080p]",
   );
   assert.strictEqual(
+    mediaServerFileBase(dir, "12.5", "1080p"),
+    "Kaguya-sama Love is War - S03E12.5 [1080p]",
+  );
+  assert.strictEqual(
     mediaServerFileBase(path.join("dl", "Show", "Season 00"), 1, null),
     "Show - S00E01",
+  );
+  assert.strictEqual(
+    mediaServerFileBase(path.join("dl", "Show", "Season 01"), "0.5", null),
+    "Show - S01E00.5",
   );
   // Not a season folder: show name is the folder, season 1
   assert.strictEqual(

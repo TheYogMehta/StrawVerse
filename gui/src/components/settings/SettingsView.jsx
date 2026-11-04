@@ -1906,13 +1906,14 @@ export default function SettingsView({
                 <div className="settings-row-item">
                   <div className="settings-row-info">
                     <div className="settings-row-label">
-                      Media Server Naming (Jellyfin / Plex)
+                      Media Server Integration (Jellyfin / Plex)
                     </div>
                     <div className="settings-row-hint">
                       Save episodes as "Show/Season 02/Show - S02E05
-                      [1080p].mp4" so Jellyfin and Plex recognize them. Pick
-                      the season and show folder on each show's page next to
-                      the download buttons. Applies to new downloads.
+                      [1080p].mp4", align external subtitles, and automatically
+                      generate .nfo metadata and poster artwork for Jellyfin
+                      and Plex. Pick the season and show folder on each show's
+                      page next to the download buttons.
                     </div>
                   </div>
                   <div className="settings-row-control">
