@@ -1214,7 +1214,7 @@ async function loadSingleScraper(
 
     if (!fs.existsSync(scopedPath)) {
       logger.error(`Scraper file not found: ${scopedPath}`);
-      return;
+      return { success: false, error: "Scraper file not found" };
     }
     const fullPath = scopedPath;
 
@@ -1224,7 +1224,7 @@ async function loadSingleScraper(
       logger.warn(
         `[Security] Blocked unsafe scraper ${fullPath}: ${safety.reason}`,
       );
-      return;
+      return { success: false, error: `Security check failed: ${safety.reason}` };
     }
 
     try {
@@ -1240,7 +1240,10 @@ async function loadSingleScraper(
         logger.warn(
           `[Compatibility] Skipping scraper ${AnimeManga}/${RepoOwner}/${scraper.name}: requires StrawVerse v${requiredAppVer}+ (current: v${currentAppVer})`,
         );
-        return;
+        return {
+          success: false,
+          error: `Requires StrawVerse v${requiredAppVer}+ (current: v${currentAppVer})`,
+        };
       }
 
       const isOfficial = RepoOwner.toLowerCase() === "theyogmehta";
@@ -1270,13 +1273,16 @@ async function loadSingleScraper(
       );
       notifyScrapersUpdated();
       await reconcileActiveProvider(AnimeManga);
+      return { success: true, scraper };
     } else {
       logger.warn(`Scraper missing 'name' export: ${fullPath}`);
+      return { success: false, error: "Scraper missing 'name' export" };
     }
   } catch (err) {
     logger.error(
       `Failed to load/reload scraper ${ExtensionName}: ${err.message}`,
     );
+    return { success: false, error: err.message };
   }
 }
 
@@ -1431,7 +1437,25 @@ async function HandleExtensions(
         }
       } catch (iconErr) {}
 
-      await loadSingleScraper(AnimeManga, ExtensionName, RepoOwner);
+      const loadResult = await loadSingleScraper(
+        AnimeManga,
+        ExtensionName,
+        RepoOwner,
+      );
+      if (!loadResult?.success) {
+        // Roll back the broken file so it doesn't leave orphan/corrupt scrapers on disk
+        try {
+          if (fs.existsSync(extensionPath)) fs.unlinkSync(extensionPath);
+          if (fs.existsSync(iconDest)) fs.unlinkSync(iconDest);
+        } catch (_) {}
+        return {
+          type: "error",
+          title: `Failed to Load ${AnimeManga} Extension!`,
+          message:
+            loadResult?.error ||
+            `Scraper ${ExtensionName} failed to initialize`,
+        };
+      }
 
       try {
         const { syncExtensionMapping } = require("./mappingUpdater");
