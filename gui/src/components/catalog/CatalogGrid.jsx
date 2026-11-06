@@ -239,21 +239,19 @@ export default function CatalogGrid({
                   </div>
                 )}
 
-                {item.isCompleted ||
-                item.status === "completed" ||
-                item.malStatus === "completed" ? (
+                {item.isCompleted || item.malStatus === "completed" ? (
                   <div
                     className="indicator-badge completed-badge"
                     title={`Completed${
                       item.watched
-                        ? ` (${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""})`
+                        ? ` (${type === "Manga" ? "Ch " : "Ep "}${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""})`
                         : ""
                     }`}
                   >
                     <CheckCircle size={12} className="u-style-16" />
                     Completed
                     {item.watched > 0
-                      ? ` (${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""})`
+                      ? ` (${item.totalEpisodes > 0 ? `${item.watched}/${item.totalEpisodes}` : `${type === "Manga" ? "Ch " : "Ep "}${item.watched}`})`
                       : ""}
                   </div>
                 ) : (
@@ -262,19 +260,16 @@ export default function CatalogGrid({
                   item.watched > 0 && (
                     <div
                       className="indicator-badge watched-badge"
-                      title={`Watched: ${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""}`}
+                      title={`${type === "Manga" ? "Read" : "Watched"}: ${type === "Manga" ? "Ch " : "Ep "}${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""}`}
                     >
                       {type === "Manga" ? (
                         <BookOpen size={12} className="u-style-16" />
                       ) : (
                         <Eye size={12} className="u-style-16" />
                       )}
-                      {item.watched}
                       {item.totalEpisodes > 0
-                        ? `/${item.totalEpisodes}`
-                        : type === "Anime"
-                          ? " Eps"
-                          : " Chs"}
+                        ? `${item.watched}/${item.totalEpisodes}`
+                        : `${type === "Manga" ? "Ch " : "Ep "}${item.watched}`}
                     </div>
                   )
                 )}

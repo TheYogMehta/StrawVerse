@@ -19,6 +19,22 @@ export default function CatalogHeader({
         {provider === "local" && <h1 className="catalog-title">Home</h1>}
         {provider === "provider" && <h1 className="catalog-title">Discover</h1>}
         {provider === "mal" && <h1 className="catalog-title">Filters</h1>}
+        {provider === "provider" && type === "Anime" && (
+          <div className="discover-sub-tabs">
+            <button
+              onClick={() => onSubTabChange && onSubTabChange("latest")}
+              className={`discover-sub-tab ${discoverTab === "latest" ? "active" : ""}`}
+            >
+              Latest
+            </button>
+            <button
+              onClick={() => onSubTabChange && onSubTabChange("calendar")}
+              className={`discover-sub-tab ${discoverTab === "calendar" ? "active" : ""}`}
+            >
+              Airing Calendar
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="header-search-section">

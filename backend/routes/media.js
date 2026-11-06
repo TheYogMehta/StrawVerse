@@ -27,7 +27,7 @@ const {
   getSourceById,
   FindMapping,
 } = require("../utils/Metadata");
-const { getKeyValue, queryOne, run } = require("../utils/db");
+const { getKeyValue, queryOne, queryAll, run } = require("../utils/db");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getHeaders } = require("../utils/proxyHeaders");
 const {
@@ -214,12 +214,15 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
           const imgRow = await global.mappingDb
             .prepare(
               isAnime
-                ? "SELECT image_url FROM anime WHERE malid = ? LIMIT 1"
-                : "SELECT image_url FROM manga WHERE malid = ? LIMIT 1",
+                ? "SELECT image_url, genres FROM anime WHERE malid = ? LIMIT 1"
+                : "SELECT image_url, genres FROM manga WHERE malid = ? LIMIT 1",
             )
             .get(malid);
           if (imgRow && imgRow.image_url) {
             remoteImg = imgRow.image_url;
+          }
+          if (imgRow && imgRow.genres && !item.genres) {
+            item.genres = imgRow.genres;
           }
         } catch (_) {}
       }
@@ -347,7 +350,7 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
 
     // 2. Batch query MyAnimeList / MyMangaList
     const malMap = new Map();
-    if (global.db) {
+    if (global.db && global.MalLoggedIn) {
       try {
         const malIdArr = Array.from(malIdSet);
         const titleArr = Array.from(itemTitles);
@@ -627,7 +630,7 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
   return results;
 }
 
-function buildLocalCatalogWhere(AnimeManga, filters = {}, keyword = "") {
+async function buildLocalCatalogWhere(AnimeManga, filters = {}, keyword = "") {
   const isAnime = AnimeManga === "Anime";
   const table = isAnime ? "anime" : "manga";
 
@@ -642,6 +645,52 @@ function buildLocalCatalogWhere(AnimeManga, filters = {}, keyword = "") {
     conditions.push(
       "status NOT IN ('UPCOMING', 'NOT_YET_PUBLISHED', 'not_yet_published', 'upcoming')",
     );
+  }
+
+  // MAL Status Filter (Watching, Reading, Completed, Plan to Watch/Read, On Hold, Dropped)
+  if (
+    filters?.malStatus &&
+    filters.malStatus !== "All" &&
+    filters.malStatus !== ""
+  ) {
+    if (!global.MalLoggedIn) {
+      conditions.push("1 = 0");
+    } else {
+      const listTable = isAnime ? "MyAnimeList" : "MyMangaList";
+      let targetStatus = String(filters.malStatus).toLowerCase();
+      if (isAnime && targetStatus === "reading") targetStatus = "watching";
+      if (!isAnime && targetStatus === "watching") targetStatus = "reading";
+      if (isAnime && targetStatus === "plan_to_read")
+        targetStatus = "plan_to_watch";
+      if (!isAnime && targetStatus === "plan_to_watch")
+        targetStatus = "plan_to_read";
+
+      try {
+        const rows = await queryAll(
+          `SELECT id FROM ${listTable} WHERE status = ?`,
+          [targetStatus],
+        );
+        const ids = (rows || [])
+          .map((r) => Number(r.id))
+          .filter((id) => !isNaN(id) && id > 0);
+
+        if (ids.length === 0) {
+          conditions.push("1 = 0");
+        } else if (ids.length <= 900) {
+          const placeholders = ids.map(() => "?").join(",");
+          conditions.push(`malid IN (${placeholders})`);
+          params.push(...ids);
+        } else {
+          const safeIds = ids.join(",");
+          conditions.push(`malid IN (${safeIds})`);
+        }
+      } catch (err) {
+        logger.error(
+          `Error querying ${listTable} for status ${targetStatus}: ${err.message}`,
+        );
+        conditions.push("1 = 0");
+      }
+    }
   }
 
   const searchKeyword = (
@@ -685,6 +734,11 @@ function buildLocalCatalogWhere(AnimeManga, filters = {}, keyword = "") {
   if (filters?.format && filters.format !== "All" && filters.format !== "") {
     conditions.push("LOWER(type) = ?");
     params.push(String(filters.format).toLowerCase());
+  }
+
+  if (filters?.genre && filters.genre !== "All" && filters.genre !== "") {
+    conditions.push("LOWER(genres) LIKE ?");
+    params.push(`%${String(filters.genre).toLowerCase()}%`);
   }
 
   if (filters?.status && filters.status !== "All" && filters.status !== "") {
@@ -780,6 +834,11 @@ function buildUniqueProviderWhere(
     params.push(String(filters.format).toLowerCase());
   }
 
+  if (filters?.genre && filters.genre !== "All" && filters.genre !== "") {
+    conditions.push("LOWER(genres) LIKE ?");
+    params.push(`%${String(filters.genre).toLowerCase()}%`);
+  }
+
   const whereClause = conditions.join(" AND ");
   return { provider, whereClause, params };
 }
@@ -802,7 +861,7 @@ async function getLocalCatalogList(AnimeManga, filters = {}, keyword = "") {
     };
   }
 
-  const { whereClause, orderClause, params } = buildLocalCatalogWhere(
+  const { whereClause, orderClause, params } = await buildLocalCatalogWhere(
     AnimeManga,
     filters,
     keyword,
@@ -900,6 +959,7 @@ async function getLocalCatalogList(AnimeManga, filters = {}, keyword = "") {
         status: r.status,
         season: r.season,
         year: r.year,
+        genres: r.genres,
         aired: r.year ? `${r.season ? r.season + " " : ""}${r.year}` : null,
         nextEpisodeIn,
         provider: resolvedProvider || preferred,
@@ -926,6 +986,7 @@ async function getLocalCatalogList(AnimeManga, filters = {}, keyword = "") {
     results,
     site: "mal",
     lastFetched,
+    malLoggedIn: !!global.MalLoggedIn,
   };
 }
 
@@ -957,15 +1018,15 @@ async function getUniqueProviderList(
     keyword,
   );
 
-  // Get last_fetched from provider_metadata
+  // Get last_fetched from unmapped_items
   let lastFetched = null;
   try {
-    const provMeta = await global.mappingDb
+    const row = await global.mappingDb
       .prepare(
-        "SELECT last_fetched FROM provider_metadata WHERE table_name = ?",
+        "SELECT MAX(last_fetched) as last_fetched FROM unmapped_items WHERE provider = ?",
       )
       .get(provider);
-    lastFetched = provMeta?.last_fetched || null;
+    lastFetched = row?.last_fetched || null;
   } catch (_) {}
 
   let rows = [];
@@ -1474,7 +1535,7 @@ router.post(
           .get(...params);
         count = row?.count || 0;
       } else {
-        const { table, whereClause, params } = buildLocalCatalogWhere(
+        const { table, whereClause, params } = await buildLocalCatalogWhere(
           AnimeManga,
           filters,
           searchKeyword,
@@ -1951,6 +2012,14 @@ router.post(
 
             const provName = Animeprovider.provider_name;
             const cleanProv = (provName || "").toLowerCase().split("/").pop();
+            const targetProvider =
+              provName && (provName.startsWith("@") || provName.includes("/"))
+                ? provName.toLowerCase().startsWith("theyogmehta/")
+                  ? cleanProv
+                  : provName.startsWith("@")
+                    ? provName.trim()
+                    : `@${provName.trim()}`
+                : cleanProv;
 
             const safeAnimeApi = {
               isMapped: async (itemId) => {
@@ -2013,9 +2082,15 @@ router.post(
                     if (customRow && customRow.malid) {
                       await global.mappingDb
                         .prepare(
-                          "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ?) AND (id = ? OR id = ?)",
+                          "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider = ?) AND (id = ? OR id = ?)",
                         )
-                        .run(cleanProv, provName, targetId, targetId);
+                        .run(
+                          targetProvider,
+                          cleanProv,
+                          provName,
+                          targetId,
+                          targetId,
+                        );
                       return;
                     }
                   }
@@ -2037,9 +2112,15 @@ router.post(
                   if (mappedRow && mappedRow.malid) {
                     await global.mappingDb
                       .prepare(
-                        "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ?) AND (id = ? OR id = ?)",
+                        "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider = ?) AND (id = ? OR id = ?)",
                       )
-                      .run(cleanProv, provName, targetId, targetId);
+                      .run(
+                        targetProvider,
+                        cleanProv,
+                        provName,
+                        targetId,
+                        targetId,
+                      );
                     return;
                   }
 
@@ -2072,9 +2153,15 @@ router.post(
                       }
                       await global.mappingDb
                         .prepare(
-                          "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ?) AND (id = ? OR id = ?)",
+                          "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider = ?) AND (id = ? OR id = ?)",
                         )
-                        .run(cleanProv, provName, targetId, targetId);
+                        .run(
+                          targetProvider,
+                          cleanProv,
+                          provName,
+                          targetId,
+                          targetId,
+                        );
                       return;
                     }
                   }
@@ -2089,7 +2176,7 @@ router.post(
                     )
                     .run(
                       targetId,
-                      provName,
+                      targetProvider,
                       "Anime",
                       unmappedData.name ||
                         unmappedData.title ||
@@ -2122,7 +2209,7 @@ router.post(
                       "https://strawverse.theyogmehta.online/api/unmapped/report",
                       {
                         id: targetId,
-                        provider: cleanProv,
+                        provider: targetProvider,
                         media_type: "Anime",
                         name:
                           unmappedData.name ||
@@ -2159,9 +2246,10 @@ router.post(
                 try {
                   await global.mappingDb
                     .prepare(
-                      "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ?) AND (id = ? OR id = ?)",
+                      "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider = ?) AND (id = ? OR id = ?)",
                     )
                     .run(
+                      targetProvider,
                       cleanProv,
                       provName,
                       String(itemId || id),
@@ -2254,6 +2342,15 @@ router.post(
                   .toLowerCase()
                   .split("/")
                   .pop();
+                const targetProvider =
+                  provName &&
+                  (provName.startsWith("@") || provName.includes("/"))
+                    ? provName.toLowerCase().startsWith("theyogmehta/")
+                      ? cleanProv
+                      : provName.startsWith("@")
+                        ? provName.trim()
+                        : `@${provName.trim()}`
+                    : cleanProv;
 
                 const safeMangaApi = {
                   isMapped: async (itemId) => {
@@ -2299,9 +2396,15 @@ router.post(
                         if (customRow && customRow.malid) {
                           await global.mappingDb
                             .prepare(
-                              "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ?) AND (id = ? OR id = ?)",
+                              "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider = ?) AND (id = ? OR id = ?)",
                             )
-                            .run(cleanProv, provName, targetId, targetId);
+                            .run(
+                              targetProvider,
+                              cleanProv,
+                              provName,
+                              targetId,
+                              targetId,
+                            );
                           return;
                         }
                       }
@@ -2314,9 +2417,15 @@ router.post(
                       if (mappedRow && mappedRow.malid) {
                         await global.mappingDb
                           .prepare(
-                            "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ?) AND (id = ? OR id = ?)",
+                            "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider = ?) AND (id = ? OR id = ?)",
                           )
-                          .run(cleanProv, provName, targetId, targetId);
+                          .run(
+                            targetProvider,
+                            cleanProv,
+                            provName,
+                            targetId,
+                            targetId,
+                          );
                         return;
                       }
 
@@ -2348,9 +2457,15 @@ router.post(
                           }
                           await global.mappingDb
                             .prepare(
-                              "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ?) AND (id = ? OR id = ?)",
+                              "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider = ?) AND (id = ? OR id = ?)",
                             )
-                            .run(cleanProv, provName, targetId, targetId);
+                            .run(
+                              targetProvider,
+                              cleanProv,
+                              provName,
+                              targetId,
+                              targetId,
+                            );
                           return;
                         }
                       }
@@ -2365,7 +2480,7 @@ router.post(
                         )
                         .run(
                           targetId,
-                          provName,
+                          targetProvider,
                           "Manga",
                           unmappedData.name ||
                             unmappedData.title ||
@@ -2399,7 +2514,7 @@ router.post(
                           "https://strawverse.theyogmehta.online/api/unmapped/report",
                           {
                             id: targetId,
-                            provider: cleanProv,
+                            provider: targetProvider,
                             media_type: "Manga",
                             name:
                               unmappedData.name ||
@@ -2438,9 +2553,10 @@ router.post(
                     try {
                       await global.mappingDb
                         .prepare(
-                          "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ?) AND (id = ? OR id = ?)",
+                          "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider = ?) AND (id = ? OR id = ?)",
                         )
                         .run(
+                          targetProvider,
                           cleanProv,
                           provName,
                           String(itemId || id),
@@ -2718,6 +2834,14 @@ router.post(
             try {
               const prov = data.provider || LocalMalProvider || "";
               const clean = (prov || "").toLowerCase().split("/").pop();
+              const targetProvider =
+                prov && (prov.startsWith("@") || prov.includes("/"))
+                  ? prov.toLowerCase().startsWith("theyogmehta/")
+                    ? clean
+                    : prov.startsWith("@")
+                      ? prov.trim()
+                      : `@${prov.trim()}`
+                  : clean;
               global.mappingDb
                 .prepare(
                   `INSERT OR REPLACE INTO unmapped_items (
@@ -2726,7 +2850,7 @@ router.post(
                 )
                 .run(
                   String(id),
-                  clean,
+                  targetProvider,
                   AnimeManga,
                   data.title || data.name || "Unknown",
                   data.image_url || data.image || null,
@@ -2746,7 +2870,7 @@ router.post(
                   "https://strawverse.theyogmehta.online/api/unmapped/report",
                   {
                     id: String(id),
-                    provider: clean,
+                    provider: targetProvider,
                     media_type: AnimeManga,
                     name: data.title || data.name || "Unknown",
                     image_url: data.image_url || data.image || null,
@@ -2758,9 +2882,7 @@ router.post(
                       (data.totalEpisodes
                         ? String(data.totalEpisodes)
                         : null) ||
-                      (data.totalChapters
-                        ? String(data.totalChapters)
-                        : null),
+                      (data.totalChapters ? String(data.totalChapters) : null),
                     status: data.status || "Unknown",
                     season: data.season || null,
                     year: data.year ? parseInt(data.year, 10) : null,
@@ -3642,7 +3764,22 @@ router.get("/api/image", async (req, res) => {
 
         let malid = req.query.malid ? parseInt(req.query.malid, 10) : null;
         let title = req.query.title ? String(req.query.title) : null;
-        let mediaType = req.query.type || "anime";
+        let mediaType = req.query.type;
+        if (!mediaType) {
+          if (
+            decodedUrl.includes("/images/manga/") ||
+            decodedUrl.includes("/manga/")
+          ) {
+            mediaType = "manga";
+          } else if (
+            decodedUrl.includes("/images/anime/") ||
+            decodedUrl.includes("/anime/")
+          ) {
+            mediaType = "anime";
+          } else {
+            mediaType = "anime";
+          }
+        }
 
         if (!malid && global.mappingDb) {
           try {

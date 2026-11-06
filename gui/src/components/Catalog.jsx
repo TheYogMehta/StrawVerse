@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
   RotateCcw,
   Clock,
+  LogIn,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
@@ -92,14 +93,23 @@ const MAPPING_OPTIONS = [
   { label: "Unmapped (Unique to Extension)", value: "unmapped" },
 ];
 
-const MAL_STATUS_OPTIONS = [
-  { label: "All", value: "" },
-  { label: "Watching / Reading", value: "watching" },
-  { label: "Completed", value: "completed" },
-  { label: "Plan to Watch / Read", value: "plan_to_watch" },
-  { label: "On Hold", value: "on_hold" },
-  { label: "Dropped", value: "dropped" },
-];
+const getMalStatusOptions = (type) => {
+  const isManga = type === "Manga";
+  return [
+    { label: "All", value: "" },
+    {
+      label: isManga ? "Reading" : "Watching",
+      value: isManga ? "reading" : "watching",
+    },
+    { label: "Completed", value: "completed" },
+    {
+      label: isManga ? "Plan to Read" : "Plan to Watch",
+      value: isManga ? "plan_to_read" : "plan_to_watch",
+    },
+    { label: "On Hold", value: "on_hold" },
+    { label: "Dropped", value: "dropped" },
+  ];
+};
 
 const STATUS_OPTIONS = [
   { label: "All", value: "" },
@@ -189,15 +199,18 @@ function matchItemFilters(item, filters) {
     const targetStatus = String(filters.malStatus).toLowerCase();
     const itemStatus = String(item.malStatus || "").toLowerCase();
     if (targetStatus === "watching" || targetStatus === "reading") {
-      if (
-        itemStatus !== "watching" &&
-        itemStatus !== "reading" &&
-        Number(item.watched || 0) === 0
-      ) {
+      if (itemStatus !== "watching" && itemStatus !== "reading") {
+        return false;
+      }
+    } else if (
+      targetStatus === "plan_to_watch" ||
+      targetStatus === "plan_to_read"
+    ) {
+      if (itemStatus !== "plan_to_watch" && itemStatus !== "plan_to_read") {
         return false;
       }
     } else if (targetStatus === "completed") {
-      if (itemStatus !== "completed" && !item.isCompleted) return false;
+      if (itemStatus !== "completed") return false;
     } else if (itemStatus !== targetStatus) {
       return false;
     }
@@ -270,6 +283,8 @@ export default function Catalog({
   onSelectMedia,
   onTypeChange,
   initialSearchQuery = "",
+  malLoggedIn = false,
+  onNavigate,
 }) {
   const lastRequestRef = useRef(null);
   const sentinelRef = useRef(null);
@@ -313,9 +328,18 @@ export default function Catalog({
     () => cache?.searchQuery || "",
   );
   const [currentPage, setCurrentPage] = useState(() => cache?.currentPage || 1);
-  const [activeFilters, setActiveFilters] = useState(
-    () => cache?.activeFilters || {},
-  );
+  const [activeFilters, setActiveFilters] = useState(() => {
+    if (cache?.activeFilters && Object.keys(cache.activeFilters).length > 0) {
+      return cache.activeFilters;
+    }
+    if (provider === "local") {
+      const savedTag = sessionStorage.getItem(`active_tag_${type}`);
+      const defaultTag =
+        savedTag || (type === "Manga" ? "Reading" : "Watching");
+      return { tag: defaultTag };
+    }
+    return {};
+  });
   const [availableFilters, setAvailableFilters] = useState(
     () => cache?.availableFilters || null,
   );
@@ -719,6 +743,16 @@ export default function Catalog({
       return;
     }
 
+    // CRITICAL: If the view was just mounted and scroll restoration hasn't completed,
+    // do not allow an initial mount event (scrollTop = 0) to wipe out the saved scroll position!
+    if (
+      !isRestoredRef.current &&
+      ((window.catalogCache[cacheKey]?.scrollPosition || 0) > 10 ||
+        (window.catalogCache[cacheKey]?.lastActivePage || 1) > 1)
+    ) {
+      return;
+    }
+
     window.catalogCache[cacheKey].scrollPosition = scrollTop;
 
     if (scrollTop <= 10) {
@@ -844,15 +878,6 @@ export default function Catalog({
 
       const applyScroll = () => {
         if (!wrapperRef.current) return;
-        if (
-          (!cache.lastActivePage || cache.lastActivePage === 1) &&
-          cache.cardIndexInPage === 0 &&
-          (!cache.scrollPosition || cache.scrollPosition <= 10)
-        ) {
-          wrapperRef.current.scrollTop = 0;
-          return;
-        }
-
         let restoredScroll = cache.scrollPosition || 0;
         const headerEl = wrapperRef.current.querySelector(".catalog-header");
         const headerHeight = headerEl ? headerEl.offsetHeight : 80;
@@ -879,8 +904,15 @@ export default function Catalog({
 
       applyScroll();
       const raf = requestAnimationFrame(applyScroll);
-      isRestoredRef.current = true;
-      return () => cancelAnimationFrame(raf);
+      const timer = setTimeout(() => {
+        applyScroll();
+        isRestoredRef.current = true;
+      }, 60);
+
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(timer);
+      };
     }
   }, [data?.results, discoverTab]);
 
@@ -1487,7 +1519,7 @@ export default function Catalog({
     }
 
     try {
-      const listRes = await fetch("/api/history/list?limit=15");
+      const listRes = await fetch("/api/history/list?shelf=true&limit=15");
       if (listRes.ok) {
         const hData = await listRes.json();
         const filtered = (hData || []).filter((item) => item.type === type);
@@ -1532,58 +1564,31 @@ export default function Catalog({
     const cacheKey = `${type}_${provider}`;
     const cache = window.catalogCache[cacheKey];
 
-    if (cache && !initialSearchQuery) {
+    if (
+      cache &&
+      (!initialSearchQuery || cache.searchQuery === initialSearchQuery)
+    ) {
       lastLoadedKeyRef.current = cacheKey;
-      setSearchQuery(cache.searchQuery);
-      setCurrentPage(cache.lastActivePage || cache.currentPage || 1);
-      setActiveFilters(cache.activeFilters);
-      setAvailableFilters(cache.availableFilters);
-      setErrorMsg(cache.errorMsg);
-      setDiscoverTab(cache.discoverTab);
-      setInfiniteScroll(cache.infiniteScroll);
+      setSearchQuery(cache.searchQuery || "");
+      setCurrentPage(cache.currentPage || cache.lastActivePage || 1);
+      setActiveFilters(cache.activeFilters || {});
+      setAvailableFilters(cache.availableFilters || null);
+      setErrorMsg(cache.errorMsg || "");
+      if (cache.discoverTab) setDiscoverTab(cache.discoverTab);
+      if (cache.infiniteScroll !== undefined)
+        setInfiniteScroll(cache.infiniteScroll);
 
-      const targetP = cache.lastActivePage || cache.currentPage || 1;
-      const startP = Math.max(1, targetP - 1);
-      const endP = targetP + 1;
-      const fp = cache.fetchedPages || {};
-
-      let hasAllPages = true;
-      for (let p = startP; p <= endP; p++) {
-        if (!fp[p]) {
-          hasAllPages = false;
-          break;
-        }
-      }
-
-      if (hasAllPages) {
-        const windowResults = [];
-        for (let p = startP; p <= endP; p++) {
-          if (fp[p]) windowResults.push(...fp[p]);
-        }
-        setFetchedPages(fp);
-        setLoadedPageStart(startP);
-        setLoadedPageEnd(endP);
-        setData({
-          ...cache.data,
-          currentPage: targetP,
-          results: windowResults,
-        });
-        isRestoredRef.current = false;
-        didFetchRef.current = true;
-      } else if (
-        targetP > 1 &&
-        (provider === "provider" || provider === "mal")
-      ) {
-        setFetchedPages(fp);
-        isRestoredRef.current = false;
-        preloadPagesAround(targetP, cache.activeFilters || {});
-      } else {
+      if (cache.data?.results && cache.data.results.length > 0) {
         setData(cache.data);
-        setFetchedPages(fp);
+        setFetchedPages(cache.fetchedPages || {});
         setLoadedPageStart(cache.loadedPageStart || 1);
-        setLoadedPageEnd(cache.loadedPageEnd || 1);
+        setLoadedPageEnd(cache.loadedPageEnd || cache.currentPage || 1);
         isRestoredRef.current = false;
         didFetchRef.current = true;
+      } else {
+        isRestoredRef.current = false;
+        didFetchRef.current = true;
+        fetchData(cache.currentPage || 1, cache.activeFilters || {});
       }
     } else {
       if ((provider !== "provider" && provider !== "mal") || type !== "Anime") {
@@ -1601,8 +1606,11 @@ export default function Catalog({
       isRestoredRef.current = false;
       didFetchRef.current = false;
 
+      const savedTag = sessionStorage.getItem(`active_tag_${type}`);
       const defaultTag =
-        provider === "local" ? (type === "Manga" ? "Reading" : "Watching") : "";
+        provider === "local"
+          ? savedTag || (type === "Manga" ? "Reading" : "Watching")
+          : "";
       const initFilters = defaultTag ? { tag: defaultTag } : {};
       setActiveFilters(initFilters);
       fetchData(1, initFilters, startQuery, null);
@@ -1989,11 +1997,42 @@ export default function Catalog({
           : null;
 
     if (resolvedProv) {
-      onSelectMedia(item.id, resolvedProv, backText);
+      handleSelectMediaWithCache(item.id, resolvedProv, backText);
       return;
     }
 
-    onSelectMedia(item.id, "mal", backText);
+    handleSelectMediaWithCache(item.id, "mal", backText);
+  };
+
+  const handleSelectMediaWithCache = (
+    id,
+    prov,
+    backText,
+    autoPlay,
+    targetNum,
+  ) => {
+    const cacheKey = `${type}_${provider}`;
+    if (!window.catalogCache) {
+      window.catalogCache = {};
+    }
+    const currentScroll = wrapperRef.current ? wrapperRef.current.scrollTop : 0;
+    window.catalogCache[cacheKey] = {
+      ...window.catalogCache[cacheKey],
+      data,
+      searchQuery,
+      currentPage,
+      activeFilters,
+      availableFilters,
+      errorMsg,
+      discoverTab,
+      infiniteScroll,
+      fetchedPages,
+      loadedPageStart: loadedPageStart || 1,
+      loadedPageEnd: loadedPageEnd || currentPage,
+      scrollPosition: currentScroll,
+      lastActivePage: currentPage,
+    };
+    onSelectMedia(id, prov, backText, autoPlay, targetNum);
   };
 
   const handleSearchSubmit = (e) => {
@@ -2008,6 +2047,13 @@ export default function Catalog({
       delete nextFilters[filterName];
     } else {
       nextFilters[filterName] = val;
+    }
+    if (filterName === "tag" && provider === "local") {
+      if (val) {
+        sessionStorage.setItem(`active_tag_${type}`, val);
+      } else {
+        sessionStorage.removeItem(`active_tag_${type}`);
+      }
     }
     setActiveFilters(nextFilters);
     setCurrentPage(1);
@@ -2241,7 +2287,7 @@ export default function Catalog({
         provider={provider}
         linkingMalItem={linkingMalItem}
         recentHistory={recentHistory}
-        onSelectMedia={onSelectMedia}
+        onSelectMedia={handleSelectMediaWithCache}
         onDismissHistory={handleDismissHistory}
       />
 
@@ -2366,9 +2412,11 @@ export default function Catalog({
               </select>
             </div>
 
-            {/* MAL Watch Status */}
+            {/* MAL Watch / Reading Status */}
             <div className="filter-group">
-              <label className="filter-label">MAL Status</label>
+              <label className="filter-label">
+                {type === "Manga" ? "MAL Reading Status" : "MAL Watch Status"}
+              </label>
               <select
                 value={activeFilters.malStatus || ""}
                 onChange={(e) =>
@@ -2376,7 +2424,7 @@ export default function Catalog({
                 }
                 className={`filter-select ${activeFilters.malStatus ? "is-active" : ""}`}
               >
-                {MAL_STATUS_OPTIONS.map((opt) => (
+                {getMalStatusOptions(type).map((opt) => (
                   <option key={opt.label} value={opt.value}>
                     {opt.label}
                   </option>
@@ -2435,6 +2483,54 @@ export default function Catalog({
                 </select>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Discover Provider-native Filter panel */}
+      {provider === "provider" && availableFilters && (
+        <div className="filter-panel">
+          <div className="filter-panel-header">
+            <div className="filter-panel-left">
+              <div className="filter-panel-title">
+                <SlidersHorizontal size={15} />
+                <span>Filters</span>
+                {Object.keys(activeFilters).filter((k) => k !== "page" && activeFilters[k]).length > 0 && (
+                  <span className="filter-count-label">
+                    ({Object.keys(activeFilters).filter((k) => k !== "page" && activeFilters[k]).length} active)
+                  </span>
+                )}
+              </div>
+            </div>
+            {Object.keys(activeFilters).filter((k) => k !== "page" && activeFilters[k]).length > 0 && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="filter-reset-btn"
+                title="Clear all filters"
+              >
+                <RotateCcw size={13} />
+                <span>Reset All</span>
+              </button>
+            )}
+          </div>
+          <div className="filter-grid">
+            {Object.entries(availableFilters).map(([key, filter]) => (
+              <div key={key} className="filter-group">
+                <label className="filter-label">{filter.label}</label>
+                <select
+                  value={activeFilters[key] || ""}
+                  onChange={(e) => handleFilterChange(key, e.target.value)}
+                  className={`filter-select ${activeFilters[key] ? "is-active" : ""}`}
+                >
+                  {Object.entries(filter.options).map(([optLabel, optVal]) => (
+                    <option key={optLabel} value={optVal}>
+                      {optLabel}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -2503,7 +2599,7 @@ export default function Catalog({
           calendarDayFilter={calendarDayFilter}
           setCalendarDayFilter={setCalendarDayFilter}
           timeTicker={timeTicker}
-          onSelectMedia={onSelectMedia}
+          onSelectMedia={handleSelectMediaWithCache}
           triggerScrapeSearch={triggerScrapeSearch}
         />
       ) : (
@@ -2535,36 +2631,96 @@ export default function Catalog({
               )}
             </div>
           )}
-          <CatalogGrid
-            loading={loading}
-            data={displayData}
-            type={type}
-            provider={provider}
-            activeFilters={activeFilters}
-            searchQuery={searchQuery}
-            canReorder={canReorder}
-            infiniteScroll={infiniteScroll}
-            infiniteLoading={infiniteLoading}
-            currentPage={currentPage}
-            loadedPageStart={loadedPageStart}
-            topSentinelRef={topSentinelRef}
-            sentinelRef={sentinelRef}
-            draggedIndex={draggedIndex}
-            dragOverIndex={dragOverIndex}
-            handleDragStart={handleDragStart}
-            handleDragOver={handleDragOver}
-            handleDragLeave={handleDragLeave}
-            handleDrop={handleDrop}
-            handleDragEnd={handleDragEnd}
-            handleTouchStart={handleTouchStart}
-            handleTouchMove={handleTouchMove}
-            handleTouchEnd={handleTouchEnd}
-            handleMediaClick={handleMediaClick}
-            handlePageChange={handlePageChange}
-            handleRemoveFromLibrary={handleRemoveFromLibrary}
-            getItemTagInfo={getItemTagInfo}
-            onOpenTagModal={handleOpenTagModal}
-          />
+          {activeFilters.malStatus &&
+          !(data?.malLoggedIn ?? malLoggedIn ?? false) ? (
+            <div
+              className="empty-center-panel"
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: "80px 20px",
+                textAlign: "center",
+              }}
+            >
+              <LogIn
+                size={44}
+                style={{ color: "var(--accent)", marginBottom: "14px" }}
+              />
+              <h3
+                style={{
+                  fontSize: "18px",
+                  fontWeight: "600",
+                  marginBottom: "8px",
+                  color: "#fff",
+                }}
+              >
+                Not connected to MyAnimeList
+              </h3>
+              <p
+                style={{
+                  maxWidth: "440px",
+                  marginBottom: "18px",
+                  color: "rgba(255, 255, 255, 0.7)",
+                  fontSize: "14px",
+                  lineHeight: "1.5",
+                }}
+              >
+                Log in to your MyAnimeList account in Settings to view and
+                filter your personal {type === "Manga" ? "reading" : "watch"}{" "}
+                list.
+              </p>
+              <button
+                type="button"
+                onClick={() =>
+                  onNavigate
+                    ? onNavigate("settings")
+                    : (window.location.hash = "#settings")
+                }
+                className="primary-btn"
+                style={{
+                  padding: "10px 24px",
+                  borderRadius: "8px",
+                  fontWeight: "500",
+                  cursor: "pointer",
+                }}
+              >
+                Go to Settings
+              </button>
+            </div>
+          ) : (
+            <CatalogGrid
+              loading={loading}
+              data={displayData}
+              type={type}
+              provider={provider}
+              activeFilters={activeFilters}
+              searchQuery={searchQuery}
+              canReorder={canReorder}
+              infiniteScroll={infiniteScroll}
+              infiniteLoading={infiniteLoading}
+              currentPage={currentPage}
+              loadedPageStart={loadedPageStart}
+              topSentinelRef={topSentinelRef}
+              sentinelRef={sentinelRef}
+              draggedIndex={draggedIndex}
+              dragOverIndex={dragOverIndex}
+              handleDragStart={handleDragStart}
+              handleDragOver={handleDragOver}
+              handleDragLeave={handleDragLeave}
+              handleDrop={handleDrop}
+              handleDragEnd={handleDragEnd}
+              handleTouchStart={handleTouchStart}
+              handleTouchMove={handleTouchMove}
+              handleTouchEnd={handleTouchEnd}
+              handleMediaClick={handleMediaClick}
+              handlePageChange={handlePageChange}
+              handleRemoveFromLibrary={handleRemoveFromLibrary}
+              getItemTagInfo={getItemTagInfo}
+              onOpenTagModal={handleOpenTagModal}
+            />
+          )}
         </>
       )}
 
