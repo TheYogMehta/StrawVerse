@@ -14,7 +14,8 @@ class HLSLogger {
   }
   logProgress() {
     const now = Date.now();
-    const isFinal = this.currentSegments >= this.totalSegments || this.totalSegments === 0;
+    const isFinal =
+      this.currentSegments >= this.totalSegments || this.totalSegments === 0;
     if (!isFinal && this.currentSegments > 1 && now - this.lastLogTime < 800) {
       return;
     }

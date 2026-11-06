@@ -12,9 +12,8 @@ function invalidateMappingMetadataCache() {
 /**
  * Universal Provider Discovery:
  * Dynamically aggregates providers from:
- * 1. Live registered scraper extensions (global.Anime_providers, global.Manga_providers)
- * 2. Mapping database provider_metadata table
- * 3. Mapping database SQLite tables (discovering any table with an id & malid column)
+ * 1. Mapping database SQLite tables (discovering any table with an id & malid column)
+ * 2. Live registered scraper extensions (global.Anime_providers, global.Manga_providers)
  */
 async function getMappingProviders(
   mediaType = null,
@@ -25,69 +24,144 @@ async function getMappingProviders(
     try {
       const providersMap = new Map();
 
-      // 1. Live registered scrapers
-      if (global.Anime_providers) {
-        for (const [key, scraper] of Object.entries(global.Anime_providers)) {
-          const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-          providersMap.set(cleanKey, {
-            table_name: cleanKey,
-            media_type: "Anime",
-            display_name: scraper?.name || key,
-          });
-        }
-      }
-      if (global.Manga_providers) {
-        for (const [key, scraper] of Object.entries(global.Manga_providers)) {
-          const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
-          providersMap.set(cleanKey, {
-            table_name: cleanKey,
-            media_type: "Manga",
-            display_name: scraper?.name || key,
-          });
-        }
-      }
-
-      // 2. Mapping DB metadata
+      // 1. Discover physical tables from mapping DB sqlite_master (only tables with a malid column)
       if (global.mappingDb) {
         try {
-          const rows = await mappingQueryAll(
-            "SELECT table_name, media_type, display_name FROM provider_metadata",
-          );
-          if (rows && rows.length > 0) {
-            for (const row of rows) {
-              const cleanKey = (row.table_name || "").toLowerCase().replace(/[^a-z0-9]/g, "");
-              if (providersMap.has(cleanKey)) {
-                Object.assign(providersMap.get(cleanKey), row);
-              } else {
-                providersMap.set(cleanKey, {
-                  table_name: row.table_name,
-                  media_type: row.media_type,
-                  display_name: row.display_name || row.table_name,
-                });
-              }
-            }
-          }
-        } catch (_) {}
-
-        // 3. Mapping DB tables from sqlite_master
-        try {
           const tableRows = await mappingQueryAll(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('unmapped_items', 'provider_metadata', 'anime', 'manga', 'anime_titles', 'manga_titles', 'version_history')",
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT IN ('unmapped_items', 'provider_metadata', 'anime', 'manga', 'anime_titles', 'manga_titles', 'version_history', 'next_episodes', 'mapping_changelog', 'extension_settings', 'unlinked_mal_ids', 'custom_mappings', 'sync_history')",
           );
           if (tableRows && tableRows.length > 0) {
             for (const t of tableRows) {
-              const cleanKey = t.name.toLowerCase().replace(/[^a-z0-9]/g, "");
-              if (!providersMap.has(cleanKey)) {
-                providersMap.set(cleanKey, {
-                  table_name: t.name,
-                  media_type: null,
-                  display_name: t.name,
-                });
+              try {
+                const cols = await mappingQueryAll(
+                  `PRAGMA table_info("${t.name}")`,
+                );
+                const hasMalId = cols?.some(
+                  (c) => (c.name || "").toLowerCase() === "malid",
+                );
+                if (!hasMalId) continue;
+              } catch (_) {
+                continue;
               }
+
+              providersMap.set(t.name, {
+                table_name: t.name,
+                media_type: null,
+                display_name: t.name,
+              });
             }
           }
         } catch (_) {}
       }
+
+      // 2. Associate with live registered scrapers (media_type and display_name)
+      const matchScraper = (tblName) => {
+        const cleanTbl = tblName.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const shortTbl = tblName
+          .toLowerCase()
+          .split("/")
+          .pop()
+          .replace(/[^a-z0-9]/g, "");
+
+        if (global.Anime_providers) {
+          for (const [key, scraper] of Object.entries(global.Anime_providers)) {
+            const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const cleanName = (scraper?.name || "")
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, "");
+            if (
+              cleanKey === cleanTbl ||
+              cleanName === cleanTbl ||
+              cleanKey === shortTbl ||
+              cleanName === shortTbl
+            ) {
+              return {
+                media_type: "Anime",
+                display_name: scraper?.name || key,
+              };
+            }
+          }
+        }
+        if (global.Manga_providers) {
+          for (const [key, scraper] of Object.entries(global.Manga_providers)) {
+            const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const cleanName = (scraper?.name || "")
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, "");
+            if (
+              cleanKey === cleanTbl ||
+              cleanName === cleanTbl ||
+              cleanKey === shortTbl ||
+              cleanName === shortTbl
+            ) {
+              return {
+                media_type: "Manga",
+                display_name: scraper?.name || key,
+              };
+            }
+          }
+        }
+        return null;
+      };
+
+      for (const [tblName, entry] of providersMap.entries()) {
+        const matched = matchScraper(tblName);
+        if (matched) {
+          entry.media_type = matched.media_type;
+          entry.display_name = matched.display_name;
+        }
+      }
+
+      // 3. Fallback known media types if not matched to active scraper
+      const knownAnime = new Set(["pahe", "anikoto", "animesalt"]);
+      const knownManga = new Set([
+        "weebcentral",
+        "asurascans",
+        "comix",
+        "mangafire",
+      ]);
+      for (const entry of providersMap.values()) {
+        if (!entry.media_type) {
+          const short = entry.table_name.toLowerCase().split("/").pop();
+          if (knownAnime.has(short)) entry.media_type = "Anime";
+          else if (knownManga.has(short)) entry.media_type = "Manga";
+        }
+      }
+
+      // 4. Also register live scrapers that might not have a table in mapping.db yet
+      const addMissingScrapers = (scrapers, type) => {
+        if (!scrapers) return;
+        for (const [key, scraper] of Object.entries(scrapers)) {
+          const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+          const cleanName = (scraper?.name || "")
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, "");
+          const alreadyPresent = Array.from(providersMap.values()).some((p) => {
+            const pClean = p.table_name.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const pShort = p.table_name
+              .toLowerCase()
+              .split("/")
+              .pop()
+              .replace(/[^a-z0-9]/g, "");
+            return (
+              pClean === cleanKey ||
+              pClean === cleanName ||
+              pShort === cleanKey ||
+              pShort === cleanName
+            );
+          });
+          if (!alreadyPresent) {
+            const tblName = scraper?.name || key;
+            providersMap.set(tblName, {
+              table_name: tblName,
+              media_type: type,
+              display_name: scraper?.name || key,
+            });
+          }
+        }
+      };
+      addMissingScrapers(global.Anime_providers, "Anime");
+      addMissingScrapers(global.Manga_providers, "Manga");
 
       if (providersMap.size > 0) {
         cachedProviderMetadata = Array.from(providersMap.values());
@@ -101,7 +175,7 @@ async function getMappingProviders(
   if (mediaType) {
     const targetType = String(mediaType).toLowerCase();
     list = list.filter(
-      (p) => (p.media_type || "").toLowerCase() === targetType,
+      (p) => !p.media_type || (p.media_type || "").toLowerCase() === targetType,
     );
   }
 
@@ -121,11 +195,25 @@ async function getMappingProviders(
       const cleanTbl = (p.table_name || "")
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "");
+      const shortTbl = (p.table_name || "")
+        .toLowerCase()
+        .split("/")
+        .pop()
+        .replace(/[^a-z0-9]/g, "");
       const isAnime = (p.media_type || "").toLowerCase() === "anime";
       const installedSet = isAnime ? installedAnime : installedManga;
-      if (installedSet.has(cleanTbl)) return true;
+      if (installedSet.has(cleanTbl) || installedSet.has(shortTbl)) return true;
       for (const inst of installedSet) {
-        if (inst.includes(cleanTbl) || cleanTbl.includes(inst)) return true;
+        if (
+          inst === cleanTbl ||
+          inst === shortTbl ||
+          inst.includes(cleanTbl) ||
+          cleanTbl.includes(inst) ||
+          inst.includes(shortTbl) ||
+          shortTbl.includes(inst)
+        ) {
+          return true;
+        }
       }
       return false;
     });
@@ -152,27 +240,49 @@ async function resolveMalIdFromMapping({
       const cleanProv = String(provider)
         .toLowerCase()
         .replace(/[^a-z0-9]/g, "");
-      const matched = providers.find((p) => {
-        const tbl = p.table_name.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const shortProv = String(provider)
+        .toLowerCase()
+        .split("/")
+        .pop()
+        .replace(/[^a-z0-9]/g, "");
+
+      const matchedList = providers.filter((p) => {
+        const tbl = (p.table_name || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+        const shortTbl = (p.table_name || "")
+          .toLowerCase()
+          .split("/")
+          .pop()
+          .replace(/[^a-z0-9]/g, "");
+        const dName = (p.display_name || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
         return (
           tbl === cleanProv ||
+          tbl === shortProv ||
+          shortTbl === cleanProv ||
+          shortTbl === shortProv ||
           tbl.includes(cleanProv) ||
-          cleanProv.includes(tbl)
+          cleanProv.includes(tbl) ||
+          dName === cleanProv ||
+          dName === shortProv ||
+          dName.includes(cleanProv) ||
+          cleanProv.includes(dName)
         );
       });
 
-      if (matched) {
-        const tbl = matched.table_name;
-        const sql =
-          tbl === "pahe"
-            ? `SELECT malid FROM ${tbl} WHERE id = ? OR uuid = ? LIMIT 1`
-            : `SELECT malid FROM ${tbl} WHERE id = ? LIMIT 1`;
-        const params =
-          tbl === "pahe"
-            ? [cleanId, cleanId]
-            : [cleanId];
-        const row = await mappingQueryOne(sql, params);
-        return row?.malid ? Number(row.malid) : null;
+      for (const matched of matchedList) {
+        try {
+          const tbl = matched.table_name;
+          const sql =
+            tbl === "pahe"
+              ? `SELECT malid FROM "${tbl}" WHERE id = ? OR uuid = ? LIMIT 1`
+              : `SELECT malid FROM "${tbl}" WHERE id = ? LIMIT 1`;
+          const params = tbl === "pahe" ? [cleanId, cleanId] : [cleanId];
+          const row = await mappingQueryOne(sql, params);
+          if (row?.malid) return Number(row.malid);
+        } catch (_) {}
       }
     }
 
@@ -180,12 +290,9 @@ async function resolveMalIdFromMapping({
       try {
         const sql =
           p.table_name === "pahe"
-            ? `SELECT malid FROM ${p.table_name} WHERE id = ? OR uuid = ? LIMIT 1`
-            : `SELECT malid FROM ${p.table_name} WHERE id = ? LIMIT 1`;
-        const params =
-          p.table_name === "pahe"
-            ? [cleanId, cleanId]
-            : [cleanId];
+            ? `SELECT malid FROM "${p.table_name}" WHERE id = ? OR uuid = ? LIMIT 1`
+            : `SELECT malid FROM "${p.table_name}" WHERE id = ? LIMIT 1`;
+        const params = p.table_name === "pahe" ? [cleanId, cleanId] : [cleanId];
         const row = await mappingQueryOne(sql, params);
         if (row?.malid) return Number(row.malid);
       } catch (_) {}
@@ -240,22 +347,25 @@ async function getLinkedProvidersForMalId(
       if (linkedMap[pNameLower]) continue;
 
       const selectCol = p.table_name === "pahe" ? "id, uuid" : "id";
-      const row = await mappingQueryOne(
-        `SELECT ${selectCol} FROM ${p.table_name} WHERE malid = ? LIMIT 1`,
-        [numMalId],
-      );
+      try {
+        const row = await mappingQueryOne(
+          `SELECT ${selectCol} FROM "${p.table_name}" WHERE malid = ? LIMIT 1`,
+          [numMalId],
+        );
 
-      if (row) {
-        const resolvedId = p.table_name === "pahe" ? (row.id || row.uuid) : row.id;
-        if (resolvedId) {
-          linkedMap[pNameLower] = {
-            id: String(resolvedId),
-            provider: p.table_name,
-            title: title || "",
-            folder_name: null,
-          };
+        if (row) {
+          const resolvedId =
+            p.table_name === "pahe" ? row.id || row.uuid : row.id;
+          if (resolvedId) {
+            linkedMap[pNameLower] = {
+              id: String(resolvedId),
+              provider: p.table_name,
+              title: title || "",
+              folder_name: null,
+            };
+          }
         }
-      }
+      } catch (_) {}
     }
   } catch (err) {
     logger.error(
@@ -287,43 +397,58 @@ async function getBestProviderForMalId(
 
     if (prefLower) {
       const preferredMeta = providers.find((p) => {
-        const tbl = p.table_name.toLowerCase().replace(/[^a-z0-9]/g, "");
+        const tbl = (p.table_name || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+        const shortTbl = (p.table_name || "")
+          .toLowerCase()
+          .split("/")
+          .pop()
+          .replace(/[^a-z0-9]/g, "");
         return (
           tbl === prefLower ||
+          shortTbl === prefLower ||
           tbl.includes(prefLower) ||
           prefLower.includes(tbl)
         );
       });
       if (preferredMeta) {
-        const selectCol = preferredMeta.table_name === "pahe" ? "id, uuid" : "id";
-        const row = await mappingQueryOne(
-          `SELECT ${selectCol} FROM ${preferredMeta.table_name} WHERE malid = ? LIMIT 1`,
-          [numMalId],
-        );
-        if (row) {
-          const resolvedId = preferredMeta.table_name === "pahe" ? (row.id || row.uuid) : row.id;
-          if (resolvedId) {
-            return {
-              id: String(resolvedId),
-              provider: preferredMeta.table_name,
-            };
+        const selectCol =
+          preferredMeta.table_name === "pahe" ? "id, uuid" : "id";
+        try {
+          const row = await mappingQueryOne(
+            `SELECT ${selectCol} FROM "${preferredMeta.table_name}" WHERE malid = ? LIMIT 1`,
+            [numMalId],
+          );
+          if (row) {
+            const resolvedId =
+              preferredMeta.table_name === "pahe" ? row.id || row.uuid : row.id;
+            if (resolvedId) {
+              return {
+                id: String(resolvedId),
+                provider: preferredMeta.table_name,
+              };
+            }
           }
-        }
+        } catch (_) {}
       }
     }
 
     for (const p of providers) {
       const selectCol = p.table_name === "pahe" ? "id, uuid" : "id";
-      const row = await mappingQueryOne(
-        `SELECT ${selectCol} FROM ${p.table_name} WHERE malid = ? LIMIT 1`,
-        [numMalId],
-      );
-      if (row) {
-        const resolvedId = p.table_name === "pahe" ? (row.id || row.uuid) : row.id;
-        if (resolvedId) {
-          return { id: String(resolvedId), provider: p.table_name };
+      try {
+        const row = await mappingQueryOne(
+          `SELECT ${selectCol} FROM "${p.table_name}" WHERE malid = ? LIMIT 1`,
+          [numMalId],
+        );
+        if (row) {
+          const resolvedId =
+            p.table_name === "pahe" ? row.id || row.uuid : row.id;
+          if (resolvedId) {
+            return { id: String(resolvedId), provider: p.table_name };
+          }
         }
-      }
+      } catch (_) {}
     }
   } catch (err) {
     logger.error(

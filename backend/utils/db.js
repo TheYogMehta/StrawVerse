@@ -611,7 +611,11 @@ async function executeDb(dbName, action, sql, params = []) {
       if (action === "one") return res.row || null;
       return res;
     } catch (e) {
-      if (dbName === "mapping" && e.message?.includes("no such table")) {
+      if (
+        dbName === "mapping" &&
+        (e.message?.includes("no such table") ||
+          e.message?.includes("no such column"))
+      ) {
         return action === "all" ? [] : null;
       }
       logger.error(`${tag} ${action} error on "${sql}": ${e.message}`);
@@ -632,7 +636,11 @@ async function executeDb(dbName, action, sql, params = []) {
     if (action === "one") return stmt.get(...flat) || null;
     if (action === "run") return stmt.run(...flat);
   } catch (e) {
-    if (dbName === "mapping" && e.message?.includes("no such table")) {
+    if (
+      dbName === "mapping" &&
+      (e.message?.includes("no such table") ||
+        e.message?.includes("no such column"))
+    ) {
       return action === "all" ? [] : null;
     }
     logger.error(`${tag} ${action} error on "${sql}": ${e.message}`);
