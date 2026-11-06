@@ -1,9 +1,7 @@
 const axios = require("axios");
 const http = require("http");
 const https = require("https");
-const fs = require("fs");
 const path = require("path");
-const zlib = require("zlib");
 
 const mappingClient = axios.create({
   httpAgent: new http.Agent({ family: 4, keepAlive: true }),
@@ -23,8 +21,6 @@ const {
   mappingQueryOne,
   mappingRun,
   mappingExec,
-  closeDb,
-  openDb,
   batchRun,
   queryAll,
   queryOne,
@@ -34,7 +30,6 @@ const {
   getUserDataPath,
   getOSName,
   sanitizeFolderName,
-  isUuid,
 } = require("./constants");
 const {
   getMappingProviders,
@@ -42,6 +37,8 @@ const {
 } = require("./mappingResolver");
 
 const userDataPath = getUserDataPath();
+const MAPPING_API_BASE =
+  process.env.MAPPING_API_URL || "https://strawverse.theyogmehta.online";
 
 async function dropAllTriggers() {
   try {
@@ -49,7 +46,7 @@ async function dropAllTriggers() {
       "SELECT name FROM sqlite_master WHERE type='trigger'",
     );
     for (const trigger of triggers) {
-      await mappingRun(`DROP TRIGGER IF EXISTS ${trigger.name}`);
+      await mappingRun(`DROP TRIGGER IF EXISTS "${trigger.name}"`);
     }
   } catch (e) {
     logger.error(`[mappingUpdater] Failed to drop triggers: ${e.message}`);
@@ -59,9 +56,12 @@ async function dropAllTriggers() {
 async function ensureMappingTablesExist() {
   try {
     await mappingExec(`
-      CREATE TABLE IF NOT EXISTS mapping_changelog (
-        id INTEGER PRIMARY KEY,
-        version TEXT
+      DROP TABLE IF EXISTS mapping_changelog;
+      DROP TABLE IF EXISTS provider_metadata;
+      CREATE TABLE IF NOT EXISTS sync_versions (
+        table_name TEXT PRIMARY KEY,
+        timestamp INTEGER DEFAULT 0,
+        row_count INTEGER DEFAULT 0
       );
       CREATE TABLE IF NOT EXISTS unmapped_items (
         id TEXT NOT NULL,
@@ -77,6 +77,14 @@ async function ensureMappingTablesExist() {
         last_fetched TEXT,
         PRIMARY KEY (provider, id)
       );
+      CREATE TABLE IF NOT EXISTS next_episodes (
+        livechart_id TEXT,
+        episode INTEGER,
+        date TEXT,
+        title TEXT,
+        image TEXT,
+        PRIMARY KEY (livechart_id, episode)
+      );
       CREATE TABLE IF NOT EXISTS anime (
         malid INTEGER PRIMARY KEY,
         title TEXT,
@@ -87,7 +95,8 @@ async function ensureMappingTablesExist() {
         year INTEGER,
         image_url TEXT,
         livechart_id TEXT UNIQUE,
-        has_mapping INTEGER DEFAULT 0
+        has_mapping INTEGER DEFAULT 0,
+        genres TEXT
       );
       CREATE TABLE IF NOT EXISTS manga (
         malid INTEGER PRIMARY KEY,
@@ -97,14 +106,8 @@ async function ensureMappingTablesExist() {
         volumes INTEGER,
         status TEXT,
         image_url TEXT,
-        has_mapping INTEGER DEFAULT 0
-      );
-      CREATE TABLE IF NOT EXISTS provider_metadata (
-        table_name TEXT PRIMARY KEY,
-        media_type TEXT,
-        primary_key_field TEXT,
-        display_name TEXT,
-        updated_at TEXT
+        has_mapping INTEGER DEFAULT 0,
+        genres TEXT
       );
     `);
 
@@ -112,10 +115,13 @@ async function ensureMappingTablesExist() {
       await mappingExec(`
         CREATE INDEX IF NOT EXISTS idx_unmapped_provider ON unmapped_items(provider);
         CREATE INDEX IF NOT EXISTS idx_unmapped_media_type ON unmapped_items(media_type);
+        CREATE INDEX IF NOT EXISTS idx_next_episodes_date ON next_episodes(date);
+        CREATE INDEX IF NOT EXISTS idx_anime_genres ON anime(genres);
+        CREATE INDEX IF NOT EXISTS idx_manga_genres ON manga(genres);
       `);
     } catch (_) {}
 
-    // Ensure title and image_url columns exist if tables were created with an earlier minimal schema
+    // Ensure title, image_url, livechart_id, and genres columns exist if tables were created with an earlier schema
     try {
       const animeCols = await mappingQueryAll("PRAGMA table_info(anime)");
       const colNames = new Set((animeCols || []).map((c) => c.name));
@@ -128,6 +134,9 @@ async function ensureMappingTablesExist() {
       if (!colNames.has("livechart_id")) {
         await mappingExec("ALTER TABLE anime ADD COLUMN livechart_id TEXT;");
       }
+      if (!colNames.has("genres")) {
+        await mappingExec("ALTER TABLE anime ADD COLUMN genres TEXT;");
+      }
     } catch (_) {}
 
     try {
@@ -139,6 +148,9 @@ async function ensureMappingTablesExist() {
       if (!mColNames.has("image_url")) {
         await mappingExec("ALTER TABLE manga ADD COLUMN image_url TEXT;");
       }
+      if (!mColNames.has("genres")) {
+        await mappingExec("ALTER TABLE manga ADD COLUMN genres TEXT;");
+      }
     } catch (_) {}
   } catch (e) {
     logger.error(
@@ -147,539 +159,243 @@ async function ensureMappingTablesExist() {
   }
 }
 
-function deserializeDelta(buffer) {
-  let offset = 0;
-  if (buffer.length < 1) return { action: "full_sync" };
-  const actionFlag = buffer.readUInt8(offset);
-  offset += 1;
+async function ensureProviderTable(providerName) {
+  const cleanProv = String(providerName).toLowerCase().trim().split("/").pop();
+  if (!cleanProv) return;
 
-  if (actionFlag === 0) {
-    return { action: "full_sync" };
+  if (cleanProv === "pahe") {
+    await mappingExec(`
+      CREATE TABLE IF NOT EXISTS pahe (
+        id TEXT PRIMARY KEY,
+        uuid TEXT,
+        malid INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_pahe_malid ON pahe(malid);
+    `);
+  } else {
+    await mappingExec(`
+      CREATE TABLE IF NOT EXISTS "${cleanProv}" (
+        id TEXT PRIMARY KEY,
+        malid INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS "idx_${cleanProv}_malid" ON "${cleanProv}"(malid);
+    `);
   }
-  if (buffer.length < offset + 2) return { action: "full_sync" };
-  const vLen = buffer.readUInt16BE(offset);
-  offset += 2;
-  if (buffer.length < offset + vLen) return { action: "full_sync" };
-  const version = buffer.toString("utf8", offset, offset + vLen);
-  offset += vLen;
-  if (buffer.length < offset + 4) return { action: "full_sync" };
-  const numUpdates = buffer.readUInt32BE(offset);
-  offset += 4;
-
-  const tblRevMap = {
-    1: "anime",
-    2: "pahe",
-    3: "anikoto",
-    4: "anineko",
-    5: "manga",
-    6: "weebcentral",
-    7: "next_episodes",
-    8: "allmanga",
-    9: "provider_metadata",
-  };
-  const actRevMap = { 1: "INSERT", 2: "UPDATE", 3: "DELETE" };
-
-  const updates = [];
-  for (let i = 0; i < numUpdates; i++) {
-    if (buffer.length < offset + 6) return { action: "full_sync" };
-    const id = buffer.readUInt32BE(offset);
-    offset += 4;
-
-    const actVal = buffer.readUInt8(offset);
-    offset += 1;
-    const action = actRevMap[actVal] || "INSERT";
-
-    const tblVal = buffer.readUInt8(offset);
-    offset += 1;
-    let tbl = tblRevMap[tblVal];
-    if (!tbl || tblVal === 255) {
-      if (buffer.length < offset + 1) return { action: "full_sync" };
-      const tblLen = buffer.readUInt8(offset);
-      offset += 1;
-      if (buffer.length < offset + tblLen) return { action: "full_sync" };
-      tbl = buffer.toString("utf8", offset, offset + tblLen);
-      offset += tblLen;
-    }
-
-    if (buffer.length < offset + 2) return { action: "full_sync" };
-    const rowIdLen = buffer.readUInt16BE(offset);
-    offset += 2;
-
-    if (buffer.length < offset + rowIdLen) return { action: "full_sync" };
-    const row_id = buffer.toString("utf8", offset, offset + rowIdLen);
-    offset += rowIdLen;
-
-    if (buffer.length < offset + 4) return { action: "full_sync" };
-    const dataLen = buffer.readUInt32BE(offset);
-    offset += 4;
-
-    let data = null;
-    if (dataLen > 0) {
-      if (buffer.length < offset + dataLen) return { action: "full_sync" };
-      data = buffer.toString("utf8", offset, offset + dataLen);
-      offset += dataLen;
-    }
-
-    updates.push({ id, action, tbl, row_id, data });
-  }
-
-  return { action: "delta", version, updates };
 }
 
-async function checkForMappingUpdates(force = false) {
-  const mappingTagKey = "mapping_release_tag";
-  let storedTag = await getKeyValue("Settings", mappingTagKey);
+async function applySyncResponse(data) {
+  if (!data) return false;
+  const { tables, unmapped } = data;
+  let hasChanges = false;
+  const paheRotations = [];
 
-  logger.info(
-    `[mappingUpdater] Checking for mapping database updates... (local version: ${storedTag || "none"})`,
-  );
-
-  let hasNextEpisodesTable = false;
-  let hasMappingChangelogTable = false;
-  let hasAnimeTable = false;
-  try {
-    const tablesList = await mappingQueryAll(
-      "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('next_episodes', 'mapping_changelog', 'anime')",
-    );
-    const tableNames = (tablesList || []).map((t) => t.name);
-    hasNextEpisodesTable = tableNames.includes("next_episodes");
-    hasMappingChangelogTable = tableNames.includes("mapping_changelog");
-    hasAnimeTable = tableNames.includes("anime");
-  } catch (e) {}
-
-  if (!hasAnimeTable) {
-    logger.info(
-      "[mappingUpdater] Anime table missing in mapping database. Forcing full sync...",
-    );
-    storedTag = null;
-  }
-
-  let hasTriggers = false;
-  try {
-    const row = await mappingQueryOne(
-      "SELECT 1 FROM sqlite_master WHERE type='trigger' LIMIT 1",
-    );
-    if (row) {
-      logger.info(
-        "[mappingUpdater] Legacy triggers detected in mapping database. Forcing full sync to clean up database.",
-      );
-      hasTriggers = true;
-    }
-  } catch (e) {}
-
-  let isNextEpisodesEmpty = false;
-  if (hasNextEpisodesTable) {
-    try {
-      const row = await mappingQueryOne(
-        "SELECT COUNT(*) as count FROM next_episodes",
-      );
-      if (!row || row.count === 0) {
-        isNextEpisodesEmpty = true;
-      }
-    } catch (e) {
-      isNextEpisodesEmpty = true;
-    }
-  } else {
-    isNextEpisodesEmpty = true;
-  }
-
-  let lastId = 0;
-  if (hasMappingChangelogTable) {
-    try {
-      const row = await mappingQueryOne(
-        "SELECT MAX(id) as maxId FROM mapping_changelog",
-      );
-      if (row && typeof row.maxId === "number") {
-        lastId = row.maxId;
-      }
-    } catch (e) {}
-  }
-
-  let latestVersion = null;
-  const osName = getOSName();
+  await ensureMappingTablesExist();
+  await mappingExec("PRAGMA foreign_keys = OFF");
 
   try {
-    const vRes = await mappingClient.get(
-      "https://strawverse.theyogmehta.online/api/mapping/version",
-      {
-        headers: {
-          os: osName,
-        },
-      },
-    );
-    latestVersion = vRes.data?.version;
-    const canaryChecks =
-      vRes.data?.canaryChecks ||
-      (vRes.data?.paheCanaryCheck ? { pahe: vRes.data.paheCanaryCheck } : null);
-    if (canaryChecks && typeof canaryChecks === "object") {
-      setTimeout(async () => {
-        let activeAnime = "";
-        let activeManga = "";
-        try {
-          const { settingfetch } = require("./settings");
-          const cfg = await settingfetch();
-          activeAnime = (cfg?.Animeprovider || "").toLowerCase();
-          activeManga = (cfg?.Mangaprovider || "").toLowerCase();
-        } catch (_) {}
+    // 1. Process regular & core tables (anime, manga, next_episodes, pahe, etc.)
+    if (tables && typeof tables === "object") {
+      for (const [tbl, tableData] of Object.entries(tables)) {
+        if (!tableData) continue;
+        const { type, timestamp, count, rows } = tableData;
 
-        for (const [providerName, canaryData] of Object.entries(canaryChecks)) {
-          const pLower = providerName.toLowerCase();
-          const isSelected =
-            activeAnime === pLower ||
-            activeAnime.endsWith(`/${pLower}`) ||
-            activeManga === pLower ||
-            activeManga.endsWith(`/${pLower}`);
-          if (!isSelected) {
-            continue;
-          }
-
-          const provider =
-            (global.Anime_providers &&
-              (global.Anime_providers[providerName] ||
-                global.Anime_providers[`TheYogMehta/${providerName}`])) ||
-            (global.Manga_providers &&
-              (global.Manga_providers[providerName] ||
-                global.Manga_providers[`TheYogMehta/${providerName}`])) ||
-            null;
-          if (provider && typeof provider.checkCanary === "function") {
+        // If snapshot, handle UUID rotation tracking for pahe before wiping
+        if (type === "snapshot") {
+          logger.info(
+            `[mappingUpdater] Applying full snapshot for table: ${tbl} (${rows?.length || 0} rows)`,
+          );
+          if (tbl === "pahe") {
             try {
-              provider.checkCanary(canaryData).catch(() => {});
+              const existingRows = await mappingQueryAll(
+                "SELECT id, uuid FROM pahe WHERE uuid IS NOT NULL",
+              );
+              const existingMap = new Map();
+              for (const r of existingRows || []) {
+                if (r.id && r.uuid) existingMap.set(String(r.id), r.uuid);
+              }
+              if (existingMap.size > 0 && Array.isArray(rows)) {
+                for (const r of rows) {
+                  const oldUuid = existingMap.get(String(r.id));
+                  if (
+                    oldUuid &&
+                    r.uuid &&
+                    oldUuid.toLowerCase() !== r.uuid.toLowerCase()
+                  ) {
+                    paheRotations.push({
+                      oldUuid,
+                      newUuid: r.uuid,
+                      malid: r.malid || null,
+                    });
+                  }
+                }
+              }
             } catch (_) {}
           }
-        }
-      }, 5000);
-    }
-  } catch (e) {
-    logger.error(`[mappingUpdater] Failed to get latest version: ${e.message}`);
-  }
-
-  if (
-    !force &&
-    storedTag &&
-    latestVersion &&
-    storedTag === latestVersion &&
-    !hasTriggers
-  ) {
-    logger.info(
-      `[mappingUpdater] Local mapping database is up to date at version ${storedTag}. Skipping download.`,
-    );
-    await dropAllTriggers();
-    await ensureMappingTablesExist();
-    try {
-      await syncLibraryIdsWithMapping();
-    } catch (syncErr) {}
-    return;
-  }
-
-  let updateResponse = null;
-  try {
-    const installedProviders = [];
-    if (global.Anime_providers) {
-      for (const p of Object.values(global.Anime_providers)) {
-        if (p?.name) installedProviders.push(p.name.toLowerCase());
-      }
-    }
-    if (global.Manga_providers) {
-      for (const p of Object.values(global.Manga_providers)) {
-        if (p?.name) installedProviders.push(p.name.toLowerCase());
-      }
-    }
-    const cleanProviders = Array.from(new Set(installedProviders)).join(",");
-    const provQuery = cleanProviders
-      ? `&providers=${encodeURIComponent(cleanProviders)}`
-      : "";
-
-    const url = storedTag
-      ? `https://strawverse.theyogmehta.online/api/mapping/updates?version=${storedTag}&last_id=${lastId}${provQuery}`
-      : `https://strawverse.theyogmehta.online/api/mapping/updates?last_id=${lastId}${provQuery ? `?${provQuery.slice(1)}` : ""}`;
-    const response = await mappingClient.get(url, {
-      responseType: "arraybuffer",
-      headers: {
-        os: osName,
-      },
-    });
-    const buffer = Buffer.from(response.data);
-    updateResponse = deserializeDelta(buffer);
-  } catch (err) {
-    logger.error(
-      `[mappingUpdater] Failed to check for mapping updates from server: ${err.message}`,
-    );
-  }
-
-  let action = updateResponse?.action || "full_sync";
-  if (!latestVersion && updateResponse?.version) {
-    latestVersion = updateResponse.version;
-  }
-  let updates = updateResponse?.updates || [];
-
-  if (action === "delta" && updates.length > 50000) {
-    logger.info(
-      `[mappingUpdater] Delta update contains ${updates.length} records. Forcing full sync...`,
-    );
-    action = "full_sync";
-  }
-
-  if (hasTriggers || !hasAnimeTable) {
-    action = "full_sync";
-  }
-
-  if (action === "full_sync") {
-    const downloadUrl =
-      "https://strawverse.theyogmehta.online/api/mapping/download";
-    const tempDbPath = path.join(userDataPath, "mapping_temp.db");
-    const mappingDbPath = path.join(userDataPath, "mapping.db");
-
-    try {
-      logger.info(
-        `[mappingUpdater] Downloading full mapping database from: ${downloadUrl}`,
-      );
-      const response = await mappingClient.get(downloadUrl, {
-        responseType: "arraybuffer",
-        headers: {
-          os: osName,
-        },
-      });
-      const gzippedData = Buffer.from(response.data);
-
-      logger.info("[mappingUpdater] Decompressing mapping database...");
-      const decompressedData = await new Promise((resolve, reject) => {
-        zlib.gunzip(gzippedData, (err, result) => {
-          if (err) reject(err);
-          else resolve(result);
-        });
-      });
-
-      await fs.promises.writeFile(tempDbPath, decompressedData);
-
-      logger.info("[mappingUpdater] Replacing mapping database file...");
-
-      try {
-        await closeDb("mapping");
-      } catch (closeErr) {
-        logger.error(
-          `[mappingUpdater] Error closing database connection: ${closeErr.message}`,
-        );
-      }
-
-      await fs.promises.copyFile(tempDbPath, mappingDbPath);
-      await fs.promises.unlink(tempDbPath).catch(() => {});
-
-      await openDb("mapping");
-      await dropAllTriggers();
-      await ensureMappingTablesExist();
-
-      if (latestVersion) {
-        await setKeyValue("Settings", mappingTagKey, latestVersion);
-      }
-      logger.info(
-        `[mappingUpdater] Mapping database successfully updated to version: ${latestVersion || "fallback"}`,
-      );
-      try {
-        await syncLibraryIdsWithMapping();
-      } catch (syncErr) {}
-    } catch (err) {
-      logger.error(
-        `[mappingUpdater] Failed to update mapping database: ${err.message}`,
-      );
-      try {
-        await closeDb("mapping");
-      } catch (e) {}
-      try {
-        await openDb("mapping");
-        await dropAllTriggers();
-      } catch (reopenErr) {
-        logger.error(
-          `[mappingUpdater] Failed to re-open mapping database after error: ${reopenErr.message}`,
-        );
-      }
-    }
-  } else {
-    await dropAllTriggers();
-    await ensureMappingTablesExist();
-
-    if (action === "delta" && updates.length > 0) {
-      await applyDeltaUpdates(updates, latestVersion, storedTag);
-    } else {
-      logger.info("[mappingUpdater] Mapping database is up to date.");
-      if (latestVersion && latestVersion !== storedTag) {
-        await setKeyValue("Settings", mappingTagKey, latestVersion);
-        logger.info(
-          `[mappingUpdater] Updated client version tag to: ${latestVersion}`,
-        );
-      }
-      try {
-        await syncLibraryIdsWithMapping();
-      } catch (syncErr) {}
-    }
-  }
-}
-
-async function applyDeltaUpdates(updates, latestVersion, storedTag) {
-  if (!updates || updates.length === 0) return;
-  const mappingTagKey = "mapping_release_tag";
-
-  logger.info(
-    `[mappingUpdater] Applying ${updates.length} delta updates${storedTag ? ` since version ${storedTag}` : ""}...`,
-  );
-  try {
-    await ensureMappingTablesExist();
-    await mappingExec("PRAGMA foreign_keys = OFF");
-
-    const changelogSql =
-      "INSERT OR REPLACE INTO mapping_changelog (id, version) VALUES (?, ?)";
-
-    const paheRotations = [];
-    const UPDATE_CHUNK_SIZE = 500;
-    for (let i = 0; i < updates.length; i += UPDATE_CHUNK_SIZE) {
-      const updateChunk = updates.slice(i, i + UPDATE_CHUNK_SIZE);
-      const ops = [];
-
-      for (const update of updateChunk) {
-        const { id, action: act, tbl, row_id, data } = update;
-
-        const tableCheck = await mappingQueryOne(
-          "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?",
-          [tbl],
-        );
-
-        if (!tableCheck) {
-          if (id) {
-            ops.push({
-              sql: changelogSql,
-              params: [id, latestVersion || "v0"],
-            });
-          }
-          continue;
+          await mappingRun(`DELETE FROM "${tbl}"`);
+          hasChanges = true;
         }
 
-        if (act === "INSERT" || act === "UPDATE") {
-          if (data) {
-            const parsedData = JSON.parse(data);
+        if (rows && rows.length > 0) {
+          hasChanges = true;
+          logger.info(
+            `[mappingUpdater] Applying ${rows.length} ${type} rows for table: ${tbl}`,
+          );
 
-            if (tbl === "pahe" && parsedData.id && parsedData.uuid) {
-              try {
-                const existingPahe = await mappingQueryOne(
-                  "SELECT uuid FROM pahe WHERE id = ?",
-                  [parsedData.id],
-                );
-                if (
-                  existingPahe?.uuid &&
-                  existingPahe.uuid.toLowerCase() !==
-                    parsedData.uuid.toLowerCase()
-                ) {
-                  paheRotations.push({
-                    oldUuid: existingPahe.uuid,
-                    newUuid: parsedData.uuid,
-                    malid: parsedData.malid || null,
-                  });
-                }
-              } catch (_) {}
-            }
+          const CHUNK_SIZE = 500;
+          for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+            const chunk = rows.slice(i, i + CHUNK_SIZE);
+            const ops = [];
 
-            if (parsedData.malid) {
-              const targetIds = [parsedData.id, parsedData.uuid, row_id]
-                .filter(Boolean)
-                .map(String);
+            for (const row of chunk) {
+              if (!row || typeof row !== "object") continue;
 
-              if (global.db && targetIds.length > 0) {
+              // Delta Pahe UUID rotation check
+              if (type !== "snapshot" && tbl === "pahe" && row.id && row.uuid) {
                 try {
-                  for (const tid of targetIds) {
-                    const localEntry = await queryOne(
-                      "SELECT malid FROM unlinked_mal_ids WHERE id = ? LIMIT 1",
-                      [tid],
-                    );
-                    if (localEntry) {
-                      await run("DELETE FROM unlinked_mal_ids WHERE id = ?", [
-                        tid,
-                      ]);
-                      logger.info(
-                        `[mappingUpdater] Pruned duplicate local mapping for ${tid} (server now provides canonical MAL ID ${parsedData.malid})`,
-                      );
-                    }
+                  const existingPahe = await mappingQueryOne(
+                    "SELECT uuid FROM pahe WHERE id = ?",
+                    [row.id],
+                  );
+                  if (
+                    existingPahe?.uuid &&
+                    existingPahe.uuid.toLowerCase() !== row.uuid.toLowerCase()
+                  ) {
+                    paheRotations.push({
+                      oldUuid: existingPahe.uuid,
+                      newUuid: row.uuid,
+                      malid: row.malid || null,
+                    });
                   }
                 } catch (_) {}
               }
 
-              for (const tid of targetIds) {
+              // Prune duplicate local mappings and unmapped items if malid provided
+              if (row.malid) {
+                const targetIds = [row.id, row.uuid].filter(Boolean).map(String);
+                if (global.db && targetIds.length > 0) {
+                  for (const tid of targetIds) {
+                    try {
+                      const localEntry = await queryOne(
+                        "SELECT malid FROM unlinked_mal_ids WHERE id = ? LIMIT 1",
+                        [tid],
+                      );
+                      if (localEntry) {
+                        await run("DELETE FROM unlinked_mal_ids WHERE id = ?", [
+                          tid,
+                        ]);
+                        logger.info(
+                          `[mappingUpdater] Pruned duplicate local mapping for ${tid} (canonical MAL ID ${row.malid})`,
+                        );
+                      }
+                    } catch (_) {}
+                  }
+                }
+                for (const tid of targetIds) {
+                  ops.push({
+                    sql: "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider LIKE ?) AND (id = ? OR id = ?)",
+                    params: [tbl, tbl, `%/${tbl}`, tid, tid],
+                  });
+                }
+              }
+
+              // Build INSERT OR REPLACE
+              const colKeys = Object.keys(row);
+              if (colKeys.length > 0) {
+                const cols = colKeys.map((c) => `"${c}"`).join(", ");
+                const placeholders = colKeys.map(() => "?").join(", ");
+                const values = colKeys.map((k) => row[k] ?? null);
                 ops.push({
-                  sql: "DELETE FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider LIKE ?) AND (id = ? OR id = ?)",
-                  params: [tbl, tbl, `%/${tbl}`, tid, tid],
+                  sql: `INSERT OR REPLACE INTO "${tbl}" (${cols}) VALUES (${placeholders})`,
+                  params: values,
                 });
               }
             }
 
-            const tableColsRes = await mappingQueryAll(
-              `PRAGMA table_info(${tbl})`,
-            );
-            const validCols = new Set((tableColsRes || []).map((c) => c.name));
-            const validKeys = Object.keys(parsedData).filter((k) =>
-              validCols.has(k),
-            );
-
-            if (validKeys.length > 0) {
-              const cols = validKeys.join(", ");
-              const placeholders = validKeys.map(() => "?").join(", ");
-              const values = validKeys.map((k) => parsedData[k] ?? null);
-              ops.push({
-                sql: `INSERT OR REPLACE INTO ${tbl} (${cols}) VALUES (${placeholders})`,
-                params: values,
-              });
+            if (ops.length > 0) {
+              await batchRun("mapping", ops);
+              await new Promise((r) => setTimeout(r, 0));
             }
-          }
-        } else if (act === "DELETE") {
-          if (tbl === "anime" || tbl === "manga") {
-            ops.push({
-              sql: `DELETE FROM ${tbl} WHERE malid = ?`,
-              params: [row_id],
-            });
-          } else if (tbl === "next_episodes") {
-            const parts = row_id.split("_");
-            const livechartId = parts[0];
-            const episode = parseInt(parts[1], 10);
-            ops.push({
-              sql: "DELETE FROM next_episodes WHERE livechart_id = ? AND episode = ?",
-              params: [livechartId ?? null, isNaN(episode) ? null : episode],
-            });
-          } else if (tbl === "provider_metadata") {
-            ops.push({
-              sql: "DELETE FROM provider_metadata WHERE table_name = ?",
-              params: [row_id],
-            });
-          } else if (tbl === "unmapped_items") {
-            const parts = String(row_id).split(":::");
-            if (parts.length >= 2) {
-              ops.push({
-                sql: "DELETE FROM unmapped_items WHERE provider = ? AND id = ?",
-                params: [parts[0], parts.slice(1).join(":::")],
-              });
-            } else {
-              ops.push({
-                sql: "DELETE FROM unmapped_items WHERE id = ?",
-                params: [row_id],
-              });
-            }
-          } else {
-            ops.push({
-              sql: `DELETE FROM ${tbl} WHERE id = ?`,
-              params: [row_id],
-            });
           }
         }
 
-        if (id) {
-          ops.push({
-            sql: changelogSql,
-            params: [id, latestVersion || "v0"],
-          });
+        // Update sync_versions for this table
+        if (timestamp != null) {
+          const rowCountRes = await mappingQueryOne(
+            `SELECT COUNT(*) as count FROM "${tbl}"`,
+          );
+          const currentCount = rowCountRes?.count ?? count ?? 0;
+          await mappingRun(
+            "INSERT OR REPLACE INTO sync_versions (table_name, timestamp, row_count) VALUES (?, ?, ?)",
+            [tbl, timestamp, currentCount],
+          );
         }
-      }
-
-      if (ops.length > 0) {
-        await batchRun("mapping", ops);
-        await new Promise((r) => setTimeout(r, 0));
       }
     }
 
+    // 2. Process unmapped_items per provider
+    if (unmapped && typeof unmapped === "object") {
+      for (const [provider, provData] of Object.entries(unmapped)) {
+        if (!provData) continue;
+        const { type, timestamp, count, rows } = provData;
+
+        if (type === "snapshot") {
+          logger.info(
+            `[mappingUpdater] Applying full snapshot for unmapped_items of ${provider} (${rows?.length || 0} rows)`,
+          );
+          await mappingRun(
+            "DELETE FROM unmapped_items WHERE provider = ? OR provider = ? OR provider LIKE ?",
+            [provider, provider, `%/${provider}`],
+          );
+          hasChanges = true;
+        }
+
+        if (rows && rows.length > 0) {
+          hasChanges = true;
+          logger.info(
+            `[mappingUpdater] Applying ${rows.length} ${type} rows for unmapped_items of ${provider}`,
+          );
+
+          const CHUNK_SIZE = 500;
+          for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+            const chunk = rows.slice(i, i + CHUNK_SIZE);
+            const ops = [];
+
+            for (const row of chunk) {
+              if (!row || typeof row !== "object") continue;
+              const colKeys = Object.keys(row);
+              if (colKeys.length > 0) {
+                const cols = colKeys.map((c) => `"${c}"`).join(", ");
+                const placeholders = colKeys.map(() => "?").join(", ");
+                const values = colKeys.map((k) => row[k] ?? null);
+                ops.push({
+                  sql: `INSERT OR REPLACE INTO unmapped_items (${cols}) VALUES (${placeholders})`,
+                  params: values,
+                });
+              }
+            }
+
+            if (ops.length > 0) {
+              await batchRun("mapping", ops);
+              await new Promise((r) => setTimeout(r, 0));
+            }
+          }
+        }
+
+        if (timestamp != null) {
+          const rowCountRes = await mappingQueryOne(
+            "SELECT COUNT(*) as count FROM unmapped_items WHERE provider = ? OR provider = ? OR provider LIKE ?",
+            [provider, provider, `%/${provider}`],
+          );
+          const currentCount = rowCountRes?.count ?? count ?? 0;
+          await mappingRun(
+            "INSERT OR REPLACE INTO sync_versions (table_name, timestamp, row_count) VALUES (?, ?, ?)",
+            [`unmapped_${provider}`, timestamp, currentCount],
+          );
+        }
+      }
+    }
+
+    // Apply Pahe UUID rotations if any
     if (paheRotations.length > 0) {
       for (const rot of paheRotations) {
         try {
@@ -720,31 +436,201 @@ async function applyDeltaUpdates(updates, latestVersion, storedTag) {
         }
       }
     }
-
+  } finally {
     await mappingExec("PRAGMA foreign_keys = ON");
-
-    if (latestVersion) {
-      await setKeyValue("Settings", mappingTagKey, latestVersion);
-    }
-    logger.info(
-      `[mappingUpdater] Mapping database successfully updated via delta to version: ${latestVersion}`,
-    );
-    try {
-      await syncLibraryIdsWithMapping();
-    } catch (syncErr) {}
-  } catch (err) {
-    logger.error(
-      `[mappingUpdater] Failed to apply delta updates: ${err.message}`,
-    );
-    try {
-      await mappingExec("PRAGMA foreign_keys = ON");
-    } catch (e) {}
   }
+
+  return hasChanges;
 }
 
-/**
- * Fetches and initializes mapping data for an installed extension from the server.
- */
+async function checkCanaries(osName) {
+  try {
+    const vRes = await mappingClient.get(
+      `${MAPPING_API_BASE}/api/mapping/version`,
+      {
+        headers: { os: osName },
+        timeout: 10000,
+      },
+    );
+    const canaryChecks =
+      vRes.data?.canaryChecks ||
+      (vRes.data?.paheCanaryCheck ? { pahe: vRes.data.paheCanaryCheck } : null);
+    if (canaryChecks && typeof canaryChecks === "object") {
+      let activeAnime = "";
+      let activeManga = "";
+      try {
+        const { settingfetch } = require("./settings");
+        const cfg = await settingfetch();
+        activeAnime = (cfg?.Animeprovider || "").toLowerCase();
+        activeManga = (cfg?.Mangaprovider || "").toLowerCase();
+      } catch (_) {}
+
+      for (const [providerName, canaryData] of Object.entries(canaryChecks)) {
+        const pLower = providerName.toLowerCase();
+        const isSelected =
+          activeAnime === pLower ||
+          activeAnime.endsWith(`/${pLower}`) ||
+          activeManga === pLower ||
+          activeManga.endsWith(`/${pLower}`);
+        if (!isSelected) continue;
+
+        const provider =
+          (global.Anime_providers &&
+            (global.Anime_providers[providerName] ||
+              global.Anime_providers[`TheYogMehta/${providerName}`])) ||
+          (global.Manga_providers &&
+            (global.Manga_providers[providerName] ||
+              global.Manga_providers[`TheYogMehta/${providerName}`])) ||
+          null;
+        if (provider && typeof provider.checkCanary === "function") {
+          try {
+            provider.checkCanary(canaryData).catch(() => {});
+          } catch (_) {}
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+async function checkForMappingUpdates(force = false) {
+  logger.info("[mappingUpdater] Checking for mapping database updates...");
+
+  await dropAllTriggers();
+  await ensureMappingTablesExist();
+
+  const installedProviders = new Set();
+  if (global.Anime_providers) {
+    for (const p of Object.values(global.Anime_providers)) {
+      if (p?.name) {
+        const clean = String(p.name).toLowerCase().trim().split("/").pop();
+        if (clean) installedProviders.add(clean);
+      }
+    }
+  }
+  if (global.Manga_providers) {
+    for (const p of Object.values(global.Manga_providers)) {
+      if (p?.name) {
+        const clean = String(p.name).toLowerCase().trim().split("/").pop();
+        if (clean) installedProviders.add(clean);
+      }
+    }
+  }
+
+  for (const prov of installedProviders) {
+    await ensureProviderTable(prov);
+  }
+
+  const tablesToSync = [
+    "anime",
+    "manga",
+    "next_episodes",
+    ...Array.from(installedProviders),
+  ];
+  const reqTables = {};
+
+  for (const tbl of tablesToSync) {
+    let storedTs = 0;
+    let actualCount = 0;
+    try {
+      const vRow = await mappingQueryOne(
+        "SELECT timestamp, row_count FROM sync_versions WHERE table_name = ?",
+        [tbl],
+      );
+      if (vRow?.timestamp) storedTs = Number(vRow.timestamp);
+    } catch (_) {}
+
+    try {
+      const cRow = await mappingQueryOne(
+        `SELECT COUNT(*) as count FROM "${tbl}"`,
+      );
+      if (cRow?.count != null) actualCount = Number(cRow.count);
+    } catch (_) {}
+
+    const effectiveTs = force || actualCount === 0 ? 0 : storedTs;
+    reqTables[tbl] = {
+      timestamp: effectiveTs,
+      count: actualCount,
+    };
+  }
+
+  const reqUnmapped = {};
+  for (const prov of installedProviders) {
+    let storedTs = 0;
+    let actualCount = 0;
+    try {
+      const vRow = await mappingQueryOne(
+        "SELECT timestamp, row_count FROM sync_versions WHERE table_name = ?",
+        [`unmapped_${prov}`],
+      );
+      if (vRow?.timestamp) storedTs = Number(vRow.timestamp);
+    } catch (_) {}
+
+    try {
+      const cRow = await mappingQueryOne(
+        "SELECT COUNT(*) as count FROM unmapped_items WHERE provider = ? OR provider = ? OR provider LIKE ?",
+        [prov, prov, `%/${prov}`],
+      );
+      if (cRow?.count != null) actualCount = Number(cRow.count);
+    } catch (_) {}
+
+    const effectiveTs = force || actualCount === 0 ? 0 : storedTs;
+    reqUnmapped[prov] = {
+      timestamp: effectiveTs,
+      count: actualCount,
+    };
+  }
+
+  const osName = getOSName();
+
+  try {
+    const res = await mappingClient.post(
+      `${MAPPING_API_BASE}/api/mapping/sync`,
+      {
+        tables: reqTables,
+        unmapped: reqUnmapped,
+      },
+      {
+        headers: {
+          os: osName,
+          "Accept-Encoding": "gzip",
+        },
+      },
+    );
+
+    if (res.data) {
+      if (
+        res.data.upToDate &&
+        (!res.data.tables || Object.keys(res.data.tables).length === 0)
+      ) {
+        logger.info("[mappingUpdater] Mapping database is already up to date.");
+      } else {
+        const changed = await applySyncResponse(res.data);
+        if (changed) {
+          logger.info(
+            "[mappingUpdater] Mapping database sync completed successfully.",
+          );
+        } else {
+          logger.info("[mappingUpdater] Mapping database is up to date.");
+        }
+      }
+    }
+  } catch (err) {
+    logger.error(
+      `[mappingUpdater] Failed to sync mapping database: ${err.message}`,
+    );
+  }
+
+  try {
+    await syncLibraryIdsWithMapping();
+  } catch (syncErr) {
+    logger.error(
+      `[mappingUpdater] Failed to sync library IDs: ${syncErr.message}`,
+    );
+  }
+
+  checkCanaries(osName).catch(() => {});
+}
+
 async function syncExtensionMapping(extensionName) {
   if (!extensionName || !global.mappingDb) return;
   const cleanProv = String(extensionName).toLowerCase().trim().split("/").pop();
@@ -752,41 +638,31 @@ async function syncExtensionMapping(extensionName) {
 
   try {
     await ensureMappingTablesExist();
-    if (cleanProv === "pahe") {
-      await mappingExec(`
-        CREATE TABLE IF NOT EXISTS pahe (
-          id TEXT PRIMARY KEY,
-          uuid TEXT,
-          malid INTEGER
-        );
-        CREATE INDEX IF NOT EXISTS idx_pahe_malid ON pahe(malid);
-      `);
-    } else {
-      await mappingExec(`
-        CREATE TABLE IF NOT EXISTS "${cleanProv}" (
-          id TEXT PRIMARY KEY,
-          malid INTEGER
-        );
-        CREATE INDEX IF NOT EXISTS "idx_${cleanProv}_malid" ON "${cleanProv}"(malid);
-      `);
-    }
+    await ensureProviderTable(cleanProv);
 
-    const axiosClient = global.axios || require("axios");
     const osName = getOSName();
-    const url = `https://strawverse.theyogmehta.online/api/mapping/provider?provider=${encodeURIComponent(cleanProv)}`;
-    const response = await axiosClient.get(url, {
-      responseType: "arraybuffer",
-      headers: { os: osName },
-      timeout: 25000,
-    });
-    if (response?.data) {
-      const delta = deserializeDelta(Buffer.from(response.data));
-      if (delta && delta.updates && delta.updates.length > 0) {
-        await applyDeltaUpdates(delta.updates, delta.version || null, null);
-        logger.info(
-          `[mappingUpdater] Initialized ${delta.updates.length} mappings for ${cleanProv}`,
-        );
-      }
+    const res = await mappingClient.post(
+      `${MAPPING_API_BASE}/api/mapping/sync`,
+      {
+        tables: {
+          [cleanProv]: { timestamp: 0, count: 0 },
+        },
+        unmapped: {
+          [cleanProv]: { timestamp: 0, count: 0 },
+        },
+      },
+      {
+        headers: {
+          os: osName,
+          "Accept-Encoding": "gzip",
+        },
+        timeout: 30000,
+      },
+    );
+
+    if (res.data) {
+      await applySyncResponse(res.data);
+      logger.info(`[mappingUpdater] Initialized mappings for ${cleanProv}`);
     }
   } catch (err) {
     logger.warn(
@@ -795,19 +671,13 @@ async function syncExtensionMapping(extensionName) {
   }
 }
 
-/**
- * Deletes all mapping records, tables, unmapped items, and settings for an uninstalled extension.
- */
 async function cleanupExtensionMapping(extensionName) {
   if (!extensionName || !global.mappingDb) return;
   const cleanProv = String(extensionName).toLowerCase().trim().split("/").pop();
   if (!cleanProv) return;
 
   try {
-    // 1. Drop provider table
     await mappingExec(`DROP TABLE IF EXISTS "${cleanProv}"`);
-
-    // 2. Remove unmapped items for this provider
     try {
       global.mappingDb
         .prepare(
@@ -816,22 +686,20 @@ async function cleanupExtensionMapping(extensionName) {
         .run(cleanProv, extensionName, `%/${cleanProv}`);
     } catch (_) {}
 
-    // 3. Remove provider metadata
-    try {
-      global.mappingDb
-        .prepare(
-          "DELETE FROM provider_metadata WHERE table_name = ? OR table_name = ?",
-        )
-        .run(cleanProv, extensionName);
-    } catch (_) {}
-
-    // 4. Remove extension settings
     try {
       global.mappingDb
         .prepare(
           "DELETE FROM extension_settings WHERE provider = ? OR provider = ?",
         )
         .run(cleanProv, extensionName);
+    } catch (_) {}
+
+    try {
+      global.mappingDb
+        .prepare(
+          "DELETE FROM sync_versions WHERE table_name = ? OR table_name = ?",
+        )
+        .run(cleanProv, `unmapped_${cleanProv}`);
     } catch (_) {}
 
     logger.info(
@@ -842,6 +710,14 @@ async function cleanupExtensionMapping(extensionName) {
       `[mappingUpdater] Failed to cleanup mapping data for ${cleanProv}: ${err.message}`,
     );
   }
+}
+
+async function applyDeltaUpdates(updates, latestVersion, storedTag) {
+  // Legacy compatibility stub
+  if (!updates || updates.length === 0) return;
+  logger.info(
+    `[mappingUpdater] applyDeltaUpdates called with ${updates.length} records (legacy stub).`,
+  );
 }
 
 global.checkForMappingUpdates = checkForMappingUpdates;
@@ -946,23 +822,21 @@ async function syncLibraryIdsWithMapping() {
       let targetRow = null;
       if (malid) {
         const query = isPahe
-          ? `SELECT id, uuid, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`
-          : `SELECT id, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`;
+          ? `SELECT id, uuid, malid FROM "${targetTable}" WHERE malid = ? LIMIT 1`
+          : `SELECT id, malid FROM "${targetTable}" WHERE malid = ? LIMIT 1`;
         targetRow = await mappingQueryOne(query, [malid]);
       }
       if (!targetRow) {
         const query = isPahe
-          ? `SELECT id, uuid, malid FROM ${targetTable} WHERE id = ? OR uuid = ? LIMIT 1`
-          : `SELECT id, malid FROM ${targetTable} WHERE id = ? LIMIT 1`;
+          ? `SELECT id, uuid, malid FROM "${targetTable}" WHERE id = ? OR uuid = ? LIMIT 1`
+          : `SELECT id, malid FROM "${targetTable}" WHERE id = ? LIMIT 1`;
         targetRow = isPahe
           ? await mappingQueryOne(query, [anime.id, anime.id])
           : await mappingQueryOne(query, [anime.id]);
       }
 
       if (targetRow) {
-        const latestId = isPahe
-          ? targetRow.id || targetRow.uuid
-          : targetRow.id;
+        const latestId = isPahe ? targetRow.id || targetRow.uuid : targetRow.id;
         if (latestId && latestId !== anime.id) {
           const existingFolder =
             anime.folder_name ||
@@ -1062,25 +936,15 @@ async function syncLibraryIdsWithMapping() {
           } catch (_) {}
         }
 
-        const targetId = targetRow ? (targetRow.id || targetRow.uuid) : null;
+        const targetId = targetRow ? targetRow.id || targetRow.uuid : null;
         if (targetId && targetId !== hist.anime_id) {
           await run(
             "UPDATE WatchHistory SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?",
-            [
-              hist.anime_id,
-              targetId,
-              hist.anime_id,
-              `${hist.anime_id}-%`,
-            ],
+            [hist.anime_id, targetId, hist.anime_id, `${hist.anime_id}-%`],
           );
           await run(
             "UPDATE OR REPLACE SkipTimes SET anime_id = REPLACE(anime_id, ?, ?) WHERE anime_id = ? OR anime_id LIKE ?",
-            [
-              hist.anime_id,
-              targetId,
-              hist.anime_id,
-              `${hist.anime_id}-%`,
-            ],
+            [hist.anime_id, targetId, hist.anime_id, `${hist.anime_id}-%`],
           );
         }
       }
@@ -1169,13 +1033,13 @@ async function syncLibraryIdsWithMapping() {
       let targetRow = null;
       if (malid) {
         targetRow = await mappingQueryOne(
-          `SELECT id, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`,
+          `SELECT id, malid FROM "${targetTable}" WHERE malid = ? LIMIT 1`,
           [malid],
         );
       }
       if (!targetRow) {
         targetRow = await mappingQueryOne(
-          `SELECT id, malid FROM ${targetTable} WHERE id = ? LIMIT 1`,
+          `SELECT id, malid FROM "${targetTable}" WHERE id = ? LIMIT 1`,
           [manga.id],
         );
       }
@@ -1273,7 +1137,7 @@ async function syncLibraryIdsWithMapping() {
             );
           const targetTable = "pahe";
           const targetRow = await mappingQueryOne(
-            `SELECT id, uuid, malid FROM ${targetTable} WHERE malid = ? LIMIT 1`,
+            `SELECT id, uuid, malid FROM "${targetTable}" WHERE malid = ? LIMIT 1`,
             [malid],
           );
           if (targetRow) {
