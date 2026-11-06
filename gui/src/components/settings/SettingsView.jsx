@@ -160,6 +160,9 @@ export default function SettingsView({
   const [downloadNotification, setDownloadNotification] = useState(true);
   const [downloadLocation, setDownloadLocation] = useState("");
   const [browsingFolder, setBrowsingFolder] = useState(false);
+  const [animeNamingScheme, setAnimeNamingScheme] = useState("default");
+  const [mangaNamingScheme, setMangaNamingScheme] = useState("default");
+  const [jellyfinCompatibility, setJellyfinCompatibility] = useState(false);
   const [externalLogEnabled, setExternalLogEnabled] = useState(true);
   const [maxLogFiles, setMaxLogFiles] = useState(5);
   const [logDirectory, setLogDirectory] = useState("");
@@ -175,6 +178,7 @@ export default function SettingsView({
   const [catalogTitleFontSize, setCatalogTitleFontSize] = useState(14);
   const [catalogTitleLines, setCatalogTitleLines] = useState(2);
   const [catalogColumns, setCatalogColumns] = useState("auto");
+  const [catalogCardMaxHeight, setCatalogCardMaxHeight] = useState("auto");
   const [themePreset, setThemePreset] = useState("default");
   const [themeAccentColor, setThemeAccentColor] = useState("#8b5cf6");
   const [themeSecondaryColor, setThemeSecondaryColor] = useState("#3b82f6");
@@ -249,6 +253,11 @@ export default function SettingsView({
   const handleCatalogColumnsChange = (val) => {
     setCatalogColumns(val);
     applyThemeVars({ catalogColumns: val });
+  };
+
+  const handleCatalogCardMaxHeightChange = (val) => {
+    setCatalogCardMaxHeight(val);
+    applyThemeVars({ catalogCardMaxHeight: val });
   };
 
   const handleBrowseDownloadLocation = async () => {
@@ -712,6 +721,9 @@ export default function SettingsView({
           s.downloadNotification !== undefined ? s.downloadNotification : true,
         );
         setDownloadLocation(s.CustomDownloadLocation || "");
+        setAnimeNamingScheme(s.animeNamingScheme || "default");
+        setMangaNamingScheme(s.mangaNamingScheme || "default");
+        setJellyfinCompatibility(Boolean(s.jellyfinCompatibility));
         setExternalLogEnabled(
           s.externalLogEnabled !== undefined ? s.externalLogEnabled : true,
         );
@@ -734,6 +746,7 @@ export default function SettingsView({
             ? parseInt(s.catalogTitleLines, 10)
             : 2;
         const columnsVal = s.catalogColumns || "auto";
+        const cardMaxHeightVal = s.catalogCardMaxHeight || "auto";
         const presetVal = s.themePreset || "default";
         const accentVal = s.themeAccentColor || "#8b5cf6";
         const secVal = s.themeSecondaryColor || s.themeSubColor || "#3b82f6";
@@ -744,6 +757,7 @@ export default function SettingsView({
         setCatalogTitleFontSize(fontSizeVal);
         setCatalogTitleLines(linesVal);
         setCatalogColumns(columnsVal);
+        setCatalogCardMaxHeight(cardMaxHeightVal);
         setThemePreset(presetVal);
         setThemeAccentColor(accentVal);
         setThemeSecondaryColor(secVal);
@@ -760,6 +774,7 @@ export default function SettingsView({
           catalogTitleFontSize: fontSizeVal,
           catalogTitleLines: linesVal,
           catalogColumns: columnsVal,
+          catalogCardMaxHeight: cardMaxHeightVal,
         });
 
         if (window.sharedStateAPI && window.sharedStateAPI.getAppVersion) {
@@ -948,6 +963,12 @@ export default function SettingsView({
       dirty.downloadNotification = downloadNotification;
     if (downloadLocation !== (settings.CustomDownloadLocation || ""))
       dirty.CustomDownloadLocation = downloadLocation;
+    if (animeNamingScheme !== (settings.animeNamingScheme || "default"))
+      dirty.animeNamingScheme = animeNamingScheme;
+    if (mangaNamingScheme !== (settings.mangaNamingScheme || "default"))
+      dirty.mangaNamingScheme = mangaNamingScheme;
+    if (jellyfinCompatibility !== (settings.jellyfinCompatibility || false))
+      dirty.jellyfinCompatibility = jellyfinCompatibility;
     if (
       externalLogEnabled !==
       (settings.externalLogEnabled !== undefined
@@ -982,6 +1003,8 @@ export default function SettingsView({
       dirty.catalogTitleLines = catalogTitleLines;
     if (catalogColumns !== (settings.catalogColumns || "auto"))
       dirty.catalogColumns = catalogColumns;
+    if (catalogCardMaxHeight !== (settings.catalogCardMaxHeight || "auto"))
+      dirty.catalogCardMaxHeight = catalogCardMaxHeight;
     if (themePreset !== (settings.themePreset || "default"))
       dirty.themePreset = themePreset;
     if (themeAccentColor !== (settings.themeAccentColor || "#8b5cf6"))
@@ -1089,6 +1112,9 @@ export default function SettingsView({
           ? settings.downloadNotification
           : true) ||
       downloadLocation !== (settings.CustomDownloadLocation || "") ||
+      animeNamingScheme !== (settings.animeNamingScheme || "default") ||
+      mangaNamingScheme !== (settings.mangaNamingScheme || "default") ||
+      jellyfinCompatibility !== (settings.jellyfinCompatibility || false) ||
       externalLogEnabled !==
         (settings.externalLogEnabled !== undefined
           ? settings.externalLogEnabled
@@ -1106,6 +1132,7 @@ export default function SettingsView({
           ? parseInt(settings.catalogTitleLines, 10)
           : 2) ||
       catalogColumns !== (settings.catalogColumns || "auto") ||
+      catalogCardMaxHeight !== (settings.catalogCardMaxHeight || "auto") ||
       themePreset !== (settings.themePreset || "default") ||
       themeAccentColor !== (settings.themeAccentColor || "#8b5cf6") ||
       themeSecondaryColor !==
@@ -1143,6 +1170,9 @@ export default function SettingsView({
     developerMode,
     downloadNotification,
     downloadLocation,
+    animeNamingScheme,
+    mangaNamingScheme,
+    jellyfinCompatibility,
     externalLogEnabled,
     maxLogFiles,
     autoSkipIntro,
@@ -1151,6 +1181,7 @@ export default function SettingsView({
     catalogTitleFontSize,
     catalogTitleLines,
     catalogColumns,
+    catalogCardMaxHeight,
     themePreset,
     themeAccentColor,
     themeSecondaryColor,
@@ -1409,8 +1440,23 @@ export default function SettingsView({
                   label="Catalog Items Per Row"
                   desc="Control the density and number of cards displayed per row in the catalog grid."
                 >
-                  <div className="catalog-columns-picker">
-                    {["auto", "3", "4", "5", "6"].map((col) => (
+                  <div
+                    className="catalog-columns-picker"
+                    style={{ flexWrap: "wrap", gap: "6px" }}
+                  >
+                    {[
+                      "auto",
+                      "2",
+                      "3",
+                      "4",
+                      "5",
+                      "6",
+                      "7",
+                      "8",
+                      "9",
+                      "10",
+                      "12",
+                    ].map((col) => (
                       <button
                         key={col}
                         type="button"
@@ -1420,6 +1466,57 @@ export default function SettingsView({
                         {col === "auto" ? "Auto" : col}
                       </button>
                     ))}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label={`Catalog Card Max Height (${catalogCardMaxHeight === "auto" ? "Auto" : `${parseInt(catalogCardMaxHeight, 10)}px`})`}
+                  desc="Limit maximum height of poster images to avoid oversized cards on large displays."
+                >
+                  <div className="settings-slider-wrapper">
+                    <input
+                      type="range"
+                      min={160}
+                      max={460}
+                      step={10}
+                      value={
+                        catalogCardMaxHeight === "auto"
+                          ? 460
+                          : parseInt(catalogCardMaxHeight, 10)
+                      }
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        const finalVal = val >= 460 ? "auto" : `${val}px`;
+                        handleCatalogCardMaxHeightChange(finalVal);
+                      }}
+                      className="settings-range-slider"
+                    />
+                    <span
+                      className="settings-slider-val"
+                      style={{ minWidth: "55px" }}
+                    >
+                      {catalogCardMaxHeight === "auto"
+                        ? "Auto"
+                        : `${parseInt(catalogCardMaxHeight, 10)}px`}
+                    </span>
+                    {catalogCardMaxHeight !== "auto" && (
+                      <button
+                        type="button"
+                        className="btn-text-reset"
+                        style={{
+                          marginLeft: "8px",
+                          fontSize: "12px",
+                          color: "var(--accent)",
+                          cursor: "pointer",
+                          background: "none",
+                          border: "none",
+                          fontWeight: 500,
+                        }}
+                        onClick={() => handleCatalogCardMaxHeightChange("auto")}
+                      >
+                        Reset
+                      </button>
+                    )}
                   </div>
                 </SettingsRow>
 
@@ -1487,7 +1584,19 @@ export default function SettingsView({
                   >
                     {PREVIEW_SAMPLE_CARDS.map((card) => (
                       <div key={card.id} className="catalog-preview-card">
-                        <div className="catalog-preview-img-box">
+                        <div
+                          className="catalog-preview-img-box"
+                          style={{
+                            maxHeight:
+                              catalogCardMaxHeight === "auto"
+                                ? undefined
+                                : catalogCardMaxHeight,
+                            height:
+                              catalogCardMaxHeight === "auto"
+                                ? undefined
+                                : catalogCardMaxHeight,
+                          }}
+                        >
                           <img
                             src="/images/image-404.png"
                             alt="Preview Poster"
@@ -1869,6 +1978,60 @@ export default function SettingsView({
                   </div>
                 </div>
 
+                <SettingsRow
+                  label="Anime Download Naming"
+                  desc="Format for downloaded anime video files. Plex / Jellyfin standard includes dynamic episode zero-padding (e.g. S01E0001 for 1000+ episode anime, S01E01 for standard series)."
+                >
+                  <Dropdown
+                    value={animeNamingScheme}
+                    onChange={setAnimeNamingScheme}
+                    options={[
+                      {
+                        value: "plex_jellyfin",
+                        label: "Plex / Jellyfin Standard (Auto-padded)",
+                      },
+                      {
+                        value: "default",
+                        label: "Default / Compact (1Ep.mp4)",
+                      },
+                      {
+                        value: "series_s_ep",
+                        label: "Series S#EP# (One Piece S1EP1.mp4)",
+                      },
+                      {
+                        value: "episode_only",
+                        label: "Episode Only (Episode 01.mp4)",
+                      },
+                    ]}
+                    minWidth={220}
+                  />
+                </SettingsRow>
+
+                {!isMobileApp() && (
+                  <SettingsRow
+                    label="Jellyfin & Plex Compatibility"
+                    desc="Automatically updates anime download file naming to Plex/Jellyfin format and generates .nfo metadata and poster.jpg for existing and new downloads. Disabling keeps existing NFO files."
+                  >
+                    <Dropdown
+                      value={String(jellyfinCompatibility)}
+                      onChange={(val) => {
+                        const isEnabled = val === "true";
+                        setJellyfinCompatibility(isEnabled);
+                        if (isEnabled) {
+                          setAnimeNamingScheme("plex_jellyfin");
+                        } else {
+                          setAnimeNamingScheme("default");
+                        }
+                      }}
+                      options={[
+                        { value: "true", label: "Enabled" },
+                        { value: "false", label: "Disabled" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </SettingsRow>
+                )}
+
                 <div className="settings-row-item">
                   <div className="settings-row-info">
                     <div className="settings-row-label">
@@ -1950,9 +2113,9 @@ export default function SettingsView({
                     <div className="settings-row-hint">
                       Save episodes as "Show/Season 02/Show - S02E05
                       [1080p].mp4", align external subtitles, and automatically
-                      generate .nfo metadata and poster artwork for Jellyfin
-                      and Plex. Pick the season and show folder on each show's
-                      page next to the download buttons.
+                      generate .nfo metadata and poster artwork for Jellyfin and
+                      Plex. Pick the season and show folder on each show's page
+                      next to the download buttons.
                     </div>
                   </div>
                   <div className="settings-row-control">
@@ -2492,6 +2655,29 @@ export default function SettingsView({
                     />
                   </div>
                 </div>
+
+                <SettingsRow
+                  label="Manga Download Naming"
+                  desc="Naming format for downloaded manga chapter archives (.cbz files)."
+                >
+                  <Dropdown
+                    value={mangaNamingScheme}
+                    onChange={setMangaNamingScheme}
+                    options={[
+                      {
+                        value: "default",
+                        label: "Default (Chapter 1052.cbz)",
+                      },
+                      {
+                        value: "series_chapter",
+                        label:
+                          "Series - Chapter (One Piece - Chapter 1052.cbz)",
+                      },
+                      { value: "short", label: "Short (Ch. 1052.cbz)" },
+                    ]}
+                    minWidth={220}
+                  />
+                </SettingsRow>
 
                 <div className="settings-row-item">
                   <div className="settings-row-info">

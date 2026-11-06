@@ -77,7 +77,9 @@ async function downloadMediaMulti({
 
   const unresolved = items.filter((it) => !it || !it.id);
   if (unresolved.length > 0) {
-    logger.warn(`[queueWorker] Dropping ${unresolved.length} ${unitName.toLowerCase()} with unresolvable IDs (numbers: ${unresolved.map((u) => u?.number ?? "?").join(", ")}).`);
+    logger.warn(
+      `[queueWorker] Dropping ${unresolved.length} ${unitName.toLowerCase()} with unresolvable IDs (numbers: ${unresolved.map((u) => u?.number ?? "?").join(", ")}).`,
+    );
     items = items.filter((it) => it && it.id);
     if (items.length === 0) {
       return {
@@ -163,7 +165,8 @@ async function downloadAnimeSingle(
   if (!episodeid) {
     return {
       error: true,
-      message: "Missing episode ID — cannot queue download. Re-add it from the episode list.",
+      message:
+        "Missing episode ID — cannot queue download. Re-add it from the episode list.",
     };
   }
   try {
@@ -258,6 +261,7 @@ async function downloadAnimeSingle(
         mergeSubtitles: config?.mergeSubtitles,
         subtitleFormat: config?.subtitleFormat,
         CustomDownloadLocation: config?.CustomDownloadLocation,
+        jellyfinCompatibility: config?.jellyfinCompatibility,
       },
       epid: episodeid,
       totalSegments: 0,
@@ -384,7 +388,8 @@ async function downloadMangaSingle(
   if (!chapterid) {
     return {
       error: true,
-      message: "Missing chapter ID — cannot queue download. Re-add it from the chapter list.",
+      message:
+        "Missing chapter ID — cannot queue download. Re-add it from the chapter list.",
     };
   }
   try {

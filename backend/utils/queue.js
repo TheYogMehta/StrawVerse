@@ -28,6 +28,8 @@ const {
 const {
   sortSourcesByPreferredQuality,
   mediaServerFileBase,
+  formatChapterFilename,
+  isAndroid,
 } = require("./constants");
 const { verifyStreamReachability } = require("./streamVerifier");
 const { updateHistory } = require("./history");
@@ -205,7 +207,7 @@ async function removeQueue(AnimeEpId, isSuccess = false) {
       epid: removedItem.epid,
     });
 
-    if (removedItem.Type === "Anime") {
+    if (!isAndroid && removedItem.Type === "Anime") {
       try {
         const { settingfetch } = require("./settings");
         settingfetch()
@@ -1255,6 +1257,7 @@ async function downloadVideo(
       !isNaN(Number(episodeNumber))
         ? String(Number(episodeNumber))
         : episodeNumber;
+
     await download({
       directory: directoryPath,
       Epnum: episodeNumber,
@@ -1321,11 +1324,14 @@ async function downloadMangaChapters(
       mediaId,
     );
 
-    const sanitizedChapterName = (ChapterTitle || `Chapter ${EpNum}`).replace(
-      /[<>:"/\\|?*]/g,
-      "-",
-    );
-    const outputFile = path.join(directoryPath, `${sanitizedChapterName}.cbz`);
+    const mangaScheme = config?.mangaNamingScheme || "default";
+    const cbzFilename = formatChapterFilename({
+      title: Title,
+      chapterNum: EpNum,
+      namingScheme: mangaScheme,
+      ext: ".cbz",
+    });
+    const outputFile = path.join(directoryPath, cbzFilename);
     await DownloadChapters(
       outputFile,
       ChapterData,

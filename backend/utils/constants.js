@@ -172,14 +172,18 @@ function mediaServerFileBase(directory, episode, quality) {
 
 function getChapterNumberFromFilename(filename) {
   if (!filename || !isMangaFile(filename)) return null;
-  const match = filename.match(
-    /(?:chapter|chp|ch|ep)?\s*[-_]?\s*(\d+(?:\.\d+)?)/i,
-  );
-  if (match) {
-    const num = parseFloat(match[1]);
-    return !isNaN(num) ? num : null;
-  }
-  return null;
+
+  // 1. "Chapter 1052", "Ch. 1052", "One Piece - Chapter 1052"
+  let match = filename.match(/(?:chapter|chp|ch)\.?\s*(\d+(?:\.\d+)?)/i);
+  if (match) return parseFloat(match[1]);
+
+  // 2. Prefix number: "1052.cbz", "1052 Chapter.cbz"
+  match = filename.match(/^(\d+(?:\.\d+)?)/);
+  if (match) return parseFloat(match[1]);
+
+  // 3. Fallback: match number
+  match = filename.match(/(\d+(?:\.\d+)?)/);
+  return match ? parseFloat(match[1]) : null;
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -351,7 +355,103 @@ function sortSourcesByPreferredQuality(sources, preferredQuality = "highest") {
   return copy;
 }
 
+function formatEpisodeFilename(
+  optsOrTitle = {},
+  epNumArg,
+  namingSchemeArg,
+  extArg,
+  totalEpisodesArg,
+  seasonArg,
+) {
+  let title = "";
+  let epNum = 1;
+  let season = 1;
+  let totalEpisodes = null;
+  let namingScheme = "default";
+  let ext = ".mp4";
+
+  if (typeof optsOrTitle === "object" && optsOrTitle !== null) {
+    title = optsOrTitle.title || "";
+    epNum = optsOrTitle.epNum !== undefined ? optsOrTitle.epNum : 1;
+    season = optsOrTitle.season !== undefined ? optsOrTitle.season : 1;
+    totalEpisodes =
+      optsOrTitle.totalEpisodes !== undefined
+        ? optsOrTitle.totalEpisodes
+        : null;
+    namingScheme = optsOrTitle.namingScheme || "default";
+    ext = optsOrTitle.ext || ".mp4";
+  } else {
+    title = optsOrTitle || "";
+    epNum = epNumArg !== undefined ? epNumArg : 1;
+    namingScheme = namingSchemeArg || "default";
+    ext = extArg || ".mp4";
+    totalEpisodes = totalEpisodesArg !== undefined ? totalEpisodesArg : null;
+    season = seasonArg !== undefined ? seasonArg : 1;
+  }
+
+  const num = parseFloat(epNum) || 0;
+  const maxEp = Math.max(Number(totalEpisodes) || 0, num);
+  const padLen = maxEp >= 1000 ? 4 : maxEp >= 100 ? 3 : 2;
+  const paddedEp = String(num).padStart(padLen, "0");
+  const paddedSeason = String(season).padStart(2, "0");
+  const cleanTitle = sanitizeFolderName(title || "Anime");
+
+  let baseName = "";
+  if (namingScheme === "plex_jellyfin") {
+    baseName = `${cleanTitle} - S${paddedSeason}E${paddedEp}`;
+  } else if (namingScheme === "series_s_ep") {
+    baseName = `${cleanTitle} S${season}EP${num}`;
+  } else if (namingScheme === "episode_only") {
+    baseName = `Episode ${paddedEp}`;
+  } else {
+    baseName = `${num}Ep`;
+  }
+
+  return `${baseName}${ext.startsWith(".") ? ext : `.${ext}`}`;
+}
+
+function formatChapterFilename(
+  optsOrTitle = {},
+  chapterNumArg,
+  namingSchemeArg,
+  extArg,
+) {
+  let title = "";
+  let chapterNum = 1;
+  let namingScheme = "default";
+  let ext = ".cbz";
+
+  if (typeof optsOrTitle === "object" && optsOrTitle !== null) {
+    title = optsOrTitle.title || "";
+    chapterNum =
+      optsOrTitle.chapterNum !== undefined ? optsOrTitle.chapterNum : 1;
+    namingScheme = optsOrTitle.namingScheme || "default";
+    ext = optsOrTitle.ext || ".cbz";
+  } else {
+    title = optsOrTitle || "";
+    chapterNum = chapterNumArg !== undefined ? chapterNumArg : 1;
+    namingScheme = namingSchemeArg || "default";
+    ext = extArg || ".cbz";
+  }
+
+  const num = chapterNum;
+  const cleanTitle = sanitizeFolderName(title || "Manga");
+  let baseName = "";
+
+  if (namingScheme === "series_chapter") {
+    baseName = `${cleanTitle} - Chapter ${num}`;
+  } else if (namingScheme === "short") {
+    baseName = `Ch. ${num}`;
+  } else {
+    baseName = `Chapter ${num}`;
+  }
+
+  return `${baseName}${ext.startsWith(".") ? ext : `.${ext}`}`;
+}
+
 module.exports = {
+  formatEpisodeFilename,
+  formatChapterFilename,
   VIDEO_EXTENSIONS,
   SUBTITLE_EXTENSIONS,
   MANGA_EXTENSIONS,

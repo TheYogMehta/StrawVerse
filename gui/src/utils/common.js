@@ -146,7 +146,22 @@ export function applyThemeVars(s = {}) {
     root.style.setProperty("--catalog-title-lines", `${s.catalogTitleLines}`);
   }
   if (s.catalogColumns) {
-    root.style.setProperty("--catalog-columns", s.catalogColumns);
+    if (s.catalogColumns === "auto") {
+      root.style.removeProperty("--catalog-columns");
+    } else {
+      root.style.setProperty("--catalog-columns", s.catalogColumns);
+    }
+  }
+  if (s.catalogCardMaxHeight !== undefined) {
+    if (!s.catalogCardMaxHeight || s.catalogCardMaxHeight === "auto") {
+      root.style.removeProperty("--catalog-card-max-height");
+    } else {
+      const val =
+        typeof s.catalogCardMaxHeight === "number"
+          ? `${s.catalogCardMaxHeight}px`
+          : s.catalogCardMaxHeight;
+      root.style.setProperty("--catalog-card-max-height", val);
+    }
   }
 }
 

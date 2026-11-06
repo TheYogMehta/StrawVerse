@@ -328,6 +328,9 @@ async function SettingsLoad() {
             upscalePreset: "off",
             forceHighPerformanceGpu: false,
             preferredSubtitleLanguages: ["English"],
+            jellyfinCompatibility: false,
+            animeNamingScheme: "default",
+            mangaNamingScheme: "default",
           };
 
     if (config && !config.hasOwnProperty("subFontSize")) {
@@ -387,6 +390,14 @@ async function SettingsLoad() {
 
     if (config && !config.hasOwnProperty("mediaServerNaming")) {
       config.mediaServerNaming = false;
+    }
+
+    if (config && !config.hasOwnProperty("animeNamingScheme")) {
+      config.animeNamingScheme = "default";
+    }
+
+    if (config && !config.hasOwnProperty("mangaNamingScheme")) {
+      config.mangaNamingScheme = "default";
     }
 
     let currentVersion = "1.0.0";

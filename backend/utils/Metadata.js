@@ -1317,8 +1317,15 @@ async function getSourceById(type, baseDir, id, number, subdub) {
         });
         return match ? path.join(fPath, match) : null;
       } else if (type === "Manga") {
-        const filePath = path.join(fPath, `Chapter ${number}.cbz`);
-        return fs.existsSync(filePath) ? filePath : null;
+        const files = fs.readdirSync(fPath);
+        const match = files.find((f) => {
+          if (!isMangaFile(f)) return false;
+          const num = getChapterNumberFromFilename(f);
+          return num !== null && num === parseFloat(number);
+        });
+        if (match) return path.join(fPath, match);
+        const fallbackPath = path.join(fPath, `Chapter ${number}.cbz`);
+        return fs.existsSync(fallbackPath) ? fallbackPath : null;
       }
       return null;
     };
@@ -1399,6 +1406,40 @@ async function getSourceById(type, baseDir, id, number, subdub) {
             lang: lang,
           };
         });
+    }
+
+    if (fs.existsSync(parentDir)) {
+      const videoBaseName = path.parse(finalPath).name;
+      try {
+        const siblingSubs = fs
+          .readdirSync(parentDir)
+          .filter((file) => {
+            if (!isSubtitleFile(file)) return false;
+            return file.startsWith(videoBaseName);
+          })
+          .map((subtitle) => {
+            const parts = subtitle.split(".");
+            let lang = "English";
+            if (parts.length >= 3) {
+              const rawLang = parts[parts.length - 2];
+              if (rawLang && rawLang.length <= 4) {
+                lang = rawLang;
+              }
+            }
+            return {
+              url: `/subtitles?file=${encodeURIComponent(
+                path.join(parentDir, subtitle),
+              )}`,
+              lang: lang,
+            };
+          });
+
+        for (const s of siblingSubs) {
+          if (!subtitleFiles.some((existing) => existing.url === s.url)) {
+            subtitleFiles.push(s);
+          }
+        }
+      } catch (e) {}
     }
 
     if (
