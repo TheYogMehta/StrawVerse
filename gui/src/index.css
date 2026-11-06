@@ -235,6 +235,42 @@ body {
   transform: scale(0.95);
 }
 
+.history-unhide-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition);
+  margin-left: 8px;
+}
+
+.history-unhide-btn:hover {
+  background-color: rgba(99, 102, 241, 0.15);
+  color: var(--primary);
+  transform: scale(1.05);
+}
+
+.history-unhide-btn:active {
+  transform: scale(0.95);
+}
+
+.settings-hidden-badge {
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+}
+
 /* MyAnimeList Connection Modal Overlay & Glassmorphism Card */
 .mal-modal-overlay {
   position: fixed;

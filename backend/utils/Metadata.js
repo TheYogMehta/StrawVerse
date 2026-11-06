@@ -688,25 +688,35 @@ async function getAllMetadata(
     if (type === "Anime") {
       try {
         const watchRows = await queryAll(`
-          SELECT anime_id, COUNT(DISTINCT episode_number) as count 
+          SELECT anime_id, MAX(episode_number) as max_ep 
           FROM WatchHistory 
-          WHERE is_completed = 1 
           GROUP BY anime_id
         `);
         watchRows.forEach((r) => {
-          watchMap[r.anime_id] = (watchMap[r.anime_id] || 0) + r.count;
+          if (r.max_ep != null) {
+            const num = Number(r.max_ep);
+            watchMap[r.anime_id] = Math.max(
+              watchMap[r.anime_id] || 0,
+              isNaN(num) ? 0 : num,
+            );
+          }
         });
       } catch (e) {}
     } else if (type === "Manga") {
       try {
         const readRows = await queryAll(`
-          SELECT manga_id, COUNT(DISTINCT chapter_number) as count 
+          SELECT manga_id, MAX(chapter_number) as max_ch 
           FROM ReadHistory 
-          WHERE is_completed = 1 
           GROUP BY manga_id
         `);
         readRows.forEach((r) => {
-          watchMap[r.manga_id] = (watchMap[r.manga_id] || 0) + r.count;
+          if (r.max_ch != null) {
+            const num = Number(r.max_ch);
+            watchMap[r.manga_id] = Math.max(
+              watchMap[r.manga_id] || 0,
+              isNaN(num) ? 0 : num,
+            );
+          }
         });
       } catch (e) {}
     }

@@ -438,7 +438,9 @@ export default function SettingsView({
           const statsData = await statsRes.json();
           setStats(statsData);
 
-          const listRes = await fetch("/api/history/list?limit=50");
+          const listRes = await fetch(
+            "/api/history/list?include_hidden=true&limit=100",
+          );
           const listData = await listRes.json();
           setHistoryList(listData);
         } catch (err) {
@@ -805,7 +807,9 @@ export default function SettingsView({
           const statsData = await statsRes.json();
           setStats(statsData);
 
-          const listRes = await fetch("/api/history/list?limit=50");
+          const listRes = await fetch(
+            "/api/history/list?include_hidden=true&limit=100",
+          );
           const listData = await listRes.json();
           setHistoryList(listData);
         } else {
@@ -814,6 +818,41 @@ export default function SettingsView({
       } catch (err) {
         swalError("Error", err.message || "An error occurred while deleting.");
       }
+    }
+  };
+
+  const handleUnhideHistory = async (item) => {
+    try {
+      const res = await fetch("/api/history/hide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mediaId: item.media_id,
+          type: item.type,
+          malId: item.mal_id,
+          title: item.title,
+          unhide: true,
+        }),
+      });
+      const data = await res.json().catch(() => null);
+      if (data?.success) {
+        swalSuccess(
+          "Restored!",
+          `"${item.title}" will now show on continue shelf.`,
+        );
+        setHistoryList((prev) =>
+          prev.map((h) =>
+            h.id === item.id ||
+            (h.media_id === item.media_id && h.type === item.type)
+              ? { ...h, hidden: 0 }
+              : h,
+          ),
+        );
+      } else {
+        swalError("Error", data?.error || "Failed to restore entry.");
+      }
+    } catch (err) {
+      swalError("Error", err.message || "Failed to restore entry.");
     }
   };
 
@@ -2728,6 +2767,14 @@ export default function SettingsView({
                                           Completed
                                         </span>
                                       )}
+                                      {item.hidden === 1 && (
+                                        <span
+                                          className="settings-hidden-badge"
+                                          title="Hidden from Continue Watching/Reading shelf"
+                                        >
+                                          Hidden from shelf
+                                        </span>
+                                      )}
                                     </div>
                                     <span className="settings-history-item-meta">
                                       {item.type === "Anime"
@@ -2741,6 +2788,19 @@ export default function SettingsView({
                                   <span className="settings-history-item-date">
                                     {formattedDate}
                                   </span>
+                                  {item.hidden === 1 && (
+                                    <button
+                                      type="button"
+                                      className="history-unhide-btn"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleUnhideHistory(item);
+                                      }}
+                                      title="Restore to Continue shelf"
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     className="history-delete-btn"

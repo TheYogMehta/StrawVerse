@@ -471,13 +471,14 @@ export default function App() {
             type={contentType}
             provider="local"
             onTypeChange={setContentType}
-            onSelectMedia={(id, prov, backText, autoPlay) =>
+            onSelectMedia={(id, prov, backText, autoPlay, targetNum) =>
               navigateTo("info", {
                 id,
                 type: contentType,
                 provider: "local",
                 backText,
                 autoPlay,
+                targetNum,
               })
             }
           />
@@ -511,6 +512,8 @@ export default function App() {
             provider="mal"
             onTypeChange={setContentType}
             initialSearchQuery={current.params?.searchQuery || ""}
+            malLoggedIn={malLoggedIn}
+            onNavigate={navigateTo}
             onSelectMedia={(id, prov, backText, autoPlay) =>
               navigateTo("info", {
                 id,
@@ -531,6 +534,7 @@ export default function App() {
             localMalProvider={current.params.provider}
             backText={current.params.backText}
             autoPlay={current.params.autoPlay}
+            targetNum={current.params.targetNum}
             sortOrder={infoSortOrder}
             setSortOrder={setInfoSortOrder}
             onBack={navigateBack}

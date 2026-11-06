@@ -870,7 +870,7 @@ router.delete("/api/history/:type/:id", async (req, res) => {
 // Hide tracking record from shelf
 router.post("/api/history/hide", async (req, res) => {
   try {
-    const { mediaId, type, malId, title } = req.body;
+    const { mediaId, type, malId, title, unhide } = req.body;
     if (!mediaId || !type) {
       throw new Error("Missing parameters");
     }
@@ -880,6 +880,7 @@ router.post("/api/history/hide", async (req, res) => {
     const idField = isAnime ? "anime_id" : "manga_id";
     const titleField = isAnime ? "anime_title" : "manga_title";
     const mainTable = isAnime ? "Anime" : "Manga";
+    const hiddenVal = unhide ? 0 : 1;
 
     let queryIds = [mediaId];
 
@@ -899,22 +900,28 @@ router.post("/api/history/hide", async (req, res) => {
     const placeholders = queryIds.map(() => "?").join(",");
     await global.db
       .prepare(
-        `UPDATE ${historyTable} SET hidden = 1 WHERE ${idField} IN (${placeholders})`,
+        `UPDATE ${historyTable} SET hidden = ? WHERE ${idField} IN (${placeholders})`,
       )
-      .run(...queryIds);
+      .run(hiddenVal, ...queryIds);
 
     if (title) {
       await global.db
         .prepare(
-          `UPDATE ${historyTable} SET hidden = 1 WHERE LOWER(${titleField}) = LOWER(?)`,
+          `UPDATE ${historyTable} SET hidden = ? WHERE LOWER(${titleField}) = LOWER(?)`,
         )
-        .run(title);
+        .run(hiddenVal, title);
     }
 
-    res.json({ success: true });
+    res.json({ success: true, hidden: hiddenVal });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Explicit unhide tracking record route
+router.post("/api/history/unhide", async (req, res) => {
+  req.body.unhide = true;
+  return router.handle(req, res);
 });
 
 // Fetch progress history for specific title
@@ -929,6 +936,8 @@ router.get("/api/history/progress", async (req, res) => {
     const idCol = isAnime ? "anime_id" : "manga_id";
     const titleCol = isAnime ? "anime_title" : "manga_title";
     const numCol = isAnime ? "episode_number" : "chapter_number";
+    const currentCol = isAnime ? "current_time" : "current_page";
+    const totalCol = isAnime ? "duration" : "total_pages";
     const dateCol = isAnime ? "last_watched" : "last_read";
 
     let suggestedNumber = null;
@@ -970,13 +979,102 @@ router.get("/api/history/progress", async (req, res) => {
     }
 
     const history = await queryAll(sql, params);
-    history.sort(
-      (a, b) => new Date(b[dateCol]).getTime() - new Date(a[dateCol]).getTime(),
-    );
 
     if (history.length > 0) {
       hasBefore = true;
-      const latest = history[0];
+
+      // Group records by chapter/episode number, keeping the newest entry per number
+      const numMap = new Map();
+      for (const h of history) {
+        const num = Number(h[numCol]);
+        if (!isNaN(num)) {
+          if (!numMap.has(num)) {
+            numMap.set(num, h);
+          } else {
+            const existing = numMap.get(num);
+            if (
+              new Date(h[dateCol]).getTime() >
+              new Date(existing[dateCol]).getTime()
+            ) {
+              numMap.set(num, h);
+            }
+          }
+        }
+      }
+
+      const uniqueRecords = Array.from(numMap.values());
+
+      // In-progress records (started reading/watching, not completed)
+      const inProgressRecords = uniqueRecords.filter(
+        (h) =>
+          h.is_completed === 0 &&
+          (Number(h[currentCol]) > 0 || Number(h.time_spent) > 0),
+      );
+
+      // Completed records
+      const completedRecords = uniqueRecords.filter(
+        (h) => h.is_completed === 1,
+      );
+
+      let targetRecord = null;
+      let targetSuggestedNum = null;
+
+      if (inProgressRecords.length > 0) {
+        // Sort in-progress by number descending
+        inProgressRecords.sort(
+          (a, b) => Number(b[numCol]) - Number(a[numCol]),
+        );
+        const highestInProgress = inProgressRecords[0];
+
+        const maxCompletedNum =
+          completedRecords.length > 0
+            ? Math.max(...completedRecords.map((h) => Number(h[numCol])))
+            : -1;
+
+        if (Number(highestInProgress[numCol]) >= maxCompletedNum) {
+          // Normal forward reading: user is currently inside this chapter/episode
+          targetRecord = highestInProgress;
+          targetSuggestedNum = Number(highestInProgress[numCol]);
+        } else {
+          // In-progress number is lower than max completed number:
+          // Check if user is actively re-reading (timestamp is much newer than completed)
+          const highestCompRec = completedRecords.find(
+            (h) => Number(h[numCol]) === maxCompletedNum,
+          );
+          const inProgTime = new Date(highestInProgress[dateCol]).getTime();
+          const compTime = highestCompRec
+            ? new Date(highestCompRec[dateCol]).getTime()
+            : 0;
+          if (inProgTime > compTime + 120000) {
+            targetRecord = highestInProgress;
+            targetSuggestedNum = Number(highestInProgress[numCol]);
+          } else {
+            // User already completed higher chapters; resume next after highest completed
+            targetRecord = highestCompRec;
+            targetSuggestedNum = maxCompletedNum + 1;
+          }
+        }
+      } else if (completedRecords.length > 0) {
+        // All read records are completed: continue with next chapter/episode after highest completed
+        completedRecords.sort(
+          (a, b) => Number(b[numCol]) - Number(a[numCol]),
+        );
+        targetRecord = completedRecords[0];
+        targetSuggestedNum = Number(targetRecord[numCol]) + 1;
+      } else {
+        // Fallback to most recently updated record
+        history.sort(
+          (a, b) =>
+            new Date(b[dateCol]).getTime() - new Date(a[dateCol]).getTime(),
+        );
+        targetRecord = history[0];
+        targetSuggestedNum =
+          targetRecord.is_completed === 1
+            ? Number(targetRecord[numCol]) + 1
+            : Number(targetRecord[numCol]);
+      }
+
+      const latest = targetRecord || history[0];
       lastProgress = isAnime
         ? {
             number: latest.episode_number,
@@ -993,7 +1091,11 @@ router.get("/api/history/progress", async (req, res) => {
           };
 
       suggestedNumber =
-        latest.is_completed === 1 ? latest[numCol] + 1 : latest[numCol];
+        targetSuggestedNum !== null
+          ? targetSuggestedNum
+          : latest.is_completed === 1
+            ? latest[numCol] + 1
+            : latest[numCol];
     }
 
     const mappedStatus = history.map((h) =>
@@ -1135,13 +1237,16 @@ async function resolveHistoryCoverImage(
 router.get("/api/history/list", async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || 50);
-    const includeHidden = req.query.include_hidden === "true";
-    const watchWhereClause = includeHidden
-      ? ""
-      : "WHERE (w.hidden IS NULL OR w.hidden = 0)";
-    const readWhereClause = includeHidden
-      ? ""
-      : "WHERE (r.hidden IS NULL OR r.hidden = 0)";
+    const shelfOnly =
+      req.query.shelf === "true" ||
+      req.query.shelf_only === "true" ||
+      req.query.include_hidden === "false";
+    const watchWhereClause = shelfOnly
+      ? "WHERE (w.hidden IS NULL OR w.hidden = 0)"
+      : "";
+    const readWhereClause = shelfOnly
+      ? "WHERE (r.hidden IS NULL OR r.hidden = 0)"
+      : "";
 
     const watchLogs =
       (await global.db
@@ -1158,7 +1263,8 @@ router.get("/api/history/list", async (req, res) => {
           w.time_spent,
           w.is_completed,
           w.last_watched AS date,
-        w.sub_dub AS subdub,
+          w.sub_dub AS subdub,
+          COALESCE(w.hidden, 0) AS hidden,
           a.image_url,
           a.provider,
           a.MalID AS mal_id,
@@ -1190,6 +1296,7 @@ router.get("/api/history/list", async (req, res) => {
           r.time_spent,
           r.is_completed,
           r.last_read AS date,
+          COALESCE(r.hidden, 0) AS hidden,
           m.image_url,
           m.provider,
           m.MalID AS mal_id,

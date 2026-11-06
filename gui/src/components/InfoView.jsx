@@ -81,6 +81,7 @@ export default function InfoView({
   localMalProvider: propLocalMalProvider,
   backText,
   autoPlay,
+  targetNum: propTargetNum,
   sortOrder,
   setSortOrder,
   onBack,
@@ -1471,6 +1472,7 @@ export default function InfoView({
   }, [details, type]);
 
   const localNext =
+    (propTargetNum ? Number(propTargetNum) : 0) ||
     historyProgress?.suggestedNumber ||
     historyProgress?.lastProgress?.number ||
     0;
@@ -2050,6 +2052,17 @@ export default function InfoView({
     }
   };
 
+  const invalidateAllCatalogCaches = () => {
+    if (window.catalogCache) {
+      delete window.catalogCache.Anime_mal;
+      delete window.catalogCache.Manga_mal;
+      delete window.catalogCache.Anime_local;
+      delete window.catalogCache.Manga_local;
+      delete window.catalogCache.Anime_provider;
+      delete window.catalogCache.Manga_provider;
+    }
+  };
+
   // MAL Status sync
   const handleMalSync = async () => {
     if (!details?.malid) return;
@@ -2068,6 +2081,7 @@ export default function InfoView({
         status: malStatus,
         type: type,
       });
+      invalidateAllCatalogCaches();
       swalSuccess(
         "MAL Synced",
         data.text || data.title || "Updated MyAnimeList successfully!",
@@ -2100,6 +2114,7 @@ export default function InfoView({
 
       if (data.icon === "success") {
         setMalStatus("not_in_list");
+        invalidateAllCatalogCaches();
         swalSuccess(
           "Removed",
           data.title || "Successfully removed from MyAnimeList!",
@@ -2163,10 +2178,7 @@ export default function InfoView({
       });
       const data = await response.json();
       if (!data.error) {
-        if (window.catalogCache) {
-          delete window.catalogCache[`Anime_local`];
-          delete window.catalogCache[`Manga_local`];
-        }
+        invalidateAllCatalogCaches();
         setCurrentTags(updatedTag ? [updatedTag] : []);
 
         // Refresh custom tag list

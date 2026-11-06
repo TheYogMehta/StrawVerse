@@ -55,6 +55,7 @@ export default function RecentHistory({
                   "local",
                   "Back to Collection",
                   true,
+                  nextNum,
                 )
               }
             >
