@@ -35,7 +35,8 @@ const {
   getLinkedProvidersForMalId,
   getBestProviderForMalId,
 } = require("../utils/mappingResolver");
-const { sanitizeFolderName } = require("../utils/constants");
+const { sanitizeFolderName, getUserDataPath } = require("../utils/constants");
+const { getDownloadsFolder } = require("../utils/DirectoryMaker");
 
 const router = express.Router();
 
@@ -3222,65 +3223,149 @@ router.post("/api/watch/server", async (req, res) => {
   }
 });
 
+const ALLOWED_SUBTITLE_EXTENSIONS = new Set([
+  ".vtt",
+  ".srt",
+  ".ass",
+  ".ssa",
+  ".sub",
+]);
+
+const ALLOWED_VIDEO_EXTENSIONS = new Set([
+  ".mp4",
+  ".mkv",
+  ".webm",
+  ".avi",
+  ".mov",
+  ".ts",
+  ".m4v",
+  ".flv",
+]);
+
+async function getAllowedMediaBases() {
+  const allowedBases = new Set();
+
+  try {
+    const userData = getUserDataPath();
+    if (userData) {
+      allowedBases.add(path.resolve(userData));
+      try {
+        allowedBases.add(fs.realpathSync(userData));
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  try {
+    const dlFolder = getDownloadsFolder();
+    if (dlFolder) {
+      allowedBases.add(path.resolve(dlFolder));
+      try {
+        allowedBases.add(fs.realpathSync(dlFolder));
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  try {
+    const config = await settingfetch();
+    if (config?.CustomDownloadLocation) {
+      allowedBases.add(path.resolve(config.CustomDownloadLocation));
+      try {
+        allowedBases.add(fs.realpathSync(config.CustomDownloadLocation));
+      } catch (_) {}
+    }
+  } catch (_) {}
+
+  return Array.from(allowedBases);
+}
+
+function isPathInsideBases(targetPath, allowedBases) {
+  return allowedBases.some(
+    (base) => targetPath === base || targetPath.startsWith(base + path.sep),
+  );
+}
+
 // Play Video From Local Source
-router.get("/video", (req, res) => {
-  const filePath = req.query.path;
-  if (!filePath) return res.status(400).send("No file path provided");
+router.get("/video", async (req, res) => {
+  try {
+    let filePath = req.query.path;
+    if (!filePath) return res.status(400).send("No file path provided");
 
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Accept-Ranges", "bytes");
+    filePath = decodeURIComponent(filePath);
 
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).send("File not found");
-  }
-
-  const stat = fs.statSync(filePath);
-  const fileSize = stat.size;
-  const range = req.headers.range;
-
-  const ext = path.extname(filePath).toLowerCase();
-  const contentType = ext === ".ts" ? "video/mp2t" : "video/mp4";
-
-  if (range) {
-    const parts = range.replace(/bytes=/, "").split("-");
-    const start = parseInt(parts[0], 10);
-    const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
-
-    if (start >= fileSize || end >= fileSize) {
-      res.status(416).send("Requested range not satisfiable");
-      return;
+    const ext = path.extname(filePath).toLowerCase();
+    if (!ALLOWED_VIDEO_EXTENSIONS.has(ext)) {
+      return res.status(400).send("Invalid video file format");
     }
 
-    const chunkSize = end - start + 1;
-    const fileStream = fs.createReadStream(filePath, { start, end });
-
-    res.writeHead(206, {
-      "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-      "Accept-Ranges": "bytes",
-      "Content-Length": chunkSize,
-      "Content-Type": contentType,
-    });
-
-    if (req.method === "HEAD") {
-      return res.end();
+    let resolvedPath;
+    try {
+      resolvedPath = fs.realpathSync(path.resolve(filePath));
+    } catch (_) {
+      return res.status(404).send("File not found");
     }
-    fileStream.pipe(res);
-  } else {
-    res.writeHead(200, {
-      "Content-Length": fileSize,
-      "Content-Type": contentType,
-      "Accept-Ranges": "bytes",
-    });
 
-    if (req.method === "HEAD") {
-      return res.end();
+    const allowedBases = await getAllowedMediaBases();
+    if (!isPathInsideBases(resolvedPath, allowedBases)) {
+      return res.status(403).send("Access denied");
     }
-    fs.createReadStream(filePath).pipe(res);
+
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).send("File not found");
+    }
+
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Accept-Ranges", "bytes");
+
+    const stat = fs.statSync(resolvedPath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    const contentType = ext === ".ts" ? "video/mp2t" : "video/mp4";
+
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      if (start >= fileSize || end >= fileSize) {
+        res.status(416).send("Requested range not satisfiable");
+        return;
+      }
+
+      const chunkSize = end - start + 1;
+      const fileStream = fs.createReadStream(resolvedPath, { start, end });
+
+      res.writeHead(206, {
+        "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+        "Accept-Ranges": "bytes",
+        "Content-Length": chunkSize,
+        "Content-Type": contentType,
+      });
+
+      if (req.method === "HEAD") {
+        return res.end();
+      }
+      fileStream.pipe(res);
+    } else {
+      res.writeHead(200, {
+        "Content-Length": fileSize,
+        "Content-Type": contentType,
+        "Accept-Ranges": "bytes",
+      });
+
+      if (req.method === "HEAD") {
+        return res.end();
+      }
+      fs.createReadStream(resolvedPath).pipe(res);
+    }
+  } catch (err) {
+    console.error("Error streaming video:", err);
+    res.status(500).send("Internal Server Error");
   }
 });
 
 // Serve Local Subtitles
-router.get("/subtitles", (req, res) => {
+router.get("/subtitles", async (req, res) => {
   try {
     let subtitlePath = req.query.file;
     if (!subtitlePath) {
@@ -3289,14 +3374,30 @@ router.get("/subtitles", (req, res) => {
 
     subtitlePath = decodeURIComponent(subtitlePath);
 
-    if (!fs.existsSync(subtitlePath)) {
+    const ext = path.extname(subtitlePath).toLowerCase();
+    if (!ALLOWED_SUBTITLE_EXTENSIONS.has(ext)) {
+      return res.status(400).json({ error: "Invalid subtitle file format" });
+    }
+
+    let resolvedPath;
+    try {
+      resolvedPath = fs.realpathSync(path.resolve(subtitlePath));
+    } catch (_) {
       return res.status(404).json({ error: "Subtitle file not found" });
     }
 
-    const ext = path.extname(subtitlePath);
+    const allowedBases = await getAllowedMediaBases();
+    if (!isPathInsideBases(resolvedPath, allowedBases)) {
+      return res.status(403).json({ error: "Access denied" });
+    }
+
+    if (!fs.existsSync(resolvedPath)) {
+      return res.status(404).json({ error: "Subtitle file not found" });
+    }
+
     const mimeType = ext === ".srt" ? "application/x-subrip" : "text/vtt";
     res.setHeader("Content-Type", mimeType);
-    return res.sendFile(subtitlePath, { dotfiles: "allow" });
+    return res.sendFile(resolvedPath, { dotfiles: "deny" });
   } catch (err) {
     console.error("Error serving subtitle:", err);
     res.status(500).json({ error: "Internal Server Error" });
