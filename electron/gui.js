@@ -76,6 +76,16 @@ const electronNodeModules = path.join(__dirname, "node_modules");
 if (!Module.globalPaths.includes(electronNodeModules)) {
   Module.globalPaths.push(electronNodeModules);
 }
+const origNodeModulePaths = Module._nodeModulePaths;
+if (typeof origNodeModulePaths === "function") {
+  Module._nodeModulePaths = function (from) {
+    const paths = origNodeModulePaths.call(this, from);
+    if (!paths.includes(electronNodeModules)) {
+      paths.push(electronNodeModules);
+    }
+    return paths;
+  };
+}
 const origResolve = Module._resolveFilename;
 Module._resolveFilename = function (request, parent, isMain) {
   try {
@@ -231,6 +241,26 @@ const { checkForMappingUpdates } = require(
 // Express Server
 const routes = require(path.join(backendDir, "routes", "index"));
 const appExpress = express();
+appExpress.set("trust proxy", true);
+appExpress.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS, HEAD",
+  );
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization, Range",
+  );
+  res.header(
+    "Access-Control-Expose-Headers",
+    "Content-Length, Content-Range, Accept-Ranges",
+  );
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
+});
 appExpress.use(express.urlencoded({ limit: "50mb", extended: true }));
 appExpress.use(express.json({ limit: "50mb" }));
 appExpress.use(express.static(guiDistDir));
@@ -669,11 +699,10 @@ global.updatePowerSaveBlocker = () => {
 };
 
 app.whenReady().then(async () => {
-  const PORT = await getFreePort();
+  const PORT = 9545;
   global.PORT = PORT;
   await new Promise((resolve) => {
-    const server = appExpress.listen(PORT, () => {
-      logger.info(`Listening on port ${PORT}`);
+    const server = appExpress.listen(PORT, "0.0.0.0", () => {
       resolve();
     });
     server.keepAliveTimeout = 65000;
@@ -901,25 +930,6 @@ ipcMain.handle("control-mpv", (event, command, args) => {
   }
   return { success: false, error: "MPV player is not active." };
 });
-
-// Find Free Port
-async function getFreePort() {
-  return new Promise((resolve) => {
-    const tryFindPort = () => {
-      const server = net.createServer();
-      server.listen(0, () => {
-        const port = server.address().port;
-        server.close(() => resolve(port));
-      });
-
-      server.on("error", (err) => {
-        logger.error(`getFreePort error: ${err.message}`);
-        setTimeout(tryFindPort, 50);
-      });
-    };
-    tryFindPort();
-  });
-}
 
 // Register Linux protocol handler dynamically (for AppImage and system integration)
 function registerLinuxProtocol() {

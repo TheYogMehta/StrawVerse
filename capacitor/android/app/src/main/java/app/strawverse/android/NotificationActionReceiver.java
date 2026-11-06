@@ -20,7 +20,7 @@ public class NotificationActionReceiver extends BroadcastReceiver {
 
         new Thread(() -> {
             try {
-                int serverPort = 3459;
+                int serverPort = 9545;
                 if (ACTION_PAUSE.equals(action)) {
                     sendPostRequest("http://127.0.0.1:" + serverPort + "/api/download/pause", null);
                 } else if (ACTION_RESUME.equals(action)) {

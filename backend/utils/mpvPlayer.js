@@ -306,8 +306,7 @@ const resolvePathOrUrl = (rawUrl) => {
     }
   } catch (e) {}
 
-  const port = global.PORT || 3000;
-  return `http://localhost:${port}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`;
+  return `http://localhost:${global.PORT}${rawUrl.startsWith("/") ? "" : "/"}${rawUrl}`;
 };
 
 // Proxy external URLs through local Express → Electron's net stack (bypasses Cloudflare).
@@ -321,8 +320,7 @@ const toProxyUrl = (url, customHeaders, prefQuality = "") => {
   ) {
     return url;
   }
-  const port = global.PORT || 3000;
-  const base = `http://127.0.0.1:${port}/api/stream`;
+  const base = `http://127.0.0.1:${global.PORT}/api/stream`;
   let ref = customHeaders?.Referer || customHeaders?.referer || "";
   if (!ref && global.fallbackReferer) {
     ref = global.fallbackReferer;

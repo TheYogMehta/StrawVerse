@@ -24,7 +24,7 @@ import java.util.Map;
 public class MainActivity extends BridgeActivity {
 
     private static final String TAG = "StrawVerse";
-    private static final int SERVER_PORT = 3459;
+    private static final int SERVER_PORT = 9545;
     private android.app.AlertDialog permissionDialog;
 
     private void launchPermissionSettings() {
@@ -159,7 +159,7 @@ public class MainActivity extends BridgeActivity {
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Failed to natively inject bridge for port 3459", e);
+                Log.e(TAG, "Failed to natively inject bridge for port 9545", e);
             }
         }).start();
 

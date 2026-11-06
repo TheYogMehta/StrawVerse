@@ -77,7 +77,8 @@ os.homedir = () => "/data/data/app.strawverse.android/files";
 const cheerio = require("cheerio");
 const axios = require("axios");
 const got = require("got");
-const PORT = 3459;
+const PORT = 9545;
+global.PORT = PORT;
 
 const sseClients = new Set();
 let pendingBypassRequest = null;

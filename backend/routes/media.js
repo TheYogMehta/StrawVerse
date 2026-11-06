@@ -3614,7 +3614,6 @@ router.get("/api/stream/m3u8", async (req, res) => {
     if (customReferer && global.setDynamicReferer) {
       global.setDynamicReferer(url, customReferer);
     }
-    const port = global.PORT || 3000;
     const reqHeaders = getHeaders(url);
     if (customReferer) {
       reqHeaders.Referer = customReferer;
@@ -3660,8 +3659,8 @@ router.get("/api/stream/m3u8", async (req, res) => {
     const refParam = customReferer
       ? `&referer=${encodeURIComponent(customReferer)}`
       : "";
-    const segProxy = `http://127.0.0.1:${port}/api/stream/segment.ts?url=`;
-    const m3u8Proxy = `http://127.0.0.1:${port}/api/stream/m3u8?url=`;
+    const segProxy = `http://127.0.0.1:${global.PORT}/api/stream/segment.ts?url=`;
+    const m3u8Proxy = `http://127.0.0.1:${global.PORT}/api/stream/m3u8?url=`;
 
     const regHost = (targetAbs) => {
       if (

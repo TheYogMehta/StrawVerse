@@ -1,6 +1,6 @@
 const NodeJS = window.Capacitor?.Plugins?.CapacitorNodeJS;
 
-const PORT = 3459;
+const PORT = 9545;
 const APP_URL = `http://127.0.0.1:${PORT}/`;
 const HEALTH_URL = `http://127.0.0.1:${PORT}/health`;
 

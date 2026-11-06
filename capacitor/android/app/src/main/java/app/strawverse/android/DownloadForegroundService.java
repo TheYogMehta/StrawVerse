@@ -67,7 +67,7 @@ public class DownloadForegroundService extends Service {
         notificationPoller = java.util.concurrent.Executors.newSingleThreadScheduledExecutor();
         notificationPoller.scheduleAtFixedRate(() -> {
             try {
-                java.net.URL url = new java.net.URL("http://127.0.0.1:3459/api/internal/download-progress");
+                java.net.URL url = new java.net.URL("http://127.0.0.1:9545/api/internal/download-progress");
                 java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
                 conn.setRequestMethod("GET");
                 conn.setConnectTimeout(2000);

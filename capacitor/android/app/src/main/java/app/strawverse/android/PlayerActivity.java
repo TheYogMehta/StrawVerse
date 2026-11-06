@@ -778,7 +778,7 @@ public class PlayerActivity extends Activity {
                         body.put("provider", provider);
                     }
 
-                    URL url = new URL("http://127.0.0.1:3459/api/watch");
+                    URL url = new URL("http://127.0.0.1:9545/api/watch");
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -1136,7 +1136,7 @@ public class PlayerActivity extends Activity {
                         body.put("subdub", subdub);
                     }
 
-                    URL url = new URL("http://127.0.0.1:3459/api/watch/server");
+                    URL url = new URL("http://127.0.0.1:9545/api/watch/server");
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -1218,7 +1218,7 @@ public class PlayerActivity extends Activity {
     private void initializePlayer(String videoUrl, final Map<String, String> headers) {
         try {
             if (videoUrl != null && videoUrl.startsWith("/")) {
-                videoUrl = "http://127.0.0.1:3459" + videoUrl;
+                videoUrl = "http://127.0.0.1:9545" + videoUrl;
             }
             if (player != null) {
                 player.release();
@@ -1481,7 +1481,7 @@ public class PlayerActivity extends Activity {
         if (ref == null || ref.isEmpty()) {
             ref = "https://megaplay.buzz/";
         }
-        String base = "http://127.0.0.1:3459/api/stream";
+        String base = "http://127.0.0.1:9545/api/stream";
         String refParam = "&referer=" + Uri.encode(ref);
         if (url.contains(".m3u8")) {
             return base + "/m3u8?url=" + Uri.encode(url) + refParam;
@@ -1524,7 +1524,7 @@ public class PlayerActivity extends Activity {
 
                     String fullUrl = url;
                     if (fullUrl.startsWith("/")) {
-                        fullUrl = "http://127.0.0.1:3459" + fullUrl;
+                        fullUrl = "http://127.0.0.1:9545" + fullUrl;
                     } else if (fullUrl.startsWith("http://") || fullUrl.startsWith("https://")) {
                         fullUrl = toProxyUrl(fullUrl);
                     }
@@ -2656,7 +2656,7 @@ public class PlayerActivity extends Activity {
             @Override
             public void run() {
                 try {
-                    URL url = new URL("http://127.0.0.1:3459/api/history/update");
+                    URL url = new URL("http://127.0.0.1:9545/api/history/update");
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2697,7 +2697,7 @@ public class PlayerActivity extends Activity {
             @Override
             public void run() {
                 try {
-                    URL url = new URL("http://127.0.0.1:3459/api/settings/update");
+                    URL url = new URL("http://127.0.0.1:9545/api/settings/update");
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2734,7 +2734,7 @@ public class PlayerActivity extends Activity {
             public void run() {
                 // 1. Fetch settings
                 try {
-                    URL url = new URL("http://127.0.0.1:3459/api/settings/get");
+                    URL url = new URL("http://127.0.0.1:9545/api/settings/get");
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                     conn.setRequestMethod("POST");
                     conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
@@ -2870,7 +2870,7 @@ public class PlayerActivity extends Activity {
                 // 2. Fetch watch history progress
                 if (animeId != null && !animeId.isEmpty()) {
                     try {
-                        String urlStr = "http://127.0.0.1:3459/api/history/progress?mediaId=" 
+                        String urlStr = "http://127.0.0.1:9545/api/history/progress?mediaId=" 
                             + Uri.encode(animeId) + "&type=Anime";
                         URL url = new URL(urlStr);
                         HttpURLConnection conn = (HttpURLConnection) url.openConnection();

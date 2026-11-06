@@ -1,6 +1,10 @@
 const path = require("path");
 const fs = require("fs");
 
+if (!global.PORT) {
+  global.PORT = 9545;
+}
+
 const VIDEO_EXTENSIONS = Object.freeze([".mp4", ".ts"]);
 const SUBTITLE_EXTENSIONS = Object.freeze([".srt", ".vtt"]);
 const MANGA_EXTENSIONS = Object.freeze([".cbz"]);
