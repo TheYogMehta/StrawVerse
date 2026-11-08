@@ -144,7 +144,12 @@ async function getFfmpegPath() {
 
   // Desktop (Electron / Node.js)
   const binaryName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
-  const platformDir = process.platform === "win32" ? "win32" : "linux";
+  const platformDir =
+    process.platform === "win32"
+      ? "win32"
+      : process.platform === "darwin"
+        ? "darwin"
+        : "linux";
   const candidatePaths = [];
 
   const resourceRoots = [];
@@ -171,6 +176,8 @@ async function getFfmpegPath() {
 
   if (process.platform === "linux") {
     candidatePaths.push("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg");
+  } else if (process.platform === "darwin") {
+    candidatePaths.push("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg");
   }
 
   let ffmpegStatic = null;

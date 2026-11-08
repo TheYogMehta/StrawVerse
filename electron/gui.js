@@ -737,6 +737,18 @@ app.whenReady().then(async () => {
     }
   });
 
+  app.on("open-url", (event, url) => {
+    event.preventDefault();
+    logger.info(`[macOS Protocol] Received open-url: ${url}`);
+    handleCustomProtocolUrl(url);
+  });
+
+  app.on("window-all-closed", () => {
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
+  });
+
   registerLinuxProtocol();
   app.setAsDefaultProtocolClient("strawverse");
 
