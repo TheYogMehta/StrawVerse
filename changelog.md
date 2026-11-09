@@ -62,6 +62,11 @@
 - **For Plex Users:**
   - In your Plex Library settings (`Manage Library -> Edit -> Advanced`), set **Local Assets** to _Prefer local metadata_ so Plex uses the local `poster.jpg` and metadata files directly.
 
+### macOS Apple Silicon Support
+
+- **Native macOS (arm64) Desktop Support:** StrawVerse now runs natively on macOS Apple Silicon (M1/M2/M3/M4) Macs with dedicated DMG installer and portable ZIP packages.
+- **macOS Window Lifecycle & Deep-Linking:** Full macOS integration with dock click handling (reopening minimized windows), clean window close behavior, and custom protocol (`strawverse://`) deep-linking.
+
 ### Speed, Stability & Engine
 
 - **Database & Dynamic Provider Query Hardening:** Dynamic provider mapping queries now validate schemas and handle missing tables safely without sync errors.
@@ -77,6 +82,7 @@
 - Special thanks to **@AmarilloNL** for their contributions to Jellyfin & Plex media server integration, NFO metadata generation, and sidecar subtitle support!
 - Special thanks to **@cyber-winner** for their contributions to extension installation error handling and scraper loading rollback!
 - Special thanks to **@satoridev01** for responsibly disclosing the media/subtitles security vulnerability!
+- Special thanks to **@Buff-alo** for their contributions to native macOS Apple Silicon (arm64) support, MPV and FFmpeg binary packaging, and macOS window lifecycle integration!
 
 # [11.1.1] - 2026-10-26
 
