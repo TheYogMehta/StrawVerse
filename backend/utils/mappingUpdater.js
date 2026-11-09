@@ -121,37 +121,82 @@ async function ensureMappingTablesExist() {
       `);
     } catch (_) {}
 
-    // Ensure title, image_url, livechart_id, and genres columns exist if tables were created with an earlier schema
-    try {
-      const animeCols = await mappingQueryAll("PRAGMA table_info(anime)");
-      const colNames = new Set((animeCols || []).map((c) => c.name));
-      if (!colNames.has("title")) {
-        await mappingExec("ALTER TABLE anime ADD COLUMN title TEXT;");
-      }
-      if (!colNames.has("image_url")) {
-        await mappingExec("ALTER TABLE anime ADD COLUMN image_url TEXT;");
-      }
-      if (!colNames.has("livechart_id")) {
-        await mappingExec("ALTER TABLE anime ADD COLUMN livechart_id TEXT;");
-      }
-      if (!colNames.has("genres")) {
-        await mappingExec("ALTER TABLE anime ADD COLUMN genres TEXT;");
-      }
-    } catch (_) {}
+    // Ensure all required columns exist if tables were created with an earlier schema
+    const coreTableSchemas = {
+      anime: {
+        title: "TEXT",
+        type: "TEXT",
+        episodes: "INTEGER",
+        status: "TEXT",
+        season: "TEXT",
+        year: "INTEGER",
+        image_url: "TEXT",
+        livechart_id: "TEXT",
+        has_mapping: "INTEGER DEFAULT 0",
+        genres: "TEXT",
+      },
+      manga: {
+        title: "TEXT",
+        type: "TEXT",
+        chapters: "INTEGER",
+        volumes: "INTEGER",
+        status: "TEXT",
+        image_url: "TEXT",
+        has_mapping: "INTEGER DEFAULT 0",
+        genres: "TEXT",
+      },
+      next_episodes: {
+        livechart_id: "TEXT",
+        episode: "INTEGER",
+        date: "TEXT",
+        title: "TEXT",
+        image: "TEXT",
+      },
+      unmapped_items: {
+        id: "TEXT",
+        provider: "TEXT",
+        media_type: "TEXT",
+        name: "TEXT",
+        image_url: "TEXT",
+        type: "TEXT",
+        episodes: "TEXT",
+        status: "TEXT",
+        season: "TEXT",
+        year: "INTEGER",
+        last_fetched: "TEXT",
+      },
+    };
 
-    try {
-      const mangaCols = await mappingQueryAll("PRAGMA table_info(manga)");
-      const mColNames = new Set((mangaCols || []).map((c) => c.name));
-      if (!mColNames.has("title")) {
-        await mappingExec("ALTER TABLE manga ADD COLUMN title TEXT;");
+    for (const [tbl, cols] of Object.entries(coreTableSchemas)) {
+      try {
+        const pragmaCols = await mappingQueryAll(`PRAGMA table_info("${tbl}")`);
+        if (pragmaCols && pragmaCols.length > 0) {
+          const existingColNames = new Set(
+            pragmaCols.map((c) => (c.name || "").toLowerCase()),
+          );
+          for (const [colName, colDef] of Object.entries(cols)) {
+            if (!existingColNames.has(colName.toLowerCase())) {
+              try {
+                await mappingExec(
+                  `ALTER TABLE "${tbl}" ADD COLUMN "${colName}" ${colDef};`,
+                );
+                logger.info(
+                  `[mappingUpdater] Added column ${colName} to ${tbl}`,
+                );
+              } catch (alterErr) {
+                logger.warn(
+                  `[mappingUpdater] Could not add column ${colName} to ${tbl}: ${alterErr.message}`,
+                );
+              }
+            }
+          }
+        }
+      } catch (colErr) {
+        logger.warn(
+          `[mappingUpdater] Failed checking columns for ${tbl}: ${colErr.message}`,
+        );
       }
-      if (!mColNames.has("image_url")) {
-        await mappingExec("ALTER TABLE manga ADD COLUMN image_url TEXT;");
-      }
-      if (!mColNames.has("genres")) {
-        await mappingExec("ALTER TABLE manga ADD COLUMN genres TEXT;");
-      }
-    } catch (_) {}
+    }
   } catch (e) {
     logger.error(
       `[mappingUpdater] Failed to ensure mapping tables exist: ${e.message}`,
@@ -241,6 +286,44 @@ async function applySyncResponse(data) {
             `[mappingUpdater] Applying ${rows.length} ${type} rows for table: ${tbl}`,
           );
 
+          if (
+            tbl !== "anime" &&
+            tbl !== "manga" &&
+            tbl !== "next_episodes" &&
+            tbl !== "unmapped_items" &&
+            tbl !== "sync_versions"
+          ) {
+            await ensureProviderTable(tbl);
+          }
+
+          // Dynamically ensure all columns present in incoming rows exist in target table
+          const pragmaCols =
+            (await mappingQueryAll(`PRAGMA table_info("${tbl}")`)) || [];
+          const existingColSet = new Set(
+            pragmaCols.map((c) => (c.name || "").toLowerCase()),
+          );
+
+          const sampleRow = rows.find((r) => r && typeof r === "object");
+          if (sampleRow) {
+            for (const key of Object.keys(sampleRow)) {
+              if (!existingColSet.has(key.toLowerCase())) {
+                try {
+                  await mappingExec(
+                    `ALTER TABLE "${tbl}" ADD COLUMN "${key}" TEXT;`,
+                  );
+                  existingColSet.add(key.toLowerCase());
+                  logger.info(
+                    `[mappingUpdater] Dynamically added column "${key}" to "${tbl}"`,
+                  );
+                } catch (addColErr) {
+                  logger.warn(
+                    `[mappingUpdater] Failed to add column "${key}" to "${tbl}": ${addColErr.message}`,
+                  );
+                }
+              }
+            }
+          }
+
           const CHUNK_SIZE = 500;
           for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
             const chunk = rows.slice(i, i + CHUNK_SIZE);
@@ -271,7 +354,9 @@ async function applySyncResponse(data) {
 
               // Prune duplicate local mappings and unmapped items if malid provided
               if (row.malid) {
-                const targetIds = [row.id, row.uuid].filter(Boolean).map(String);
+                const targetIds = [row.id, row.uuid]
+                  .filter(Boolean)
+                  .map(String);
                 if (global.db && targetIds.length > 0) {
                   for (const tid of targetIds) {
                     try {
@@ -298,8 +383,10 @@ async function applySyncResponse(data) {
                 }
               }
 
-              // Build INSERT OR REPLACE
-              const colKeys = Object.keys(row);
+              // Build INSERT OR REPLACE safely matching existing columns
+              const colKeys = Object.keys(row).filter((k) =>
+                existingColSet.has(k.toLowerCase()),
+              );
               if (colKeys.length > 0) {
                 const cols = colKeys.map((c) => `"${c}"`).join(", ");
                 const placeholders = colKeys.map(() => "?").join(", ");
@@ -355,6 +442,35 @@ async function applySyncResponse(data) {
             `[mappingUpdater] Applying ${rows.length} ${type} rows for unmapped_items of ${provider}`,
           );
 
+          // Dynamically ensure all columns present in incoming rows exist in unmapped_items
+          const pragmaCols =
+            (await mappingQueryAll('PRAGMA table_info("unmapped_items")')) ||
+            [];
+          const existingColSet = new Set(
+            pragmaCols.map((c) => (c.name || "").toLowerCase()),
+          );
+
+          const sampleRow = rows.find((r) => r && typeof r === "object");
+          if (sampleRow) {
+            for (const key of Object.keys(sampleRow)) {
+              if (!existingColSet.has(key.toLowerCase())) {
+                try {
+                  await mappingExec(
+                    `ALTER TABLE "unmapped_items" ADD COLUMN "${key}" TEXT;`,
+                  );
+                  existingColSet.add(key.toLowerCase());
+                  logger.info(
+                    `[mappingUpdater] Dynamically added column "${key}" to "unmapped_items"`,
+                  );
+                } catch (addColErr) {
+                  logger.warn(
+                    `[mappingUpdater] Failed to add column "${key}" to "unmapped_items": ${addColErr.message}`,
+                  );
+                }
+              }
+            }
+          }
+
           const CHUNK_SIZE = 500;
           for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
             const chunk = rows.slice(i, i + CHUNK_SIZE);
@@ -362,7 +478,9 @@ async function applySyncResponse(data) {
 
             for (const row of chunk) {
               if (!row || typeof row !== "object") continue;
-              const colKeys = Object.keys(row);
+              const colKeys = Object.keys(row).filter((k) =>
+                existingColSet.has(k.toLowerCase()),
+              );
               if (colKeys.length > 0) {
                 const cols = colKeys.map((c) => `"${c}"`).join(", ");
                 const placeholders = colKeys.map(() => "?").join(", ");

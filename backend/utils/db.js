@@ -44,6 +44,7 @@ const tables = {
     description: "TEXT",
     genres: "TEXT",
     type: "TEXT",
+    status: "TEXT",
     author: "TEXT",
     released: "TEXT",
     image_url: "TEXT",

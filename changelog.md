@@ -1,5 +1,13 @@
 # Changelog
 
+# [11.2.1] - 2026-11-09
+
+### Android & Database Stability Fixes
+
+- **Mapping Database Schema Synchronization:** Fixed a fatal `table anime has no column named type (SQLITE_ERROR)` when applying cloud database updates by adding automated schema migrations for all core mapping tables (`anime`, `manga`, `unmapped_items`, `next_episodes`) and dynamically verifying and adding any missing columns prior to executing snapshot or delta insertions.
+- **Manga Database Schema Fix:** Added the missing `status` column to the `Manga` SQLite table definition in `database.db`, resolving fatal `no such column: status` crashes during library queries, metadata caching, and catalog enrichment with watch/read progress.
+- **Android Cloudflare Bypass Cookie Retention:** Fixed an issue where the Discover/Browse catalog failed to load on Android with recurring 403 challenge loops by preventing in-memory cache eviction upon challenge resolution and reloading fresh clearance cookies from SQLite so retry requests successfully include valid `cf_clearance` cookies and User-Agent headers.
+
 # [11.2.0] - 2026-11-09
 
 ### Manga Reader Improvements

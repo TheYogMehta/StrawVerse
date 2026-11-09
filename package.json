@@ -1,6 +1,6 @@
 {
   "name": "strawverse-root",
-  "version": "11.2.0",
+  "version": "11.2.1",
   "private": true,
   "description": "StrawVerse - Download anime & manga in batches, unified across Desktop & Android",
   "scripts": {

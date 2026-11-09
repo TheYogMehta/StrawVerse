@@ -2299,10 +2299,11 @@ router.post(
               try {
                 await global.db
                   .prepare(
-                    `UPDATE Manga SET description = ?, genres = ?, released = ?, author = ?, image_url = ?, provider = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+                    `UPDATE Manga SET description = ?, status = ?, genres = ?, released = ?, author = ?, image_url = ?, provider = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
                   )
                   .run(
                     MangaInfoData.description || "",
+                    MangaInfoData.status || "",
                     Array.isArray(MangaInfoData.genres)
                       ? MangaInfoData.genres.join(",")
                       : MangaInfoData.genres || "",

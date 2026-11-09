@@ -622,7 +622,15 @@ async function boot() {
             [`${domain}-cf_clearance`, domain],
           );
           if (row?.value) {
-            if (global.clearCookieCache) global.clearCookieCache(domain);
+            try {
+              const proxyHeaders = require("../../../backend/utils/proxyHeaders");
+              if (
+                proxyHeaders &&
+                typeof proxyHeaders.initCache === "function"
+              ) {
+                await proxyHeaders.initCache().catch(() => {});
+              }
+            } catch (_) {}
             return true;
           }
         }
