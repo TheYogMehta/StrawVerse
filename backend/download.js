@@ -16,10 +16,7 @@ const {
 } = require("./utils/queue");
 const { MetadataAdd, FindMapping } = require("./utils/Metadata");
 const path = require("path");
-const {
-  hasLocalMediaFiles,
-  SEASON_FOLDER_RE,
-} = require("./utils/constants");
+const { hasLocalMediaFiles, SEASON_FOLDER_RE } = require("./utils/constants");
 
 // Shared runner for multiple episodes/chapters download
 async function downloadMediaMulti({
@@ -183,7 +180,7 @@ async function downloadAnimeSingle(
       if (!existing) {
         const animedata = await animeinfo(
           Animeprovider,
-          config?.CustomDownloadLocation,
+          config?.CustomDownloadLocationAnime,
           animeid,
         );
         if (animedata) {
@@ -219,7 +216,7 @@ async function downloadAnimeSingle(
         "Anime",
         animeid,
         null,
-        config?.CustomDownloadLocation,
+        config?.CustomDownloadLocationAnime,
       );
       if (animeMapping && animeMapping.DownloadedEpisodes) {
         const num = parseFloat(number);
@@ -260,8 +257,9 @@ async function downloadAnimeSingle(
         quality: config?.quality,
         mergeSubtitles: config?.mergeSubtitles,
         subtitleFormat: config?.subtitleFormat,
-        CustomDownloadLocation: config?.CustomDownloadLocation,
+        CustomDownloadLocation: config?.CustomDownloadLocationAnime,
         jellyfinCompatibility: config?.jellyfinCompatibility,
+        animeNamingScheme: config?.animeNamingScheme || "default",
       },
       epid: episodeid,
       totalSegments: 0,
@@ -433,7 +431,7 @@ async function downloadMangaSingle(
         "Manga",
         mangaid,
         null,
-        config?.CustomDownloadLocation,
+        config?.CustomDownloadLocationManga,
       );
       if (mangaMapping && mangaMapping.DownloadedChapters) {
         const num = parseFloat(number);
@@ -454,7 +452,8 @@ async function downloadMangaSingle(
       Title: Title,
       config: {
         Mangaprovider: Mangaprovider.provider_name,
-        CustomDownloadLocation: config?.CustomDownloadLocation,
+        CustomDownloadLocation: config?.CustomDownloadLocationManga,
+        mangaNamingScheme: config?.mangaNamingScheme || "default",
       },
       ChapterTitle: `Chapter ${number}`,
       epid: chapterid,
@@ -512,9 +511,15 @@ const fetchAllEpisodes = (Animeprovider, animeid) =>
 const fetchAllChapters = (Mangaprovider, mangaid) =>
   fetchAllPages(fetchChapters, Mangaprovider, mangaid, "Chapters");
 
-async function getBaseDownloadDir() {
+async function getBaseDownloadDir(type) {
   const setting = await settingfetch();
-  return setting?.CustomDownloadLocation || (await getDownloadsFolder());
+  if (type === "Anime") {
+    return setting?.CustomDownloadLocationAnime || (await getDownloadsFolder());
+  }
+  if (type === "Manga") {
+    return setting?.CustomDownloadLocationManga || (await getDownloadsFolder());
+  }
+  return await getDownloadsFolder();
 }
 
 async function cleanupEmptyDownloadFolder(folderPath, type, id) {

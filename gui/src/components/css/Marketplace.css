@@ -112,8 +112,73 @@
 
 .market-card-actions {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   margin-top: 16px;
+}
+
+.market-card-actions-row {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.btn-use-provider {
+  background: rgba(124, 58, 237, 0.16);
+  border: 1px solid rgba(124, 58, 237, 0.45);
+  color: #c084fc;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.btn-use-provider:hover:not(:disabled) {
+  background: var(--accent, #7c3aed);
+  border-color: var(--accent, #7c3aed);
+  color: #ffffff;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(124, 58, 237, 0.35);
+}
+
+.btn-use-provider:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-in-use {
+  background: rgba(16, 185, 129, 0.16);
+  border: 1px solid rgba(16, 185, 129, 0.45);
+  color: #34d399;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.12);
+  user-select: none;
+}
+
+.market-card.in-use {
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.08);
+}
+
+.market-card.in-use .market-logo-wrapper {
+  border-color: rgba(16, 185, 129, 0.45);
 }
 
 .market-loading-center {

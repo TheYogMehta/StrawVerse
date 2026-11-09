@@ -282,6 +282,25 @@ async function MalAddToList(type = "anime", malid, status, numVal = 0) {
       );
     });
 
+    const table = isAnime ? "MyAnimeList" : "MyMangaList";
+    const progCol = isAnime ? "watched" : "read";
+    try {
+      const existing = await queryOne(`SELECT id FROM ${table} WHERE id = ?`, [
+        String(malid),
+      ]);
+      if (existing) {
+        await run(
+          `UPDATE ${table} SET status = ?, ${progCol} = ?, updated_at = ? WHERE id = ?`,
+          [status, numVal, new Date().toISOString(), String(malid)],
+        );
+      } else {
+        await run(
+          `INSERT INTO ${table} (id, status, ${progCol}, updated_at) VALUES (?, ?, ?, ?)`,
+          [String(malid), status, numVal, new Date().toISOString()],
+        );
+      }
+    } catch (_) {}
+
     await MalSyncType(type, true);
 
     return { title: "MyAnimeList Update Success!", icon: "success" };

@@ -76,14 +76,23 @@ async function reconcileActiveProvider(Type) {
 // update the settings
 async function settingupdate(newSettings = {}) {
   const wasMediaServerEnabled = Boolean(config.mediaServerNaming);
+  const oldMangaScheme = config.mangaNamingScheme || "default";
   if (newSettings && typeof newSettings === "object") {
-    if (process.env.NODEJS_MOBILE_DATA_DIR) {
-      delete newSettings.CustomDownloadLocation;
-    }
     for (const [k, v] of Object.entries(newSettings)) {
       if (v !== undefined) {
         config[k] = v;
       }
+    }
+  }
+
+  if (
+    newSettings.mangaNamingScheme !== undefined &&
+    newSettings.mangaNamingScheme !== oldMangaScheme
+  ) {
+    try {
+      await renameExistingMangaChapters(newSettings.mangaNamingScheme);
+    } catch (err) {
+      logger.error(`[MangaRename] Auto-rename error: ${err.message}`);
     }
   }
 
@@ -96,10 +105,6 @@ async function settingupdate(newSettings = {}) {
         );
       });
     } catch (_) {}
-  }
-
-  if (process.env.NODEJS_MOBILE_DATA_DIR) {
-    config.CustomDownloadLocation = getDownloadsFolder();
   }
 
   if (process.versions?.electron && StartDiscordRPC) {
@@ -137,26 +142,24 @@ async function settingfetch() {
       await SettingsLoad();
     }
     let changes = false;
-    if (typeof config?.CustomDownloadLocation === "string") {
-      config.CustomDownloadLocation = config.CustomDownloadLocation.replace(
-        /^["']|["']$/g,
-        "",
-      ).trim();
-    }
-    // making sure download folder exists
-    if (!config?.CustomDownloadLocation) {
-      config.CustomDownloadLocation = getDownloadsFolder();
-      changes = true;
+    for (const key of [
+      "CustomDownloadLocationAnime",
+      "CustomDownloadLocationManga",
+    ]) {
+      if (typeof config?.[key] === "string") {
+        config[key] = config[key].replace(/^["']|["']$/g, "").trim();
+      }
     }
 
-    // if downloads folder exists check if its can be access
-    if (config?.CustomDownloadLocation) {
-      try {
-        await ensureDirectoryExists(config?.CustomDownloadLocation);
-      } catch (error) {
-        console.log(error);
-        config.CustomDownloadLocation = getDownloadsFolder();
-        changes = true;
+    // ensure configured download directories exist (creating if not present)
+    for (const key of [
+      "CustomDownloadLocationAnime",
+      "CustomDownloadLocationManga",
+    ]) {
+      if (config?.[key]) {
+        try {
+          await ensureDirectoryExists(config[key]);
+        } catch (_) {}
       }
     }
     // kept log files: default 5, user range 1..10
@@ -302,7 +305,9 @@ async function SettingsLoad() {
             mal_on_off: false,
             status: "watching",
             malToken: null,
-            CustomDownloadLocation: getDownloadsFolder(),
+            CustomDownloadLocationAnime: null,
+            CustomDownloadLocationManga: null,
+            mangaAutoScrollSpeed: 2,
             externalLogEnabled: true,
             maxLogFiles: 5,
             Animeprovider: 0,
@@ -459,6 +464,14 @@ async function SettingsLoad() {
         maxFiles: config.maxLogFiles,
         dir: getEffectiveLogDir(),
       });
+    } catch (_) {}
+
+    try {
+      if (config?.mangaNamingScheme) {
+        renameExistingMangaChapters(config.mangaNamingScheme).catch((err) => {
+          logger.error(`[MangaRename] Startup sync error: ${err.message}`);
+        });
+      }
     } catch (_) {}
 
     await settingSave();
@@ -1235,7 +1248,10 @@ async function loadSingleScraper(
       logger.warn(
         `[Security] Blocked unsafe scraper ${fullPath}: ${safety.reason}`,
       );
-      return { success: false, error: `Security check failed: ${safety.reason}` };
+      return {
+        success: false,
+        error: `Security check failed: ${safety.reason}`,
+      };
     }
 
     try {
@@ -1656,11 +1672,182 @@ function isLanguagePreferred(subLang, preferredLanguages) {
   });
 }
 
+async function renameExistingMangaChapters(targetScheme) {
+  if (!targetScheme) return;
+  try {
+    const {
+      sanitizeFolderName,
+      formatChapterFilename,
+      getChapterNumberFromFilename,
+      isMangaFile,
+    } = require("./constants");
+
+    const candidateRoots = new Set();
+    if (
+      config?.CustomDownloadLocationManga &&
+      typeof config.CustomDownloadLocationManga === "string"
+    ) {
+      const loc = config.CustomDownloadLocationManga.trim();
+      candidateRoots.add(path.resolve(loc));
+      candidateRoots.add(path.resolve(path.join(loc, "Manga")));
+    }
+    if (
+      config?.CustomDownloadLocation &&
+      typeof config.CustomDownloadLocation === "string"
+    ) {
+      const loc = config.CustomDownloadLocation.trim();
+      candidateRoots.add(path.resolve(loc));
+      candidateRoots.add(path.resolve(path.join(loc, "Manga")));
+    }
+    const defDownloads = getDownloadsFolder();
+    if (defDownloads) {
+      candidateRoots.add(path.resolve(path.join(defDownloads, "Manga")));
+      candidateRoots.add(path.resolve(defDownloads));
+    }
+
+    const existingRoots = [];
+    for (const r of candidateRoots) {
+      try {
+        if (fs.existsSync(r) && fs.statSync(r).isDirectory()) {
+          existingRoots.push(r);
+        }
+      } catch (_) {}
+    }
+
+    const mangaDbRows = await queryAll(
+      "SELECT id, title, folder_name FROM Manga",
+    ).catch(() => []);
+    const folderToTitleMap = new Map();
+    if (Array.isArray(mangaDbRows)) {
+      for (const row of mangaDbRows) {
+        if (row.folder_name && row.title) {
+          folderToTitleMap.set(row.folder_name.toLowerCase(), row.title);
+        }
+        if (row.title) {
+          folderToTitleMap.set(
+            sanitizeFolderName(row.title).toLowerCase(),
+            row.title,
+          );
+        }
+      }
+    }
+
+    const processedDirs = new Set();
+
+    const processDir = async (dirPath, folderTitle) => {
+      const resolvedPath = path.resolve(dirPath);
+      if (processedDirs.has(resolvedPath)) return;
+      processedDirs.add(resolvedPath);
+
+      let entries = [];
+      try {
+        entries = await fs.promises.readdir(resolvedPath, {
+          withFileTypes: true,
+        });
+      } catch (_) {
+        return;
+      }
+
+      const mangaFiles = entries.filter(
+        (e) => e.isFile() && isMangaFile(e.name),
+      );
+      if (mangaFiles.length === 0) return;
+
+      const title =
+        folderToTitleMap.get(path.basename(resolvedPath).toLowerCase()) ||
+        folderTitle ||
+        path.basename(resolvedPath);
+
+      for (const fileEntry of mangaFiles) {
+        const oldName = fileEntry.name;
+        const chNum = getChapterNumberFromFilename(oldName);
+        if (chNum === null || isNaN(chNum)) continue;
+
+        const ext = path.extname(oldName) || ".cbz";
+        const newName = formatChapterFilename({
+          title,
+          chapterNum: chNum,
+          namingScheme: targetScheme,
+          ext,
+        });
+
+        if (oldName === newName) continue;
+
+        const oldPath = path.join(resolvedPath, oldName);
+        const newPath = path.join(resolvedPath, newName);
+
+        try {
+          if (
+            oldName.toLowerCase() !== newName.toLowerCase() &&
+            fs.existsSync(newPath)
+          ) {
+            logger.warn(
+              `[MangaRename] Destination file ${newName} already exists in ${resolvedPath}, skipping rename of ${oldName}`,
+            );
+            continue;
+          }
+          await fs.promises.rename(oldPath, newPath);
+          logger.info(
+            `[MangaRename] Renamed "${oldName}" -> "${newName}" in ${resolvedPath}`,
+          );
+        } catch (renameErr) {
+          logger.error(
+            `[MangaRename] Failed to rename "${oldName}" to "${newName}": ${renameErr.message}`,
+          );
+        }
+      }
+    };
+
+    if (Array.isArray(mangaDbRows)) {
+      for (const row of mangaDbRows) {
+        const folderName = row.folder_name || sanitizeFolderName(row.title);
+        if (!folderName) continue;
+        for (const root of existingRoots) {
+          const direct = path.join(root, folderName);
+          if (fs.existsSync(direct)) {
+            await processDir(direct, row.title);
+          }
+          const nested = path.join(root, "Manga", folderName);
+          if (fs.existsSync(nested)) {
+            await processDir(nested, row.title);
+          }
+        }
+      }
+    }
+
+    for (const root of existingRoots) {
+      let subEntries = [];
+      try {
+        subEntries = await fs.promises.readdir(root, { withFileTypes: true });
+      } catch (_) {
+        continue;
+      }
+
+      const directFiles = subEntries.filter(
+        (e) => e.isFile() && isMangaFile(e.name),
+      );
+      if (directFiles.length > 0) {
+        await processDir(root, path.basename(root));
+      }
+
+      for (const sub of subEntries) {
+        if (!sub.isDirectory()) continue;
+        if (sub.name === "Anime" || sub.name === "logs") continue;
+        const subPath = path.join(root, sub.name);
+        await processDir(subPath, sub.name);
+      }
+    }
+  } catch (err) {
+    logger.error(`[MangaRename] Error auto-renaming manga: ${err.message}`);
+  }
+}
+
 module.exports = {
   settingupdate,
   settingfetch,
   settingSave,
   SettingsLoad,
+  renameExistingMangaChapters,
   reconcileActiveProvider,
   providerFetch,
   loadAllScrapers,

@@ -90,10 +90,81 @@
   gap: 16px;
 }
 
+.info-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  position: relative;
+}
+
 .info-title {
   font-size: 28px;
   font-weight: 800;
   line-height: 1.2;
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  cursor: text;
+  transition: opacity 0.15s ease;
+}
+
+.info-title:active {
+  opacity: 0.85;
+}
+
+.btn-copy-title {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-muted, #9ca3af);
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.btn-copy-title:hover {
+  background: rgba(124, 58, 237, 0.18);
+  border-color: rgba(124, 58, 237, 0.45);
+  color: #c084fc;
+  transform: scale(1.08);
+}
+
+.btn-copy-title.copied {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(16, 185, 129, 0.5);
+  color: #34d399;
+}
+
+.copy-badge {
+  position: absolute;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  background: #10b981;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+  z-index: 10;
+}
+
+.copy-badge.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
 .tag-list {
@@ -148,11 +219,19 @@
   font-size: 15px;
   line-height: 1.6;
   color: #d1d5db;
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  cursor: text;
 }
 
 .meta-item {
   font-size: 13px;
   color: var(--text-muted);
+  user-select: text;
+  -webkit-user-select: text;
+  -webkit-touch-callout: default;
+  cursor: text;
 }
 
 .mal-box {
@@ -423,14 +502,15 @@
 .sort-subdub-row {
   display: flex;
   gap: 10px;
-  width: 100%;
   align-items: center;
 }
 
-.sort-subdub-row .u-style-43,
+.sort-subdub-row .u-style-43 {
+  min-width: 130px;
+}
+
 .sort-subdub-row .u-style-46 {
-  flex: 1;
-  min-width: 0;
+  min-width: 90px;
 }
 
 .btn-bulk {
@@ -1120,11 +1200,17 @@
     justify-content: center;
   }
 
+  .info-title-row {
+    width: 100%;
+    justify-content: center;
+  }
+
   .info-title {
     font-size: 24px;
     font-weight: 800;
     word-break: break-word;
-    width: 100%;
+    width: auto;
+    text-align: center;
   }
 
   .info-description {
@@ -1370,4 +1456,78 @@
     transform: scale(1);
     opacity: 1;
   }
+}
+
+/* History Toolbar Bulk Actions */
+.btn-mark-read-all {
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  color: #34d399;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-mark-read-all:hover {
+  background: rgba(16, 185, 129, 0.28);
+  border-color: #34d399;
+  color: #ffffff;
+}
+
+.btn-mark-unread-all {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #f87171;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-mark-unread-all:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+  color: #ffffff;
+}
+/* Row top actions & quick history toggle */
+.item-card-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+.btn-item-history-mark {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted, #9ca3af);
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  padding: 0;
+}
+
+.btn-item-history-mark:hover {
+  background: rgba(16, 185, 129, 0.16);
+  border-color: rgba(16, 185, 129, 0.45);
+  color: #34d399;
+  transform: scale(1.08);
+}
+
+.btn-item-history-mark.completed {
+  background: rgba(16, 185, 129, 0.18);
+  border-color: rgba(16, 185, 129, 0.45);
+  color: #34d399;
+}
+
+.btn-item-history-mark.completed:hover {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: rgba(239, 68, 68, 0.45);
+  color: #f87171;
+  transform: scale(1.08);
 }

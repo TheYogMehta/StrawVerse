@@ -61,7 +61,8 @@ const ALL_SUBTITLE_LANGUAGES = [
 
 const SETTINGS_TABS = [
   "general",
-  "anime_manga",
+  "anime",
+  "manga",
   "tags",
   "history",
   "changelog",
@@ -74,7 +75,7 @@ const PREVIEW_SAMPLE_CARDS = [
     title:
       "Backstabbed in a Backwater Dungeon: My Trusted Companions Tried to Kill Me, but Thanks to the Gift of an Unlimited Gacha I Got LVL 9999 Friends and Am Out for Revenge on My Former Party Members and the World",
   },
-  { id: 2, title: "One Peice" },
+  { id: 2, title: "One Piece" },
   { id: 3, title: "Frieren: Beyond Journey's End" },
   { id: 4, title: "fullmetal alchemist: brotherhood" },
   { id: 5, title: "Demon Slayer: Kimetsu no Yaiba Hashira Training Arc" },
@@ -158,7 +159,9 @@ export default function SettingsView({
   const [imageCacheSizeLimit, setImageCacheSizeLimit] = useState(5);
   const [developerMode, setDeveloperMode] = useState(false);
   const [downloadNotification, setDownloadNotification] = useState(true);
-  const [downloadLocation, setDownloadLocation] = useState("");
+  const [animeDownloadLocation, setAnimeDownloadLocation] = useState("");
+  const [mangaDownloadLocation, setMangaDownloadLocation] = useState("");
+  const [mangaAutoScrollSpeed, setMangaAutoScrollSpeed] = useState(2);
   const [browsingFolder, setBrowsingFolder] = useState(false);
   const [animeNamingScheme, setAnimeNamingScheme] = useState("default");
   const [mangaNamingScheme, setMangaNamingScheme] = useState("default");
@@ -210,7 +213,6 @@ export default function SettingsView({
   };
 
   const handleRestoreSubtitleDefaults = () => {
-    setPlayerSpeed(1.0);
     setSubFontSize(46);
     setSubColor("#FFFFFF");
     setSubBorderColor("#000000");
@@ -260,33 +262,48 @@ export default function SettingsView({
     applyThemeVars({ catalogCardMaxHeight: val });
   };
 
-  const handleBrowseDownloadLocation = async () => {
-    if (!window.sharedStateAPI?.selectDirectory) {
-      swalError(
-        "Not Supported",
-        "Folder picker is not available on this platform.",
-      );
+  const handleBrowseLocation = async (type) => {
+    const isAnime = type === "Anime";
+    const currentLoc = isAnime ? animeDownloadLocation : mangaDownloadLocation;
+    const defaultPlaceholder = isMobileApp()
+      ? `/StrawVerse/${type}`
+      : `Downloads/${type}`;
+
+    if (window.sharedStateAPI?.selectDirectory && !isMobileApp()) {
+      setBrowsingFolder(true);
+      try {
+        const result = await window.sharedStateAPI.selectDirectory(currentLoc);
+        if (result?.success && result.path) {
+          if (isAnime) setAnimeDownloadLocation(result.path);
+          else setMangaDownloadLocation(result.path);
+        } else if (result && !result.canceled && result.error) {
+          swalError("Could Not Pick Folder", result.error);
+        }
+      } catch (err) {
+        console.error("Failed to pick folder:", err);
+        swalError("Could Not Pick Folder", err.message);
+      } finally {
+        setBrowsingFolder(false);
+      }
       return;
     }
-    setBrowsingFolder(true);
-    try {
-      const result =
-        await window.sharedStateAPI.selectDirectory(downloadLocation);
-      if (result?.success && result.path) {
-        setDownloadLocation(result.path);
-      } else if (result && !result.canceled && result.error) {
-        swalError("Could Not Pick Folder", result.error);
-      }
-    } catch (err) {
-      console.error("Failed to pick download folder:", err);
-      swalError("Could Not Pick Folder", err.message);
-    } finally {
-      setBrowsingFolder(false);
-    }
-  };
 
-  const handleResetDownloadLocation = () => {
-    setDownloadLocation("");
+    const { value: customPath } = await Swal.fire({
+      background: "var(--bg-secondary)",
+      color: "var(--text-main)",
+      title: `${type} Download Location`,
+      input: "text",
+      inputValue: currentLoc || "",
+      inputPlaceholder: defaultPlaceholder,
+      text: `Enter custom storage folder path on device for ${type.toLowerCase()} downloads:`,
+      showCancelButton: true,
+      confirmButtonText: "Save",
+      confirmButtonColor: "var(--primary-accent)",
+    });
+    if (customPath !== undefined && customPath !== null) {
+      if (isAnime) setAnimeDownloadLocation(customPath.trim());
+      else setMangaDownloadLocation(customPath.trim());
+    }
   };
 
   useEffect(() => {
@@ -338,26 +355,33 @@ export default function SettingsView({
     const cleanName = String(name || "")
       .toLowerCase()
       .replace(/^@/, "");
+    let targetOwner = "theyogmehta";
+    let targetName = cleanName;
+    if (cleanName.includes("/")) {
+      const parts = cleanName.split("/");
+      targetOwner = parts[0];
+      targetName = parts[1];
+    }
     const ext = list?.find((e) => {
       const eName = String(e.name || "").toLowerCase();
-      const eUnique = String(e.uniqueId || "")
+      const eOwner = String(e.repoOwner || "theyogmehta")
         .toLowerCase()
         .replace(/^@/, "");
-      return (
-        eName === cleanName ||
-        eUnique === cleanName ||
-        cleanName.endsWith(`/${eName}`) ||
-        cleanName === `${(e.repoOwner || "").toLowerCase()}/${eName}`
-      );
+      return eName === targetName && eOwner === targetOwner;
     });
     return ext?.icon || null;
   };
 
   const [hasChanges, setHasChanges] = useState(false);
-  const [activeTab, setActiveTab] = useState(initialTab);
+  const [activeTab, setActiveTab] = useState(() => {
+    if (initialTab === "anime_manga") return "anime";
+    return initialTab || "general";
+  });
 
   useEffect(() => {
-    setActiveTab(initialTab);
+    setActiveTab(
+      initialTab === "anime_manga" ? "anime" : initialTab || "general",
+    );
   }, [initialTab]);
 
   useEffect(() => {
@@ -720,7 +744,13 @@ export default function SettingsView({
         setDownloadNotification(
           s.downloadNotification !== undefined ? s.downloadNotification : true,
         );
-        setDownloadLocation(s.CustomDownloadLocation || "");
+        setAnimeDownloadLocation(s.CustomDownloadLocationAnime || "");
+        setMangaDownloadLocation(s.CustomDownloadLocationManga || "");
+        setMangaAutoScrollSpeed(
+          s.mangaAutoScrollSpeed !== undefined
+            ? parseInt(s.mangaAutoScrollSpeed, 10) || 2
+            : 2,
+        );
         setAnimeNamingScheme(s.animeNamingScheme || "default");
         setMangaNamingScheme(s.mangaNamingScheme || "default");
         setJellyfinCompatibility(Boolean(s.jellyfinCompatibility));
@@ -853,7 +883,7 @@ export default function SettingsView({
       if (data?.success) {
         swalSuccess(
           "Restored!",
-          `"${item.title}" will now show on continue shelf.`,
+          `"${item.title}" will now show on your Home screen.`,
         );
         setHistoryList((prev) =>
           prev.map((h) =>
@@ -961,8 +991,12 @@ export default function SettingsView({
         : true)
     )
       dirty.downloadNotification = downloadNotification;
-    if (downloadLocation !== (settings.CustomDownloadLocation || ""))
-      dirty.CustomDownloadLocation = downloadLocation;
+    if (animeDownloadLocation !== (settings.CustomDownloadLocationAnime || ""))
+      dirty.CustomDownloadLocationAnime = animeDownloadLocation;
+    if (mangaDownloadLocation !== (settings.CustomDownloadLocationManga || ""))
+      dirty.CustomDownloadLocationManga = mangaDownloadLocation;
+    if (mangaAutoScrollSpeed !== (settings.mangaAutoScrollSpeed || 2))
+      dirty.mangaAutoScrollSpeed = mangaAutoScrollSpeed;
     if (animeNamingScheme !== (settings.animeNamingScheme || "default"))
       dirty.animeNamingScheme = animeNamingScheme;
     if (mangaNamingScheme !== (settings.mangaNamingScheme || "default"))
@@ -1111,7 +1145,9 @@ export default function SettingsView({
         (settings.downloadNotification !== undefined
           ? settings.downloadNotification
           : true) ||
-      downloadLocation !== (settings.CustomDownloadLocation || "") ||
+      animeDownloadLocation !== (settings.CustomDownloadLocationAnime || "") ||
+      mangaDownloadLocation !== (settings.CustomDownloadLocationManga || "") ||
+      mangaAutoScrollSpeed !== (settings.mangaAutoScrollSpeed || 2) ||
       animeNamingScheme !== (settings.animeNamingScheme || "default") ||
       mangaNamingScheme !== (settings.mangaNamingScheme || "default") ||
       jellyfinCompatibility !== (settings.jellyfinCompatibility || false) ||
@@ -1169,7 +1205,9 @@ export default function SettingsView({
     playerSpeed,
     developerMode,
     downloadNotification,
-    downloadLocation,
+    animeDownloadLocation,
+    mangaDownloadLocation,
+    mangaAutoScrollSpeed,
     animeNamingScheme,
     mangaNamingScheme,
     jellyfinCompatibility,
@@ -1305,10 +1343,17 @@ export default function SettingsView({
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("anime_manga")}
-              className={`settings-tab-btn ${activeTab === "anime_manga" ? "active" : ""}`}
+              onClick={() => setActiveTab("anime")}
+              className={`settings-tab-btn ${activeTab === "anime" ? "active" : ""}`}
             >
-              Anime & Manga Settings
+              Anime Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("manga")}
+              className={`settings-tab-btn ${activeTab === "manga" ? "active" : ""}`}
+            >
+              Manga Settings
             </button>
             <button
               type="button"
@@ -1347,58 +1392,22 @@ export default function SettingsView({
               {/* General Settings */}
               <div className="settings-section glass-panel">
                 <h2 className="settings-section-title">General Settings</h2>
-                <SettingsRow
-                  label="Download Notifications"
-                  desc="Show active download progress notification in the Android status bar."
-                >
-                  <Dropdown
-                    value={String(downloadNotification)}
-                    onChange={(val) => setDownloadNotification(val === "true")}
-                    options={[
-                      { value: "true", label: "Enabled" },
-                      { value: "false", label: "Disabled" },
-                    ]}
-                    minWidth={200}
-                  />
-                </SettingsRow>
-                {!isMobileApp() && (
+                {isMobileApp() && (
                   <SettingsRow
-                    label="Download Location"
-                    desc="Where new anime episodes and manga chapters are saved. Takes effect for new downloads; move existing Anime/Manga folders over manually to keep them visible."
+                    label="Download Notifications"
+                    desc="Show active download progress notification in the Android status bar."
                   >
-                    <div className="download-location-picker">
-                      <input
-                        type="text"
-                        className="settings-text-input download-location-path"
-                        value={downloadLocation}
-                        placeholder="Default (system Downloads folder)"
-                        readOnly
-                        title={
-                          downloadLocation ||
-                          "Default (system Downloads folder)"
-                        }
-                      />
-                      <button
-                        type="button"
-                        className="settings-market-btn download-location-btn"
-                        onClick={handleBrowseDownloadLocation}
-                        disabled={browsingFolder}
-                      >
-                        <FolderOpen size={14} />
-                        {browsingFolder ? "Browsing..." : "Browse"}
-                      </button>
-                      {downloadLocation && (
-                        <button
-                          type="button"
-                          className="theme-reset-btn"
-                          onClick={handleResetDownloadLocation}
-                          title="Reset to default Downloads folder"
-                          aria-label="Reset download location to default"
-                        >
-                          <RotateCcw size={16} />
-                        </button>
-                      )}
-                    </div>
+                    <Dropdown
+                      value={String(downloadNotification)}
+                      onChange={(val) =>
+                        setDownloadNotification(val === "true")
+                      }
+                      options={[
+                        { value: "true", label: "Enabled" },
+                        { value: "false", label: "Disabled" },
+                      ]}
+                      minWidth={200}
+                    />
                   </SettingsRow>
                 )}
                 <SettingsRow
@@ -1429,6 +1438,121 @@ export default function SettingsView({
                     minWidth={200}
                   />
                 </SettingsRow>
+              </div>
+              {/* MyAnimeList Connection */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">
+                  MyAnimeList Integration
+                </h2>
+
+                {malLoggedIn ? (
+                  <>
+                    <div className="settings-row-item">
+                      <div className="settings-row-info">
+                        <div className="settings-row-label">
+                          Connection Status
+                        </div>
+                        <div className="settings-row-hint">
+                          Syncs watch/read status automatically to your MAL
+                          profile.
+                        </div>
+                      </div>
+                      <div className="settings-row-control">
+                        <div className="u-style-78">
+                          <CheckCircle size={18} />
+                          <span>Connected</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="settings-row-item">
+                      <div className="settings-row-info">
+                        <div className="settings-row-label">
+                          Auto-update Status
+                        </div>
+                        <div className="settings-row-hint">
+                          Default status applied to media when starting or
+                          completing.
+                        </div>
+                      </div>
+                      <div className="settings-row-control">
+                        <Dropdown
+                          value={malStatus}
+                          onChange={setMalStatus}
+                          options={MAL_STATUSES.Anime.map((s) => ({
+                            value: s,
+                            label: getMalStatusLabel(s),
+                          }))}
+                          minWidth={200}
+                        />
+                      </div>
+                    </div>
+                    <div className="settings-row-item">
+                      <div className="settings-row-info">
+                        <div className="settings-row-label">
+                          Account Options
+                        </div>
+                        <div className="settings-row-hint">
+                          Disconnect and remove MyAnimeList credentials from
+                          StrawVerse.
+                        </div>
+                      </div>
+                      <div className="settings-row-control">
+                        <button
+                          type="button"
+                          onClick={handleMalLogout}
+                          className="settings-logout-btn u-style-11"
+                        >
+                          <LogOut size={16} />
+                          <span>Disconnect Account</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="settings-row-item">
+                    <div className="settings-row-info">
+                      <div className="settings-row-label">
+                        MyAnimeList Progress Sync
+                      </div>
+                      <div className="settings-row-hint">
+                        Connect your account to synchronize your watch and read
+                        progress automatically.
+                      </div>
+                    </div>
+                    <div className="settings-row-control">
+                      {url ? (
+                        <a
+                          href={url}
+                          onClick={(e) => {
+                            e.preventDefault();
+                            if (
+                              window.Capacitor &&
+                              window.Capacitor.Plugins &&
+                              window.Capacitor.Plugins.CloudflareBypass
+                            ) {
+                              window.Capacitor.Plugins.CloudflareBypass.openSystemBrowser(
+                                { url },
+                              ).catch(() => {
+                                window.open(url, "_blank");
+                              });
+                            } else {
+                              window.open(url, "_blank");
+                            }
+                          }}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="settings-connect-link u-style-81"
+                        >
+                          <LinkIcon size={16} />
+                          <span>Authenticate Account</span>
+                        </a>
+                      ) : (
+                        <span className="u-style-82">OAuth URL Error</span>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
               {/* Catalog Layout & Appearance */}
               <div className="settings-section glass-panel">
@@ -1470,99 +1594,90 @@ export default function SettingsView({
                 </SettingsRow>
 
                 <SettingsRow
-                  label={`Catalog Card Max Height (${catalogCardMaxHeight === "auto" ? "Auto" : `${parseInt(catalogCardMaxHeight, 10)}px`})`}
+                  label="Catalog Card Max Height"
                   desc="Limit maximum height of poster images to avoid oversized cards on large displays."
                 >
-                  <div className="settings-slider-wrapper">
-                    <input
-                      type="range"
-                      min={160}
-                      max={460}
-                      step={10}
-                      value={
-                        catalogCardMaxHeight === "auto"
-                          ? 460
-                          : parseInt(catalogCardMaxHeight, 10)
-                      }
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        const finalVal = val >= 460 ? "auto" : `${val}px`;
-                        handleCatalogCardMaxHeightChange(finalVal);
-                      }}
-                      className="settings-range-slider"
-                    />
-                    <span
-                      className="settings-slider-val"
-                      style={{ minWidth: "55px" }}
-                    >
-                      {catalogCardMaxHeight === "auto"
-                        ? "Auto"
-                        : `${parseInt(catalogCardMaxHeight, 10)}px`}
-                    </span>
-                    {catalogCardMaxHeight !== "auto" && (
-                      <button
-                        type="button"
-                        className="btn-text-reset"
-                        style={{
-                          marginLeft: "8px",
-                          fontSize: "12px",
-                          color: "var(--accent)",
-                          cursor: "pointer",
-                          background: "none",
-                          border: "none",
-                          fontWeight: 500,
-                        }}
-                        onClick={() => handleCatalogCardMaxHeightChange("auto")}
-                      >
-                        Reset
-                      </button>
-                    )}
-                  </div>
+                  <Dropdown
+                    value={catalogCardMaxHeight}
+                    onChange={handleCatalogCardMaxHeightChange}
+                    options={[
+                      { value: "auto", label: "Auto (Uncapped)" },
+                      { value: "180px", label: "180px (Extra Compact)" },
+                      { value: "200px", label: "200px (Compact)" },
+                      { value: "240px", label: "240px" },
+                      { value: "280px", label: "280px" },
+                      { value: "320px", label: "320px (Default)" },
+                      { value: "360px", label: "360px" },
+                      { value: "400px", label: "400px" },
+                      { value: "440px", label: "440px (Tall)" },
+                      ...(![
+                        "auto",
+                        "180px",
+                        "200px",
+                        "240px",
+                        "280px",
+                        "320px",
+                        "360px",
+                        "400px",
+                        "440px",
+                      ].includes(catalogCardMaxHeight)
+                        ? [
+                            {
+                              value: catalogCardMaxHeight,
+                              label: `${catalogCardMaxHeight} (Custom)`,
+                            },
+                          ]
+                        : []),
+                    ]}
+                    minWidth={200}
+                  />
                 </SettingsRow>
 
                 <SettingsRow
-                  label={`Catalog Title Font Size (${catalogTitleFontSize}px)`}
+                  label="Catalog Title Font Size"
                   desc="Adjust the font size of media item titles below poster images."
                 >
-                  <div className="settings-slider-wrapper">
-                    <input
-                      type="range"
-                      min={10}
-                      max={20}
-                      step={1}
-                      value={catalogTitleFontSize}
-                      onChange={(e) =>
-                        handleCatalogTitleFontSizeChange(e.target.value)
-                      }
-                      className="settings-range-slider"
-                    />
-                    <span className="settings-slider-val">
-                      {catalogTitleFontSize}px
-                    </span>
-                  </div>
+                  <Dropdown
+                    value={String(catalogTitleFontSize)}
+                    onChange={handleCatalogTitleFontSizeChange}
+                    options={[
+                      { value: "11", label: "11px (Small)" },
+                      { value: "12", label: "12px" },
+                      { value: "13", label: "13px (Default)" },
+                      { value: "14", label: "14px" },
+                      { value: "15", label: "15px" },
+                      { value: "16", label: "16px (Large)" },
+                      { value: "18", label: "18px (Extra Large)" },
+                      ...(!["11", "12", "13", "14", "15", "16", "18"].includes(
+                        String(catalogTitleFontSize),
+                      )
+                        ? [
+                            {
+                              value: String(catalogTitleFontSize),
+                              label: `${catalogTitleFontSize}px (Custom)`,
+                            },
+                          ]
+                        : []),
+                    ]}
+                    minWidth={200}
+                  />
                 </SettingsRow>
 
                 <SettingsRow
-                  label={`Catalog Title Lines (${catalogTitleLines} ${catalogTitleLines === 1 ? "line" : "lines"})`}
+                  label="Catalog Title Lines"
                   desc="Limit the maximum number of text lines shown for titles in the catalog."
                 >
-                  <div className="settings-slider-wrapper">
-                    <input
-                      type="range"
-                      min={1}
-                      max={4}
-                      step={1}
-                      value={catalogTitleLines}
-                      onChange={(e) =>
-                        handleCatalogTitleLinesChange(e.target.value)
-                      }
-                      className="settings-range-slider"
-                    />
-                    <span className="settings-slider-val">
-                      {catalogTitleLines}{" "}
-                      {catalogTitleLines === 1 ? "line" : "lines"}
-                    </span>
-                  </div>
+                  <Dropdown
+                    value={String(catalogTitleLines)}
+                    onChange={handleCatalogTitleLinesChange}
+                    options={[
+                      { value: "1", label: "1 Line" },
+                      { value: "2", label: "2 Lines (Default)" },
+                      { value: "3", label: "3 Lines" },
+                      { value: "4", label: "4 Lines" },
+                    ]}
+                    minWidth={200}
+                  />
                 </SettingsRow>
 
                 {/* Live Preview Box */}
@@ -1925,11 +2040,11 @@ export default function SettingsView({
             </div>
           )}
 
-          {activeTab === "anime_manga" && (
+          {activeTab === "anime" && (
             <div className="settings-column">
-              {/* Anime Settings */}
+              {/* Playback & Streaming */}
               <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">Anime Settings</h2>
+                <h2 className="settings-section-title">Playback & Streaming</h2>
 
                 <div className="settings-row-item">
                   <div className="settings-row-info">
@@ -1977,6 +2092,102 @@ export default function SettingsView({
                     />
                   </div>
                 </div>
+
+                <SettingsRow
+                  label="Default Playback Speed"
+                  desc="Default playback speed when launching video player (MPV / Android)."
+                >
+                  <Dropdown
+                    value={String(playerSpeed)}
+                    onChange={(val) => setPlayerSpeed(parseFloat(val))}
+                    options={[
+                      { value: "0.5", label: "0.5x" },
+                      { value: "0.75", label: "0.75x" },
+                      { value: "1", label: "1.0x (Normal)" },
+                      { value: "1.25", label: "1.25x" },
+                      { value: "1.5", label: "1.5x" },
+                      { value: "1.75", label: "1.75x" },
+                      { value: "2", label: "2.0x" },
+                      { value: "2.5", label: "2.5x" },
+                    ]}
+                    minWidth={200}
+                  />
+                </SettingsRow>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Auto-Skip Intro & Outro
+                    </div>
+                    <div className="settings-row-hint">
+                      Automatically skip intro and outro segments during
+                      playback when detected.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={String(autoSkipIntro)}
+                      onChange={(val) => setAutoSkipIntro(val === "true")}
+                      options={[
+                        { value: "true", label: "Yes" },
+                        { value: "false", label: "No" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Downloads & Media Server */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">
+                  Downloads & Media Server
+                </h2>
+
+                <SettingsRow
+                  label="Anime Download Location"
+                  desc="Where new anime episodes are saved. Takes effect for new downloads. Custom paths download anime files directly inside without creating an extra Anime subfolder."
+                >
+                  <div className="download-location-picker">
+                    <input
+                      type="text"
+                      className="settings-text-input download-location-path"
+                      value={animeDownloadLocation}
+                      placeholder={
+                        isMobileApp()
+                          ? "Default (/StrawVerse/Anime)"
+                          : "Default (Downloads/Anime)"
+                      }
+                      readOnly
+                      title={
+                        animeDownloadLocation ||
+                        (isMobileApp()
+                          ? "Default (/StrawVerse/Anime)"
+                          : "Default (Downloads/Anime)")
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="settings-market-btn download-location-btn"
+                      onClick={() => handleBrowseLocation("Anime")}
+                      disabled={browsingFolder}
+                    >
+                      <FolderOpen size={14} />
+                      {browsingFolder ? "Browsing..." : "Browse"}
+                    </button>
+                    {animeDownloadLocation && (
+                      <button
+                        type="button"
+                        className="theme-reset-btn"
+                        onClick={() => setAnimeDownloadLocation("")}
+                        title="Reset to default Anime Downloads folder"
+                        aria-label="Reset Anime download location"
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
 
                 <SettingsRow
                   label="Anime Download Naming"
@@ -2035,79 +2246,6 @@ export default function SettingsView({
                 <div className="settings-row-item">
                   <div className="settings-row-info">
                     <div className="settings-row-label">
-                      Auto-Skip Intro & Outro
-                    </div>
-                    <div className="settings-row-hint">
-                      Automatically skip intro and outro segments during
-                      playback when detected.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={String(autoSkipIntro)}
-                      onChange={(val) => setAutoSkipIntro(val === "true")}
-                      options={[
-                        { value: "true", label: "Yes" },
-                        { value: "false", label: "No" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Merge Soft Subtitles
-                    </div>
-                    <div className="settings-row-hint">
-                      Automatically merge downloaded subtitles into the video
-                      file container using FFmpeg.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={String(mergeSubtitles)}
-                      onChange={(val) => setMergeSubtitles(val === "true")}
-                      options={[
-                        {
-                          value: "true",
-                          label: "Yes (Merge subtitles inside MP4)",
-                        },
-                        {
-                          value: "false",
-                          label: "No (Download subtitles in subfolder)",
-                        },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">Subtitle Format</div>
-                    <div className="settings-row-hint">
-                      Subtitle file format used for download and merge
-                      operations.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={subtitleFormat}
-                      onChange={setSubtitleFormat}
-                      options={[
-                        { value: "srt", label: "SubRip (.srt)" },
-                        { value: "vtt", label: "WebVTT (.vtt)" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
                       Media Server Integration (Jellyfin / Plex)
                     </div>
                     <div className="settings-row-hint">
@@ -2130,6 +2268,11 @@ export default function SettingsView({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Subtitles & Audio */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Subtitles & Audio</h2>
 
                 <div
                   className="settings-row-item vertical-layout"
@@ -2266,19 +2409,51 @@ export default function SettingsView({
 
                 <div className="settings-row-item">
                   <div className="settings-row-info">
-                    <div className="settings-row-label">Manage Extensions</div>
+                    <div className="settings-row-label">Subtitle Format</div>
                     <div className="settings-row-hint">
-                      Install, update, or configure anime scraper providers.
+                      Subtitle file format used for download and merge
+                      operations.
                     </div>
                   </div>
                   <div className="settings-row-control">
-                    <button
-                      type="button"
-                      onClick={() => onMarketplaceOpen("Anime")}
-                      className="settings-market-btn u-style-11"
-                    >
-                      Open Anime Extensions
-                    </button>
+                    <Dropdown
+                      value={subtitleFormat}
+                      onChange={setSubtitleFormat}
+                      options={[
+                        { value: "srt", label: "SubRip (.srt)" },
+                        { value: "vtt", label: "WebVTT (.vtt)" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Merge Soft Subtitles
+                    </div>
+                    <div className="settings-row-hint">
+                      Automatically merge downloaded subtitles into the video
+                      file container using FFmpeg.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={String(mergeSubtitles)}
+                      onChange={(val) => setMergeSubtitles(val === "true")}
+                      options={[
+                        {
+                          value: "true",
+                          label: "Yes (Merge subtitles inside MP4)",
+                        },
+                        {
+                          value: "false",
+                          label: "No (Download subtitles in subfolder)",
+                        },
+                      ]}
+                      minWidth={200}
+                    />
                   </div>
                 </div>
               </div>
@@ -2311,67 +2486,40 @@ export default function SettingsView({
                 </div>
 
                 <SettingsRow
-                  label="Default Playback Speed"
-                  desc="Default playback speed when launching video player (MPV / Android)."
+                  label="Subtitle Font Size"
+                  desc="Adjust font size of subtitles in video player."
                 >
                   <Dropdown
-                    value={String(playerSpeed)}
-                    onChange={(val) => setPlayerSpeed(parseFloat(val))}
+                    value={String(subFontSize)}
+                    onChange={(val) => setSubFontSize(parseInt(val, 10))}
                     options={[
-                      { value: "0.5", label: "0.5x" },
-                      { value: "0.75", label: "0.75x" },
-                      { value: "1", label: "1.0x (Normal)" },
-                      { value: "1.25", label: "1.25x" },
-                      { value: "1.5", label: "1.5x" },
-                      { value: "1.75", label: "1.75x" },
-                      { value: "2", label: "2.0x" },
-                      { value: "2.5", label: "2.5x" },
+                      { value: "28", label: "28px (Small)" },
+                      { value: "34", label: "34px" },
+                      { value: "40", label: "40px" },
+                      { value: "46", label: "46px (Default)" },
+                      { value: "52", label: "52px" },
+                      { value: "58", label: "58px (Large)" },
+                      { value: "66", label: "66px (Extra Large)" },
+                      ...(!["28", "34", "40", "46", "52", "58", "66"].includes(
+                        String(subFontSize),
+                      )
+                        ? [
+                            {
+                              value: String(subFontSize),
+                              label: `${subFontSize}px (Custom)`,
+                            },
+                          ]
+                        : []),
                     ]}
                     minWidth={200}
                   />
                 </SettingsRow>
 
                 <SettingsRow
-                  label={`Subtitle Font Size (${subFontSize}px)`}
-                  desc="Adjust font size of subtitles in video player."
-                >
-                  <div className="settings-slider-wrapper">
-                    <input
-                      type="range"
-                      min={20}
-                      max={72}
-                      step={2}
-                      value={subFontSize}
-                      onChange={(e) =>
-                        setSubFontSize(parseInt(e.target.value, 10))
-                      }
-                      className="settings-range-slider"
-                    />
-                    <span className="settings-slider-val">{subFontSize}px</span>
-                  </div>
-                </SettingsRow>
-
-                <SettingsRow
                   label="Subtitle Text Color"
                   desc="Color of subtitle text characters."
                 >
-                  <div className="theme-color-picker-row">
-                    {[
-                      "#FFFFFF",
-                      "#FFFF00",
-                      "#00FFFF",
-                      "#00FF00",
-                      "#FFCC00",
-                    ].map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        className={`color-preset-dot ${subColor.toUpperCase() === c ? "active" : ""}`}
-                        style={{ backgroundColor: c }}
-                        onClick={() => setSubColor(c)}
-                        title={`Select ${c}`}
-                      />
-                    ))}
+                  <div className="color-picker-control">
                     <input
                       type="color"
                       value={subColor.startsWith("#") ? subColor : "#FFFFFF"}
@@ -2386,23 +2534,7 @@ export default function SettingsView({
                   label="Outline / Border Color"
                   desc="Outline border color around text characters (prevents text fading into white video frames)."
                 >
-                  <div className="theme-color-picker-row">
-                    {[
-                      "#000000",
-                      "#111111",
-                      "#333333",
-                      "#000080",
-                      "#800000",
-                    ].map((c) => (
-                      <button
-                        key={c}
-                        type="button"
-                        className={`color-preset-dot ${subBorderColor.toUpperCase() === c ? "active" : ""}`}
-                        style={{ backgroundColor: c }}
-                        onClick={() => setSubBorderColor(c)}
-                        title={`Select ${c}`}
-                      />
-                    ))}
+                  <div className="color-picker-control">
                     <input
                       type="color"
                       value={
@@ -2418,25 +2550,33 @@ export default function SettingsView({
                 </SettingsRow>
 
                 <SettingsRow
-                  label={`Outline / Border Thickness (${subBorderSize}px)`}
+                  label="Outline / Border Thickness"
                   desc="Thickness of outline border around subtitle text."
                 >
-                  <div className="settings-slider-wrapper">
-                    <input
-                      type="range"
-                      min={0}
-                      max={6}
-                      step={0.5}
-                      value={subBorderSize}
-                      onChange={(e) =>
-                        setSubBorderSize(parseFloat(e.target.value))
-                      }
-                      className="settings-range-slider"
-                    />
-                    <span className="settings-slider-val">
-                      {subBorderSize}px
-                    </span>
-                  </div>
+                  <Dropdown
+                    value={String(subBorderSize)}
+                    onChange={(val) => setSubBorderSize(parseFloat(val))}
+                    options={[
+                      { value: "0", label: "0px (None)" },
+                      { value: "1", label: "1.0px (Thin)" },
+                      { value: "2", label: "2.0px" },
+                      { value: "3", label: "3.0px (Default)" },
+                      { value: "4", label: "4.0px" },
+                      { value: "5", label: "5.0px (Thick)" },
+                      { value: "6", label: "6.0px (Heavy)" },
+                      ...(!["0", "1", "2", "3", "4", "5", "6"].includes(
+                        String(subBorderSize),
+                      )
+                        ? [
+                            {
+                              value: String(subBorderSize),
+                              label: `${subBorderSize}px (Custom)`,
+                            },
+                          ]
+                        : []),
+                    ]}
+                    minWidth={200}
+                  />
                 </SettingsRow>
 
                 <SettingsRow
@@ -2551,10 +2691,14 @@ export default function SettingsView({
                   </div>
                 </div>
               </div>
+            </div>
+          )}
 
-              {/* Manga Settings */}
+          {activeTab === "manga" && (
+            <div className="settings-column">
+              {/* Provider Settings */}
               <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">Manga Settings</h2>
+                <h2 className="settings-section-title">Provider Settings</h2>
 
                 <div className="settings-row-item">
                   <div className="settings-row-info">
@@ -2581,6 +2725,11 @@ export default function SettingsView({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Reader Settings */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Reader Settings</h2>
 
                 <div className="settings-row-item">
                   <div className="settings-row-info">
@@ -2608,30 +2757,66 @@ export default function SettingsView({
                   </div>
                 </div>
 
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Manga Reader Width ({mangaReaderWidth}px)
-                    </div>
-                    <div className="settings-row-hint">
-                      Adjust the maximum page display width inside the manga
-                      reader.
-                    </div>
-                  </div>
-                  <div className="settings-row-control u-style-27">
-                    <input
-                      type="range"
-                      min="400"
-                      max="1600"
-                      step="20"
-                      value={mangaReaderWidth}
-                      onChange={(e) =>
-                        setMangaReaderWidth(parseInt(e.target.value, 10))
-                      }
-                      className="settings-range-slider u-style-77"
-                    />
-                  </div>
-                </div>
+                <SettingsRow
+                  label="Manga Reader Width"
+                  desc="Adjust the maximum page display width inside the manga reader."
+                >
+                  <Dropdown
+                    value={String(mangaReaderWidth)}
+                    onChange={(val) => setMangaReaderWidth(parseInt(val, 10))}
+                    options={[
+                      { value: "600", label: "600px (Compact)" },
+                      { value: "700", label: "700px" },
+                      { value: "800", label: "800px (Default)" },
+                      { value: "900", label: "900px" },
+                      { value: "1000", label: "1000px (Medium)" },
+                      { value: "1100", label: "1100px" },
+                      { value: "1200", label: "1200px (Wide)" },
+                      { value: "1400", label: "1400px (Extra Wide)" },
+                      { value: "1600", label: "1600px (Full Width)" },
+                      ...(![
+                        "600",
+                        "700",
+                        "800",
+                        "900",
+                        "1000",
+                        "1100",
+                        "1200",
+                        "1400",
+                        "1600",
+                      ].includes(String(mangaReaderWidth))
+                        ? [
+                            {
+                              value: String(mangaReaderWidth),
+                              label: `${mangaReaderWidth}px (Custom)`,
+                            },
+                          ]
+                        : []),
+                    ]}
+                    minWidth={200}
+                  />
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Auto-Scroll Speed"
+                  desc="Default continuous vertical scrolling speed in Long Strip mode."
+                >
+                  <Dropdown
+                    value={String(mangaAutoScrollSpeed)}
+                    onChange={(val) =>
+                      setMangaAutoScrollSpeed(parseInt(val, 10))
+                    }
+                    options={[
+                      { value: "1", label: "1.0x (Slowest)" },
+                      { value: "2", label: "2.0x (Default)" },
+                      { value: "3", label: "3.0x (Normal)" },
+                      { value: "4", label: "4.0x (Fast)" },
+                      { value: "5", label: "5.0x (Faster)" },
+                      { value: "6", label: "6.0x (Fastest)" },
+                    ]}
+                    minWidth={200}
+                  />
+                </SettingsRow>
 
                 <div className="settings-row-item">
                   <div className="settings-row-info">
@@ -2655,6 +2840,56 @@ export default function SettingsView({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Downloads & Storage */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Downloads & Storage</h2>
+
+                <SettingsRow
+                  label="Manga Download Location"
+                  desc="Where new manga chapters are saved (.cbz archives). Takes effect for new downloads. Custom paths download manga files directly inside without creating an extra Manga subfolder."
+                >
+                  <div className="download-location-picker">
+                    <input
+                      type="text"
+                      className="settings-text-input download-location-path"
+                      value={mangaDownloadLocation}
+                      placeholder={
+                        isMobileApp()
+                          ? "Default (/StrawVerse/Manga)"
+                          : "Default (Downloads/Manga)"
+                      }
+                      readOnly
+                      title={
+                        mangaDownloadLocation ||
+                        (isMobileApp()
+                          ? "Default (/StrawVerse/Manga)"
+                          : "Default (Downloads/Manga)")
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="settings-market-btn download-location-btn"
+                      onClick={() => handleBrowseLocation("Manga")}
+                      disabled={browsingFolder}
+                    >
+                      <FolderOpen size={14} />
+                      {browsingFolder ? "Browsing..." : "Browse"}
+                    </button>
+                    {mangaDownloadLocation && (
+                      <button
+                        type="button"
+                        className="theme-reset-btn"
+                        onClick={() => setMangaDownloadLocation("")}
+                        title="Reset to default Manga Downloads folder"
+                        aria-label="Reset Manga download location"
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
 
                 <SettingsRow
                   label="Manga Download Naming"
@@ -2678,140 +2913,6 @@ export default function SettingsView({
                     minWidth={220}
                   />
                 </SettingsRow>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">Manage Extensions</div>
-                    <div className="settings-row-hint">
-                      Install, update, or configure manga scraper providers.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <button
-                      type="button"
-                      onClick={() => onMarketplaceOpen("Manga")}
-                      className="settings-market-btn u-style-11"
-                    >
-                      Open Manga Extensions
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* MyAnimeList Connection */}
-              <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">
-                  MyAnimeList Integration
-                </h2>
-
-                {malLoggedIn ? (
-                  <>
-                    <div className="settings-row-item">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">
-                          Connection Status
-                        </div>
-                        <div className="settings-row-hint">
-                          Syncs watch/read status automatically to your MAL
-                          profile.
-                        </div>
-                      </div>
-                      <div className="settings-row-control">
-                        <div className="u-style-78">
-                          <CheckCircle size={18} />
-                          <span>Connected</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="settings-row-item">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">
-                          Auto-update Status
-                        </div>
-                        <div className="settings-row-hint">
-                          Default status applied to media when starting or
-                          completing.
-                        </div>
-                      </div>
-                      <div className="settings-row-control">
-                        <Dropdown
-                          value={malStatus}
-                          onChange={setMalStatus}
-                          options={MAL_STATUSES.Anime.map((s) => ({
-                            value: s,
-                            label: getMalStatusLabel(s),
-                          }))}
-                          minWidth={200}
-                        />
-                      </div>
-                    </div>
-                    <div className="settings-row-item">
-                      <div className="settings-row-info">
-                        <div className="settings-row-label">
-                          Account Options
-                        </div>
-                        <div className="settings-row-hint">
-                          Disconnect and remove MyAnimeList credentials from
-                          StrawVerse.
-                        </div>
-                      </div>
-                      <div className="settings-row-control">
-                        <button
-                          type="button"
-                          onClick={handleMalLogout}
-                          className="settings-logout-btn u-style-11"
-                        >
-                          <LogOut size={16} />
-                          <span>Disconnect Account</span>
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="settings-row-item">
-                    <div className="settings-row-info">
-                      <div className="settings-row-label">
-                        MyAnimeList Progress Sync
-                      </div>
-                      <div className="settings-row-hint">
-                        Connect your account to synchronize your watch and read
-                        progress automatically.
-                      </div>
-                    </div>
-                    <div className="settings-row-control">
-                      {url ? (
-                        <a
-                          href={url}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            if (
-                              window.Capacitor &&
-                              window.Capacitor.Plugins &&
-                              window.Capacitor.Plugins.CloudflareBypass
-                            ) {
-                              window.Capacitor.Plugins.CloudflareBypass.openSystemBrowser(
-                                { url },
-                              ).catch(() => {
-                                window.open(url, "_blank");
-                              });
-                            } else {
-                              window.open(url, "_blank");
-                            }
-                          }}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="settings-connect-link u-style-81"
-                        >
-                          <LinkIcon size={16} />
-                          <span>Authenticate Account</span>
-                        </a>
-                      ) : (
-                        <span className="u-style-82">OAuth URL Error</span>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -2956,9 +3057,9 @@ export default function SettingsView({
                                       {item.hidden === 1 && (
                                         <span
                                           className="settings-hidden-badge"
-                                          title="Hidden from Continue Watching/Reading shelf"
+                                          title="Dismissed from Continue Watching/Reading on Home screen"
                                         >
-                                          Hidden from shelf
+                                          Hidden from Home
                                         </span>
                                       )}
                                     </div>
@@ -2982,7 +3083,7 @@ export default function SettingsView({
                                         e.stopPropagation();
                                         handleUnhideHistory(item);
                                       }}
-                                      title="Restore to Continue shelf"
+                                      title="Restore to Home screen"
                                     >
                                       <Eye size={16} />
                                     </button>

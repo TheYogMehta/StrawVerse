@@ -19,6 +19,21 @@
     height: 100dvh;
   }
 
+  html .app-layout.is-reading {
+    height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  html .app-layout.is-reading > main {
+    height: 100dvh !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  html .app-layout.is-reading .sidebar {
+    display: none !important;
+  }
+
   html .app-layout > main {
     order: 1;
     flex: 1;
@@ -182,11 +197,19 @@
     overflow: hidden !important;
   }
 
+  html .info-title-row {
+    width: 100% !important;
+    justify-content: center !important;
+  }
+
   html .info-title {
     font-size: 22px !important;
     text-align: center !important;
     word-break: break-word !important;
-    width: 100% !important;
+    width: auto !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -webkit-touch-callout: default !important;
   }
 
   html .info-description {
@@ -197,6 +220,9 @@
     overflow-wrap: break-word !important;
     font-size: 14px !important;
     text-align: left !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    -webkit-touch-callout: default !important;
   }
 
   html .actions-row {

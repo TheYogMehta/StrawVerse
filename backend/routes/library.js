@@ -373,7 +373,7 @@ router.post("/api/local/tags/add", async (req, res) => {
             const lookupId = id;
             const animedata = await animeinfo(
               resolvedProvider,
-              config?.CustomDownloadLocation,
+              config?.CustomDownloadLocationAnime,
               lookupId,
             );
             if (animedata) {
@@ -451,11 +451,17 @@ router.post("/api/local/tags/add", async (req, res) => {
           .prepare(`SELECT id, folder_name FROM ${type} WHERE MalID = ?`)
           .all(targetMalID);
 
-        const baseDir = await getBaseDownloadDir();
+        const baseDir = await getBaseDownloadDir(type);
 
         for (const row of rowsToClean) {
           const folderName = row.folder_name || "";
-          const folderPath = path.join(baseDir, type, folderName);
+          let folderPath = path.join(baseDir, type, folderName);
+          if (
+            !fs.existsSync(folderPath) &&
+            fs.existsSync(path.join(baseDir, folderName))
+          ) {
+            folderPath = path.join(baseDir, folderName);
+          }
           const folderExists = folderName && fs.existsSync(folderPath);
 
           if (!folderExists) {
@@ -474,7 +480,7 @@ router.post("/api/local/tags/add", async (req, res) => {
       (CustomTag !== undefined && (tagValue === "" || tagValue === "[]"))
     ) {
       try {
-        const baseDir = await getBaseDownloadDir();
+        const baseDir = await getBaseDownloadDir(type);
         const typeDir = await resolveDownloadFolder(type, id, null, baseDir);
         if (typeDir && fs.existsSync(typeDir)) {
           await fs.promises.rm(typeDir, { recursive: true, force: true });
@@ -541,8 +547,8 @@ router.post("/api/local/tags/remove", async (req, res) => {
     const { id, type } = req.body;
     if (!id || !type) throw new Error("ID or Type is missing");
 
-    const baseDir = await getBaseDownloadDir();
-    let typeDir = path.join(baseDir, type, id);
+    const baseDir = await getBaseDownloadDir(type);
+    let typeDir = await resolveDownloadFolder(type, id, null, baseDir);
 
     let dbRecord = null;
     try {
@@ -551,14 +557,7 @@ router.post("/api/local/tags/remove", async (req, res) => {
         .get(id);
     } catch (e) {}
 
-    if (!fs.existsSync(typeDir) && dbRecord) {
-      const folderName =
-        dbRecord.folder_name ||
-        (dbRecord.title ? sanitizeFolderName(dbRecord.title) : id);
-      typeDir = path.join(baseDir, type, folderName);
-    }
-
-    if (fs.existsSync(typeDir)) {
+    if (typeDir && fs.existsSync(typeDir)) {
       await fs.promises.rm(typeDir, { recursive: true, force: true });
     }
 
@@ -639,7 +638,7 @@ router.post("/api/local/delete", async (req, res) => {
       throw new Error("Missing or invalid parameters");
     }
 
-    const baseDir = await getBaseDownloadDir();
+    const baseDir = await getBaseDownloadDir(type);
     let typeDir = await resolveDownloadFolder(type, id, subdub, baseDir);
 
     if (!fs.existsSync(typeDir)) {
@@ -788,7 +787,7 @@ router.post("/api/local/open", async (req, res) => {
     let targetPath = customPath || "";
 
     if (!targetPath) {
-      const baseDir = await getBaseDownloadDir();
+      const baseDir = await getBaseDownloadDir(type);
       if (!id) {
         targetPath = baseDir;
       } else {
@@ -834,10 +833,126 @@ router.post("/api/local/open", async (req, res) => {
 router.post("/api/history/update", async (req, res) => {
   try {
     const { mediaId, type, number } = req.body;
-    if (!mediaId || !type || !number) {
+    if (!mediaId || !type || number === undefined || number === null) {
       throw new Error("Missing parameters for history update");
     }
     await updateHistory(req.body);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Bulk mark items as read or unread
+router.post("/api/history/mark-read", async (req, res) => {
+  try {
+    const {
+      mediaId,
+      type,
+      numbers,
+      isCompleted,
+      title,
+      provider,
+      image,
+      malid,
+      timestamp,
+    } = req.body;
+    if (!mediaId || !type || !Array.isArray(numbers) || numbers.length === 0) {
+      throw new Error("Missing parameters for bulk history update");
+    }
+
+    const nowIso = timestamp
+      ? new Date(timestamp).toISOString()
+      : new Date().toISOString();
+
+    for (const num of numbers) {
+      await updateHistory({
+        mediaId,
+        type,
+        number: num,
+        title,
+        provider,
+        image,
+        malid,
+        isCompleted: Boolean(isCompleted),
+        currentTime: isCompleted ? 1 : 0,
+        duration: 1,
+        timeSpent: isCompleted ? 10 : 0,
+        timestamp: nowIso,
+      });
+    }
+
+    res.json({ success: true, count: numbers.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Edit specific history entry (timestamp, progress, completion)
+router.post("/api/history/edit-entry", async (req, res) => {
+  try {
+    const {
+      mediaId,
+      type,
+      number,
+      isCompleted,
+      currentPageOrTime,
+      totalPagesOrTime,
+      timestamp,
+      title,
+      provider,
+      image,
+      malid,
+    } = req.body;
+    if (!mediaId || !type || number === undefined) {
+      throw new Error("Missing parameters for history edit");
+    }
+
+    const isAnime = type === "Anime";
+    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
+    const idField = isAnime ? "anime_id" : "manga_id";
+    const numberField = isAnime ? "episode_number" : "chapter_number";
+    const currentField = isAnime ? "current_time" : "current_page";
+    const totalField = isAnime ? "duration" : "total_pages";
+    const timeField = isAnime ? "last_watched" : "last_read";
+
+    const cur = parseFloat(currentPageOrTime) || (isCompleted ? 1 : 0);
+    const tot = parseFloat(totalPagesOrTime) || 1;
+    const comp = isCompleted ? 1 : 0;
+    const timeIso = timestamp
+      ? new Date(timestamp).toISOString()
+      : new Date().toISOString();
+    const compAt = isCompleted ? timeIso : null;
+
+    const existing = await queryOne(
+      `SELECT id FROM ${historyTable} WHERE ${idField} = ? AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ?) LIMIT 1`,
+      [mediaId, number, number],
+    );
+
+    if (existing) {
+      await run(
+        `UPDATE ${historyTable} 
+         SET ${currentField} = ?, ${totalField} = ?, is_completed = ?, ${timeField} = ?, completed_at = ?, hidden = 0 
+         WHERE id = ?`,
+        [cur, tot, comp, timeIso, compAt, existing.id],
+      );
+    } else {
+      await updateHistory({
+        mediaId,
+        type,
+        number,
+        title,
+        provider,
+        image,
+        malid,
+        isCompleted: Boolean(isCompleted),
+        currentTime: cur,
+        duration: tot,
+        timeSpent: isCompleted ? 10 : 0,
+        timestamp: timeIso,
+      });
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1021,9 +1136,7 @@ router.get("/api/history/progress", async (req, res) => {
 
       if (inProgressRecords.length > 0) {
         // Sort in-progress by number descending
-        inProgressRecords.sort(
-          (a, b) => Number(b[numCol]) - Number(a[numCol]),
-        );
+        inProgressRecords.sort((a, b) => Number(b[numCol]) - Number(a[numCol]));
         const highestInProgress = inProgressRecords[0];
 
         const maxCompletedNum =
@@ -1056,9 +1169,7 @@ router.get("/api/history/progress", async (req, res) => {
         }
       } else if (completedRecords.length > 0) {
         // All read records are completed: continue with next chapter/episode after highest completed
-        completedRecords.sort(
-          (a, b) => Number(b[numCol]) - Number(a[numCol]),
-        );
+        completedRecords.sort((a, b) => Number(b[numCol]) - Number(a[numCol]));
         targetRecord = completedRecords[0];
         targetSuggestedNum = Number(targetRecord[numCol]) + 1;
       } else {
@@ -1101,17 +1212,25 @@ router.get("/api/history/progress", async (req, res) => {
     const mappedStatus = history.map((h) =>
       isAnime
         ? {
+            id: h.id,
             number: h.episode_number,
             isCompleted: h.is_completed === 1,
             currentTime: h.current_time,
             duration: h.duration,
             subdub: h.sub_dub || "sub",
+            lastWatched: h.last_watched,
+            completedAt: h.completed_at,
+            timeSpent: h.time_spent,
           }
         : {
+            id: h.id,
             number: h.chapter_number,
             isCompleted: h.is_completed === 1,
             currentPage: h.current_page,
             totalPages: h.total_pages,
+            lastRead: h.last_read,
+            completedAt: h.completed_at,
+            timeSpent: h.time_spent,
           },
     );
 

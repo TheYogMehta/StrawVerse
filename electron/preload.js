@@ -28,6 +28,7 @@ const ALLOWED_IPC_CHANNELS = new Set([
   "info-loading-status",
   "open-settings-tab",
   "anime-id-updated",
+  "reader-zoom",
 ]);
 
 contextBridge.exposeInMainWorld("sharedStateAPI", {

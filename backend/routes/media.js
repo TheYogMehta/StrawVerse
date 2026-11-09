@@ -1313,7 +1313,7 @@ router.post(
         if (provider === "local") {
           data = await getAllMetadata(
             "Anime",
-            config?.CustomDownloadLocation,
+            config?.CustomDownloadLocationAnime,
             filters?.page,
             filters?.tag,
             filters,
@@ -1369,7 +1369,7 @@ router.post(
         if (provider === "local") {
           data = await getAllMetadata(
             "Manga",
-            config?.CustomDownloadLocation,
+            config?.CustomDownloadLocationManga,
             filters?.page,
             filters?.tag,
             filters,
@@ -1698,7 +1698,9 @@ router.post(
           AnimeManga,
           id,
           null,
-          setting.CustomDownloadLocation,
+          AnimeManga === "Anime"
+            ? setting?.CustomDownloadLocationAnime
+            : setting?.CustomDownloadLocationManga,
         );
         if (AnimeLocalInfo && AnimeLocalInfo.id) {
           Object.assign(data, AnimeLocalInfo);
@@ -1920,7 +1922,7 @@ router.post(
             try {
               AnimeInfo = await animeinfo(
                 Animeprovider,
-                setting?.CustomDownloadLocation,
+                setting?.CustomDownloadLocationAnime,
                 lookupId,
                 data?.provider ? false : true,
               );
@@ -1951,7 +1953,7 @@ router.post(
               if (newId && newId !== lookupId) {
                 AnimeInfo = await animeinfo(
                   Animeprovider,
-                  setting?.CustomDownloadLocation,
+                  setting?.CustomDownloadLocationAnime,
                   newId,
                   false,
                 );
@@ -3293,7 +3295,7 @@ router.post("/api/watch", async (req, res) => {
 
       const SourcesData = await getSourceById(
         "Anime",
-        config?.CustomDownloadLocation,
+        config?.CustomDownloadLocationAnime,
         ep,
         epNum,
         subdub,
@@ -3389,11 +3391,16 @@ async function getAllowedMediaBases() {
 
   try {
     const config = await settingfetch();
-    if (config?.CustomDownloadLocation) {
-      allowedBases.add(path.resolve(config.CustomDownloadLocation));
-      try {
-        allowedBases.add(fs.realpathSync(config.CustomDownloadLocation));
-      } catch (_) {}
+    for (const loc of [
+      config?.CustomDownloadLocationAnime,
+      config?.CustomDownloadLocationManga,
+    ]) {
+      if (loc && typeof loc === "string") {
+        allowedBases.add(path.resolve(loc));
+        try {
+          allowedBases.add(fs.realpathSync(loc));
+        } catch (_) {}
+      }
     }
   } catch (_) {}
 
@@ -3532,36 +3539,23 @@ router.post("/api/read", async (req, res) => {
   try {
     if (!chapterID) throw new Error("Chapter ID is missing");
 
-    let isLocal = Downloaded;
+    let isLocal = Downloaded === true || Downloaded === "true";
     let SourcesData = null;
     const config = await settingfetch();
 
-    if (MangaID) {
+    if (isLocal && MangaID) {
       try {
         SourcesData = await getSourceById(
           "Manga",
-          config?.CustomDownloadLocation,
+          config?.CustomDownloadLocationManga,
           MangaID,
           chapterID,
         );
-        if (SourcesData?.filepath && fs.existsSync(SourcesData.filepath)) {
-          isLocal = true;
-        }
       } catch (e) {}
     }
 
     if (isLocal) {
-      if (!SourcesData) {
-        if (!MangaID) throw new Error("Manga ID is missing");
-        SourcesData = await getSourceById(
-          "Manga",
-          config?.CustomDownloadLocation,
-          MangaID,
-          chapterID,
-        );
-      }
-
-      if (SourcesData?.filepath) {
+      if (SourcesData?.filepath && fs.existsSync(SourcesData.filepath)) {
         const zipData = fs.readFileSync(SourcesData.filepath);
         const zip = await JSZip.loadAsync(zipData);
 
@@ -3576,7 +3570,7 @@ router.post("/api/read", async (req, res) => {
                 .async("base64")}`,
             })),
         );
-        res.json(pages);
+        return res.json(pages);
       } else {
         throw new Error("Chapter Not Found In Downloads!");
       }

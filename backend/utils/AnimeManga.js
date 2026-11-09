@@ -384,11 +384,7 @@ async function MangaSearch(provider, MANGA_NAME, PAGE = 1, filters = {}) {
       return cachedData;
     }
 
-    const data = await provider.provider.searchManga(
-      MANGA_NAME,
-      PAGE,
-      filters,
-    );
+    const data = await provider.provider.searchManga(MANGA_NAME, PAGE, filters);
     if (data?.results) await enrichWithLibraryTags("Manga", data.results);
     if (data?.data) await enrichWithLibraryTags("Manga", data.data);
     cache.set(cacheKey, data, 60);
@@ -679,7 +675,13 @@ async function migrateLegacyFolderIfNeeded(type, dbRecord, baseDir) {
 
   // 1. If folder_name is set and exists on disk with files, keep it!
   if (dbRecord.folder_name) {
-    const currentPath = path.join(baseDir, type, dbRecord.folder_name);
+    let currentPath = path.join(baseDir, type, dbRecord.folder_name);
+    if (
+      !hasLocalMediaFiles(currentPath, type) &&
+      hasLocalMediaFiles(path.join(baseDir, dbRecord.folder_name), type)
+    ) {
+      currentPath = path.join(baseDir, dbRecord.folder_name);
+    }
     if (hasLocalMediaFiles(currentPath, type)) {
       return dbRecord.folder_name;
     }
@@ -739,6 +741,8 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
 
   let typeDir = path.join(baseDir, type, id || "");
   if (id && fs.existsSync(typeDir)) return typeDir;
+  if (id && fs.existsSync(path.join(baseDir, id || "")))
+    return path.join(baseDir, id || "");
 
   let record = null;
 
@@ -789,6 +793,9 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
       (record.title ? sanitizeFolderName(record.title) : id);
     const resolvedPath = path.join(baseDir, type, folderName);
     if (fs.existsSync(resolvedPath)) return resolvedPath;
+    if (fs.existsSync(path.join(baseDir, folderName))) {
+      return path.join(baseDir, folderName);
+    }
   }
 
   if (id) {
@@ -804,12 +811,20 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
     for (const cand of candidates) {
       const candPath = path.join(baseDir, type, cand);
       if (fs.existsSync(candPath)) return candPath;
+      const directCand = path.join(baseDir, cand);
+      if (fs.existsSync(directCand)) return directCand;
     }
 
     try {
+      const dirsToSearch = [];
       const parentDir = path.join(baseDir, type);
-      if (fs.existsSync(parentDir)) {
-        const dirs = await fs.promises.readdir(parentDir, {
+      if (fs.existsSync(parentDir)) dirsToSearch.push(parentDir);
+      if (fs.existsSync(baseDir) && !dirsToSearch.includes(baseDir)) {
+        dirsToSearch.push(baseDir);
+      }
+
+      for (const pDir of dirsToSearch) {
+        const dirs = await fs.promises.readdir(pDir, {
           withFileTypes: true,
         });
         const cleanId = cleanAlphanumeric(id);
@@ -818,8 +833,10 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
           // season; deleting one entry must not take the whole show)
           if (
             d.isDirectory() &&
+            d.name !== "Anime" &&
+            d.name !== "Manga" &&
             !fs
-              .readdirSync(path.join(parentDir, d.name))
+              .readdirSync(path.join(pDir, d.name))
               .some((n) => SEASON_FOLDER_RE.test(n))
           ) {
             const cleanDirName = cleanAlphanumeric(d.name);
@@ -827,12 +844,32 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
               cleanId.length > 5 &&
               (cleanDirName.includes(cleanId) || cleanId.includes(cleanDirName))
             ) {
-              return path.join(parentDir, d.name);
+              return path.join(pDir, d.name);
             }
           }
         }
       }
     } catch (_) {}
+  }
+
+  if (record) {
+    const folderName =
+      record.folder_name ||
+      (record.title ? sanitizeFolderName(record.title) : id);
+    if (fs.existsSync(path.join(baseDir, folderName))) {
+      return path.join(baseDir, folderName);
+    }
+    if (fs.existsSync(path.join(baseDir, type, folderName))) {
+      return path.join(baseDir, type, folderName);
+    }
+    if (!fs.existsSync(path.join(baseDir, type))) {
+      return path.join(baseDir, folderName);
+    }
+    return path.join(baseDir, type, folderName);
+  }
+
+  if (!fs.existsSync(path.join(baseDir, type)) && id) {
+    return path.join(baseDir, id);
   }
 
   return typeDir;

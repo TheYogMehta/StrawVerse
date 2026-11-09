@@ -14,6 +14,10 @@ import {
   Plus,
   FolderOpen,
   Folder,
+  CheckCircle2,
+  RotateCcw,
+  Copy,
+  Check,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
@@ -442,6 +446,123 @@ export default function InfoView({
 
   const [historyProgress, setHistoryProgress] = useState(null);
   const [hasProgress, setHasProgress] = useState(false);
+
+  // Title copy & long-press hold state
+  const [copiedTitle, setCopiedTitle] = useState(false);
+  const titleHoldTimerRef = useRef(null);
+  const touchStartPosRef = useRef({ x: 0, y: 0 });
+
+  const handleCopyTitle = useCallback(
+    (e) => {
+      if (e && typeof e.stopPropagation === "function") {
+        e.stopPropagation();
+      }
+      const titleText = details?.title;
+      if (!titleText) return;
+
+      const performCopy = async () => {
+        let success = false;
+        if (navigator?.clipboard?.writeText) {
+          try {
+            await navigator.clipboard.writeText(titleText);
+            success = true;
+          } catch (_) {
+            success = false;
+          }
+        }
+        if (!success) {
+          try {
+            const ta = document.createElement("textarea");
+            ta.value = titleText;
+            ta.setAttribute("readonly", "");
+            ta.style.position = "fixed";
+            ta.style.opacity = "0";
+            document.body.appendChild(ta);
+            ta.select();
+            success = document.execCommand("copy");
+            document.body.removeChild(ta);
+          } catch (err) {
+            console.error("Failed to copy title", err);
+          }
+        }
+        if (success) {
+          setCopiedTitle(true);
+          if (typeof navigator !== "undefined" && navigator.vibrate) {
+            try {
+              navigator.vibrate(50);
+            } catch (_) {}
+          }
+          setTimeout(() => setCopiedTitle(false), 2200);
+        }
+      };
+
+      performCopy();
+    },
+    [details?.title],
+  );
+
+  const handleTitleTouchStart = (e) => {
+    if (e.touches && e.touches[0]) {
+      touchStartPosRef.current = {
+        x: e.touches[0].clientX,
+        y: e.touches[0].clientY,
+      };
+    }
+    if (titleHoldTimerRef.current) clearTimeout(titleHoldTimerRef.current);
+    titleHoldTimerRef.current = setTimeout(() => {
+      handleCopyTitle(e);
+    }, 450);
+  };
+
+  const handleTitleTouchMove = (e) => {
+    if (e.touches && e.touches[0]) {
+      const dx = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
+      const dy = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
+      if (dx > 10 || dy > 10) {
+        if (titleHoldTimerRef.current) {
+          clearTimeout(titleHoldTimerRef.current);
+          titleHoldTimerRef.current = null;
+        }
+      }
+    }
+  };
+
+  const handleTitleTouchEnd = () => {
+    if (titleHoldTimerRef.current) {
+      clearTimeout(titleHoldTimerRef.current);
+      titleHoldTimerRef.current = null;
+    }
+  };
+
+  const handleTitleMouseDown = (e) => {
+    if (e.button !== 0) return;
+    touchStartPosRef.current = { x: e.clientX, y: e.clientY };
+    if (titleHoldTimerRef.current) clearTimeout(titleHoldTimerRef.current);
+    titleHoldTimerRef.current = setTimeout(() => {
+      const sel = window.getSelection ? window.getSelection().toString() : "";
+      if (!sel || sel.trim().length === 0) {
+        handleCopyTitle(e);
+      }
+    }, 500);
+  };
+
+  const handleTitleMouseMove = (e) => {
+    const dx = Math.abs(e.clientX - touchStartPosRef.current.x);
+    const dy = Math.abs(e.clientY - touchStartPosRef.current.y);
+    if (dx > 8 || dy > 8) {
+      if (titleHoldTimerRef.current) {
+        clearTimeout(titleHoldTimerRef.current);
+        titleHoldTimerRef.current = null;
+      }
+    }
+  };
+
+  const handleTitleMouseUp = () => {
+    if (titleHoldTimerRef.current) {
+      clearTimeout(titleHoldTimerRef.current);
+      titleHoldTimerRef.current = null;
+    }
+  };
 
   const [downloadsState, setDownloadsState] = useState({
     activeTask: null,
@@ -1892,10 +2013,15 @@ export default function InfoView({
               ${
                 msShow
                   ? `<div style="margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
-                Jellyfin/Plex naming: saves to <strong>${String(msShow.series || details?.title || "")
+                Jellyfin/Plex naming: saves to <strong>${String(
+                  msShow.series || details?.title || "",
+                )
                   .replace(/&/g, "&amp;")
                   .replace(/</g, "&lt;")
-                  .replace(/>/g, "&gt;")}\\${msShow.season === 0 ? "Season 00 (Specials)" : `Season ${String(msShow.season).padStart(2, "0")}`}</strong>.<br>
+                  .replace(
+                    />/g,
+                    "&gt;",
+                  )}\\${msShow.season === 0 ? "Season 00 (Specials)" : `Season ${String(msShow.season).padStart(2, "0")}`}</strong>.<br>
                 To change this, cancel and set <strong>Season</strong> and <strong>Show folder</strong> above the episode list.
               </div>`
                   : ""
@@ -2536,6 +2662,41 @@ export default function InfoView({
     });
   };
 
+  // Mark items as read/completed or unread/unwatched
+  const handleMarkRead = async (isCompleted, numbersList = null) => {
+    const targets = numbersList || Array.from(selectedItems);
+    if (!targets || targets.length === 0) return;
+    const numbers = [...targets].sort((a, b) => a - b);
+    try {
+      const res = await apiPost("/api/history/mark-read", {
+        mediaId: id,
+        type,
+        numbers,
+        isCompleted: Boolean(isCompleted),
+        title: details?.title || "",
+        provider: details?.provider || "",
+        image: details?.image || "",
+        malid: details?.malid || details?.id,
+      });
+      if (res?.success) {
+        await fetchHistoryProgress();
+        const actionLabel = isCompleted
+          ? type === "Manga"
+            ? "Read"
+            : "Watched"
+          : type === "Manga"
+            ? "Unread"
+            : "Unwatched";
+        swalSuccess(`Marked ${numbers.length} item(s) as ${actionLabel}!`);
+      } else {
+        throw new Error(res?.error || "Failed to update history");
+      }
+    } catch (err) {
+      console.error("Failed to update history:", err);
+      swalError(err.message || "Failed to update history");
+    }
+  };
+
   const isItemUnavailable = (item) => {
     if (type !== "Anime") return false;
     const langs = getItemLangs(item, details, dubSelect);
@@ -2897,7 +3058,21 @@ export default function InfoView({
         </div>
 
         <div className="info-content">
-          <h1 className="info-title">{details?.title}</h1>
+          <div className="info-title-row">
+            <h1 className="info-title">{details?.title}</h1>
+            <button
+              type="button"
+              className={`btn-copy-title ${copiedTitle ? "copied" : ""}`}
+              onClick={handleCopyTitle}
+              title={copiedTitle ? "Copied!" : "Copy title"}
+              aria-label="Copy title"
+            >
+              {copiedTitle ? <Check size={16} /> : <Copy size={16} />}
+              <span className={`copy-badge ${copiedTitle ? "visible" : ""}`}>
+                Copied!
+              </span>
+            </button>
+          </div>
 
           <div className="tag-list">
             {(Array.isArray(details?.genres)
@@ -2952,6 +3127,8 @@ export default function InfoView({
                       marginLeft: "6px",
                       padding: 0,
                       fontSize: "13px",
+                      userSelect: "none",
+                      WebkitUserSelect: "none",
                     }}
                   >
                     {isDescExpanded ? "Show Less" : "Show More"}
@@ -3531,8 +3708,41 @@ export default function InfoView({
                         if (e.key === "Enter") e.currentTarget.blur();
                       }}
                       className="input-val"
-                      style={{ width: "220px", height: "38px", boxSizing: "border-box" }}
+                      style={{
+                        width: "220px",
+                        height: "38px",
+                        boxSizing: "border-box",
+                      }}
                     />
+                  </>
+                )}
+                {selectedItems.size > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleMarkRead(true)}
+                      className="btn-bulk btn-mark-read-all"
+                      title={`Mark ${selectedItems.size} selected as ${type === "Manga" ? "read" : "watched"}`}
+                    >
+                      <CheckCircle2 size={15} />
+                      <span>
+                        Mark {type === "Manga" ? "Read" : "Watched"} (
+                        {selectedItems.size})
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleMarkRead(false)}
+                      className="btn-bulk btn-mark-unread-all"
+                      title={`Mark ${selectedItems.size} selected as un${type === "Manga" ? "read" : "watched"}`}
+                    >
+                      <RotateCcw size={15} />
+                      <span>
+                        Mark Un{type === "Manga" ? "read" : "watched"} (
+                        {selectedItems.size})
+                      </span>
+                    </button>
                   </>
                 )}
                 {numToDownload > 0 && (
@@ -3665,46 +3875,64 @@ export default function InfoView({
                       )}
                   </div>
 
-                  {(() => {
-                    if (!epStatus) return null;
-                    const curVal =
-                      type === "Anime"
-                        ? epStatus.currentTime
-                        : epStatus.currentPage;
-                    const totVal =
-                      type === "Anime"
-                        ? epStatus.duration
-                        : epStatus.totalPages;
-                    if (
-                      curVal === undefined ||
-                      curVal === null ||
-                      totVal === undefined ||
-                      totVal === null
-                    )
-                      return null;
+                  <div className="item-card-top-actions">
+                    {(() => {
+                      if (!epStatus) return null;
+                      const curVal =
+                        type === "Anime"
+                          ? epStatus.currentTime
+                          : epStatus.currentPage;
+                      const totVal =
+                        type === "Anime"
+                          ? epStatus.duration
+                          : epStatus.totalPages;
+                      if (
+                        curVal === undefined ||
+                        curVal === null ||
+                        totVal === undefined ||
+                        totVal === null
+                      )
+                        return null;
 
-                    return (
-                      <div className="item-progress-bar-wrap">
-                        <div className="item-progress-bar-bg">
-                          <div
-                            style={{
-                              width: `${Math.min(100, Math.max(0, (curVal / (totVal || 1)) * 100))}%`,
-                              height: "100%",
-                              backgroundColor: epStatus.isCompleted
-                                ? "#34d399"
-                                : "var(--accent)",
-                              borderRadius: "2px",
-                            }}
-                          />
+                      return (
+                        <div className="item-progress-bar-wrap">
+                          <div className="item-progress-bar-bg">
+                            <div
+                              style={{
+                                width: `${Math.min(100, Math.max(0, (curVal / (totVal || 1)) * 100))}%`,
+                                height: "100%",
+                                backgroundColor: epStatus.isCompleted
+                                  ? "#34d399"
+                                  : "var(--accent)",
+                                borderRadius: "2px",
+                              }}
+                            />
+                          </div>
+                          <span className="item-progress-text">
+                            {type === "Anime"
+                              ? `${formatTime(curVal)} / ${formatTime(totVal)}`
+                              : `Page ${curVal}/${totVal}`}
+                          </span>
                         </div>
-                        <span className="item-progress-text">
-                          {type === "Anime"
-                            ? `${formatTime(curVal)} / ${formatTime(totVal)}`
-                            : `Page ${curVal}/${totVal}`}
-                        </span>
-                      </div>
-                    );
-                  })()}
+                      );
+                    })()}
+
+                    <button
+                      type="button"
+                      className={`btn-item-history-mark ${isCompleted ? "completed" : ""}`}
+                      title={
+                        isCompleted
+                          ? `Mark as un${type === "Manga" ? "read" : "watched"}`
+                          : `Mark as ${type === "Manga" ? "read" : "watched"}`
+                      }
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleMarkRead(!isCompleted, [Number(item.number)]);
+                      }}
+                    >
+                      <CheckCircle2 size={14} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* LINE 2: All sub, dub, hsub, download button */}

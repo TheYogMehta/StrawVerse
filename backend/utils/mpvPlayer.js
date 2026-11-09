@@ -506,7 +506,7 @@ async function playInMpv(window, options) {
       const config = await settingfetch();
       const localData = await getSourceById(
         "Anime",
-        config?.CustomDownloadLocation,
+        config?.CustomDownloadLocationAnime,
         mediaId,
         episode,
         subdub,

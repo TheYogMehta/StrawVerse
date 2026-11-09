@@ -224,7 +224,7 @@ async function generateNfoAndPosterForAnime(
   try {
     const config = await settingfetch();
     const downloadDir =
-      customDir || config?.CustomDownloadLocation || getDownloadsFolder();
+      customDir || config?.CustomDownloadLocationAnime || getDownloadsFolder();
 
     const anime = await queryOne(
       "SELECT * FROM Anime WHERE id = ? OR folder_name = ? OR LOWER(title) = LOWER(?) LIMIT 1",
@@ -403,7 +403,10 @@ async function generateNfoAndPosterForAnime(
 
     // Determine metadata fields preferring MyAnimeList -> Scraper -> Existing Anime Record
     const finalTitle =
-      malMeta?.title || scraperMeta?.title || anime.title || path.basename(showDir);
+      malMeta?.title ||
+      scraperMeta?.title ||
+      anime.title ||
+      path.basename(showDir);
     const finalOriginalTitle =
       malMeta?.alternative_titles?.ja ||
       malMeta?.title ||
@@ -549,7 +552,11 @@ async function generateNfoAndPosterForAnime(
               let lang = "en";
               if (parts.length >= 2) {
                 const rawLang = parts[parts.length - 1];
-                if (rawLang && rawLang.length <= 4 && !/^\d+ep$/i.test(rawLang)) {
+                if (
+                  rawLang &&
+                  rawLang.length <= 4 &&
+                  !/^\d+ep$/i.test(rawLang)
+                ) {
                   lang = rawLang;
                 }
               }
@@ -691,7 +698,7 @@ async function generateAllNfosAndPosters(customDir = null) {
   try {
     const config = await settingfetch();
     const downloadDir =
-      customDir || config?.CustomDownloadLocation || getDownloadsFolder();
+      customDir || config?.CustomDownloadLocationAnime || getDownloadsFolder();
     const rows = await queryAll("SELECT id, title FROM Anime");
 
     if (!rows || rows.length === 0) {
@@ -733,7 +740,7 @@ async function onAnimeDownloadComplete(item) {
   try {
     const config = await settingfetch();
     if (config?.mediaServerNaming && item.id) {
-      await enqueueMediaSync(item.id, config?.CustomDownloadLocation, {
+      await enqueueMediaSync(item.id, config?.CustomDownloadLocationAnime, {
         priority: true,
       });
     }

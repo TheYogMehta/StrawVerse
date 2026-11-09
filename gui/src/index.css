@@ -44,6 +44,16 @@
   user-select: none;
 }
 
+::selection {
+  background: rgba(124, 58, 237, 0.45);
+  color: #ffffff;
+}
+
+::-moz-selection {
+  background: rgba(124, 58, 237, 0.45);
+  color: #ffffff;
+}
+
 body {
   background-color: var(--bg-primary);
   color: var(--text-main);

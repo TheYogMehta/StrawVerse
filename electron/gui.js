@@ -375,15 +375,31 @@ const createWindow = () => {
   });
 
   global.win.webContents.on("before-input-event", (event, input) => {
-    if (
-      input.control &&
-      (input.key === "+" ||
+    if (input.type === "keyDown" && (input.control || input.meta)) {
+      if (
+        input.key === "+" ||
         input.key === "=" ||
+        input.code === "Equal" ||
+        input.code === "NumpadAdd"
+      ) {
+        event.preventDefault();
+        try {
+          global.win.webContents.send("reader-zoom", "in");
+        } catch (_) {}
+        return;
+      }
+      if (
         input.key === "-" ||
         input.key === "_" ||
-        input.key === "0")
-    ) {
-      event.preventDefault();
+        input.code === "Minus" ||
+        input.code === "NumpadSubtract"
+      ) {
+        event.preventDefault();
+        try {
+          global.win.webContents.send("reader-zoom", "out");
+        } catch (_) {}
+        return;
+      }
     }
   });
 

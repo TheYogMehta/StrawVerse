@@ -47,6 +47,8 @@ async function updateHistory({
   malid,
   subdub,
   sub_dub,
+  isCompleted,
+  timestamp,
 }) {
   const tSpent = parseFloat(timeSpent || 0);
   const rawNum = parseFloat(number);
@@ -182,9 +184,22 @@ async function updateHistory({
   if (isAnime && totVal > 0 && curVal > totVal) {
     curVal = totVal;
   }
-  const isComp = totVal > 0 && curVal / totVal >= 0.75 ? 1 : 0;
+  let isComp = 0;
+  if (isCompleted !== undefined && isCompleted !== null) {
+    isComp = isCompleted ? 1 : 0;
+  } else {
+    if (isAnime) {
+      isComp = totVal > 0 && curVal / totVal >= 0.75 ? 1 : 0;
+    } else {
+      const cumulativeTime = (record?.time_spent || 0) + tSpent;
+      const isNearEnd = totVal > 0 && curVal / totVal >= 0.85;
+      isComp = isNearEnd && cumulativeTime >= 8 ? 1 : 0;
+    }
+  }
 
-  const nowIso = new Date().toISOString();
+  const nowIso = timestamp
+    ? new Date(timestamp).toISOString()
+    : new Date().toISOString();
 
   const cleanDuplicates = async (excludeId) => {
     try {
@@ -221,11 +236,14 @@ async function updateHistory({
   };
 
   if (record) {
-    const nextComp = record.is_completed === 1 ? 1 : isComp;
+    const nextComp =
+      isCompleted === false ? 0 : record.is_completed === 1 ? 1 : isComp;
     const compAt =
       record.is_completed === 0 && nextComp === 1
         ? nowIso
-        : record.completed_at;
+        : nextComp === 0
+          ? null
+          : record.completed_at;
 
     const subDubUpdate = isAnime && langSubDub ? `, sub_dub = ?` : ``;
     const updateParams = [

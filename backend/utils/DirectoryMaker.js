@@ -55,29 +55,25 @@ async function getOrCreateMediaDir(
 
 // Downloads/<Type> root (custom location or default)
 async function getTypeDir(customdir, Type, create = false) {
-  let destination;
-  if (customdir) {
-    try {
-      await fs.promises.access(customdir);
-      destination = customdir;
-    } catch (err) {
-      if (err.code === "ENOENT") {
-        destination = getDownloadsFolder();
-      }
+  let Directory;
+  if (customdir && typeof customdir === "string" && customdir.trim()) {
+    Directory = customdir.trim();
+    if (create) {
+      try {
+        await fs.promises.mkdir(Directory, { recursive: true });
+      } catch (_) {}
     }
   } else {
-    destination = getDownloadsFolder();
+    const destination = getDownloadsFolder();
+    Directory = path.join(destination, `./${Type}`);
+    if (create) {
+      try {
+        await fs.promises.mkdir(Directory, { recursive: true });
+      } catch (_) {}
+    }
   }
 
-  const Directory = path.join(destination, `./${Type}`);
-  if (create) {
-    try {
-      await fs.promises.access(Directory);
-    } catch (error) {
-      if (error.code === "ENOENT") {
-        await fs.promises.mkdir(Directory, { recursive: true });
-      }
-    }
+  if (create && Directory) {
     const dirNomedia = path.join(Directory, ".nomedia");
     if (!fs.existsSync(dirNomedia)) {
       try {
@@ -86,6 +82,14 @@ async function getTypeDir(customdir, Type, create = false) {
     }
   }
   return Directory;
+}
+
+function getEffectiveDownloadLocation(type, config) {
+  if (!config) return null;
+  const isAnime = type === "Anime" || type === "anime";
+  return isAnime
+    ? config.CustomDownloadLocationAnime || null
+    : config.CustomDownloadLocationManga || null;
 }
 
 // Dir GET
@@ -98,11 +102,17 @@ async function GetDir(title, customdir, Type, mediaId = null, create = false) {
 // to it so the library finds the episodes there.
 async function mediaServerDir(series, season, customdir, mediaId = null) {
   const folderName = `${sanitizeFolderName(series)}/Season ${String(season).padStart(2, "0")}`;
-  const targetDir = path.join(await getTypeDir(customdir, "Anime", true), folderName);
+  const targetDir = path.join(
+    await getTypeDir(customdir, "Anime", true),
+    folderName,
+  );
   await fs.promises.mkdir(targetDir, { recursive: true });
   if (mediaId) {
     try {
-      await run(`UPDATE Anime SET folder_name = ? WHERE id = ?`, [folderName, mediaId]);
+      await run(`UPDATE Anime SET folder_name = ? WHERE id = ?`, [
+        folderName,
+        mediaId,
+      ]);
     } catch (_) {}
   }
   return targetDir;
@@ -155,4 +165,6 @@ module.exports = {
   ensureDirectoryExists,
   getDownloadsFolder,
   GetDir,
+  getTypeDir,
+  getEffectiveDownloadLocation,
 };

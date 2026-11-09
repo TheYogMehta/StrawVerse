@@ -170,12 +170,26 @@ function matchItemFilters(item, filters) {
 
   // 1. Tag filter
   if (filters.tag && filters.tag !== "All" && filters.tag !== "") {
-    if (!item.CustomTag) return false;
-    const tags = parseTags(item.CustomTag);
     const targetTag = String(filters.tag).toLowerCase().trim();
     if (targetTag === "downloads") {
-      if (item.Downloaded && item.Downloaded.length > 0) return true;
+      const hasDl =
+        (Array.isArray(item.Downloaded) && item.Downloaded.length > 0) ||
+        (Array.isArray(item.DownloadedChapters) &&
+          item.DownloadedChapters.length > 0) ||
+        (Array.isArray(item.DownloadedEpisodes) &&
+          item.DownloadedEpisodes.length > 0) ||
+        (item.DownloadedEpisodes?.sub?.length || 0) +
+          (item.DownloadedEpisodes?.dub?.length || 0) >
+          0;
+      if (hasDl) return true;
+      if (!item.CustomTag) return false;
+      const tags = parseTags(item.CustomTag);
+      return tags.some(
+        (t) => t && String(t).toLowerCase().trim() === targetTag,
+      );
     } else {
+      if (!item.CustomTag) return false;
+      const tags = parseTags(item.CustomTag);
       const hasTag = tags.some(
         (t) => t && String(t).toLowerCase().trim() === targetTag,
       );

@@ -26,6 +26,10 @@ export default function Marketplace({ initialType }) {
     Anime: [],
     Manga: [],
   });
+  const [activeProviders, setActiveProviders] = useState({
+    Anime: "",
+    Manga: "",
+  });
   const [appVersion, setAppVersion] = useState("11.0.4");
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
@@ -97,11 +101,13 @@ export default function Marketplace({ initialType }) {
       setExtensions(extList);
       setRepos(repoList);
 
-      // 4. Fetch locally installed scrapers and versions from Express/IPC settings
+      // 4. Fetch locally installed scrapers, versions, and active providers
       if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
         const settingsData = await window.sharedStateAPI.getSettings([
           "providers",
           "installedExtensions",
+          "Animeprovider",
+          "Mangaprovider",
         ]);
         setInstalledProviders(
           settingsData.settings?.providers || { Anime: [], Manga: [] },
@@ -112,6 +118,26 @@ export default function Marketplace({ initialType }) {
             Manga: [],
           },
         );
+        setActiveProviders({
+          Anime: settingsData.settings?.Animeprovider || "",
+          Manga: settingsData.settings?.Mangaprovider || "",
+        });
+      } else {
+        try {
+          const res = await fetch("/api/settings");
+          if (res.ok) {
+            const data = await res.json();
+            const s = data?.settings || {};
+            setInstalledProviders(s.providers || { Anime: [], Manga: [] });
+            setInstalledVersions(
+              s.installedExtensions || { Anime: [], Manga: [] },
+            );
+            setActiveProviders({
+              Anime: s.Animeprovider || "",
+              Manga: s.Mangaprovider || "",
+            });
+          }
+        } catch (_) {}
       }
 
       // 5. Fetch current app version
@@ -177,25 +203,31 @@ export default function Marketplace({ initialType }) {
 
   const getInstalledItem = (provider) => {
     const list = installedVersions[activeType] || [];
-    const expectedOwner = (provider.repoOwner || "TheYogMehta").toLowerCase();
+    const expectedOwner = (provider.repoOwner || "TheYogMehta")
+      .toLowerCase()
+      .replace(/^@/, "");
     const expectedName = (provider.name || "").toLowerCase();
     const expectedUniqueId = (
-      provider.uniqueId || `${provider.repoOwner}/${provider.name}`
-    ).toLowerCase();
+      provider.uniqueId || `${expectedOwner}/${expectedName}`
+    )
+      .toLowerCase()
+      .replace(/^@/, "");
 
     return list.find((ext) => {
-      const extUniqueId = (ext.uniqueId || "").toLowerCase();
+      const extUniqueId = (ext.uniqueId || "").toLowerCase().replace(/^@/, "");
       const extName = (ext.name || "").toLowerCase();
-      const extOwner = (ext.repoOwner || "theyogmehta").toLowerCase();
+      const extOwner = (ext.repoOwner || "theyogmehta")
+        .toLowerCase()
+        .replace(/^@/, "");
 
-      if (extUniqueId && extUniqueId === expectedUniqueId) return true;
-      if (extName === expectedName && extOwner === expectedOwner) return true;
       if (
-        (expectedOwner === "theyogmehta" || extOwner === "theyogmehta") &&
-        extName === expectedName
+        extUniqueId &&
+        (extUniqueId === expectedUniqueId ||
+          extUniqueId === `${expectedOwner}/${expectedName}`)
       ) {
         return true;
       }
+      if (extName === expectedName && extOwner === expectedOwner) return true;
       return false;
     });
   };
@@ -203,17 +235,95 @@ export default function Marketplace({ initialType }) {
   const isInstalled = (provider) => {
     if (getInstalledItem(provider)) return true;
     const providerList = installedProviders[activeType] || [];
-    const targetName = provider.name;
+    const owner = (provider.repoOwner || "TheYogMehta")
+      .toLowerCase()
+      .replace(/^@/, "");
+    const isOfficial = owner === "theyogmehta";
+
+    if (isOfficial && providerList.includes(provider.name)) return true;
     const targetUnique = provider.uniqueId;
+    if (targetUnique && providerList.includes(targetUnique)) return true;
+
+    const atScoped = `@${provider.repoOwner || "TheYogMehta"}/${provider.name}`;
+    const slashScoped = `${(provider.repoOwner || "TheYogMehta").replace(/^@/, "")}/${provider.name}`;
     return (
-      providerList.includes(targetName) ||
-      (targetUnique && providerList.includes(targetUnique))
+      providerList.includes(atScoped) || providerList.includes(slashScoped)
     );
   };
 
   const getInstalledVersion = (provider) => {
     const item = getInstalledItem(provider);
     return item ? item.version : null;
+  };
+
+  const isProviderInUse = (provider) => {
+    const rawActive = String(activeProviders[activeType] || "").trim();
+    if (!rawActive) return false;
+
+    const cleanActive = rawActive.toLowerCase().replace(/^@/, "");
+    let activeOwner = "theyogmehta";
+    let activeName = cleanActive;
+    if (cleanActive.includes("/")) {
+      const parts = cleanActive.split("/");
+      activeOwner = parts[0];
+      activeName = parts[1];
+    }
+
+    const pOwner = String(provider.repoOwner || "TheYogMehta")
+      .trim()
+      .toLowerCase()
+      .replace(/^@/, "");
+    const pName = String(provider.name || "").trim().toLowerCase();
+
+    return activeOwner === pOwner && activeName === pName;
+  };
+
+  const handleUseProvider = async (provider) => {
+    const ownerClean = (provider.repoOwner || "TheYogMehta").replace(/^@/, "");
+    const isOfficial = ownerClean.toLowerCase() === "theyogmehta";
+    const pList = installedProviders[activeType] || [];
+
+    let targetVal = isOfficial
+      ? provider.name
+      : `@${ownerClean}/${provider.name}`;
+
+    if (!isOfficial && pList.includes(`${ownerClean}/${provider.name}`)) {
+      targetVal = `${ownerClean}/${provider.name}`;
+    }
+
+    const settingKey =
+      activeType === "Anime" ? "Animeprovider" : "Mangaprovider";
+
+    try {
+      if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+        await window.sharedStateAPI.updateSetting(settingKey, targetVal);
+      } else {
+        await fetch("/api/settings/update", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [settingKey]: targetVal }),
+        });
+      }
+
+      if (window.catalogCache) {
+        delete window.catalogCache[`${activeType}_provider`];
+        delete window.catalogCache[`${activeType}_trending`];
+        delete window.catalogCache[`${activeType}_latest`];
+      }
+
+      setActiveProviders((prev) => ({
+        ...prev,
+        [activeType]: targetVal,
+      }));
+
+      swalSuccess(
+        "Provider Activated",
+        `"${provider.name}"${!isOfficial ? ` (@${provider.repoOwner})` : ""} is now your active ${activeType.toLowerCase()} provider!`,
+      );
+    } catch (err) {
+      console.error("Failed to activate provider:", err);
+      swalError("Error", "Could not set provider as active.");
+    }
   };
 
   const handleAction = async (taskType, provider) => {
@@ -442,6 +552,7 @@ export default function Marketplace({ initialType }) {
           ) : (
             visibleExtensions.map((provider) => {
               const installed = isInstalled(provider);
+              const inUse = installed && isProviderInUse(provider);
               const cardId =
                 provider.uniqueId ||
                 `${provider.repoOwner || "TheYogMehta"}/${provider.name}`;
@@ -463,7 +574,10 @@ export default function Marketplace({ initialType }) {
                 : false;
 
               return (
-                <div key={cardId} className="market-card glass-panel">
+                <div
+                  key={cardId}
+                  className={`market-card glass-panel ${inUse ? "in-use" : ""}`}
+                >
                   <div className="market-card-header">
                     <div className="market-logo-wrapper">
                       <img
@@ -547,39 +661,60 @@ export default function Marketplace({ initialType }) {
                       </button>
                     ) : installed ? (
                       <>
-                        {!provider.disabled &&
-                          (isAppOutdated ? (
-                            <button
-                              disabled
-                              className="btn-update"
-                              style={{ opacity: 0.5, cursor: "not-allowed" }}
-                              title={`Update requires StrawVerse v${provider.MinAppVersion}`}
-                            >
-                              v{provider.MinAppVersion}+ Required
-                            </button>
-                          ) : hasUpdate ? (
-                            <button
-                              onClick={() => handleAction("add", provider)}
-                              className="btn-update"
-                              title={`New version v${provider.version} available!`}
-                            >
-                              Update
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => handleAction("add", provider)}
-                              className="btn-reinstall"
-                              title="Reinstall current version"
-                            >
-                              Reinstall
-                            </button>
-                          ))}
-                        <button
-                          onClick={() => handleAction("remove", provider)}
-                          className="btn-remove"
-                        >
-                          Remove
-                        </button>
+                        {inUse ? (
+                          <div
+                            className="btn-in-use"
+                            title="Currently selected as your active provider"
+                          >
+                            In Use
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="btn-use-provider"
+                            onClick={() => handleUseProvider(provider)}
+                            disabled={provider.disabled}
+                            title={`Set ${provider.name} as active ${activeType.toLowerCase()} provider`}
+                          >
+                            Use Provider
+                          </button>
+                        )}
+
+                        <div className="market-card-actions-row">
+                          {!provider.disabled &&
+                            (isAppOutdated ? (
+                              <button
+                                disabled
+                                className="btn-update"
+                                style={{ opacity: 0.5, cursor: "not-allowed" }}
+                                title={`Update requires StrawVerse v${provider.MinAppVersion}`}
+                              >
+                                v{provider.MinAppVersion}+ Required
+                              </button>
+                            ) : hasUpdate ? (
+                              <button
+                                onClick={() => handleAction("add", provider)}
+                                className="btn-update"
+                                title={`New version v${provider.version} available!`}
+                              >
+                                Update
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleAction("add", provider)}
+                                className="btn-reinstall"
+                                title="Reinstall current version"
+                              >
+                                Reinstall
+                              </button>
+                            ))}
+                          <button
+                            onClick={() => handleAction("remove", provider)}
+                            className="btn-remove"
+                          >
+                            Remove
+                          </button>
+                        </div>
                       </>
                     ) : (
                       <button

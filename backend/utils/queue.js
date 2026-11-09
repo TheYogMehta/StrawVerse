@@ -772,24 +772,25 @@ async function downloadep(
     // Season and show folder picked on the show's page (default: S1, title)
     const show = liveSettings.mediaServerShows?.[String(animeId)] || {};
     const season = parseInt(show.season, 10);
+    const dlLoc =
+      Videoconfig?.CustomDownloadLocationAnime ||
+      Videoconfig?.CustomDownloadLocation;
     directoryPath = await mediaServerDir(
       String(show.series || "").trim() || Title,
       Number.isInteger(season) && season >= 0 ? season : 1,
-      Videoconfig?.CustomDownloadLocation,
+      dlLoc,
       animeId || AnimeEpId,
     );
     try {
       const { generateNfoAndPosterForAnime } = require("./mediaServer");
-      generateNfoAndPosterForAnime(
-        animeId || AnimeEpId,
-        Videoconfig?.CustomDownloadLocation,
-      ).catch(() => {});
+      generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(() => {});
     } catch (_) {}
   } else {
     directoryPath = await directoryMaker(
       Title,
       EpNum,
-      Videoconfig?.CustomDownloadLocation,
+      Videoconfig?.CustomDownloadLocationAnime ||
+        Videoconfig?.CustomDownloadLocation,
       animeId || AnimeEpId,
     );
   }
@@ -1318,13 +1319,22 @@ async function downloadMangaChapters(
       throw new Error("No Image Found For This Chapter!");
     }
 
+    const liveSettings = (await settingfetch()) || {};
+    const customLoc =
+      liveSettings?.CustomDownloadLocationManga ||
+      config?.CustomDownloadLocationManga ||
+      config?.CustomDownloadLocation;
+
     const directoryPath = await MangaDir(
       Title,
-      config?.CustomDownloadLocation,
+      customLoc,
       mediaId,
     );
 
-    const mangaScheme = config?.mangaNamingScheme || "default";
+    const mangaScheme =
+      liveSettings?.mangaNamingScheme ||
+      config?.mangaNamingScheme ||
+      "default";
     const cbzFilename = formatChapterFilename({
       title: Title,
       chapterNum: EpNum,

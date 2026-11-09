@@ -34,7 +34,7 @@ export default function Dropdown({
       ? `${label} ${selectedOption.label}`
       : selectedOption
         ? selectedOption.label
-        : label;
+        : label || (value !== undefined && value !== null ? String(value) : "");
 
   return (
     <div

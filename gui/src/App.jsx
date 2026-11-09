@@ -336,8 +336,15 @@ export default function App() {
         }
       });
       window.sharedStateAPI.on("open-settings-tab", (data) => {
+        const rawTab = data?.tab;
         const tab =
-          data?.tab === "subtitles" ? "anime_manga" : data?.tab || "general";
+          rawTab === "subtitles" ||
+          rawTab === "anime_manga" ||
+          rawTab === "anime"
+            ? "anime"
+            : rawTab === "manga"
+              ? "manga"
+              : rawTab || "general";
         const scrollTo =
           data?.tab === "subtitles" || data?.scrollTo === "subtitles"
             ? "subtitle-customization"
@@ -701,34 +708,38 @@ export default function App() {
     }
   };
 
+  const isReading = current.view === "read";
+
   return (
-    <div className="app-layout">
-      <Sidebar
-        currentView={current.view}
-        setView={(view) => {
-          cancelObsoleteNativeRequests();
-          if (window.catalogCache) {
-            if (view === "home") {
-              delete window.catalogCache[`Anime_local`];
-              delete window.catalogCache[`Manga_local`];
-            } else if (view === "discover") {
-              delete window.catalogCache[`Anime_provider`];
-              delete window.catalogCache[`Manga_provider`];
-            } else if (view === "filters") {
-              delete window.catalogCache[`Anime_mal`];
-              delete window.catalogCache[`Manga_mal`];
+    <div className={`app-layout ${isReading ? "is-reading" : ""}`}>
+      {!isReading && (
+        <Sidebar
+          currentView={current.view}
+          setView={(view) => {
+            cancelObsoleteNativeRequests();
+            if (window.catalogCache) {
+              if (view === "home") {
+                delete window.catalogCache[`Anime_local`];
+                delete window.catalogCache[`Manga_local`];
+              } else if (view === "discover") {
+                delete window.catalogCache[`Anime_provider`];
+                delete window.catalogCache[`Manga_provider`];
+              } else if (view === "filters") {
+                delete window.catalogCache[`Anime_mal`];
+                delete window.catalogCache[`Manga_mal`];
+              }
             }
-          }
-          if (view === current.view) {
-            setReloadCounter((prev) => prev + 1);
-          }
-          setHistory([{ view, params: {} }]);
-        }}
-        isCollapsed={isSidebarCollapsed}
-        toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-        malLoggedIn={malLoggedIn}
-        developerMode={developerMode}
-      />
+            if (view === current.view) {
+              setReloadCounter((prev) => prev + 1);
+            }
+            setHistory([{ view, params: {} }]);
+          }}
+          isCollapsed={isSidebarCollapsed}
+          toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+          malLoggedIn={malLoggedIn}
+          developerMode={developerMode}
+        />
+      )}
       <main className="u-style-8">
         <Suspense fallback={<ViewLoading />}>{renderActiveView()}</Suspense>
       </main>
