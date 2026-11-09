@@ -36,15 +36,16 @@ Whether you want high-speed **anime download** queues in 1080p, full Sub and Dub
 
 ## Quick Download
 
-| Platform    | Download Link                                                              | Format                           | OS Compatibility             |
-| :---------- | :------------------------------------------------------------------------- | :------------------------------- | :--------------------------- |
-| **macOS**   | [StrawVerse-mac-arm64.zip](https://github.com/TheYogMehta/StrawVerse/releases) | Application (`.zip` / `.dmg`) | macOS 12+ (Apple Silicon M1/M2/M3/M4) |
-| **Windows** | [StrawVerse.Setup.exe](https://github.com/TheYogMehta/StrawVerse/releases) | Installer (`.exe`)               | Windows 10, 11 (64-bit)      |
-| **Linux**   | [StrawVerse.AppImage](https://github.com/TheYogMehta/StrawVerse/releases)  | Portable (`.AppImage` / `.snap`) | Ubuntu, Fedora, Arch, Debian |
-| **Android** | [StrawVerse.apk](https://github.com/TheYogMehta/StrawVerse/releases)       | Mobile APK (`.apk`)              | Android 7.0+                 |
+| Platform    | Download Link                                                                  | Format                                    | OS Compatibility                      |
+| :---------- | :----------------------------------------------------------------------------- | :---------------------------------------- | :------------------------------------ |
+| **macOS**   | [StrawVerse-mac-arm64.zip](https://github.com/TheYogMehta/StrawVerse/releases) | Application (`.zip` / `.dmg`)             | macOS 12+ (Apple Silicon M1/M2/M3/M4) |
+| **Windows** | [StrawVerse.Setup.exe](https://github.com/TheYogMehta/StrawVerse/releases)     | Installer (`.exe`)                        | Windows 10, 11 (64-bit)               |
+| **Linux**   | [StrawVerse.AppImage](https://github.com/TheYogMehta/StrawVerse/releases)      | Portable & Package (`.AppImage` / `.deb`) | Ubuntu, Debian, Arch, Fedora          |
+| **Android** | [StrawVerse.apk](https://github.com/TheYogMehta/StrawVerse/releases)           | Mobile APK (`.apk`)                       | Android 7.0+                          |
 
 > [!NOTE]
 > **macOS (Apple Silicon) First Launch:** Because StrawVerse is an open-source, ad-hoc signed community release, macOS Gatekeeper may ask you to confirm opening the app on first launch. Right-click `StrawVerse.app` in `/Applications` and select **Open**, or run:
+>
 > ```bash
 > xattr -cr /Applications/StrawVerse.app
 > ```
@@ -172,7 +173,7 @@ Navigate to the settings tab to configure your StrawVerse application:
 ### For macOS
 
 1. Drag `StrawVerse.app` from your `/Applications` folder to the **Trash** (and empty Trash).
-2. *(Optional)* To completely delete application settings and local cache:
+2. _(Optional)_ To completely delete application settings and local cache:
    ```bash
    rm -rf ~/Library/Application\ Support/strawverse
    ```
@@ -189,10 +190,14 @@ Then, run `Uninstall StrawVerse.exe`.
 
 ### For Linux
 
-- **AppImage:** Simply delete the downloaded `.AppImage` file. If you want to clean up application configurations, delete the `~/.config/strawverse` directory.
-- **Snap:** Run the following command in your terminal:
+- **AppImage:** Simply delete the downloaded `.AppImage` file.
+- **DEB Package:** Run the following command in your terminal:
   ```bash
-  sudo snap remove strawverse
+  sudo apt remove strawverse
+  ```
+- _(Optional)_ To delete application configuration and local database files:
+  ```bash
+  rm -rf ~/.config/strawverse
   ```
 
 ---
