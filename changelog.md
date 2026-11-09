@@ -1,5 +1,83 @@
 # Changelog
 
+# [11.2.0] - 2026-11-09
+
+### Manga Reader Improvements
+
+- **Accurate Online vs. Downloaded Chapter Routing:** Fixed an issue where reading an online chapter (e.g. Chapter 3) when earlier chapters were downloaded locally incorrectly labeled the chapter as local and served Chapter 1's pages. Online streams now strictly fetch and display the requested online chapter.
+- **Android & Mobile Reader Optimization:** Immersive fullscreen reading experience on mobile by hiding the bottom app navigation bar while reading, eliminating layout overlap with the floating page pill. Compacted top bar controls so chapter and page selectors fit cleanly without overflowing on narrow screens.
+- **Simplified Chapter Selector:** Removed redundant `(Downloaded)` labels from the chapter selector dropdown since local/online status is already clearly badged on the right.
+- **Background Image Preloading:** Single-page and double-page modes now preload upcoming (5 pages ahead) and previous (2 pages) images in the background so you can flip through pages smoothly without loading spinners.
+- **Pinch to Zoom on Mobile:** You can now smoothly pinch with two fingers to zoom in and out of manga pages on your phone or tablet. Your preferred zoom size is saved automatically.
+- **Keyboard Zoom Shortcuts:** Easily adjust page width on desktop with `Ctrl +` and `Ctrl -`.
+- **Cleaner Reading View:** Removed extra title text from the top bar to give you more room to read, and added convenient previous/next buttons plus a page jump menu to hop straight to any page.
+- **Help & Shortcuts Guide:** Tap the new info icon in the top right (or press `?` on your keyboard) to open a handy guide showing all gestures and keyboard shortcuts.
+
+### Settings & Download Locations
+
+- **Separate Anime & Manga Settings Tabs:** Split the combined settings view into two dedicated navigation tabs for Anime Settings and Manga Settings for cleaner organization.
+- **Independent Download Folders:** Set custom download directories independently for anime and manga. By default, media saves to `<Downloads>/Anime` and `<Downloads>/Manga` (or `/StrawVerse/Anime` and `/StrawVerse/Manga` on Android).
+- **Direct Custom Folder Saving & File Manager Opener:** Choosing a custom download folder (e.g. `Downloads/MyFolder`) downloads media directly inside that folder without generating redundant subdirectories. Fixed the folder opener in the library/details view to properly resolve custom download locations.
+- **Downloads Tab Custom Location Scanning:** Enhanced the Library "Downloads" tag filter to scan across custom download directories, ensuring downloaded anime and manga reliably display under the Downloads tab.
+- **Android Custom Locations:** Android users can now customize download directories for both anime and manga directly from the mobile app.
+- **Download File Naming Schemes & Automatic Migration:** Choose your preferred file naming pattern for anime and manga (.cbz formatting). Changing the manga naming scheme in Settings now automatically renames existing downloaded chapters to match the selected scheme, and ensures all subsequent downloads strictly follow the new format.
+
+### Extensions & Marketplace
+
+- **Quick "In Use" Provider Switcher:** Activate and switch your default anime and manga providers directly from the Extensions / Marketplace view without having to open Settings.
+- **Faster, Lighter Extension Updates:** The app now only downloads what has actually changed for each of your installed extensions rather than re-downloading entire databases, saving data and keeping syncing fast.
+- **Smoother Extension Installs:** Handled extension installation errors gracefully with automatic rollback to keep your extensions folder clean and reliable.
+
+### Details & Info Page
+
+- **Single-Line Desktop Toolbar:** Aligned the in-page search box, sort selector, language controls, and bulk selection controls onto a single row on desktop viewports.
+- **Select & Copy Title & Description:** Easily select and copy text from anime and manga titles and descriptions via keyboard (`Ctrl + C`) or mobile text selection.
+
+### Catalog, Discover & Filters
+
+- **Airing Calendar:** Discover and keep track of currently airing anime with the new weekly release schedule calendar.
+- **Genre Filters & Scroll Position Retention:** Filter titles effortlessly by genre, and seamlessly return to your exact browsing position when navigating back to the catalog.
+- **More Poster Columns & Layout Options:** Expanded grid layout options to support up to 12 columns on wide screens, along with adjustable poster height settings so your library looks great on any display.
+- **Dedicated Watch & Reading Filters:** Distinct "Watching" status for anime and "Reading" status for manga with accurate MyAnimeList account syncing and a helpful sign-in prompt when disconnected.
+
+### Smarter History & Progress Tracking
+
+- **Smarter "Continue" Button:** The app now intelligently figures out your next chapter or episode, seamlessly recognizing whether you are picking up where you left off or re-reading an earlier chapter.
+- **Mark Multiple Episodes / Chapters at Once:** Easily select several episodes or chapters to mark them all as watched, read, unwatched, or unread in a single click.
+- **Edit Watch Dates & Progress:** Click the new clock icon on any episode or chapter to tweak your progress or change the date and time you completed it, with handy "Now" and "Yesterday" quick buttons.
+- **Restore Hidden Continue Shelf Titles:** Accidentally hid a show from your Continue Watching or Continue Reading shelf? You can now view and restore hidden titles anytime directly in Settings.
+
+### Jellyfin & Plex Media Server Integration
+
+- **Jellyfin & Plex Compatibility Mode:** Added a toggle in Anime Settings (Desktop). When enabled, anime downloads automatically follow standard Jellyfin and Plex naming conventions.
+- **Automatic Metadata & Artwork:** When enabled, StrawVerse automatically generates show summaries, episode details, and poster artwork in your download folders so titles display properly in Jellyfin and Plex without needing online scrapers.
+- **External Subtitle Detection:** Subtitle files are automatically matched so Jellyfin, Plex, and local players detect and load them seamlessly.
+- **Automatic Background Sync:** Turning the setting on automatically updates your existing downloads in the background, and newly completed downloads are prepared automatically. Existing files remain untouched if turned off.
+
+### Recommended Media Server Plugins / Extensions
+
+- **For Jellyfin Users:**
+  - Install the **Jellyfin Anime Plugin** (or community MyAnimeList / AniList metadata plugins via Jellyfin Dashboard -> Plugins -> Catalog) to utilize MyAnimeList IDs embedded in StrawVerse's `tvshow.nfo`.
+  - In your Jellyfin Library settings, ensure the **Nfo** metadata reader is enabled so Jellyfin prioritizes your local artwork and synopsis.
+- **For Plex Users:**
+  - In your Plex Library settings (`Manage Library -> Edit -> Advanced`), set **Local Assets** to _Prefer local metadata_ so Plex uses the local `poster.jpg` and metadata files directly.
+
+### Speed, Stability & Engine
+
+- **Database & Dynamic Provider Query Hardening:** Dynamic provider mapping queries now validate schemas and handle missing tables safely without sync errors.
+- **Cleaned Internal Server Configuration:** Streamlined internal server settings and standardized internal bridge ports for a lighter, faster app.
+
+### Security & Safety
+
+- **Media Streaming Protection:** Fixed a security vulnerability in how video streams and subtitle files are accessed to keep local files strictly protected (GHSA-g8jx-jpcr-7jp6).
+- **Safer Android File Extraction:** Updated internal app packages on Android to eliminate potential security risks during archive and file extraction.
+
+### New Contributors & Special Thanks
+
+- Special thanks to **@AmarilloNL** for their contributions to Jellyfin & Plex media server integration, NFO metadata generation, and sidecar subtitle support!
+- Special thanks to **@cyber-winner** for their contributions to extension installation error handling and scraper loading rollback!
+- Special thanks to **@satoridev01** for responsibly disclosing the media/subtitles security vulnerability!
+
 # [11.1.1] - 2026-10-26
 
 ### Android Updates & Notifications
