@@ -1,11 +1,11 @@
-<h6 align="right">Supports Android, Windows & Linux</h6>
+<h6 align="right">Supports Android, Windows, Linux & macOS</h6>
 <h1 align="center">
   <img src="assets/header_banner.svg" alt="StrawVerse Header - Fast Open Source Anime & Manga Downloader" width="100%">
 </h1>
 
 # StrawVerse
 
-> **A fast, open-source anime and manga downloader for Windows, Linux, and Android with batch downloads, subtitles, multiple sources, quality selection, and MyAnimeList integration.**
+> **A fast, open-source anime and manga downloader for Windows, Linux, macOS, and Android with batch downloads, subtitles, multiple sources, quality selection, and MyAnimeList integration.**
 
 <p align="center">
   <a href="https://github.com/TheYogMehta/StrawVerse/stargazers">
@@ -22,7 +22,7 @@
   </a>
 </p>
 
-StrawVerse is a fast, open-source **anime downloader** and **manga downloader** designed for Windows, Linux, and Android. Built for speed, versatility, and offline media management, StrawVerse enables you to search, stream, read, and perform **batch anime downloads** and manga chapter downloads across multiple high-speed sources.
+StrawVerse is a fast, open-source **anime downloader** and **manga downloader** designed for Windows, Linux, macOS, and Android. Built for speed, versatility, and offline media management, StrawVerse enables you to search, stream, read, and perform **batch anime downloads** and manga chapter downloads across multiple high-speed sources.
 
 Whether you want high-speed **anime download** queues in 1080p, full Sub and Dub subtitle extraction, or automatic MyAnimeList synchronization, StrawVerse brings your entire **anime & manga** library together under one powerful open-source platform.
 
@@ -38,7 +38,7 @@ Whether you want high-speed **anime download** queues in 1080p, full Sub and Dub
 
 | Platform    | Download Link                                                              | Format                           | OS Compatibility             |
 | :---------- | :------------------------------------------------------------------------- | :------------------------------- | :--------------------------- |
-| **macOS**   | [StrawVerse-mac-arm64.dmg](https://github.com/TheYogMehta/StrawVerse/releases) | Installer (`.dmg` / `.zip`) | macOS 12+ (Apple Silicon M1/M2/M3/M4) |
+| **macOS**   | [StrawVerse-mac-arm64.zip](https://github.com/TheYogMehta/StrawVerse/releases) | Application (`.zip` / `.dmg`) | macOS 12+ (Apple Silicon M1/M2/M3/M4) |
 | **Windows** | [StrawVerse.Setup.exe](https://github.com/TheYogMehta/StrawVerse/releases) | Installer (`.exe`)               | Windows 10, 11 (64-bit)      |
 | **Linux**   | [StrawVerse.AppImage](https://github.com/TheYogMehta/StrawVerse/releases)  | Portable (`.AppImage` / `.snap`) | Ubuntu, Fedora, Arch, Debian |
 | **Android** | [StrawVerse.apk](https://github.com/TheYogMehta/StrawVerse/releases)       | Mobile APK (`.apk`)              | Android 7.0+                 |
@@ -61,7 +61,7 @@ Whether you want high-speed **anime download** queues in 1080p, full Sub and Dub
 - **Flexible Subtitle Handling:** Extract soft subtitles as raw `.vtt` / `.ass` files or merge them directly into `.mp4` containers.
 - **In-App Player & Reader:** Stream anime directly with a built-in HTML5 video player or read manga with customizable layouts.
 - **MyAnimeList Integration:** Authenticate via MAL OAuth to automatically track watched episodes, read chapters, and sync lists.
-- **Cross-Platform Support:** Unified desktop and mobile client experience across Windows, Linux, and Android.
+- **Cross-Platform Support:** Unified desktop and mobile client experience across Windows, Linux, macOS, and Android.
 - **Free & Open Source:** 100% community-driven under GPL-3.0 without advertisements or locked features.
 
 ---
@@ -105,15 +105,21 @@ Beyond standard downloading, StrawVerse includes real-time playback synchronizat
 
 ## System Requirements
 
-- **Operating System:** Android, Windows & Linux
+- **Operating System:** Android, Windows, Linux & macOS
 
 ## Installation
 
-### For Android
+### For macOS (Apple Silicon M1/M2/M3/M4)
 
 1. Go to [StrawVerse Releases](https://github.com/TheYogMehta/StrawVerse/releases).
-2. Download the APK file `StrawVerse-<version>.apk`.
-3. Open and install the APK on your Android device!
+2. Download `StrawVerse-<version>-mac-arm64.zip` (or `.dmg`).
+3. Unzip the downloaded archive and drag `StrawVerse.app` into your `/Applications` folder.
+4. **First Launch (Gatekeeper bypass):** Because StrawVerse is an open-source, ad-hoc signed community release, macOS may show a developer verification notice on first launch:
+   - **Option 1 (Right-click):** Right-click (or Control-click) `StrawVerse.app` in `/Applications`, select **Open**, and then click **Open** on the confirmation prompt.
+   - **Option 2 (Terminal):** Clear the quarantine attribute by running:
+     ```bash
+     xattr -cr /Applications/StrawVerse.app
+     ```
 
 ### For Windows
 
@@ -124,16 +130,18 @@ Beyond standard downloading, StrawVerse includes real-time playback synchronizat
 ### For Linux
 
 1. Go to [StrawVerse Releases](https://github.com/TheYogMehta/StrawVerse/releases).
-2. Download the AppImage `StrawVerse-<version>.AppImage` or the snap / deb / zip package.
+2. Download the AppImage `StrawVerse-<version>.AppImage` or the deb / zip package.
 3. For AppImage: Make it executable using `chmod +x StrawVerse-<version>.AppImage` and run it.
 
-### For Other OS (macOS, etc.)
+### For Android
 
-- Pre-built binaries are not currently provided. You can run the application by cloning the repository, installing the dependencies, and running it locally. See the **[Build the Application](#build-the-application)** section below for step-by-step instructions.
+1. Go to [StrawVerse Releases](https://github.com/TheYogMehta/StrawVerse/releases).
+2. Download the APK file `StrawVerse-<version>.apk`.
+3. Open and install the APK on your Android device!
 
 ## Usage
 
-1. Run the application (`StrawVerse.exe` on Windows, or `StrawVerse.AppImage` / Snap on Linux).
+1. Run the application (`StrawVerse.exe` on Windows, `StrawVerse.app` on macOS, or `StrawVerse.AppImage` on Linux).
 2. **Search and Discover:** Use the unified Discover page to search across anime or manga, switching search modes with the header toggle slider.
 3. **Stream or Read:** Select a title to watch instantly in the custom HTML5 video player, or read chapters in the built-in manga reader.
 4. **Synchronized Playback:** Jump to the **Watch Together** tab to host or join a synced watch room with friends.
@@ -160,6 +168,14 @@ Navigate to the settings tab to configure your StrawVerse application:
 5. **Storage & Cache:** Set size limits for poster image disk caching (default 5GB). The app implements LRU cache eviction and automatically purges cached assets older than 6 days.
 
 ## Uninstalling the Application
+
+### For macOS
+
+1. Drag `StrawVerse.app` from your `/Applications` folder to the **Trash** (and empty Trash).
+2. *(Optional)* To completely delete application settings and local cache:
+   ```bash
+   rm -rf ~/Library/Application\ Support/strawverse
+   ```
 
 ### For Windows
 
@@ -233,7 +249,7 @@ Follow these steps to build application:
 
 ## Notes
 
-- Build (package): Creates installer/executable files for Windows (`.exe`) and Linux (`.AppImage`, `.snap`) in the `dist` directory.
+- Build (package): Creates installer/executable files for Windows (`.exe`), Linux (`.AppImage`, `.deb`), and macOS (`.zip`, `.dmg`) in the `dist` directory.
 - Start: Runs the app locally in the Electron environment without building an executable.
 - Ensure that your system has the latest versions of Node.js and Git installed for compatibility.
 - If you encounter any issues, feel free to open an issue or join our [Discord Server](https://discord.gg/PzfUBgQ2gt) for support and chat!

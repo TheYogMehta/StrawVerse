@@ -35,6 +35,31 @@ if (fs.existsSync(guiDistSrc)) {
   );
 }
 
+// Patch @capacitor/cli for tar v7 compatibility when tar is overridden
+try {
+  const cliTemplatePath = path.resolve(
+    __dirname,
+    "..",
+    "node_modules",
+    "@capacitor",
+    "cli",
+    "dist",
+    "util",
+    "template.js",
+  );
+  if (fs.existsSync(cliTemplatePath)) {
+    let content = fs.readFileSync(cliTemplatePath, "utf8");
+    if (content.includes("await tar_1.default.extract")) {
+      content = content.replace(
+        "await tar_1.default.extract",
+        "await (tar_1.default || tar_1).extract",
+      );
+      fs.writeFileSync(cliTemplatePath, content, "utf8");
+      console.log("[sync] Patched @capacitor/cli for tar compatibility");
+    }
+  }
+} catch (_) {}
+
 const steps = [
   "bundle-backend.mjs",
   "copy-missing-assets.mjs",
