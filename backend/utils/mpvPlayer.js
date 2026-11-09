@@ -179,9 +179,9 @@ const getMpvPath = () => {
   candidateDirs.push(path.join(__dirname, "..", "mpv", platformDir));
 
   for (const dir of candidateDirs) {
-    const directPath = path.join(dir, exeName);
-    if (fs.existsSync(directPath)) return directPath;
-    if (platform === "darwin" && fs.existsSync(dir)) {
+    if (!fs.existsSync(dir)) continue;
+
+    if (platform === "darwin") {
       const appBundleMpv = path.join(
         dir,
         "mpv.app",
@@ -205,6 +205,9 @@ const getMpvPath = () => {
         }
       } catch (_) {}
     }
+
+    const directPath = path.join(dir, exeName);
+    if (fs.existsSync(directPath)) return directPath;
   }
 
   // 3. Fallback to common system paths
@@ -1616,8 +1619,7 @@ async function playInMpv(window, options) {
 
   const mpvExe = getMpvPath();
   const mpvExists =
-    mpvExe &&
-    (path.isAbsolute(mpvExe) ? fs.existsSync(mpvExe) : true);
+    mpvExe && (path.isAbsolute(mpvExe) ? fs.existsSync(mpvExe) : true);
   if (!mpvExe || !mpvExists) {
     const errMsg = `MPV binary executable not found on system at: ${mpvExe}`;
     logger.error(`[MPV Error] ${errMsg}`);

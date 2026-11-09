@@ -130,11 +130,11 @@ log "Packaging Desktop application..."
 cd "$ELECTRON_DIR"
 node -e "require('fs').rmSync('dist', { recursive: true, force: true });"
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  log "Building for macOS (Apple Silicon arm64)..."
+  log "Building for macOS..."
   npx electron-builder --mac --arm64
 else
-  log "Building for Windows & Linux..."
-  npx electron-builder --win --linux
+  log "Building for Windows, Linux & macOS..."
+  npx electron-builder --win --linux --mac --arm64
 fi
 ok "Desktop packaging complete"
 

@@ -86,14 +86,39 @@ const setupMacMpv = async () => {
   const destAppMpv = path.join(macDir, "mpv.app", "Contents", "MacOS", "mpv");
   const destTar = path.join(macDir, "mpv.tar.gz");
 
+  const writeLauncherScript = () => {
+    const launcherContent = `#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -x "$SCRIPT_DIR/mpv.app/Contents/MacOS/mpv" ]; then
+  exec "$SCRIPT_DIR/mpv.app/Contents/MacOS/mpv" "$@"
+fi
+for sub in "$SCRIPT_DIR"/*/; do
+  if [ -x "\${sub}mpv.app/Contents/MacOS/mpv" ]; then
+    exec "\${sub}mpv.app/Contents/MacOS/mpv" "$@"
+  fi
+done
+exec mpv "$@"
+`;
+    fs.writeFileSync(destExe, launcherContent, { mode: 0o755 });
+    fs.chmodSync(destExe, 0o755);
+  };
+
   const findExtractedMpv = () => {
-    if (fs.existsSync(destExe) && fs.statSync(destExe).size > 0) return destExe;
-    if (fs.existsSync(destAppMpv) && fs.statSync(destAppMpv).size > 0) return destAppMpv;
+    if (fs.existsSync(destAppMpv) && fs.statSync(destAppMpv).size > 0)
+      return destAppMpv;
     if (fs.existsSync(macDir)) {
       const subdirs = fs.readdirSync(macDir);
       for (const sub of subdirs) {
-        const candidate = path.join(macDir, sub, "mpv.app", "Contents", "MacOS", "mpv");
-        if (fs.existsSync(candidate)) return candidate;
+        const candidate = path.join(
+          macDir,
+          sub,
+          "mpv.app",
+          "Contents",
+          "MacOS",
+          "mpv",
+        );
+        if (fs.existsSync(candidate) && fs.statSync(candidate).size > 0)
+          return candidate;
       }
     }
     return null;
@@ -102,15 +127,10 @@ const setupMacMpv = async () => {
   let existingBinary = findExtractedMpv();
   if (existingBinary) {
     console.log("macOS arm64 MPV binary already exists, ensuring launchers...");
-    // Ensure standard destExe launcher exists
-    if (!fs.existsSync(destExe)) {
-      fs.writeFileSync(
-        destExe,
-        `#!/bin/sh\nexec "${existingBinary}" "$@"\n`,
-        { mode: 0o755 }
-      );
-    }
-    fs.chmodSync(destExe, 0o755);
+    writeLauncherScript();
+    try {
+      fs.chmodSync(existingBinary, 0o755);
+    } catch (_) {}
     return;
   }
 
@@ -126,15 +146,10 @@ const setupMacMpv = async () => {
 
     const binaryPath = findExtractedMpv();
     if (binaryPath) {
-      if (!fs.existsSync(destExe)) {
-        fs.writeFileSync(
-          destExe,
-          `#!/bin/sh\nexec "${binaryPath}" "$@"\n`,
-          { mode: 0o755 }
-        );
-      }
-      fs.chmodSync(destExe, 0o755);
-      fs.chmodSync(binaryPath, 0o755);
+      writeLauncherScript();
+      try {
+        fs.chmodSync(binaryPath, 0o755);
+      } catch (_) {}
       console.log("Configured macOS MPV executable at:", destExe);
     }
   } catch (err) {
@@ -218,7 +233,9 @@ const setupFfmpegMac = async () => {
 
   try {
     console.log("Downloading macOS arm64 FFmpeg binary...");
-    const response = await got(FFMPEG_MAC_ARM64_URL, { responseType: "buffer" });
+    const response = await got(FFMPEG_MAC_ARM64_URL, {
+      responseType: "buffer",
+    });
     const decompressed = require("zlib").gunzipSync(response.body);
     fs.writeFileSync(destExe, decompressed);
     fs.chmodSync(destExe, 0o755);
@@ -239,21 +256,30 @@ const patchSnapBuilder = () => {
       "out",
       "targets",
       "snap",
-      "coreLegacy.js"
+      "coreLegacy.js",
     );
     if (fs.existsSync(snapLegacyPath)) {
       let content = fs.readFileSync(snapLegacyPath, "utf8");
-      if (content.includes('await (0, promises_1.rm)(path.join(appOutDir, "chrome-sandbox"), { force: true });')) {
+      if (
+        content.includes(
+          'await (0, promises_1.rm)(path.join(appOutDir, "chrome-sandbox"), { force: true });',
+        )
+      ) {
         content = content.replace(
           'await (0, promises_1.rm)(path.join(appOutDir, "chrome-sandbox"), { force: true });',
-          '// Patched by StrawVerse to prevent race condition with AppImage packaging\n    // await (0, promises_1.rm)(path.join(appOutDir, "chrome-sandbox"), { force: true });'
+          '// Patched by StrawVerse to prevent race condition with AppImage packaging\n    // await (0, promises_1.rm)(path.join(appOutDir, "chrome-sandbox"), { force: true });',
         );
         fs.writeFileSync(snapLegacyPath, content, "utf8");
-        console.log("Patched app-builder-lib snap coreLegacy.js to prevent AppImage race condition.");
+        console.log(
+          "Patched app-builder-lib snap coreLegacy.js to prevent AppImage race condition.",
+        );
       }
     }
   } catch (err) {
-    console.warn("Could not patch app-builder-lib snap coreLegacy.js:", err.message);
+    console.warn(
+      "Could not patch app-builder-lib snap coreLegacy.js:",
+      err.message,
+    );
   }
 };
 

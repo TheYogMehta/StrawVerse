@@ -6,14 +6,14 @@ Welcome to the comprehensive technical documentation for **StrawVerse**, an open
 
 ## Documentation Structure
 
-| Document | Description | Target Audience |
-| :--- | :--- | :--- |
-| **[1. Architecture Overview](file:///Users/buffalo/Documents/Workspace/StrawVerse/docs/ARCHITECTURE.md)** | System topology, Electron/Capacitor execution models, Express backend, IPC, and security | Architects, Tech Leads, New Developers |
-| **[2. Backend Core & Services](file:///Users/buffalo/Documents/Workspace/StrawVerse/docs/BACKEND.md)** | Express API routes, download engine, scraping subsystem, queueing, and SQLite database schema | Backend & Systems Developers |
-| **[3. Frontend Architecture](file:///Users/buffalo/Documents/Workspace/StrawVerse/docs/FRONTEND.md)** | React 19 / Vite structure, dual-runtime API adapters, native bridges, state, and UI modules | Frontend & UI/UX Engineers |
-| **[4. Android & Capacitor Platform](file:///Users/buffalo/Documents/Workspace/StrawVerse/docs/ANDROID_CAPACITOR.md)** | Embedded Node.js runtime, Java native bridges, Android ExoPlayer activity, foreground service, and Cloudflare bypass | Mobile & Android Developers |
-| **[5. Desktop & Electron Platform](file:///Users/buffalo/Documents/Workspace/StrawVerse/docs/DESKTOP_ELECTRON.md)** | Main process lifecycle, preloads, MPV player integration with IPC/LUA, and binary bundling | Desktop Engineers |
-| **[6. Development & Deployment Guide](file:///Users/buffalo/Documents/Workspace/StrawVerse/docs/DEVELOPMENT.md)** | Local environment setup, build pipelines, cross-platform packaging, release automation, and scripts | Developers & DevOps Engineers |
+| Document                                                      | Description                                                                                                          | Target Audience                        |
+| :------------------------------------------------------------ | :------------------------------------------------------------------------------------------------------------------- | :------------------------------------- |
+| **[1. Architecture Overview](./ARCHITECTURE.md)**             | System topology, Electron/Capacitor execution models, Express backend, IPC, and security                             | Architects, Tech Leads, New Developers |
+| **[2. Backend Core & Services](./BACKEND.md)**                | Express API routes, download engine, scraping subsystem, queueing, and SQLite database schema                        | Backend & Systems Developers           |
+| **[3. Frontend Architecture](./FRONTEND.md)**                 | React 19 / Vite structure, dual-runtime API adapters, native bridges, state, and UI modules                          | Frontend & UI/UX Engineers             |
+| **[4. Android & Capacitor Platform](./ANDROID_CAPACITOR.md)** | Embedded Node.js runtime, Java native bridges, Android ExoPlayer activity, foreground service, and Cloudflare bypass | Mobile & Android Developers            |
+| **[5. Desktop & Electron Platform](./DESKTOP_ELECTRON.md)**   | Main process lifecycle, preloads, MPV player integration with IPC/LUA, and binary bundling                           | Desktop Engineers                      |
+| **[6. Development & Deployment Guide](./DEVELOPMENT.md)**     | Local environment setup, build pipelines, cross-platform packaging, release automation, and scripts                  | Developers & DevOps Engineers          |
 
 ---
 

@@ -35,7 +35,5 @@ app.log
 *.db-journal
 *.db-wal
 *.db-shm
-.agents/
-graphify-out/
 .DS_Store
 **/.DS_Store

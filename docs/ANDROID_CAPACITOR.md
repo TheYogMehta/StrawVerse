@@ -71,19 +71,19 @@ capacitor/
 ## 3. Key Native Components
 
 ### 3.1 Embedded Node.js (`nodejs-mobile`)
-- The backend directory is bundled into `capacitor/www/nodejs/` via [`capacitor/scripts/bundle-backend.mjs`](file:///Users/buffalo/Documents/Workspace/StrawVerse/capacitor/scripts/bundle-backend.mjs).
+- The backend directory is bundled into `capacitor/www/nodejs/` via [`capacitor/scripts/bundle-backend.mjs`](../capacitor/scripts/bundle-backend.mjs).
 - When the Android app starts, `nodejs-mobile` spawns the Express server on local loopback.
 - The UI detects the server address and starts communicating via standard HTTP REST.
 
-### 3.2 Native Player Activity ([`PlayerActivity.java`](file:///Users/buffalo/Documents/Workspace/StrawVerse/capacitor/android/app/src/main/java/app/strawverse/android/PlayerActivity.java))
+### 3.2 Native Player Activity ([`PlayerActivity.java`](../capacitor/android/app/src/main/java/app/strawverse/android/PlayerActivity.java))
 - When users watch video on Android, `PlayerActivity` is launched via an explicit Android Intent.
 - Uses Google's **ExoPlayer** for hardware accelerated HLS playback, subtitle rendering, and aspect ratio management.
-- Supports background playback, Picture-in-Picture (PiP), and custom HTTP request headers via [`KwikDataSource.java`](file:///Users/buffalo/Documents/Workspace/StrawVerse/capacitor/android/app/src/main/java/app/strawverse/android/KwikDataSource.java).
+- Supports background playback, Picture-in-Picture (PiP), and custom HTTP request headers via [`KwikDataSource.java`](../capacitor/android/app/src/main/java/app/strawverse/android/KwikDataSource.java).
 
-### 3.3 Cloudflare Challenge Bypass ([`CloudflareBypassPlugin.java`](file:///Users/buffalo/Documents/Workspace/StrawVerse/capacitor/android/app/src/main/java/app/strawverse/android/CloudflareBypassPlugin.java))
+### 3.3 Cloudflare Challenge Bypass ([`CloudflareBypassPlugin.java`](../capacitor/android/app/src/main/java/app/strawverse/android/CloudflareBypassPlugin.java))
 - Intercepts requests blocked by Cloudflare turnstile or bot protection.
 - Runs an off-screen Android WebView instance with genuine device headers, collects `cf_clearance` cookies and session tokens, and returns them to the backend scraper.
 
-### 3.4 Foreground Download Service ([`DownloadForegroundService.java`](file:///Users/buffalo/Documents/Workspace/StrawVerse/capacitor/android/app/src/main/java/app/strawverse/android/DownloadForegroundService.java))
+### 3.4 Foreground Download Service ([`DownloadForegroundService.java`](../capacitor/android/app/src/main/java/app/strawverse/android/DownloadForegroundService.java))
 - Prevents the Android operating system from killing background download tasks during low memory conditions or screen lock.
-- Updates download status, current file, and percentage in real-time on Android notification trays via [`DownloadNotificationManager.java`](file:///Users/buffalo/Documents/Workspace/StrawVerse/capacitor/android/app/src/main/java/app/strawverse/android/DownloadNotificationManager.java).
+- Updates download status, current file, and percentage in real-time on Android notification trays via [`DownloadNotificationManager.java`](../capacitor/android/app/src/main/java/app/strawverse/android/DownloadNotificationManager.java).

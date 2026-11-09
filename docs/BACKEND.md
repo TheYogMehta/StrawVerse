@@ -30,21 +30,21 @@ backend/
 
 ## 2. API Routes Specification
 
-All API endpoints are mounted under `/api` (or root prefix handled in [`backend/routes/index.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/routes/index.js)):
+All API endpoints are mounted under `/api` (or root prefix handled in [`backend/routes/index.js`](../backend/routes/index.js)):
 
-| Endpoint Group | File | Key Methods | Description |
-| :--- | :--- | :--- | :--- |
-| **Media** | [`media.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/routes/media.js) | `GET /search`, `GET /info`, `GET /watch`, `GET /read` | Resolves anime episodes, video stream links (HLS/MP4), manga chapter image lists from scrapers |
-| **Downloads** | [`downloads.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/routes/downloads.js) | `POST /download`, `GET /queue`, `POST /cancel`, `POST /retry` | Enqueues episodes/chapters, streams download progress, controls queue lifecycle |
-| **Library** | [`library.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/routes/library.js) | `GET /library`, `POST /bookmark`, `GET /history`, `POST /tags` | Interacts with local SQLite database to persist user watch history, bookmarks, and local files |
-| **System** | [`system.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/routes/system.js) | `GET /settings`, `POST /settings`, `GET /logs`, `POST /folder` | System settings, local directory pickers, system specs, Discord RPC config |
-| **MAL** | [`mal.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/routes/mal.js) | `GET /mal/auth`, `GET /mal/callback`, `POST /mal/sync` | PKCE OAuth authentication with MyAnimeList, user list synchronization |
+| Endpoint Group | File                                             | Key Methods                                                    | Description                                                                                    |
+| :------------- | :----------------------------------------------- | :------------------------------------------------------------- | :--------------------------------------------------------------------------------------------- |
+| **Media**      | [`media.js`](../backend/routes/media.js)         | `GET /search`, `GET /info`, `GET /watch`, `GET /read`          | Resolves anime episodes, video stream links (HLS/MP4), manga chapter image lists from scrapers |
+| **Downloads**  | [`downloads.js`](../backend/routes/downloads.js) | `POST /download`, `GET /queue`, `POST /cancel`, `POST /retry`  | Enqueues episodes/chapters, streams download progress, controls queue lifecycle                |
+| **Library**    | [`library.js`](../backend/routes/library.js)     | `GET /library`, `POST /bookmark`, `GET /history`, `POST /tags` | Interacts with local SQLite database to persist user watch history, bookmarks, and local files |
+| **System**     | [`system.js`](../backend/routes/system.js)       | `GET /settings`, `POST /settings`, `GET /logs`, `POST /folder` | System settings, local directory pickers, system specs, Discord RPC config                     |
+| **MAL**        | [`mal.js`](../backend/routes/mal.js)             | `GET /mal/auth`, `GET /mal/callback`, `POST /mal/sync`         | PKCE OAuth authentication with MyAnimeList, user list synchronization                          |
 
 ---
 
 ## 3. Database Layer & Schema
 
-The database abstraction [`backend/utils/db.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/utils/db.js) provides a resilient interface supporting native SQLite bindings (`better-sqlite3`, `sqlite3`, or Node 22+ built-in `node:sqlite`).
+The database abstraction [`backend/utils/db.js`](../backend/utils/db.js) provides a resilient interface supporting native SQLite bindings (`better-sqlite3`, `sqlite3`, or Node 22+ built-in `node:sqlite`).
 
 ### Key Database Tables
 
@@ -87,10 +87,11 @@ erDiagram
 
 ## 4. Downloader Engine & Concurrency Management
 
-Download operations are handled by [`backend/utils/downloader.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/utils/downloader.js) and coordinated by [`backend/utils/queue.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/utils/queue.js):
+Download operations are handled by [`backend/utils/downloader.js`](../backend/utils/downloader.js) and coordinated by [`backend/utils/queue.js`](../backend/utils/queue.js):
 
 ### 4.1 Features
+
 - **HLS Segment Downloader**: Fetches `.m3u8` playlists, downloads TS video fragments concurrently, and decrypts AES-128 if keys are specified.
 - **FFmpeg Transcoding & Remuxing**: Merges downloaded video streams with subtitle tracks (`.vtt`, `.ass`) into clean `.mp4` or `.mkv` containers.
 - **CBZ Manga Packager**: Fetches individual manga chapter page images, caches them locally, and compiles them into `.cbz` archive formats.
-- **Domain Concurrency Limiter** ([`backend/utils/domainConcurrency.js`](file:///Users/buffalo/Documents/Workspace/StrawVerse/backend/utils/domainConcurrency.js)): Dynamically caps simultaneous TCP sockets per CDN/scraper hostname, monitoring 429/503 responses to trigger exponential backoff.
+- **Domain Concurrency Limiter** ([`backend/utils/domainConcurrency.js`](../backend/utils/domainConcurrency.js)): Dynamically caps simultaneous TCP sockets per CDN/scraper hostname, monitoring 429/503 responses to trigger exponential backoff.

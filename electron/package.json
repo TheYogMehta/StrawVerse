@@ -9,7 +9,10 @@
     "build": "npm run build --prefix ../gui",
     "prepackage": "node scripts/download-binaries.js",
     "package": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --win --linux",
+    "prepackage:mac": "node scripts/download-binaries.js",
     "package:mac": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --mac --arm64",
+    "prepackage:all": "node scripts/download-binaries.js",
+    "package:all": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --win --linux --mac --arm64",
     "release": "bash release.sh",
     "start:prod": "cross-env NODE_ENV=production electron .",
     "postinstall": "electron-builder install-app-deps && node scripts/download-binaries.js"
@@ -79,11 +82,15 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         },
         {
           "target": "zip",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "category": "public.app-category.entertainment",

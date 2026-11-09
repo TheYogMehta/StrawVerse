@@ -171,6 +171,17 @@ async function getFfmpegPath() {
     candidatePaths.push(path.join(root, "ffmpeg", platformDir, binaryName));
   }
   candidatePaths.push(
+    path.join(
+      __dirname,
+      "..",
+      "..",
+      "electron",
+      "ffmpeg",
+      platformDir,
+      binaryName,
+    ),
+  );
+  candidatePaths.push(
     path.join(__dirname, "..", "..", "ffmpeg", platformDir, binaryName),
   );
 
@@ -683,7 +694,11 @@ class downloader {
     }
   }
 
-  async fetchDirectVideoRange(targetUrl, rangeHeader = null, timeoutMs = 60000) {
+  async fetchDirectVideoRange(
+    targetUrl,
+    rangeHeader = null,
+    timeoutMs = 60000,
+  ) {
     const u = new URL(targetUrl);
     const isHttps = u.protocol === "https:";
     const transport = isHttps ? https : http;
@@ -739,7 +754,9 @@ class downloader {
           }
 
           if (statusCode >= 400) {
-            const err = new Error(`Request failed with status code ${statusCode}`);
+            const err = new Error(
+              `Request failed with status code ${statusCode}`,
+            );
             err.statusCode = statusCode;
             err.response = {
               status: statusCode,
@@ -836,13 +853,13 @@ class downloader {
           ) {
             const redirectUrl = resolveUrl(res.headers.location, targetUrl);
             res.resume();
-            return resolve(
-              this.fetchDirectVideoStream(redirectUrl, timeoutMs),
-            );
+            return resolve(this.fetchDirectVideoStream(redirectUrl, timeoutMs));
           }
 
           if (statusCode >= 400) {
-            const err = new Error(`Request failed with status code ${statusCode}`);
+            const err = new Error(
+              `Request failed with status code ${statusCode}`,
+            );
             err.statusCode = statusCode;
             err.response = {
               status: statusCode,
@@ -1109,7 +1126,9 @@ class downloader {
         const partFile = path.join(tempDir, `${i}.part`);
         if (!fs.existsSync(partFile)) {
           writer.destroy();
-          throw new Error(`Missing part file during concatenation: ${partFile}`);
+          throw new Error(
+            `Missing part file during concatenation: ${partFile}`,
+          );
         }
         const readStream = fs.createReadStream(partFile);
         await new Promise((resolve, reject) => {

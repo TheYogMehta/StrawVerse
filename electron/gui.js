@@ -482,6 +482,7 @@ const createWindow = () => {
     });
   };
 
+  ipcMain.removeHandler("ensure-cf-bypass");
   ipcMain.handle(
     "ensure-cf-bypass",
     async (event, targetUrl, sourceReferer) => {
@@ -579,6 +580,7 @@ const createWindow = () => {
     }
   });
 
+  ipcMain.removeHandler("check-whats-new");
   ipcMain.handle("check-whats-new", async () => {
     try {
       const showWhatsNew = !!getKeyValue("Settings", "showWhatsNew");
@@ -612,6 +614,7 @@ const createWindow = () => {
     }
   });
 
+  ipcMain.removeHandler("disable-whats-new");
   ipcMain.handle("disable-whats-new", async () => {
     try {
       disableWhatsNew();
@@ -621,6 +624,7 @@ const createWindow = () => {
     }
   });
 
+  ipcMain.removeAllListeners("marketplace");
   ipcMain.on("marketplace", (event, AnimeManga) => {
     if (global.marketplaceWin && !global.marketplaceWin.isDestroyed()) {
       global.marketplaceWin.focus();
@@ -657,7 +661,9 @@ const createWindow = () => {
 
     await StopDiscordRPC();
 
-    app.quit();
+    if (process.platform !== "darwin") {
+      app.quit();
+    }
   });
 
   if (app.isPackaged) {
@@ -734,13 +740,14 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+    } else {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win) {
+        if (win.isMinimized()) win.restore();
+        win.show();
+        win.focus();
+      }
     }
-  });
-
-  app.on("open-url", (event, url) => {
-    event.preventDefault();
-    logger.info(`[macOS Protocol] Received open-url: ${url}`);
-    handleCustomProtocolUrl(url);
   });
 
   app.on("window-all-closed", () => {
