@@ -54,19 +54,21 @@ async function updateHistory({
   const rawNum = parseFloat(number);
   const parsedNum =
     !isNaN(rawNum) && Number.isInteger(rawNum) ? Math.trunc(rawNum) : rawNum;
+  const isVideo = type === "Anime" || type === "Movies";
   const isAnime = type === "Anime";
   const langSubDub = subdub || sub_dub || null;
 
   // Resolve title
   let resolvedTitle = title;
-  const mainTable = isAnime ? "Anime" : "Manga";
-  const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
-  const idField = isAnime ? "anime_id" : "manga_id";
-  const titleField = isAnime ? "anime_title" : "manga_title";
-  const numberField = isAnime ? "episode_number" : "chapter_number";
-  const currentField = isAnime ? "current_time" : "current_page";
-  const totalField = isAnime ? "duration" : "total_pages";
-  const timeField = isAnime ? "last_watched" : "last_read";
+  const mainTable =
+    type === "Manga" ? "Manga" : type === "Movies" ? "Movies" : "Anime";
+  const historyTable = isVideo ? "WatchHistory" : "ReadHistory";
+  const idField = isVideo ? "anime_id" : "manga_id";
+  const titleField = isVideo ? "anime_title" : "manga_title";
+  const numberField = isVideo ? "episode_number" : "chapter_number";
+  const currentField = isVideo ? "current_time" : "current_page";
+  const totalField = isVideo ? "duration" : "total_pages";
+  const timeField = isVideo ? "last_watched" : "last_read";
 
   if (!resolvedTitle || resolvedTitle === type) {
     try {
@@ -179,16 +181,16 @@ async function updateHistory({
     );
   }
 
-  let curVal = isAnime ? parseSeconds(currentTime) : parseInt(currentTime || 1);
-  const totVal = isAnime ? parseFloat(duration || 0) : parseInt(duration || 1);
-  if (isAnime && totVal > 0 && curVal > totVal) {
+  let curVal = isVideo ? parseSeconds(currentTime) : parseInt(currentTime || 1);
+  const totVal = isVideo ? parseFloat(duration || 0) : parseInt(duration || 1);
+  if (isVideo && totVal > 0 && curVal > totVal) {
     curVal = totVal;
   }
   let isComp = 0;
   if (isCompleted !== undefined && isCompleted !== null) {
     isComp = isCompleted ? 1 : 0;
   } else {
-    if (isAnime) {
+    if (isVideo) {
       isComp = totVal > 0 && curVal / totVal >= 0.75 ? 1 : 0;
     } else {
       const cumulativeTime = (record?.time_spent || 0) + tSpent;
@@ -225,11 +227,14 @@ async function updateHistory({
   };
 
   const notifyCompletion = async () => {
-    const synced = await autoTrackMAL(type, mediaId, parsedNum);
+    let synced = false;
+    if (type === "Anime" || type === "Manga") {
+      synced = await autoTrackMAL(type, mediaId, parsedNum);
+    }
     if (!synced) {
       global.sendToRenderer("mal-sync-notification", {
-        title: `${isAnime ? "Episode" : "Chapter"} Completed`,
-        body: `Finished ${isAnime ? "watching" : "reading"} "${resolvedTitle || type}" ${isAnime ? "Episode" : "Chapter"} ${parsedNum}.`,
+        title: `${isVideo ? "Episode" : "Chapter"} Completed`,
+        body: `Finished ${isVideo ? "watching" : "reading"} "${resolvedTitle || type}" ${isVideo ? "Episode" : "Chapter"} ${parsedNum}.`,
         icon: "/assets/luffy.png",
       });
     }
@@ -245,7 +250,7 @@ async function updateHistory({
           ? null
           : record.completed_at;
 
-    const subDubUpdate = isAnime && langSubDub ? `, sub_dub = ?` : ``;
+    const subDubUpdate = isVideo && langSubDub ? `, sub_dub = ?` : ``;
     const updateParams = [
       mediaId,
       resolvedTitle || type,
@@ -256,7 +261,7 @@ async function updateHistory({
       nowIso,
       compAt,
     ];
-    if (isAnime && langSubDub) updateParams.push(langSubDub);
+    if (isVideo && langSubDub) updateParams.push(langSubDub);
     updateParams.push(record.id);
 
     await run(
@@ -297,7 +302,7 @@ async function updateHistory({
       nowIso,
       compAt,
     ];
-    if (isAnime) {
+    if (isVideo) {
       insertCols.push("sub_dub");
       insertVals.push(langSubDub || "sub");
     }

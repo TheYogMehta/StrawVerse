@@ -195,27 +195,35 @@ export function parseTags(val) {
 export const SYSTEM_TAGS = Object.freeze({
   Anime: Object.freeze(["Watching", "Plan to Watch", "Completed", "Downloads"]),
   Manga: Object.freeze(["Reading", "Plan to Read", "Completed", "Downloads"]),
+  Movies: Object.freeze(["Watching", "Plan to Watch", "Completed", "Downloads"]),
 });
 
 export const RESERVED_TAGS = Object.freeze({
   Anime: Object.freeze(SYSTEM_TAGS.Anime.map((t) => t.toLowerCase())),
   Manga: Object.freeze(SYSTEM_TAGS.Manga.map((t) => t.toLowerCase())),
+  Movies: Object.freeze(SYSTEM_TAGS.Movies.map((t) => t.toLowerCase())),
 });
 
 export function getReservedTags(type = "Anime") {
-  const isManga = String(type).toLowerCase() === "manga";
-  return SYSTEM_TAGS[isManga ? "Manga" : "Anime"] || SYSTEM_TAGS.Anime;
+  const norm = String(type || "").toLowerCase();
+  const key =
+    norm === "manga" ? "Manga" : norm === "movies" ? "Movies" : "Anime";
+  return SYSTEM_TAGS[key] || SYSTEM_TAGS.Anime;
 }
 
 export function isReservedTag(tag, type = null) {
   if (!tag || typeof tag !== "string") return false;
   const lower = tag.trim().toLowerCase();
   if (type) {
-    const isManga = String(type).toLowerCase() === "manga";
-    return RESERVED_TAGS[isManga ? "Manga" : "Anime"].includes(lower);
+    const norm = String(type || "").toLowerCase();
+    const key =
+      norm === "manga" ? "Manga" : norm === "movies" ? "Movies" : "Anime";
+    return RESERVED_TAGS[key].includes(lower);
   }
   return (
-    RESERVED_TAGS.Anime.includes(lower) || RESERVED_TAGS.Manga.includes(lower)
+    RESERVED_TAGS.Anime.includes(lower) ||
+    RESERVED_TAGS.Manga.includes(lower) ||
+    RESERVED_TAGS.Movies.includes(lower)
   );
 }
 

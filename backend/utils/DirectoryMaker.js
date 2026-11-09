@@ -15,7 +15,12 @@ async function getOrCreateMediaDir(
   let existingFolderName = null;
   if (mediaId) {
     try {
-      const tableName = mediaType === "Manga" ? "Manga" : "Anime";
+      const tableName =
+        mediaType === "Manga"
+          ? "Manga"
+          : mediaType === "Movies"
+            ? "Movies"
+            : "Anime";
       const row = await queryOne(
         `SELECT folder_name FROM ${tableName} WHERE id = ? OR LOWER(id) = LOWER(?) LIMIT 1`,
         [mediaId, mediaId],
@@ -42,7 +47,12 @@ async function getOrCreateMediaDir(
 
   if (mediaId) {
     try {
-      const tableName = mediaType === "Manga" ? "Manga" : "Anime";
+      const tableName =
+        mediaType === "Manga"
+          ? "Manga"
+          : mediaType === "Movies"
+            ? "Movies"
+            : "Anime";
       await run(
         `UPDATE ${tableName} SET folder_name = ? WHERE id = ? AND (folder_name IS NULL OR folder_name = '')`,
         [folderName, mediaId],
@@ -86,10 +96,11 @@ async function getTypeDir(customdir, Type, create = false) {
 
 function getEffectiveDownloadLocation(type, config) {
   if (!config) return null;
-  const isAnime = type === "Anime" || type === "anime";
-  return isAnime
-    ? config.CustomDownloadLocationAnime || null
-    : config.CustomDownloadLocationManga || null;
+  const norm = String(type || "").toLowerCase();
+  if (norm === "anime") return config.CustomDownloadLocationAnime || null;
+  if (norm === "movies" || norm === "movies-tvshows")
+    return config.CustomDownloadLocationMovies || null;
+  return config.CustomDownloadLocationManga || null;
 }
 
 // Dir GET
@@ -128,6 +139,11 @@ async function MangaDir(title, customdir, mediaId = null) {
   return await GetDir(title, customdir, "Manga", mediaId, true);
 }
 
+// Movies & Series Dir Maker
+async function MovieDir(title, customdir, mediaId = null) {
+  return await GetDir(title, customdir, "Movies", mediaId, true);
+}
+
 // download folder Location
 function getDownloadsFolder() {
   return (
@@ -162,6 +178,7 @@ module.exports = {
   directoryMaker,
   mediaServerDir,
   MangaDir,
+  MovieDir,
   ensureDirectoryExists,
   getDownloadsFolder,
   GetDir,

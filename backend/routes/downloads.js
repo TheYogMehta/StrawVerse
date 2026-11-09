@@ -5,6 +5,8 @@ const {
   downloadAnimeMulti,
   downloadMangaSingle,
   downloadMangaMulti,
+  downloadMovieSingle,
+  downloadMovieMulti,
 } = require("../download");
 const {
   getQueue,
@@ -26,6 +28,7 @@ router.post("/api/download/:AnimeManga/:singleMulti", async (req, res) => {
     let MessageData = null;
 
     const isAnime = AnimeManga === "Anime";
+    const isMovies = AnimeManga === "Movies";
 
     if (singleMulti === "Single") {
       const {
@@ -38,32 +41,48 @@ router.post("/api/download/:AnimeManga/:singleMulti", async (req, res) => {
         subdub = null,
       } = req.body;
       const targetEpId = ep && typeof ep === "object" ? ep.id : ep;
-      MessageData = isAnime
-        ? await downloadAnimeSingle(
-            provider,
-            id,
-            targetEpId,
-            number,
-            Title,
-            true,
-            null,
-            null,
-            false,
-            malid,
-            subdub,
-          )
-        : await downloadMangaSingle(
-            provider,
-            id,
-            targetEpId,
-            number,
-            Title,
-            true,
-            null,
-            null,
-            false,
-            malid,
-          );
+      if (isMovies) {
+        MessageData = await downloadMovieSingle(
+          provider,
+          id,
+          targetEpId,
+          number,
+          Title,
+          true,
+          null,
+          null,
+          false,
+          malid,
+          subdub,
+        );
+      } else if (isAnime) {
+        MessageData = await downloadAnimeSingle(
+          provider,
+          id,
+          targetEpId,
+          number,
+          Title,
+          true,
+          null,
+          null,
+          false,
+          malid,
+          subdub,
+        );
+      } else {
+        MessageData = await downloadMangaSingle(
+          provider,
+          id,
+          targetEpId,
+          number,
+          Title,
+          true,
+          null,
+          null,
+          false,
+          malid,
+        );
+      }
     } else if (singleMulti === "Multi") {
       const {
         id,
@@ -74,9 +93,33 @@ router.post("/api/download/:AnimeManga/:singleMulti", async (req, res) => {
         provider,
         malid = null,
       } = req.body;
-      MessageData = isAnime
-        ? await downloadAnimeMulti(provider, id, Episodes, Title, SubDub, malid)
-        : await downloadMangaMulti(provider, id, Chapters, Title, malid);
+      if (isMovies) {
+        MessageData = await downloadMovieMulti(
+          provider,
+          id,
+          Episodes,
+          Title,
+          SubDub,
+          malid,
+        );
+      } else if (isAnime) {
+        MessageData = await downloadAnimeMulti(
+          provider,
+          id,
+          Episodes,
+          Title,
+          SubDub,
+          malid,
+        );
+      } else {
+        MessageData = await downloadMangaMulti(
+          provider,
+          id,
+          Chapters,
+          Title,
+          malid,
+        );
+      }
     }
 
     return res.json(MessageData);

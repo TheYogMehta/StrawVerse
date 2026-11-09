@@ -27,7 +27,7 @@ export default function RecentHistory({
   return (
     <div className="continue-shelf-container">
       <h2 className="shelf-title">
-        {type === "Anime" ? "Continue Watching" : "Continue Reading"}
+        {type === "Manga" ? "Continue Reading" : "Continue Watching"}
       </h2>
       <div className="continue-shelf-scroll">
         {displayable.slice(0, 4).map((item) => {
@@ -62,7 +62,7 @@ export default function RecentHistory({
               <div className="continue-img-container">
                 <button
                   className="continue-dismiss-btn"
-                  title={`Hide from Continue ${type === "Anime" ? "Watching" : "Reading"}`}
+                  title={`Hide from Continue ${type === "Manga" ? "Reading" : "Watching"}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     onDismissHistory(item);
@@ -126,9 +126,9 @@ export default function RecentHistory({
               </div>
               <div className="continue-info">
                 <span className="continue-number">
-                  {type === "Anime"
-                    ? `Episode ${nextNum}`
-                    : `Chapter ${nextNum}`}
+                  {type === "Manga"
+                    ? `Chapter ${nextNum}`
+                    : `Episode ${nextNum}`}
                 </span>
                 <h4 className="continue-title" title={item.title}>
                   {item.title}

@@ -389,7 +389,7 @@ export default function InfoView({
   const isDownloaded = (itemNum, subdub = null) => {
     const num = parseFloat(itemNum);
     if (isNaN(num)) return false;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const episodes = details?.DownloadedEpisodes;
       if (Array.isArray(episodes)) {
         return episodes.map(Number).includes(num);
@@ -414,7 +414,7 @@ export default function InfoView({
   };
 
   const hasDownloads =
-    type === "Anime"
+    type === "Anime" || type === "Movies"
       ? Array.isArray(details?.DownloadedEpisodes)
         ? details.DownloadedEpisodes.length > 0
         : (details?.DownloadedEpisodes?.sub?.length || 0) +
@@ -1194,7 +1194,7 @@ export default function InfoView({
   ) => {
     setItemsLoading(true);
     try {
-      const isAnime = type === "Anime";
+      const isAnime = type === "Anime" || type === "Movies";
       const response = await fetch("/api/info/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1261,7 +1261,7 @@ export default function InfoView({
   };
 
   const fallbackToDownloaded = (targetDetails = details) => {
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = targetDetails?.DownloadedEpisodes;
       const subList = Array.isArray(dl) ? dl : dl?.sub || [];
       const dubList = Array.isArray(dl) ? dl : dl?.dub || [];
@@ -1313,7 +1313,7 @@ export default function InfoView({
 
   const playItem = (targetItem, overrideSubDub = null) => {
     const activeSubDub = overrideSubDub || dubSelect;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = details?.DownloadedEpisodes;
       const isDownloadedLocal = Array.isArray(dl)
         ? dl.map(Number).includes(Number(targetItem.number))
@@ -1457,7 +1457,7 @@ export default function InfoView({
             if (isNaN(epNum)) return prevDetails;
 
             const updated = { ...prevDetails };
-            if (type === "Anime") {
+            if (type === "Anime" || type === "Movies") {
               const subdub = data.SubDub || "sub";
               if (Array.isArray(updated.DownloadedEpisodes)) {
                 if (!updated.DownloadedEpisodes.map(Number).includes(epNum)) {
@@ -1580,7 +1580,7 @@ export default function InfoView({
 
   const hasAnyDownloads = useMemo(() => {
     if (!details) return false;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = details.DownloadedEpisodes;
       if (Array.isArray(dl)) return dl.length > 0;
       const subList = dl?.sub || [];
@@ -1839,7 +1839,7 @@ export default function InfoView({
     );
     if (sorted.length > 0) {
       const targetItem = sorted[0];
-      if (type === "Anime") {
+      if (type === "Anime" || type === "Movies") {
         const dl = details?.DownloadedEpisodes;
         const isDownloadedLocal = Array.isArray(dl)
           ? dl.map(Number).includes(Number(targetItem.number))
@@ -1883,7 +1883,7 @@ export default function InfoView({
     );
     if (sorted.length > 0) {
       const targetItem = sorted[sorted.length - 1];
-      if (type === "Anime") {
+      if (type === "Anime" || type === "Movies") {
         const dl = details?.DownloadedEpisodes;
         const isDownloadedLocal = Array.isArray(dl)
           ? dl.map(Number).includes(Number(targetItem.number))
@@ -1924,7 +1924,7 @@ export default function InfoView({
   // Download Trigger
   const handleDownload = async (singleItem = null) => {
     try {
-      const isAnime = type === "Anime";
+      const isAnime = type === "Anime" || type === "Movies";
       const singleMulti = singleItem ? "Single" : "Multi";
       const endpoint = `/api/download/${type}/${singleMulti}`;
 
@@ -2520,7 +2520,7 @@ export default function InfoView({
 
   // Delete local catalog entry
   const handleDeleteLocal = async () => {
-    const isAnime = type === "Anime";
+    const isAnime = type === "Anime" || type === "Movies";
     const allDownloaded = [];
     if (isAnime) {
       const dl = details?.DownloadedEpisodes;
@@ -2636,7 +2636,7 @@ export default function InfoView({
 
   // Bulk Delete Trigger
   const handleBulkDelete = async () => {
-    const isAnime = type === "Anime";
+    const isAnime = type === "Anime" || type === "Movies";
     const selectedDownloaded = Array.from(selectedItems).filter((num) => {
       if (isAnime) {
         return isDownloaded(num, "sub") || isDownloaded(num, "dub");
@@ -2736,7 +2736,12 @@ export default function InfoView({
             className="u-style-31"
           />
           <h2 className="u-style-32">
-            {type === "Anime" ? "Anime" : "Manga"} Data Not Found
+            {type === "Manga"
+              ? "Manga"
+              : type === "Movies"
+                ? "Movie / Series"
+                : "Anime"}{" "}
+            Data Not Found
           </h2>
           <p className="u-style-33">
             {details?.message ||
@@ -3501,7 +3506,7 @@ export default function InfoView({
       {/* Episodes / Chapters List */}
       <div className="items-section">
         <div className="section-header">
-          <h2>{type === "Anime" ? "Episodes List" : "Chapters List"}</h2>
+          <h2>{type === "Manga" ? "Chapters List" : "Episodes List"}</h2>
         </div>
         {episodesOrChapters.length > 0 && (
           <div className="bulk-actions">
@@ -3511,7 +3516,7 @@ export default function InfoView({
               <input
                 type="text"
                 placeholder={
-                  type === "Anime" ? "Search episode..." : "Search chapter..."
+                  type === "Manga" ? "Search chapter..." : "Search episode..."
                 }
                 value={episodeSearchQuery}
                 onChange={(e) => setEpisodeSearchQuery(e.target.value)}
@@ -3937,7 +3942,7 @@ export default function InfoView({
 
                 {/* LINE 2: All sub, dub, hsub, download button */}
                 <div className="item-card-row-bottom">
-                  {type === "Anime" ? (
+                  {type === "Anime" || type === "Movies" ? (
                     <>
                       {isDownloaded(item.number) ? (
                         <div className="badge-and-action">

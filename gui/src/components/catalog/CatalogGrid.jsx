@@ -225,7 +225,12 @@ export default function CatalogGrid({
                 {item.Downloaded && item.Downloaded.length > 0 && (
                   <div className="indicator-badge">
                     <Download size={12} className="u-style-16" />
-                    {item.Downloaded.length} {type === "Anime" ? "Eps" : "Chs"}
+                    {item.Downloaded.length}{" "}
+                    {type === "Manga"
+                      ? "Chs"
+                      : type === "Movies" && item.Downloaded.length === 1
+                        ? "Movie"
+                        : "Eps"}
                   </div>
                 )}
 

@@ -505,6 +505,7 @@ export default function Catalog({
         if (window.catalogCache) {
           delete window.catalogCache[`Anime_local`];
           delete window.catalogCache[`Manga_local`];
+          delete window.catalogCache[`Movies_local`];
         }
         if (provider === "local") {
           setData((prev) => {
@@ -567,6 +568,7 @@ export default function Catalog({
         if (window.catalogCache) {
           delete window.catalogCache[`Anime_local`];
           delete window.catalogCache[`Manga_local`];
+          delete window.catalogCache[`Movies_local`];
         }
         if (provider === "local") {
           setData((prev) => {
@@ -1911,6 +1913,7 @@ export default function Catalog({
           if (window.catalogCache) {
             delete window.catalogCache[`Anime_local`];
             delete window.catalogCache[`Manga_local`];
+            delete window.catalogCache[`Movies_local`];
           }
           swalSuccess(
             "Removed",

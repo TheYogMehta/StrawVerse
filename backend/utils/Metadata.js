@@ -431,6 +431,7 @@ async function getAllMetadata(
             dir.name !== type &&
             dir.name !== "Anime" &&
             dir.name !== "Manga" &&
+            dir.name !== "Movies" &&
             !dir.name.startsWith(".")
           ) {
             const subDirPath = path.join(cDir, dir.name);
@@ -1555,22 +1556,23 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
   try {
     let data = {};
 
-    // if logged in mal && Anime
-    if (type === "Anime") {
+    // if logged in mal && Anime or Movies
+    if (type === "Anime" || type === "Movies") {
+      const mainTable = type === "Movies" ? "Movies" : "Anime";
       data.DownloadedEpisodes = [];
 
       try {
         let FoundRow = null;
-        if (malid) {
+        if (malid && type === "Anime") {
           FoundRow = await queryOne(
-            `SELECT * FROM Anime WHERE MalID = ? LIMIT 1`,
+            `SELECT * FROM ${mainTable} WHERE MalID = ? LIMIT 1`,
             [String(malid)],
           );
         }
 
         if (!FoundRow) {
           FoundRow = await queryOne(
-            `SELECT * FROM Anime WHERE id = ? OR folder_name = ? OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?) LIMIT 1`,
+            `SELECT * FROM ${mainTable} WHERE id = ? OR folder_name = ? OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?) LIMIT 1`,
             [AnimeMangaid, AnimeMangaid, AnimeMangaid],
           );
         }
@@ -1583,7 +1585,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             );
             if (histRow && histRow.anime_title) {
               FoundRow = await queryOne(
-                `SELECT * FROM Anime WHERE LOWER(title) = LOWER(?) LIMIT 1`,
+                `SELECT * FROM ${mainTable} WHERE LOWER(title) = LOWER(?) LIMIT 1`,
                 [histRow.anime_title],
               );
             }
@@ -1591,12 +1593,12 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         }
 
         if (FoundRow) {
-          await migrateLegacyFolderIfNeeded("Anime", FoundRow, dir);
+          await migrateLegacyFolderIfNeeded(type, FoundRow, dir);
         }
 
         data.CustomTag = FoundRow?.CustomTag || "";
 
-        if (!malid) {
+        if (!malid && type === "Anime") {
           data.malid = FoundRow?.MalID ? parseInt(FoundRow.MalID) : null;
           if (!data.malid && FoundRow?.id) {
             const resolvedMalId = await getMalIdFromMapping(
@@ -1614,12 +1616,12 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
               } catch (_) {}
             }
           }
-        } else {
+        } else if (type === "Anime") {
           data.malid = malid;
         }
 
         // if mal id find in list if it exists
-        if (data.malid && global.MalLoggedIn) {
+        if (data.malid && global.MalLoggedIn && type === "Anime") {
           let MalInfo = await queryOne(
             `SELECT * FROM MyAnimeList WHERE id = ?`,
             [String(data.malid)],
@@ -1647,14 +1649,14 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
       // Finding If Its Downloaded
       try {
         let Downloads = [];
-        if (data.malid) {
-          Downloads = await queryAll("SELECT * FROM Anime WHERE MalID = ?", [
+        if (data.malid && type === "Anime") {
+          Downloads = await queryAll(`SELECT * FROM ${mainTable} WHERE MalID = ?`, [
             String(data.malid),
           ]);
         }
         if (Downloads.length === 0) {
           Downloads = await queryAll(
-            `SELECT * FROM Anime WHERE id = ? OR folder_name = ? OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?)`,
+            `SELECT * FROM ${mainTable} WHERE id = ? OR folder_name = ? OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?)`,
             [AnimeMangaid, AnimeMangaid, AnimeMangaid],
           );
         }
@@ -1687,10 +1689,10 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           };
 
           for (const SubDub of Downloads) {
-            await migrateLegacyFolderIfNeeded("Anime", SubDub, dir);
+            await migrateLegacyFolderIfNeeded(type, SubDub, dir);
             const folderName =
               SubDub.folder_name || `${sanitizeFolderName(SubDub.title)}`;
-            let folderPath = path.join(dir, "Anime", folderName);
+            let folderPath = path.join(dir, type, folderName);
             if (
               !fs.existsSync(folderPath) &&
               fs.existsSync(path.join(dir, folderName))
@@ -1705,10 +1707,17 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
               });
 
               const scanned = filesAndFolders
-                .filter((file) => file.isFile())
+                .filter((file) => file.isFile() && isVideoFile(file.name))
                 .map((file) => getEpisodeNumberFromFilename(file.name))
                 .filter((num) => num !== null && !isNaN(num))
                 .sort((a, b) => a - b);
+
+              if (
+                scanned.length === 0 &&
+                filesAndFolders.some((f) => f.isFile() && isVideoFile(f.name))
+              ) {
+                scanned.push(1);
+              }
 
               data.DownloadedEpisodes = Array.from(
                 new Set([
