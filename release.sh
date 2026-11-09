@@ -130,11 +130,11 @@ log "Packaging Desktop application..."
 cd "$ELECTRON_DIR"
 node -e "require('fs').rmSync('dist', { recursive: true, force: true });"
 if [[ "$OSTYPE" == "darwin"* ]]; then
-  log "Building for macOS..."
-  npx electron-builder --mac --arm64
+  log "Building for macOS (DMG & ZIP)..."
+  npx electron-builder --mac dmg zip --arm64
 else
-  log "Building for Windows, Linux & macOS..."
-  npx electron-builder --win --linux --mac --arm64
+  log "Building for Windows (x64), Linux (x64) & macOS (arm64)..."
+  npx electron-builder --win --linux --mac
 fi
 ok "Desktop packaging complete"
 
@@ -157,7 +157,7 @@ fi
 # ── 9. Collect all release artifacts ──────────────────────
 log "Collecting all release artifacts from ${BOLD}dist/${NC}..."
 ARTIFACTS=()
-for pattern in "*.apk" "*.exe" "*.AppImage" "*.deb" "*.snap" "*.dmg" "*.zip" "latest-linux.yml" "latest-mac.yml" "latest.yml"; do
+for pattern in "*.apk" "*.exe" "*.AppImage" "*.deb" "*.dmg" "*.zip" "latest-linux.yml" "latest-mac.yml" "latest.yml"; do
   while IFS= read -r -d '' f; do
     [[ "$f" == *.blockmap ]] && continue
     ARTIFACTS+=("$f")

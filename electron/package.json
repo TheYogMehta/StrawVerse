@@ -12,7 +12,7 @@
     "prepackage:mac": "node scripts/download-binaries.js",
     "package:mac": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --mac --arm64",
     "prepackage:all": "node scripts/download-binaries.js",
-    "package:all": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --win --linux --mac --arm64",
+    "package:all": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --win --linux --mac",
     "release": "bash release.sh",
     "start:prod": "cross-env NODE_ENV=production electron .",
     "postinstall": "electron-builder install-app-deps && node scripts/download-binaries.js"
@@ -50,7 +50,12 @@
     ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "StrawVerse.Setup.${version}.exe",
       "icon": "assets/luffy.ico"
@@ -66,9 +71,18 @@
     },
     "linux": {
       "target": [
-        "AppImage",
-        "snap",
-        "deb"
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Utility",
       "icon": "assets/luffy.png",
@@ -80,12 +94,6 @@
     },
     "mac": {
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        },
         {
           "target": "zip",
           "arch": [
