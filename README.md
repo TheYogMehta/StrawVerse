@@ -38,9 +38,16 @@ Whether you want high-speed **anime download** queues in 1080p, full Sub and Dub
 
 | Platform    | Download Link                                                              | Format                           | OS Compatibility             |
 | :---------- | :------------------------------------------------------------------------- | :------------------------------- | :--------------------------- |
+| **macOS**   | [StrawVerse-mac-arm64.dmg](https://github.com/TheYogMehta/StrawVerse/releases) | Installer (`.dmg` / `.zip`) | macOS 12+ (Apple Silicon M1/M2/M3/M4) |
 | **Windows** | [StrawVerse.Setup.exe](https://github.com/TheYogMehta/StrawVerse/releases) | Installer (`.exe`)               | Windows 10, 11 (64-bit)      |
 | **Linux**   | [StrawVerse.AppImage](https://github.com/TheYogMehta/StrawVerse/releases)  | Portable (`.AppImage` / `.snap`) | Ubuntu, Fedora, Arch, Debian |
 | **Android** | [StrawVerse.apk](https://github.com/TheYogMehta/StrawVerse/releases)       | Mobile APK (`.apk`)              | Android 7.0+                 |
+
+> [!NOTE]
+> **macOS (Apple Silicon) First Launch:** Because StrawVerse is an open-source, ad-hoc signed community release, macOS Gatekeeper may ask you to confirm opening the app on first launch. Right-click `StrawVerse.app` in `/Applications` and select **Open**, or run:
+> ```bash
+> xattr -cr /Applications/StrawVerse.app
+> ```
 
 ---
 

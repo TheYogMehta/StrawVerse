@@ -126,10 +126,16 @@ log "Building Unified React GUI..."
 npm run build --prefix "$SCRIPT_DIR/gui"
 ok "Unified frontend built"
 
-log "Packaging Desktop application (Windows & Linux)..."
+log "Packaging Desktop application..."
 cd "$ELECTRON_DIR"
 node -e "require('fs').rmSync('dist', { recursive: true, force: true });"
-npx electron-builder --win --linux
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  log "Building for macOS..."
+  npx electron-builder --mac --arm64
+else
+  log "Building for Windows, Linux & macOS..."
+  npx electron-builder --win --linux --mac --arm64
+fi
 ok "Desktop packaging complete"
 
 # ── 8. Build Android (Capacitor) Application ─────────────
@@ -151,7 +157,7 @@ fi
 # ── 9. Collect all release artifacts ──────────────────────
 log "Collecting all release artifacts from ${BOLD}dist/${NC}..."
 ARTIFACTS=()
-for pattern in "*.apk" "*.exe" "*.AppImage" "*.deb" "*.snap" "*.zip" "latest-linux.yml" "latest.yml"; do
+for pattern in "*.apk" "*.exe" "*.AppImage" "*.deb" "*.snap" "*.dmg" "*.zip" "latest-linux.yml" "latest-mac.yml" "latest.yml"; do
   while IFS= read -r -d '' f; do
     [[ "$f" == *.blockmap ]] && continue
     ARTIFACTS+=("$f")

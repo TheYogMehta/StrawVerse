@@ -7,6 +7,8 @@
     "start:desktop": "npm run build:gui && cd electron && npm start",
     "build:gui": "npm run build --prefix gui",
     "build:desktop": "npm run build:gui && cd electron && npm run package",
+    "build:desktop:mac": "npm run build:gui && cd electron && npm run package:mac",
+    "build:desktop:all": "npm run build:gui && cd electron && npm run package:all",
     "sync:android": "npm run build:gui && cd capacitor && npm run sync:android",
     "build:android": "npm run sync:android && cd capacitor/android && ./gradlew assembleRelease",
     "release": "bash release.sh"

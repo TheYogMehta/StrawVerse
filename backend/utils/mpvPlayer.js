@@ -153,56 +153,86 @@ async function prepareSubtitles(validSubs, activeReferer) {
 
 const getMpvPath = () => {
   const platform = process.platform;
-  const platformDir = platform === "win32" ? "win32" : "linux";
+  const platformDir =
+    platform === "win32" ? "win32" : platform === "darwin" ? "darwin" : "linux";
   const exeName = platform === "win32" ? "mpv.exe" : "mpv";
+
+  const candidateDirs = [];
 
   // 1. Check process.resourcesPath (production unpack)
   if (process.resourcesPath) {
-    const prodPath = path.join(
-      process.resourcesPath,
-      "app.asar.unpacked",
-      "mpv",
-      platformDir,
-      exeName,
+    candidateDirs.push(
+      path.join(process.resourcesPath, "app.asar.unpacked", "mpv", platformDir),
     );
-    if (fs.existsSync(prodPath)) {
-      return prodPath;
-    }
   }
 
   // 2. Check local dev source paths
   try {
-    const devPathInner = path.join(
-      app.getAppPath(),
-      "mpv",
-      platformDir,
-      exeName,
-    );
-    if (fs.existsSync(devPathInner)) {
-      return devPathInner;
-    }
-    const devPathOuter = path.join(
-      app.getAppPath(),
-      "..",
-      "mpv",
-      platformDir,
-      exeName,
-    );
-    const devPathRel = path.join(
-      __dirname,
-      "..",
-      "..",
-      "electron",
-      "mpv",
-      platformDir,
-      exeName,
-    );
-    if (fs.existsSync(devPathRel)) {
-      return devPathRel;
+    if (app && typeof app.getAppPath === "function") {
+      candidateDirs.push(path.join(app.getAppPath(), "mpv", platformDir));
+      candidateDirs.push(path.join(app.getAppPath(), "..", "mpv", platformDir));
     }
   } catch (e) {}
+  candidateDirs.push(
+    path.join(__dirname, "..", "..", "electron", "mpv", platformDir),
+  );
+  candidateDirs.push(path.join(__dirname, "..", "mpv", platformDir));
 
-  // 3. Fallback to system command
+  for (const dir of candidateDirs) {
+    if (!fs.existsSync(dir)) continue;
+
+    if (platform === "darwin") {
+      const appBundleMpv = path.join(
+        dir,
+        "mpv.app",
+        "Contents",
+        "MacOS",
+        "mpv",
+      );
+      if (fs.existsSync(appBundleMpv)) return appBundleMpv;
+      try {
+        const subdirs = fs.readdirSync(dir);
+        for (const sub of subdirs) {
+          const nested = path.join(
+            dir,
+            sub,
+            "mpv.app",
+            "Contents",
+            "MacOS",
+            "mpv",
+          );
+          if (fs.existsSync(nested)) return nested;
+        }
+      } catch (_) {}
+    }
+
+    const directPath = path.join(dir, exeName);
+    if (fs.existsSync(directPath)) return directPath;
+  }
+
+  // 3. Fallback to common system paths
+  if (platform === "darwin") {
+    if (fs.existsSync("/opt/homebrew/bin/mpv")) return "/opt/homebrew/bin/mpv";
+    if (fs.existsSync("/usr/local/bin/mpv")) return "/usr/local/bin/mpv";
+  } else if (platform === "linux") {
+    if (fs.existsSync("/usr/bin/mpv")) return "/usr/bin/mpv";
+    if (fs.existsSync("/usr/local/bin/mpv")) return "/usr/local/bin/mpv";
+  }
+
+  // 4. Try PATH lookup via which/where
+  try {
+    const whichCmd = platform === "win32" ? "where mpv" : "which mpv";
+    const resolved = require("child_process")
+      .execSync(whichCmd, {
+        stdio: ["ignore", "pipe", "ignore"],
+        encoding: "utf8",
+      })
+      .trim()
+      .split(/\r?\n/)[0];
+    if (resolved && fs.existsSync(resolved)) return resolved;
+  } catch (_) {}
+
+  // 5. Fallback to system command
   return "mpv";
 };
 
@@ -1588,7 +1618,9 @@ async function playInMpv(window, options) {
   };
 
   const mpvExe = getMpvPath();
-  if (!mpvExe || !fs.existsSync(mpvExe)) {
+  const mpvExists =
+    mpvExe && (path.isAbsolute(mpvExe) ? fs.existsSync(mpvExe) : true);
+  if (!mpvExe || !mpvExists) {
     const errMsg = `MPV binary executable not found on system at: ${mpvExe}`;
     logger.error(`[MPV Error] ${errMsg}`);
     return { error: errMsg };
