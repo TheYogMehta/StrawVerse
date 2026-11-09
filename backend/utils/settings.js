@@ -592,12 +592,19 @@ async function httpGetText(url, timeoutMs = 15000) {
     const res = await client.get(url, {
       timeout: timeoutMs,
       responseType: "text",
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
       transformResponse: [(data) => data],
     });
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
   } catch (axiosErr) {
     try {
-      return await got(url, { timeout: { request: timeoutMs } }).text();
+      return await got(url, {
+        timeout: { request: timeoutMs },
+        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+      }).text();
     } catch (_) {
       throw axiosErr;
     }
