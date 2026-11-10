@@ -288,10 +288,12 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
   }
 
   const isVideo = AnimeManga === "Anime" || AnimeManga === "Movies";
+  const isAnime = AnimeManga === "Anime";
+  const isMovies = AnimeManga === "Movies";
   const listTable = AnimeManga === "Manga" ? "MyMangaList" : "MyAnimeList";
   const histTable = isVideo ? "WatchHistory" : "ReadHistory";
   const mediaTable =
-    AnimeManga === "Movies"
+    isMovies
       ? "Movies"
       : AnimeManga === "Manga"
         ? "Manga"
@@ -309,15 +311,19 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
     for (const item of results) {
       if (!item) continue;
       if (item.id) itemIds.add(String(item.id));
-      if (item.malid || item.MalID) {
+      if (!isMovies && (item.malid || item.MalID)) {
         malIdSet.add(String(item.malid || item.MalID));
+      }
+      if (isMovies) {
+        delete item.MalID;
+        item.malid = null;
       }
       if (item.title) {
         itemTitles.add(String(item.title).toLowerCase().trim());
       }
     }
 
-    // 1. Resolve any additional MalIDs and metadata from Anime/Manga table
+    // 1. Resolve any additional MalIDs and metadata from Anime/Manga/Movies table
     if (global.db && (itemIds.size > 0 || itemTitles.size > 0)) {
       try {
         const idArr = Array.from(itemIds);
@@ -339,16 +345,19 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
         }
 
         if (whereClause) {
-          const selectCols = isAnime
-            ? "id, title, MalID, genres, aired, status, type, provider, CustomTag"
-            : "id, title, MalID, genres, released as aired, status, type, provider, CustomTag";
+          const selectCols =
+            AnimeManga === "Manga"
+              ? "id, title, MalID, genres, released as aired, status, type, provider, CustomTag"
+              : isMovies
+                ? "id, title, genres, aired, status, type, provider, CustomTag"
+                : "id, title, MalID, genres, aired, status, type, provider, CustomTag";
           const mediaRows = await global.db
             .prepare(
               `SELECT ${selectCols} FROM ${mediaTable} WHERE ${whereClause}`,
             )
             .all(...params);
           mediaRows?.forEach((r) => {
-            if (r.MalID) malIdSet.add(String(r.MalID));
+            if (!isMovies && r.MalID) malIdSet.add(String(r.MalID));
             if (r.id) mediaMetaMap.set(String(r.id), r);
             if (r.title) {
               mediaMetaMap.set(
@@ -361,9 +370,9 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
       } catch (_) {}
     }
 
-    // 2. Batch query MyAnimeList / MyMangaList
+    // 2. Batch query MyAnimeList / MyMangaList (never for Movies)
     const malMap = new Map();
-    if (global.db && global.MalLoggedIn) {
+    if (!isMovies && global.db && global.MalLoggedIn) {
       try {
         const malIdArr = Array.from(malIdSet);
         const titleArr = Array.from(itemTitles);
@@ -405,7 +414,7 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
     }
 
     // Also look up sibling IDs in Anime/Manga table for all resolved MalIDs so WatchHistory matches
-    if (global.db && malIdSet.size > 0) {
+    if (!isMovies && global.db && malIdSet.size > 0) {
       try {
         const malIdArr = Array.from(malIdSet);
         const placeholders = malIdArr.map(() => "?").join(",");
@@ -1555,6 +1564,15 @@ router.post(
             }
           }
         } catch (_) {}
+      }
+
+      if (AnimeManga === "Movies" && data?.results && Array.isArray(data.results)) {
+        for (const item of data.results) {
+          if (item) {
+            delete item.MalID;
+            item.malid = null;
+          }
+        }
       }
 
       return res.json(data);
@@ -2739,7 +2757,12 @@ router.post(
         }
       }
 
-      if (data && global.mappingDb) {
+      if (AnimeManga === "Movies" && data) {
+        data.malid = null;
+        delete data.MalID;
+      }
+
+      if (AnimeManga !== "Movies" && data && global.mappingDb) {
         try {
           const customMappingRow = await global.db
             .prepare("SELECT malid FROM unlinked_mal_ids WHERE id = ?")
@@ -3047,7 +3070,7 @@ router.post(
         }
       }
 
-      if (data.malid && global.MalLoggedIn) {
+      if (AnimeManga !== "Movies" && data.malid && global.MalLoggedIn) {
         try {
           if (AnimeManga === "Anime") {
             const MalInfo = await global.db
@@ -3101,7 +3124,7 @@ router.post(
             .get(id, id);
         }
 
-        const targetMalId = data?.malid;
+        const targetMalId = AnimeManga !== "Movies" ? data?.malid : null;
         if (!tagRow?.CustomTag && targetMalId) {
           const malRow = await global.db
             .prepare(
@@ -3123,7 +3146,7 @@ router.post(
       if (data) {
         data.scraper_image = data.image || null;
 
-        if (data.malid) {
+        if (AnimeManga !== "Movies" && data.malid) {
           try {
             let remoteImg = null;
             if (global.mappingDb && AnimeManga === "Anime") {
@@ -4303,6 +4326,9 @@ router.get(
 );
 
 async function linkMediaItem({ oldId, malId, type, title, image }) {
+  if (type === "Movies") {
+    throw new Error("Movies do not support database mapping or MAL linking");
+  }
   const itemType = type || "Anime";
   const malIdStr = malId ? String(malId) : null;
 

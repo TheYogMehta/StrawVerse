@@ -792,10 +792,12 @@ async function downloadep(
       dlLoc,
       animeId || AnimeEpId,
     );
-    try {
-      const { generateNfoAndPosterForAnime } = require("./mediaServer");
-      generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(() => {});
-    } catch (_) {}
+    if (!isMovie) {
+      try {
+        const { generateNfoAndPosterForAnime } = require("./mediaServer");
+        generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(() => {});
+      } catch (_) {}
+    }
   } else if (isMovie) {
     directoryPath = await MovieDir(
       Title,

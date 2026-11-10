@@ -400,6 +400,7 @@ async function playInMpv(window, options) {
     }
   }
   let mediaType = options.type === "Movies" ? "Movies" : "Anime";
+  let malid = mediaType === "Movies" ? null : (options.malid || "");
   let episodeId = options.episodeId || options.episode || episode;
   let title = options.title || (mediaType === "Movies" ? "Movie" : "Anime");
   let mediaId = options.mediaId;
@@ -420,7 +421,6 @@ async function playInMpv(window, options) {
   }
   let image = options.image || "";
   let provider = options.provider || "";
-  let malid = options.malid || "";
   let subdub = options.subdub || "sub";
   let url = options.url || "";
 
@@ -991,7 +991,10 @@ async function playInMpv(window, options) {
   }
 
   // Start AniSkip fetch asynchronously without blocking MPV spawn
-  const skipTimesPromise = fetchSkipTimes(malid, episode, options.duration);
+  const skipTimesPromise =
+    mediaType === "Movies"
+      ? Promise.resolve(null)
+      : fetchSkipTimes(malid, episode, options.duration);
 
   const resolvedUrl = resolvePathOrUrl(playTargetUrl);
   const isExternal = resolvedUrl.startsWith("http");

@@ -1626,10 +1626,12 @@ async function HandleExtensions(
         };
       }
 
-      try {
-        const { syncExtensionMapping } = require("./mappingUpdater");
-        syncExtensionMapping(ExtensionName).catch(() => {});
-      } catch (_) {}
+      if (canonicalType !== "Movies") {
+        try {
+          const { syncExtensionMapping } = require("./mappingUpdater");
+          syncExtensionMapping(ExtensionName).catch(() => {});
+        } catch (_) {}
+      }
 
       return {
         type: "success",
@@ -1687,10 +1689,12 @@ async function HandleExtensions(
 
       await unloadSingleScraper(canonicalType, ExtensionName, RepoOwner);
 
-      try {
-        const { cleanupExtensionMapping } = require("./mappingUpdater");
-        cleanupExtensionMapping(ExtensionName).catch(() => {});
-      } catch (_) {}
+      if (canonicalType !== "Movies") {
+        try {
+          const { cleanupExtensionMapping } = require("./mappingUpdater");
+          cleanupExtensionMapping(ExtensionName).catch(() => {});
+        } catch (_) {}
+      }
 
       return {
         type: "success",

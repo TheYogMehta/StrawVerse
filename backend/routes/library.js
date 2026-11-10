@@ -310,9 +310,9 @@ router.post("/api/local/tags/add", async (req, res) => {
       provider = null;
     }
 
-    let resolvedMalID = MalID ? String(MalID) : null;
+    let resolvedMalID = type !== "Movies" && MalID ? String(MalID) : null;
 
-    if (!resolvedMalID) {
+    if (!resolvedMalID && type !== "Movies") {
       if (global.mappingDb && id) {
         try {
           const mal = await resolveMalIdFromMapping({
@@ -348,14 +348,16 @@ router.post("/api/local/tags/add", async (req, res) => {
     if (existing) {
       const updates = [];
       const params = [];
-      if (resolvedMalID) {
-        updates.push("MalID = ?");
-        params.push(resolvedMalID);
-      } else if (existing.MalID) {
-        resolvedMalID = existing.MalID;
-      } else if (MalID !== undefined) {
-        updates.push("MalID = ?");
-        params.push(null);
+      if (type !== "Movies") {
+        if (resolvedMalID) {
+          updates.push("MalID = ?");
+          params.push(resolvedMalID);
+        } else if (existing.MalID) {
+          resolvedMalID = existing.MalID;
+        } else if (MalID !== undefined) {
+          updates.push("MalID = ?");
+          params.push(null);
+        }
       }
       if (CustomTag !== undefined) {
         updates.push("CustomTag = ?");
@@ -365,7 +367,7 @@ router.post("/api/local/tags/add", async (req, res) => {
         params.push(existing.id);
         await global.db
           .prepare(
-            `UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+            `UPDATE ${targetTable} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
           )
           .run(...params);
 
@@ -477,14 +479,19 @@ router.post("/api/local/tags/add", async (req, res) => {
         .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
         .run(resolvedMalID, tagValue, id);
 
-      if (resolvedMalID && resolvedMalID !== "") {
+      if (type !== "Movies" && resolvedMalID && resolvedMalID !== "") {
         await global.db
           .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
           .run(tagValue, resolvedMalID);
       }
     }
 
-    const targetMalID = MalID ? String(MalID) : existing?.MalID;
+    const targetMalID =
+      type !== "Movies"
+        ? MalID
+          ? String(MalID)
+          : existing?.MalID
+        : null;
     if (
       CustomTag !== undefined &&
       (tagValue === "" || tagValue === "[]") &&
@@ -539,16 +546,19 @@ router.post("/api/local/tags/add", async (req, res) => {
 
       if (req.body.deleteFiles && global.db) {
         try {
-          const malIdStr = resolvedMalID ? String(resolvedMalID) : null;
+          const malIdStr =
+            type !== "Movies" && resolvedMalID ? String(resolvedMalID) : null;
           await run(
             `DELETE FROM ${type} WHERE id = ? OR folder_name = ?${malIdStr ? " OR MalID = ?" : ""}`,
             malIdStr ? [id, id, malIdStr] : [id, id],
           );
 
-          await run(
-            `DELETE FROM unlinked_mal_ids WHERE id = ?${malIdStr ? " OR malid = ?" : ""}`,
-            malIdStr ? [id, malIdStr] : [id],
-          );
+          if (type !== "Movies") {
+            await run(
+              `DELETE FROM unlinked_mal_ids WHERE id = ?${malIdStr ? " OR malid = ?" : ""}`,
+              malIdStr ? [id, malIdStr] : [id],
+            );
+          }
 
           if (type === "Anime") {
             await run(
@@ -1449,10 +1459,10 @@ router.get("/api/history/list", async (req, res) => {
           COALESCE(w.hidden, 0) AS hidden,
           COALESCE(mov.image_url, a.image_url) AS image_url,
           COALESCE(mov.provider, a.provider) AS provider,
-          a.MalID AS mal_id,
+          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE a.MalID END AS mal_id,
           CASE WHEN a.id IS NOT NULL OR mov.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
-          mal.totalEpisodes AS total_count,
-          mal.image AS mal_image
+          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE mal.totalEpisodes END AS total_count,
+          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE mal.image END AS mal_image
         FROM WatchHistory w
         LEFT JOIN Anime a ON a.id = w.anime_id
         LEFT JOIN Movies mov ON mov.id = w.anime_id

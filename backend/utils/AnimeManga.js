@@ -25,16 +25,19 @@ async function enrichWithLibraryTags(type, items) {
 
   try {
     const normType = String(type || "").toLowerCase();
+    const isMovieType = normType === "movies";
     const table =
       normType === "manga"
         ? "Manga"
-        : normType === "movies"
+        : isMovieType
           ? "Movies"
           : "Anime";
     const ids = items.map((i) => i.id).filter(Boolean);
-    const malIds = items
-      .map((i) => String(i.malid || i.MalID || ""))
-      .filter((b) => b && b !== "undefined" && b !== "null");
+    const malIds = isMovieType
+      ? []
+      : items
+          .map((i) => String(i.malid || i.MalID || ""))
+          .filter((b) => b && b !== "undefined" && b !== "null");
     const cleanTitles = items
       .map((i) => (i.title ? cleanAlphanumeric(i.title) : ""))
       .filter(Boolean);
@@ -51,12 +54,18 @@ async function enrichWithLibraryTags(type, items) {
       ? cleanTitles.map(() => "?").join(",")
       : "NULL";
 
+    const selectCols = isMovieType
+      ? "id, title, folder_name, CustomTag"
+      : "id, MalID, title, folder_name, CustomTag";
+    const malClause =
+      isMovieType || !malIds.length ? "" : `OR MalID IN (${malPlaceholders})`;
+
     const sql = `
-      SELECT id, MalID, title, folder_name, CustomTag FROM ${table} 
+      SELECT ${selectCols} FROM ${table} 
       WHERE CustomTag IS NOT NULL AND CustomTag != '' AND CustomTag != '[]'
         AND (
           id IN (${idPlaceholders})
-          OR MalID IN (${malPlaceholders})
+          ${malClause}
           OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(title, ' ', ''), ':', ''), '-', ''), '_', '')) IN (${titlePlaceholders})
           OR LOWER(REPLACE(REPLACE(REPLACE(REPLACE(folder_name, ' ', ''), ':', ''), '-', ''), '_', '')) IN (${titlePlaceholders})
         )

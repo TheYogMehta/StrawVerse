@@ -57,6 +57,9 @@ async function updateHistory({
   const isVideo = type === "Anime" || type === "Movies";
   const isAnime = type === "Anime";
   const langSubDub = subdub || sub_dub || null;
+  if (type === "Movies") {
+    malid = null;
+  }
 
   // Resolve title
   let resolvedTitle = title;
@@ -98,7 +101,7 @@ async function updateHistory({
       let exists = await queryOne(`SELECT id FROM ${mainTable} WHERE id = ?`, [
         mediaId,
       ]);
-      if (!exists && malid) {
+      if (type !== "Movies" && !exists && malid) {
         const byMal = await queryOne(
           `SELECT id FROM ${mainTable} WHERE MalID = ? LIMIT 1`,
           [String(malid)],
@@ -109,53 +112,82 @@ async function updateHistory({
         }
       }
       if (!exists) {
-        await run(
-          `
-          INSERT OR IGNORE INTO ${mainTable} (id, title, provider, MalID, image_url, last_updated)
-          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        `,
-          [
-            mediaId,
-            resolvedTitle || type,
-            provider,
-            malid ? String(malid) : null,
-            image || null,
-          ],
-        );
+        if (type === "Movies") {
+          await run(
+            `
+            INSERT OR IGNORE INTO Movies (id, title, provider, image_url, last_updated)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+          `,
+            [
+              mediaId,
+              resolvedTitle || type,
+              provider,
+              image || null,
+            ],
+          );
+        } else {
+          await run(
+            `
+            INSERT OR IGNORE INTO ${mainTable} (id, title, provider, MalID, image_url, last_updated)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          `,
+            [
+              mediaId,
+              resolvedTitle || type,
+              provider,
+              malid ? String(malid) : null,
+              image || null,
+            ],
+          );
+        }
       } else {
-        await run(
-          `
-          UPDATE ${mainTable} 
-          SET provider = COALESCE(provider, ?), 
-              MalID = COALESCE(MalID, ?), 
-              image_url = COALESCE(image_url, ?)
-          WHERE id = ?
-        `,
-          [provider, malid ? String(malid) : null, image || null, mediaId],
-        );
+        if (type === "Movies") {
+          await run(
+            `
+            UPDATE Movies 
+            SET provider = COALESCE(provider, ?), 
+                image_url = COALESCE(image_url, ?)
+            WHERE id = ?
+          `,
+            [provider, image || null, mediaId],
+          );
+        } else {
+          await run(
+            `
+            UPDATE ${mainTable} 
+            SET provider = COALESCE(provider, ?), 
+                MalID = COALESCE(MalID, ?), 
+                image_url = COALESCE(image_url, ?)
+            WHERE id = ?
+          `,
+            [provider, malid ? String(malid) : null, image || null, mediaId],
+          );
+        }
       }
     } catch (cacheErr) {
       logger.error(`Error saving ${type} history cache: ${cacheErr.message}`);
     }
   }
 
-  // Sync across all sibling provider IDs linked to same MAL ID
+  // Sync across all sibling provider IDs linked to same MAL ID (Anime/Manga only)
   let queryIds = [mediaId];
-  try {
-    const localRec = await queryOne(
-      `SELECT MalID FROM ${mainTable} WHERE id = ?`,
-      [mediaId],
-    );
-    if (localRec && localRec.MalID) {
-      const siblings = await queryAll(
-        `SELECT id FROM ${mainTable} WHERE MalID = ?`,
-        [localRec.MalID],
+  if (type !== "Movies") {
+    try {
+      const localRec = await queryOne(
+        `SELECT MalID FROM ${mainTable} WHERE id = ?`,
+        [mediaId],
       );
-      siblings.forEach((s) => {
-        if (s.id) queryIds.push(s.id);
-      });
-    }
-  } catch (err) {}
+      if (localRec && localRec.MalID) {
+        const siblings = await queryAll(
+          `SELECT id FROM ${mainTable} WHERE MalID = ?`,
+          [localRec.MalID],
+        );
+        siblings.forEach((s) => {
+          if (s.id) queryIds.push(s.id);
+        });
+      }
+    } catch (err) {}
+  }
   queryIds = Array.from(new Set(queryIds));
 
   const placeholders = queryIds.map(() => "?").join(",");

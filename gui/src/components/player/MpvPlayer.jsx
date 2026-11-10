@@ -85,7 +85,7 @@ export default function VideoPlayer({
         title: animeTitle,
         image: image,
         provider: provider,
-        malid: malid,
+        malid: type === "Movies" ? null : malid,
         subdub: subdub || playerSubDub,
         episodes: sortedEpisodes,
         hasNext,

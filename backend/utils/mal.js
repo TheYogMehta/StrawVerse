@@ -509,6 +509,7 @@ async function MalSearch(query, type = "anime", limit = 10) {
 async function autoTrackMAL(type, mediaId, number) {
   try {
     if (!global.MalLoggedIn) return false;
+    if (type !== "Anime" && type !== "Manga") return false;
     let localRecord = null;
 
     if (type === "Anime") {

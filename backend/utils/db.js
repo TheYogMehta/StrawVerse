@@ -64,7 +64,6 @@ const tables = {
     aired: "TEXT",
     image_url: "TEXT",
     last_updated: "DATE",
-    MalID: "TEXT",
     CustomTag: "TEXT",
   },
   MyAnimeList: {

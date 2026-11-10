@@ -149,6 +149,7 @@ export default function InfoView({
   const [isLinkingMapping, setIsLinkingMapping] = useState(false);
 
   const handleMappingSearch = async (overrideQuery) => {
+    if (type === "Movies") return;
     const q = (
       overrideQuery !== undefined ? overrideQuery : mappingSearchQuery
     ).trim();
@@ -174,6 +175,7 @@ export default function InfoView({
   };
 
   const handleLinkMappingItem = async (item) => {
+    if (type === "Movies") return;
     setIsLinkingMapping(true);
     try {
       const res = await fetch("/api/local/link-mapping", {
@@ -224,6 +226,7 @@ export default function InfoView({
   };
 
   useEffect(() => {
+    if (type === "Movies") return;
     if (details && details.error) {
       const initialQ = propTitle || id || "";
       if (initialQ) {
@@ -231,7 +234,7 @@ export default function InfoView({
         handleMappingSearch(initialQ);
       }
     }
-  }, [details]);
+  }, [details, type]);
 
   const onWatch = async (...args) => {
     const isNotInLibrary =
@@ -2191,7 +2194,7 @@ export default function InfoView({
 
   // MAL Status sync
   const handleMalSync = async () => {
-    if (!details?.malid) return;
+    if (type === "Movies" || !details?.malid) return;
     if (malStatus === "not_in_list") {
       swalInfo(
         "Status Required",
@@ -2221,7 +2224,7 @@ export default function InfoView({
   };
 
   const handleMalRemove = async () => {
-    if (!details?.malid) return;
+    if (type === "Movies" || !details?.malid) return;
 
     const result = await swalConfirm(
       "Remove from MyAnimeList?",
@@ -2298,7 +2301,7 @@ export default function InfoView({
           type: type,
           id: details?.id || id,
           provider: activeProvider,
-          MalID: details?.malid || details?.MalID,
+          MalID: type === "Movies" ? null : (details?.malid || details?.MalID),
           CustomTag: updatedTag,
         }),
       });
@@ -2335,6 +2338,7 @@ export default function InfoView({
   };
 
   const startMalLink = () => {
+    if (type === "Movies") return;
     setIsLinkingMal(true);
     const initialQuery = details?.title || "";
     setMalSearchQuery(initialQuery);
@@ -2344,7 +2348,7 @@ export default function InfoView({
   };
 
   const performMalSearch = async (query) => {
-    if (!query) return;
+    if (type === "Movies" || !query) return;
     setMalSearchLoading(true);
     try {
       const searchType = type === "Anime" ? "anime" : "manga";
@@ -2474,6 +2478,7 @@ export default function InfoView({
   };
 
   const handleUnlinkMal = async () => {
+    if (type === "Movies") return;
     const confirmResult = await Swal.fire({
       title: "Unlink MyAnimeList?",
       text: "Are you sure you want to unlink this item from MyAnimeList?",
@@ -2809,8 +2814,9 @@ export default function InfoView({
           </div>
 
           {/* SIMILAR MAPPING SEARCH & MAL LINKING SECTION */}
-          <div
-            style={{
+          {type !== "Movies" && (
+            <div
+              style={{
               marginTop: "30px",
               borderTop: "1px solid rgba(255, 255, 255, 0.1)",
               paddingTop: "20px",
@@ -3001,6 +3007,7 @@ export default function InfoView({
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
     );
@@ -3390,7 +3397,8 @@ export default function InfoView({
           </div>
 
           {/* Consolidated MyAnimeList Integration Box */}
-          <div className="mal-box glass-panel">
+          {type !== "Movies" && (
+            <div className="mal-box glass-panel">
             <div className="mal-box-header u-style-39">
               <h3 className="mal-title u-style-11">MyAnimeList Integration</h3>
               {details?.malid ? (
@@ -3500,6 +3508,7 @@ export default function InfoView({
               </p>
             )}
           </div>
+          )}
         </div>
       </div>
 
@@ -4373,7 +4382,7 @@ export default function InfoView({
       </div>
 
       {/* MAL Link Modal Overlay */}
-      {isLinkingMal && (
+      {type !== "Movies" && isLinkingMal && (
         <div className="mal-modal-overlay">
           <div className="mal-modal-card">
             <div className="mal-modal-header">

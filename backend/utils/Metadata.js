@@ -68,7 +68,9 @@ async function MetadataAdd(type, valuesToAdd) {
     throw new Error(`Invalid args!`);
   }
 
-  if (!valuesToAdd.MalID || valuesToAdd.MalID === "") {
+  if (type === "Movies") {
+    delete valuesToAdd.MalID;
+  } else if (!valuesToAdd.MalID || valuesToAdd.MalID === "") {
     try {
       const customMappingRow = await queryOne(
         "SELECT malid FROM unlinked_mal_ids WHERE id = ?",
@@ -223,7 +225,7 @@ async function MetadataAdd(type, valuesToAdd) {
       );
     }
 
-    if (!existingRecord.MalID || existingRecord.MalID === "") {
+    if (type !== "Movies" && (!existingRecord.MalID || existingRecord.MalID === "")) {
       let malIdToUpdate = valuesToAdd?.MalID;
       if (!malIdToUpdate && existingRecord.title) {
         try {
@@ -273,7 +275,12 @@ async function MetadataRemove(type, id) {
           "SELECT COUNT(*) as count FROM Manga WHERE image_url = ?",
           [imageUrl],
         )?.count) || 0;
-      if (countAnime + countManga <= 1) {
+      const countMovies =
+        (await queryOne(
+          "SELECT COUNT(*) as count FROM Movies WHERE image_url = ?",
+          [imageUrl],
+        )?.count) || 0;
+      if (countAnime + countManga + countMovies <= 1) {
         ImageCacheManager.removeCachedImage(imageUrl).catch((err) => {
           logger.error(`Error in removeCachedImage: ${err.message}`);
         });
