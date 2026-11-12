@@ -47,16 +47,26 @@ const appNodeModules = path.join(__dirname, "..", "..", "node_modules");
 let config = {},
   ScraperAnime,
   ScraperManga,
+  ScraperMovies,
   ScraperIcons;
 global.Anime_providers = {};
 global.Manga_providers = {};
+global.Movies_providers = {};
 
 async function reconcileActiveProvider(Type) {
-  const isAnime = Type === "Anime";
-  const settingKey = isAnime ? "Animeprovider" : "Mangaprovider";
+  const norm = String(Type || "").toLowerCase();
+  const isAnime = norm === "anime";
+  const isManga = norm === "manga";
+  const settingKey = isAnime
+    ? "Animeprovider"
+    : isManga
+      ? "Mangaprovider"
+      : "Moviesprovider";
   const providers = isAnime
     ? global.Anime_providers || {}
-    : global.Manga_providers || {};
+    : isManga
+      ? global.Manga_providers || {}
+      : global.Movies_providers || {};
   const currentProvider = config?.[settingKey] || null;
   const nextProvider = Object.prototype.hasOwnProperty.call(
     providers,
@@ -145,6 +155,7 @@ async function settingfetch() {
     for (const key of [
       "CustomDownloadLocationAnime",
       "CustomDownloadLocationManga",
+      "CustomDownloadLocationMovies",
     ]) {
       if (typeof config?.[key] === "string") {
         config[key] = config[key].replace(/^["']|["']$/g, "").trim();
@@ -155,6 +166,7 @@ async function settingfetch() {
     for (const key of [
       "CustomDownloadLocationAnime",
       "CustomDownloadLocationManga",
+      "CustomDownloadLocationMovies",
     ]) {
       if (config?.[key]) {
         try {
@@ -193,6 +205,21 @@ async function settingfetch() {
       const availableMangaProviders = Object.keys(global.Manga_providers);
       if (availableMangaProviders.length > 0) {
         config.Mangaprovider = availableMangaProviders[0];
+        changes = true;
+      }
+    }
+
+    // checking Moviesprovider is valid
+    if (
+      global.scrapersLoaded &&
+      (!config?.Moviesprovider ||
+        !global?.Movies_providers[config?.Moviesprovider])
+    ) {
+      const availableMoviesProviders = Object.keys(
+        global.Movies_providers || {},
+      );
+      if (availableMoviesProviders.length > 0) {
+        config.Moviesprovider = availableMoviesProviders[0];
         changes = true;
       }
     }
@@ -307,11 +334,13 @@ async function SettingsLoad() {
             malToken: null,
             CustomDownloadLocationAnime: null,
             CustomDownloadLocationManga: null,
+            CustomDownloadLocationMovies: null,
             mangaAutoScrollSpeed: 2,
             externalLogEnabled: true,
             maxLogFiles: 5,
             Animeprovider: 0,
             Mangaprovider: 0,
+            Moviesprovider: 0,
             autoLoadNextChapter: true,
             Pagination: false,
             enableDiscordRPC: false,
@@ -541,6 +570,12 @@ async function CheckScrapperFolderExists() {
     logger.info(`Created Manga scraper folder: ${ScraperManga}`);
   }
 
+  ScraperMovies = path.join(Scraper, "movies-tvshows");
+  if (!fs.existsSync(ScraperMovies)) {
+    fs.mkdirSync(ScraperMovies, { recursive: true });
+    logger.info(`Created movies-tvshows scraper folder: ${ScraperMovies}`);
+  }
+
   ScraperIcons = path.join(Scraper, iconBaseName);
   if (!fs.existsSync(ScraperIcons)) {
     fs.mkdirSync(ScraperIcons, { recursive: true });
@@ -557,12 +592,19 @@ async function httpGetText(url, timeoutMs = 15000) {
     const res = await client.get(url, {
       timeout: timeoutMs,
       responseType: "text",
+      headers: {
+        "Cache-Control": "no-cache",
+        Pragma: "no-cache",
+      },
       transformResponse: [(data) => data],
     });
     return typeof res.data === "string" ? res.data : JSON.stringify(res.data);
   } catch (axiosErr) {
     try {
-      return await got(url, { timeout: { request: timeoutMs } }).text();
+      return await got(url, {
+        timeout: { request: timeoutMs },
+        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+      }).text();
     } catch (_) {
       throw axiosErr;
     }
@@ -819,9 +861,15 @@ async function addExtensionRepo(inputUrl) {
     );
   }
 
-  if (!json || (!Array.isArray(json.Anime) && !Array.isArray(json.Manga))) {
+  if (
+    !json ||
+    (!Array.isArray(json.Anime) &&
+      !Array.isArray(json.Manga) &&
+      !Array.isArray(json["movies-tvshows"]) &&
+      !Array.isArray(json.Movies))
+  ) {
     throw new Error(
-      "Repository marketplace.json must contain 'Anime' or 'Manga' extension arrays.",
+      "Repository marketplace.json must contain 'Anime', 'Manga', or 'movies-tvshows' extension arrays.",
     );
   }
 
@@ -834,14 +882,16 @@ async function addExtensionRepo(inputUrl) {
 
   const animeCount = json.Anime?.length || 0;
   const mangaCount = json.Manga?.length || 0;
+  const moviesCount =
+    json["movies-tvshows"]?.length || json.Movies?.length || 0;
   logger.info(
-    `[Marketplace] Added custom extension repo: @${parsed.owner} (${animeCount} anime, ${mangaCount} manga)`,
+    `[Marketplace] Added custom extension repo: @${parsed.owner} (${animeCount} anime, ${mangaCount} manga, ${moviesCount} movies-tvshows)`,
   );
 
   return {
     success: true,
     repo: parsed,
-    stats: { anime: animeCount, manga: mangaCount },
+    stats: { anime: animeCount, manga: mangaCount, movies: moviesCount },
   };
 }
 
@@ -882,15 +932,28 @@ async function removeExtensionRepo(ownerOrUrl) {
 async function fetchAggregatedMarketplace(activeType = "Anime") {
   const repos = getExtensionRepos();
   const aggregated = [];
+  const norm = String(activeType || "").toLowerCase();
+  const isMovies = norm === "movies" || norm === "movies-tvshows";
 
   const results = await Promise.allSettled(
     repos.map(async (repo) => {
       try {
         const text = await httpGetText(repo.marketplaceUrl, 8000);
         const data = JSON.parse(text);
-        const list = Array.isArray(data[activeType]) ? data[activeType] : [];
+        let list = [];
+        if (isMovies) {
+          list = Array.isArray(data["movies-tvshows"])
+            ? data["movies-tvshows"]
+            : Array.isArray(data.Movies)
+              ? data.Movies
+              : [];
+        } else {
+          list = Array.isArray(data[activeType]) ? data[activeType] : [];
+        }
         return list.map((item) => ({
           ...item,
+          type: isMovies ? "Movies" : activeType,
+          category: isMovies ? "movies-tvshows" : activeType,
           repoOwner: repo.owner,
           repoName: repo.name,
           repoBaseUrl: repo.rawBaseUrl,
@@ -932,7 +995,8 @@ async function patchModulePaths() {
       parent &&
       parent.filename &&
       (parent.filename.startsWith(ScraperAnime) ||
-        parent.filename.startsWith(ScraperManga));
+        parent.filename.startsWith(ScraperManga) ||
+        (ScraperMovies && parent.filename.startsWith(ScraperMovies)));
 
     if (isScraper && BLOCKED_MODULES.has(request)) {
       throw new Error(
@@ -983,6 +1047,7 @@ function cleanupLegacyRootScrapers() {
   const folders = [
     { dir: ScraperAnime, type: "Anime" },
     { dir: ScraperManga, type: "Manga" },
+    { dir: ScraperMovies, type: "Movies" },
   ];
   for (const { dir, type } of folders) {
     try {
@@ -1077,9 +1142,11 @@ async function loadAllScrapers() {
 
     global.Anime_providers = {};
     global.Manga_providers = {};
+    global.Movies_providers = {};
 
     let animeCount = 0;
     let mangaCount = 0;
+    let moviesCount = 0;
 
     const loadScraperFile = (fullPath, repoOwner, type) => {
       try {
@@ -1116,8 +1183,13 @@ async function loadAllScrapers() {
           scraper.uniqueId = isOfficial ? scraper.name : atScopedId;
           scraper.filePath = fullPath;
 
+          const normType = String(type || "").toLowerCase();
           const targetProviders =
-            type === "Anime" ? global.Anime_providers : global.Manga_providers;
+            normType === "anime"
+              ? global.Anime_providers
+              : normType === "manga"
+                ? global.Manga_providers
+                : global.Movies_providers;
           targetProviders[atScopedId] = scraper;
           targetProviders[slashScopedId] = scraper;
 
@@ -1178,13 +1250,42 @@ async function loadAllScrapers() {
       }
     }
 
+    // 3. Scan ScraperMovies (scoped subdirectories only: ScraperMovies/<repoOwner>/*.js)
+    if (ScraperMovies && fs.existsSync(ScraperMovies)) {
+      const moviesEntries = fs.readdirSync(ScraperMovies);
+      for (const entry of moviesEntries) {
+        const fullPath = path.join(ScraperMovies, entry);
+        const stat = fs.statSync(fullPath);
+        if (stat.isDirectory()) {
+          if (entry === "icons" || entry.startsWith(".")) continue;
+          const subFiles = fs.readdirSync(fullPath);
+          for (const sf of subFiles) {
+            if (sf.endsWith(".js")) {
+              const sc = loadScraperFile(
+                path.join(fullPath, sf),
+                entry,
+                "Movies",
+              );
+              if (sc) {
+                moviesCount++;
+                logger.info(
+                  `Loaded movies-tvshows scraper: ${sc.name} (@${entry})`,
+                );
+              }
+            }
+          }
+        }
+      }
+    }
+
     global.scrapersLoaded = true;
     notifyScrapersUpdated();
     await reconcileActiveProvider("Anime");
     await reconcileActiveProvider("Manga");
+    await reconcileActiveProvider("Movies");
 
     logger.info(
-      `All scrapers loaded. Total Anime: ${animeCount}, Manga: ${mangaCount}`,
+      `All scrapers loaded. Total Anime: ${animeCount}, Manga: ${mangaCount}, Movies: ${moviesCount}`,
     );
   } catch (err) {
     logger.error(`Failed to load scrapers: ${err.message}`);
@@ -1208,9 +1309,17 @@ function notifyScrapersUpdated() {
           ),
         ),
       );
+      const cleanMovies = Array.from(
+        new Set(
+          Object.values(global.Movies_providers || {}).map(
+            (p) => p.uniqueId || p.name,
+          ),
+        ),
+      );
       global.sendToRenderer("scrapers-updated", {
         anime: cleanAnime,
         manga: cleanManga,
+        movies: cleanMovies,
       });
     }
   } catch (err) {
@@ -1225,7 +1334,13 @@ async function loadSingleScraper(
 ) {
   try {
     await CheckScrapperFolderExists();
-    const folder = AnimeManga === "Anime" ? ScraperAnime : ScraperManga;
+    const norm = String(AnimeManga || "").toLowerCase();
+    const folder =
+      norm === "anime"
+        ? ScraperAnime
+        : norm === "manga"
+          ? ScraperManga
+          : ScraperMovies;
     const scopedPath = path.join(folder, RepoOwner, `${ExtensionName}.js`);
     const flatPath = path.join(folder, `${ExtensionName}.js`);
 
@@ -1282,9 +1397,11 @@ async function loadSingleScraper(
       scraper.filePath = fullPath;
 
       const targetProviders =
-        AnimeManga === "Anime"
+        norm === "anime"
           ? global.Anime_providers
-          : global.Manga_providers;
+          : norm === "manga"
+            ? global.Manga_providers
+            : global.Movies_providers;
       targetProviders[atScopedId] = scraper;
       targetProviders[slashScopedId] = scraper;
 
@@ -1299,7 +1416,7 @@ async function loadSingleScraper(
         `Loaded/Reloaded ${AnimeManga.toLowerCase()} scraper: ${scraper.name} (@${RepoOwner})`,
       );
       notifyScrapersUpdated();
-      await reconcileActiveProvider(AnimeManga);
+      await reconcileActiveProvider(norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies");
       return { success: true, scraper };
     } else {
       logger.warn(`Scraper missing 'name' export: ${fullPath}`);
@@ -1319,8 +1436,13 @@ async function unloadSingleScraper(
   RepoOwner = "TheYogMehta",
 ) {
   try {
+    const norm = String(AnimeManga || "").toLowerCase();
     const targetProviders =
-      AnimeManga === "Anime" ? global.Anime_providers : global.Manga_providers;
+      norm === "anime"
+        ? global.Anime_providers
+        : norm === "manga"
+          ? global.Manga_providers
+          : global.Movies_providers;
     const isOfficial = RepoOwner.toLowerCase() === "theyogmehta";
     const atScopedId = `@${RepoOwner}/${ExtensionName}`;
     const slashScopedId = `${RepoOwner}/${ExtensionName}`;
@@ -1344,7 +1466,7 @@ async function unloadSingleScraper(
     logger.info(
       `Unloaded ${AnimeManga.toLowerCase()} scraper: ${ExtensionName} (@${RepoOwner})`,
     );
-    await reconcileActiveProvider(AnimeManga);
+    await reconcileActiveProvider(norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies");
     notifyScrapersUpdated();
   } catch (err) {
     logger.error(`Failed to unload scraper ${ExtensionName}: ${err.message}`);
@@ -1361,7 +1483,19 @@ async function HandleExtensions(
   MinAppVersion,
 ) {
   await CheckScrapperFolderExists();
-  const folder = AnimeManga === "Anime" ? ScraperAnime : ScraperManga;
+  const norm = String(AnimeManga || "").toLowerCase();
+  const isMovies = norm === "movies" || norm === "movies-tvshows";
+  const canonicalType = isMovies
+    ? "Movies"
+    : norm === "manga"
+      ? "Manga"
+      : "Anime";
+  const folder =
+    canonicalType === "Anime"
+      ? ScraperAnime
+      : canonicalType === "Manga"
+        ? ScraperManga
+        : ScraperMovies;
   const ownerDir = path.join(folder, RepoOwner);
   if (!fs.existsSync(ownerDir)) {
     fs.mkdirSync(ownerDir, { recursive: true });
@@ -1389,23 +1523,31 @@ async function HandleExtensions(
         }
       }
 
-      const extScriptUrl = `${rawBase.replace(/\/$/, "")}/extensions/${AnimeManga}/${ExtensionName}.js`;
-      const directScriptUrl = `${rawBase.replace(/\/$/, "")}/${AnimeManga}/${ExtensionName}.js`;
-      let scriptUrl = extScriptUrl;
-      let response;
-
-      try {
-        response = await httpGetText(extScriptUrl, 15000);
-      } catch (err) {
+      const typeSub = isMovies ? "movies-tvshows" : canonicalType;
+      const candidateUrls = [
+        `${rawBase.replace(/\/$/, "")}/extensions/${typeSub}/${ExtensionName}.js`,
+        `${rawBase.replace(/\/$/, "")}/${typeSub}/${ExtensionName}.js`,
+      ];
+      if (isMovies) {
+        candidateUrls.push(
+          `${rawBase.replace(/\/$/, "")}/extensions/Movies/${ExtensionName}.js`,
+          `${rawBase.replace(/\/$/, "")}/Movies/${ExtensionName}.js`,
+        );
+      }
+      let response = null;
+      let scriptUrl = candidateUrls[0];
+      for (const u of candidateUrls) {
         try {
-          response = await httpGetText(directScriptUrl, 15000);
-          scriptUrl = directScriptUrl;
-        } catch (_) {
-          throw err;
-        }
+          const res = await httpGetText(u, 15000);
+          if (res && !res.includes("404: Not Found")) {
+            response = res;
+            scriptUrl = u;
+            break;
+          }
+        } catch (_) {}
       }
 
-      if (response.includes("404: Not Found")) {
+      if (!response || response.includes("404: Not Found")) {
         return {
           type: "error",
           title: "Scraper Not Found",
@@ -1465,7 +1607,7 @@ async function HandleExtensions(
       } catch (iconErr) {}
 
       const loadResult = await loadSingleScraper(
-        AnimeManga,
+        canonicalType,
         ExtensionName,
         RepoOwner,
       );
@@ -1477,21 +1619,23 @@ async function HandleExtensions(
         } catch (_) {}
         return {
           type: "error",
-          title: `Failed to Load ${AnimeManga} Extension!`,
+          title: `Failed to Load ${canonicalType} Extension!`,
           message:
             loadResult?.error ||
             `Scraper ${ExtensionName} failed to initialize`,
         };
       }
 
-      try {
-        const { syncExtensionMapping } = require("./mappingUpdater");
-        syncExtensionMapping(ExtensionName).catch(() => {});
-      } catch (_) {}
+      if (canonicalType !== "Movies") {
+        try {
+          const { syncExtensionMapping } = require("./mappingUpdater");
+          syncExtensionMapping(ExtensionName).catch(() => {});
+        } catch (_) {}
+      }
 
       return {
         type: "success",
-        title: `Added ${AnimeManga} Extension!`,
+        title: `Added ${canonicalType} Extension!`,
         message: `${ExtensionName} (by @${RepoOwner}) is added successfully`,
       };
     } catch (err) {
@@ -1500,7 +1644,7 @@ async function HandleExtensions(
       );
       return {
         type: "error",
-        title: `Failed to Add ${AnimeManga} Extension!`,
+        title: `Failed to Add ${canonicalType} Extension!`,
         message: err.message,
       };
     }
@@ -1543,16 +1687,18 @@ async function HandleExtensions(
         } catch (_) {}
       }
 
-      await unloadSingleScraper(AnimeManga, ExtensionName, RepoOwner);
+      await unloadSingleScraper(canonicalType, ExtensionName, RepoOwner);
 
-      try {
-        const { cleanupExtensionMapping } = require("./mappingUpdater");
-        cleanupExtensionMapping(ExtensionName).catch(() => {});
-      } catch (_) {}
+      if (canonicalType !== "Movies") {
+        try {
+          const { cleanupExtensionMapping } = require("./mappingUpdater");
+          cleanupExtensionMapping(ExtensionName).catch(() => {});
+        } catch (_) {}
+      }
 
       return {
         type: "success",
-        title: `Removed ${AnimeManga} Extension!`,
+        title: `Removed ${canonicalType} Extension!`,
         message: `${ExtensionName} (by @${RepoOwner}) is removed successfully`,
       };
     } catch (err) {
@@ -1561,7 +1707,7 @@ async function HandleExtensions(
       );
       return {
         type: "error",
-        title: `Failed to Remove ${AnimeManga} Extension!`,
+        title: `Failed to Remove ${canonicalType} Extension!`,
         message: err.message,
       };
     }
@@ -1576,8 +1722,14 @@ async function HandleExtensions(
 // return provider
 async function providerFetch(type, index) {
   try {
-    const pMap =
-      type === "Anime" ? global.Anime_providers : global.Manga_providers;
+    const norm = String(type || "").toLowerCase();
+    const isAnime = norm === "anime";
+    const isManga = norm === "manga";
+    const pMap = isAnime
+      ? global.Anime_providers
+      : isManga
+        ? global.Manga_providers
+        : global.Movies_providers;
     const providers = Object.keys(pMap || {});
     if (providers.length === 0) {
       throw new Error(
@@ -1603,8 +1755,11 @@ async function providerFetch(type, index) {
     }
 
     if (!matchedProvider) {
-      const activePref =
-        type === "Anime" ? config.Animeprovider : config.Mangaprovider;
+      const activePref = isAnime
+        ? config.Animeprovider
+        : isManga
+          ? config.Mangaprovider
+          : config.Moviesprovider;
       if (activePref && pMap[activePref]) {
         providerName = activePref;
         matchedProvider = pMap[activePref];

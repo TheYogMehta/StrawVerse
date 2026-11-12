@@ -21,14 +21,17 @@ export default function Marketplace({ initialType }) {
   const [installedProviders, setInstalledProviders] = useState({
     Anime: [],
     Manga: [],
+    Movies: [],
   });
   const [installedVersions, setInstalledVersions] = useState({
     Anime: [],
     Manga: [],
+    Movies: [],
   });
   const [activeProviders, setActiveProviders] = useState({
     Anime: "",
     Manga: "",
+    Movies: "",
   });
   const [appVersion, setAppVersion] = useState("11.0.4");
   const [loading, setLoading] = useState(true);
@@ -75,7 +78,10 @@ export default function Marketplace({ initialType }) {
             "https://raw.githubusercontent.com/TheYogMehta/extensions/refs/heads/main/marketplace.json",
           );
           const data = await response.json();
-          const items = data[activeType] || [];
+          const items =
+            data[activeType] ||
+            data[activeType === "Movies" ? "movies-tvshows" : activeType] ||
+            [];
           extList = items.map((item) => ({
             ...item,
             repoOwner: "TheYogMehta",
@@ -108,19 +114,26 @@ export default function Marketplace({ initialType }) {
           "installedExtensions",
           "Animeprovider",
           "Mangaprovider",
+          "Moviesprovider",
         ]);
         setInstalledProviders(
-          settingsData.settings?.providers || { Anime: [], Manga: [] },
+          settingsData.settings?.providers || {
+            Anime: [],
+            Manga: [],
+            Movies: [],
+          },
         );
         setInstalledVersions(
           settingsData.settings?.installedExtensions || {
             Anime: [],
             Manga: [],
+            Movies: [],
           },
         );
         setActiveProviders({
           Anime: settingsData.settings?.Animeprovider || "",
           Manga: settingsData.settings?.Mangaprovider || "",
+          Movies: settingsData.settings?.Moviesprovider || "",
         });
       } else {
         try {
@@ -128,13 +141,16 @@ export default function Marketplace({ initialType }) {
           if (res.ok) {
             const data = await res.json();
             const s = data?.settings || {};
-            setInstalledProviders(s.providers || { Anime: [], Manga: [] });
+            setInstalledProviders(
+              s.providers || { Anime: [], Manga: [], Movies: [] },
+            );
             setInstalledVersions(
-              s.installedExtensions || { Anime: [], Manga: [] },
+              s.installedExtensions || { Anime: [], Manga: [], Movies: [] },
             );
             setActiveProviders({
               Anime: s.Animeprovider || "",
               Manga: s.Mangaprovider || "",
+              Movies: s.Moviesprovider || "",
             });
           }
         } catch (_) {}
@@ -292,7 +308,11 @@ export default function Marketplace({ initialType }) {
     }
 
     const settingKey =
-      activeType === "Anime" ? "Animeprovider" : "Mangaprovider";
+      activeType === "Anime"
+        ? "Animeprovider"
+        : activeType === "Movies"
+          ? "Moviesprovider"
+          : "Mangaprovider";
 
     try {
       if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
@@ -514,6 +534,12 @@ export default function Marketplace({ initialType }) {
                 className={`market-tab-btn ${activeType === "Manga" ? "active" : ""}`}
               >
                 Manga
+              </button>
+              <button
+                onClick={() => setActiveType("Movies")}
+                className={`market-tab-btn ${activeType === "Movies" ? "active" : ""}`}
+              >
+                Movies & Series
               </button>
             </div>
 

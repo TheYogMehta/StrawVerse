@@ -6,6 +6,7 @@ const { settingfetch, providerFetch } = require("../utils/settings");
 const {
   animeinfo,
   MangaInfo,
+  movieInfo,
   invalidateCache,
   resolveDownloadFolder,
 } = require("../utils/AnimeManga");
@@ -42,9 +43,14 @@ const { resolveMalIdFromMapping } = require("../utils/mappingResolver");
 
 const router = express.Router();
 
-// View tags for Anime/Manga in custom user order
+// View tags for Anime/Manga/Movies in custom user order
 router.get("/api/local/tags", (req, res) => {
-  const type = req.query.type === "Manga" ? "Manga" : "Anime";
+  const type =
+    req.query.type === "Manga"
+      ? "Manga"
+      : req.query.type === "Movies"
+        ? "Movies"
+        : "Anime";
   res.redirect(
     `/api/local/tags/view/${type}${req.query.includeHidden ? "?includeHidden=true" : ""}`,
   );
@@ -53,7 +59,7 @@ router.get("/api/local/tags", (req, res) => {
 router.get("/api/local/tags/view/:type", async (req, res) => {
   try {
     const { type } = req.params;
-    if (type !== "Anime" && type !== "Manga") {
+    if (type !== "Anime" && type !== "Manga" && type !== "Movies") {
       throw new Error("Invalid type parameter");
     }
     const includeHidden = req.query.includeHidden === "true";
@@ -124,7 +130,11 @@ router.get("/api/local/tags/view/:type", async (req, res) => {
 router.post("/api/local/tags/create", async (req, res) => {
   try {
     const { type, tag } = req.body;
-    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+    if (
+      !type ||
+      !tag ||
+      (type !== "Anime" && type !== "Manga" && type !== "Movies")
+    ) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -172,7 +182,7 @@ router.post("/api/local/tags/reorder", async (req, res) => {
     if (
       !type ||
       !Array.isArray(tags) ||
-      (type !== "Anime" && type !== "Manga")
+      (type !== "Anime" && type !== "Manga" && type !== "Movies")
     ) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
@@ -193,7 +203,11 @@ router.post("/api/local/tags/reorder", async (req, res) => {
 router.post("/api/local/tags/toggle-visibility", async (req, res) => {
   try {
     const { type, tag, hidden } = req.body;
-    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+    if (
+      !type ||
+      !tag ||
+      (type !== "Anime" && type !== "Manga" && type !== "Movies")
+    ) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -225,7 +239,11 @@ router.post("/api/local/tags/toggle-visibility", async (req, res) => {
 router.post("/api/local/tags/delete-tag", async (req, res) => {
   try {
     const { type, tag } = req.body;
-    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+    if (
+      !type ||
+      !tag ||
+      (type !== "Anime" && type !== "Manga" && type !== "Movies")
+    ) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -292,9 +310,9 @@ router.post("/api/local/tags/add", async (req, res) => {
       provider = null;
     }
 
-    let resolvedMalID = MalID ? String(MalID) : null;
+    let resolvedMalID = type !== "Movies" && MalID ? String(MalID) : null;
 
-    if (!resolvedMalID) {
+    if (!resolvedMalID && type !== "Movies") {
       if (global.mappingDb && id) {
         try {
           const mal = await resolveMalIdFromMapping({
@@ -319,23 +337,27 @@ router.post("/api/local/tags/add", async (req, res) => {
       tagValue = cleanArr.length > 0 ? JSON.stringify(cleanArr) : "[]";
     }
 
+    const targetTable =
+      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
     const existing = await global.db
       .prepare(
-        `SELECT * FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ? OR folder_name = ?`,
+        `SELECT * FROM ${targetTable} WHERE id = ? OR folder_name = ?`,
       )
       .get(id, id);
 
     if (existing) {
       const updates = [];
       const params = [];
-      if (resolvedMalID) {
-        updates.push("MalID = ?");
-        params.push(resolvedMalID);
-      } else if (existing.MalID) {
-        resolvedMalID = existing.MalID;
-      } else if (MalID !== undefined) {
-        updates.push("MalID = ?");
-        params.push(null);
+      if (type !== "Movies") {
+        if (resolvedMalID) {
+          updates.push("MalID = ?");
+          params.push(resolvedMalID);
+        } else if (existing.MalID) {
+          resolvedMalID = existing.MalID;
+        } else if (MalID !== undefined) {
+          updates.push("MalID = ?");
+          params.push(null);
+        }
       }
       if (CustomTag !== undefined) {
         updates.push("CustomTag = ?");
@@ -345,7 +367,7 @@ router.post("/api/local/tags/add", async (req, res) => {
         params.push(existing.id);
         await global.db
           .prepare(
-            `UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+            `UPDATE ${targetTable} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
           )
           .run(...params);
 
@@ -397,6 +419,31 @@ router.post("/api/local/tags/add", async (req, res) => {
                 MalID: resolvedMalID,
               };
             }
+          } else if (type === "Movies") {
+            const movieData = await movieInfo(
+              resolvedProvider,
+              config?.CustomDownloadLocationMovies,
+              id,
+            );
+            if (movieData) {
+              values = {
+                ...values,
+                title: movieData.title || "",
+                provider: resolvedProvider.provider_name,
+                type: movieData.type ?? "Movie",
+                description: movieData.description ?? null,
+                status: movieData.status ?? null,
+                genres:
+                  movieData?.genres?.length > 0
+                    ? Array.isArray(movieData.genres)
+                      ? movieData.genres.join(",")
+                      : movieData.genres
+                    : "",
+                aired: movieData?.aired || movieData?.released || null,
+                ImageUrl: movieData?.image_url || movieData?.image,
+                MalID: null,
+              };
+            }
           } else if (type === "Manga") {
             const mangainfo = await MangaInfo(resolvedProvider, id);
             if (mangainfo) {
@@ -432,14 +479,19 @@ router.post("/api/local/tags/add", async (req, res) => {
         .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
         .run(resolvedMalID, tagValue, id);
 
-      if (resolvedMalID && resolvedMalID !== "") {
+      if (type !== "Movies" && resolvedMalID && resolvedMalID !== "") {
         await global.db
           .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
           .run(tagValue, resolvedMalID);
       }
     }
 
-    const targetMalID = MalID ? String(MalID) : existing?.MalID;
+    const targetMalID =
+      type !== "Movies"
+        ? MalID
+          ? String(MalID)
+          : existing?.MalID
+        : null;
     if (
       CustomTag !== undefined &&
       (tagValue === "" || tagValue === "[]") &&
@@ -494,16 +546,19 @@ router.post("/api/local/tags/add", async (req, res) => {
 
       if (req.body.deleteFiles && global.db) {
         try {
-          const malIdStr = resolvedMalID ? String(resolvedMalID) : null;
+          const malIdStr =
+            type !== "Movies" && resolvedMalID ? String(resolvedMalID) : null;
           await run(
             `DELETE FROM ${type} WHERE id = ? OR folder_name = ?${malIdStr ? " OR MalID = ?" : ""}`,
             malIdStr ? [id, id, malIdStr] : [id, id],
           );
 
-          await run(
-            `DELETE FROM unlinked_mal_ids WHERE id = ?${malIdStr ? " OR malid = ?" : ""}`,
-            malIdStr ? [id, malIdStr] : [id],
-          );
+          if (type !== "Movies") {
+            await run(
+              `DELETE FROM unlinked_mal_ids WHERE id = ?${malIdStr ? " OR malid = ?" : ""}`,
+              malIdStr ? [id, malIdStr] : [id],
+            );
+          }
 
           if (type === "Anime") {
             await run(
@@ -591,7 +646,8 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
       return res.json({ success: true, message: "No change needed" });
     }
 
-    const table = type === "Anime" ? "Anime" : "Manga";
+    const table =
+      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
     const existing = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [
       oldId,
     ]);
@@ -609,7 +665,7 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
         `INSERT OR REPLACE INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`,
         values,
       );
-      if (type === "Anime") {
+      if (type === "Anime" || type === "Movies") {
         await run(`UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?`, [
           newId,
           oldId,
@@ -653,7 +709,7 @@ router.post("/api/local/delete", async (req, res) => {
       if (isNaN(targetNum)) continue;
 
       const filesToDelete = files.filter((file) => {
-        if (type === "Anime") {
+        if (type === "Anime" || type === "Movies") {
           if (!isVideoFile(file) && !isSubtitleFile(file)) {
             return false;
           }
@@ -703,7 +759,12 @@ router.post("/api/local/delete", async (req, res) => {
 
     await cleanupEmptyDownloadFolder(typeDir, type, id);
 
-    const label = type === "Anime" ? "episode(s)" : "chapter(s)";
+    const label =
+      type === "Manga"
+        ? "chapter(s)"
+        : type === "Movies"
+          ? "movie/episode(s)"
+          : "episode(s)";
     return res.json({
       error: false,
       message: `Successfully deleted ${deletedCount} ${label}`,
@@ -797,7 +858,7 @@ router.post("/api/local/open", async (req, res) => {
           const targetNum = parseFloat(number);
           if (!isNaN(targetNum)) {
             const matchedFile = files.find((file) => {
-              if (type === "Anime") {
+              if (type === "Anime" || type === "Movies") {
                 return getEpisodeNumberFromFilename(file) === targetNum;
               } else {
                 return getChapterNumberFromFilename(file) === targetNum;
@@ -908,13 +969,13 @@ router.post("/api/history/edit-entry", async (req, res) => {
       throw new Error("Missing parameters for history edit");
     }
 
-    const isAnime = type === "Anime";
-    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
-    const idField = isAnime ? "anime_id" : "manga_id";
-    const numberField = isAnime ? "episode_number" : "chapter_number";
-    const currentField = isAnime ? "current_time" : "current_page";
-    const totalField = isAnime ? "duration" : "total_pages";
-    const timeField = isAnime ? "last_watched" : "last_read";
+    const isVideo = type === "Anime" || type === "Movies";
+    const historyTable = isVideo ? "WatchHistory" : "ReadHistory";
+    const idField = isVideo ? "anime_id" : "manga_id";
+    const numberField = isVideo ? "episode_number" : "chapter_number";
+    const currentField = isVideo ? "current_time" : "current_page";
+    const totalField = isVideo ? "duration" : "total_pages";
+    const timeField = isVideo ? "last_watched" : "last_read";
 
     const cur = parseFloat(currentPageOrTime) || (isCompleted ? 1 : 0);
     const tot = parseFloat(totalPagesOrTime) || 1;
@@ -974,7 +1035,8 @@ router.post("/api/history/clear", async (req, res) => {
 router.delete("/api/history/:type/:id", async (req, res) => {
   try {
     const { type, id } = req.params;
-    const historyTable = type === "Anime" ? "WatchHistory" : "ReadHistory";
+    const historyTable =
+      type === "Anime" || type === "Movies" ? "WatchHistory" : "ReadHistory";
     await run(`DELETE FROM ${historyTable} WHERE id = ?`, [id]);
     res.json({ success: true });
   } catch (err) {
@@ -990,11 +1052,12 @@ router.post("/api/history/hide", async (req, res) => {
       throw new Error("Missing parameters");
     }
 
-    const isAnime = type === "Anime";
-    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
-    const idField = isAnime ? "anime_id" : "manga_id";
-    const titleField = isAnime ? "anime_title" : "manga_title";
-    const mainTable = isAnime ? "Anime" : "Manga";
+    const isVideo = type === "Anime" || type === "Movies";
+    const historyTable = isVideo ? "WatchHistory" : "ReadHistory";
+    const idField = isVideo ? "anime_id" : "manga_id";
+    const titleField = isVideo ? "anime_title" : "manga_title";
+    const mainTable =
+      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
     const hiddenVal = unhide ? 0 : 1;
 
     let queryIds = [mediaId];
@@ -1008,7 +1071,7 @@ router.post("/api/history/hide", async (req, res) => {
       });
     }
 
-    if (isAnime) {
+    if (isVideo) {
       queryIds = Array.from(new Set(queryIds));
     }
 
@@ -1045,15 +1108,16 @@ router.get("/api/history/progress", async (req, res) => {
     const { mediaId, type } = req.query;
     if (!mediaId || !type) throw new Error("Missing parameters");
 
-    const isAnime = type === "Anime";
-    const mainTable = isAnime ? "Anime" : "Manga";
-    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
-    const idCol = isAnime ? "anime_id" : "manga_id";
-    const titleCol = isAnime ? "anime_title" : "manga_title";
-    const numCol = isAnime ? "episode_number" : "chapter_number";
-    const currentCol = isAnime ? "current_time" : "current_page";
-    const totalCol = isAnime ? "duration" : "total_pages";
-    const dateCol = isAnime ? "last_watched" : "last_read";
+    const isVideo = type === "Anime" || type === "Movies";
+    const mainTable =
+      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
+    const historyTable = isVideo ? "WatchHistory" : "ReadHistory";
+    const idCol = isVideo ? "anime_id" : "manga_id";
+    const titleCol = isVideo ? "anime_title" : "manga_title";
+    const numCol = isVideo ? "episode_number" : "chapter_number";
+    const currentCol = isVideo ? "current_time" : "current_page";
+    const totalCol = isVideo ? "duration" : "total_pages";
+    const dateCol = isVideo ? "last_watched" : "last_read";
 
     let suggestedNumber = null;
     let lastProgress = null;
@@ -1186,7 +1250,7 @@ router.get("/api/history/progress", async (req, res) => {
       }
 
       const latest = targetRecord || history[0];
-      lastProgress = isAnime
+      lastProgress = isVideo
         ? {
             number: latest.episode_number,
             currentTime: latest.current_time,
@@ -1210,7 +1274,7 @@ router.get("/api/history/progress", async (req, res) => {
     }
 
     const mappedStatus = history.map((h) =>
-      isAnime
+      isVideo
         ? {
             id: h.id,
             number: h.episode_number,
@@ -1234,7 +1298,7 @@ router.get("/api/history/progress", async (req, res) => {
           },
     );
 
-    if (isAnime) {
+    if (isVideo) {
       episodesStatus = mappedStatus;
     } else {
       chaptersStatus = mappedStatus;
@@ -1280,6 +1344,14 @@ router.get("/api/history/stats", async (req, res) => {
       )
       .get();
 
+    let distinctMovies = 0;
+    try {
+      const movieStats = await global.db
+        .prepare(`SELECT COUNT(DISTINCT id) AS distinct_movies FROM Movies`)
+        .get();
+      distinctMovies = movieStats?.distinct_movies || 0;
+    } catch (_) {}
+
     res.json({
       watchHours: parseFloat((watchStats.total_seconds / 3600).toFixed(2)),
       readHours: parseFloat((readStats.total_seconds / 3600).toFixed(2)),
@@ -1287,6 +1359,7 @@ router.get("/api/history/stats", async (req, res) => {
       completedChapters: readStats.completed_chapters,
       distinctAnime: watchStats.distinct_anime,
       distinctManga: readStats.distinct_manga,
+      distinctMovies,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1373,7 +1446,7 @@ router.get("/api/history/list", async (req, res) => {
           `
         SELECT 
           w.id,
-          'Anime' AS type,
+          CASE WHEN mov.id IS NOT NULL THEN 'Movies' ELSE 'Anime' END AS type,
           w.anime_id AS media_id,
           w.anime_title AS title,
           w.episode_number AS number,
@@ -1384,14 +1457,15 @@ router.get("/api/history/list", async (req, res) => {
           w.last_watched AS date,
           w.sub_dub AS subdub,
           COALESCE(w.hidden, 0) AS hidden,
-          a.image_url,
-          a.provider,
-          a.MalID AS mal_id,
-          CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
-          mal.totalEpisodes AS total_count,
-          mal.image AS mal_image
+          COALESCE(mov.image_url, a.image_url) AS image_url,
+          COALESCE(mov.provider, a.provider) AS provider,
+          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE a.MalID END AS mal_id,
+          CASE WHEN a.id IS NOT NULL OR mov.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
+          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE mal.totalEpisodes END AS total_count,
+          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE mal.image END AS mal_image
         FROM WatchHistory w
         LEFT JOIN Anime a ON a.id = w.anime_id
+        LEFT JOIN Movies mov ON mov.id = w.anime_id
         LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
         ${watchWhereClause}
         ORDER BY w.last_watched DESC

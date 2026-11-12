@@ -15,6 +15,10 @@ const {
   latestAnime,
   animeinfo,
   animesearch,
+  latestMovies,
+  movieSearch,
+  movieInfo,
+  fetchMovieSources,
   fetchEpisode,
   fetchEpisodeSources,
   MangaChapterFetch,
@@ -102,6 +106,10 @@ function cleanBaseTitle(title) {
 
 async function enrichResultsWithMappingImages(results, AnimeManga) {
   if (!results || !Array.isArray(results) || results.length === 0) {
+    return results;
+  }
+
+  if (AnimeManga === "Movies") {
     return results;
   }
 
@@ -279,13 +287,20 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
     return results;
   }
 
+  const isVideo = AnimeManga === "Anime" || AnimeManga === "Movies";
   const isAnime = AnimeManga === "Anime";
-  const listTable = isAnime ? "MyAnimeList" : "MyMangaList";
-  const histTable = isAnime ? "WatchHistory" : "ReadHistory";
-  const mediaTable = isAnime ? "Anime" : "Manga";
-  const idCol = isAnime ? "anime_id" : "manga_id";
-  const titleCol = isAnime ? "anime_title" : "manga_title";
-  const epCol = isAnime ? "episode_number" : "chapter_number";
+  const isMovies = AnimeManga === "Movies";
+  const listTable = AnimeManga === "Manga" ? "MyMangaList" : "MyAnimeList";
+  const histTable = isVideo ? "WatchHistory" : "ReadHistory";
+  const mediaTable =
+    isMovies
+      ? "Movies"
+      : AnimeManga === "Manga"
+        ? "Manga"
+        : "Anime";
+  const idCol = isVideo ? "anime_id" : "manga_id";
+  const titleCol = isVideo ? "anime_title" : "manga_title";
+  const epCol = isVideo ? "episode_number" : "chapter_number";
 
   try {
     const itemIds = new Set();
@@ -296,15 +311,19 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
     for (const item of results) {
       if (!item) continue;
       if (item.id) itemIds.add(String(item.id));
-      if (item.malid || item.MalID) {
+      if (!isMovies && (item.malid || item.MalID)) {
         malIdSet.add(String(item.malid || item.MalID));
+      }
+      if (isMovies) {
+        delete item.MalID;
+        item.malid = null;
       }
       if (item.title) {
         itemTitles.add(String(item.title).toLowerCase().trim());
       }
     }
 
-    // 1. Resolve any additional MalIDs and metadata from Anime/Manga table
+    // 1. Resolve any additional MalIDs and metadata from Anime/Manga/Movies table
     if (global.db && (itemIds.size > 0 || itemTitles.size > 0)) {
       try {
         const idArr = Array.from(itemIds);
@@ -326,16 +345,19 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
         }
 
         if (whereClause) {
-          const selectCols = isAnime
-            ? "id, title, MalID, genres, aired, status, type, provider, CustomTag"
-            : "id, title, MalID, genres, released as aired, status, type, provider, CustomTag";
+          const selectCols =
+            AnimeManga === "Manga"
+              ? "id, title, MalID, genres, released as aired, status, type, provider, CustomTag"
+              : isMovies
+                ? "id, title, genres, aired, status, type, provider, CustomTag"
+                : "id, title, MalID, genres, aired, status, type, provider, CustomTag";
           const mediaRows = await global.db
             .prepare(
               `SELECT ${selectCols} FROM ${mediaTable} WHERE ${whereClause}`,
             )
             .all(...params);
           mediaRows?.forEach((r) => {
-            if (r.MalID) malIdSet.add(String(r.MalID));
+            if (!isMovies && r.MalID) malIdSet.add(String(r.MalID));
             if (r.id) mediaMetaMap.set(String(r.id), r);
             if (r.title) {
               mediaMetaMap.set(
@@ -348,9 +370,9 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
       } catch (_) {}
     }
 
-    // 2. Batch query MyAnimeList / MyMangaList
+    // 2. Batch query MyAnimeList / MyMangaList (never for Movies)
     const malMap = new Map();
-    if (global.db && global.MalLoggedIn) {
+    if (!isMovies && global.db && global.MalLoggedIn) {
       try {
         const malIdArr = Array.from(malIdSet);
         const titleArr = Array.from(itemTitles);
@@ -392,7 +414,7 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
     }
 
     // Also look up sibling IDs in Anime/Manga table for all resolved MalIDs so WatchHistory matches
-    if (global.db && malIdSet.size > 0) {
+    if (!isMovies && global.db && malIdSet.size > 0) {
       try {
         const malIdArr = Array.from(malIdSet);
         const placeholders = malIdArr.map(() => "?").join(",");
@@ -1431,6 +1453,83 @@ router.post(
           }
           data = { ...data, site: siteName };
         }
+      } else if (AnimeManga === "Movies") {
+        if (provider === "local") {
+          data = await getAllMetadata(
+            "Movies",
+            config?.CustomDownloadLocationMovies,
+            filters?.page,
+            filters?.tag,
+            filters,
+            searchKeyword,
+          );
+        } else if (
+          provider.startsWith("unique:") ||
+          provider.startsWith("unique_")
+        ) {
+          data = await getUniqueProviderList(
+            "Movies",
+            provider,
+            filters,
+            searchKeyword,
+          );
+        } else if (provider === "search") {
+          const pObj = await getProviderOrThrow("Movies");
+          data = await movieSearch(pObj, searchKeyword, filters);
+          data = { ...data, site: config?.Moviesprovider };
+        } else if (provider === "mal") {
+          const activeProvName =
+            config?.Moviesprovider ||
+            (await reconcileActiveProvider("Movies"));
+          if (!activeProvName) {
+            data = { results: [], totalPages: 1, hasNextPage: false };
+          } else {
+            const pObj = await getProviderOrThrow("Movies", activeProvName);
+            if (searchKeyword) {
+              data = await movieSearch(pObj, searchKeyword, filters);
+            } else {
+              data = await latestMovies(pObj, filters);
+            }
+            const siteName =
+              pObj?.provider_name ||
+              pObj?.provider?.name ||
+              activeProvName ||
+              provider;
+            if (data?.results && Array.isArray(data.results)) {
+              for (const item of data.results) {
+                if (item) {
+                  item.provider = siteName;
+                }
+              }
+            }
+            data = { ...data, site: siteName };
+          }
+        } else {
+          const activeProvName =
+            provider === "provider"
+              ? config?.Moviesprovider ||
+                (await reconcileActiveProvider("Movies"))
+              : provider;
+          const pObj = await getProviderOrThrow("Movies", activeProvName);
+          if (searchKeyword) {
+            data = await movieSearch(pObj, searchKeyword, filters);
+          } else {
+            data = await latestMovies(pObj, filters);
+          }
+          const siteName =
+            pObj?.provider_name ||
+            pObj?.provider?.name ||
+            activeProvName ||
+            provider;
+          if (data?.results && Array.isArray(data.results)) {
+            for (const item of data.results) {
+              if (item) {
+                item.provider = siteName;
+              }
+            }
+          }
+          data = { ...data, site: siteName };
+        }
       }
 
       if (!data) throw new Error(`No ${AnimeManga} Found in ${provider}`);
@@ -1465,6 +1564,15 @@ router.post(
             }
           }
         } catch (_) {}
+      }
+
+      if (AnimeManga === "Movies" && data?.results && Array.isArray(data.results)) {
+        for (const item of data.results) {
+          if (item) {
+            delete item.MalID;
+            item.malid = null;
+          }
+        }
       }
 
       return res.json(data);
@@ -1515,7 +1623,7 @@ router.post(
     }
     const searchKeyword = req?.body?.keyword || req?.query?.query || "";
 
-    if (!global.mappingDb) {
+    if (AnimeManga === "Movies" || !global.mappingDb) {
       return res.json({ count: 0 });
     }
 
@@ -1700,7 +1808,9 @@ router.post(
           null,
           AnimeManga === "Anime"
             ? setting?.CustomDownloadLocationAnime
-            : setting?.CustomDownloadLocationManga,
+            : AnimeManga === "Movies"
+              ? setting?.CustomDownloadLocationMovies
+              : setting?.CustomDownloadLocationManga,
         );
         if (AnimeLocalInfo && AnimeLocalInfo.id) {
           Object.assign(data, AnimeLocalInfo);
@@ -1737,11 +1847,17 @@ router.post(
                   .get(id, id, id);
                 if (!localRow) {
                   const histTable =
-                    AnimeManga === "Anime" ? "WatchHistory" : "ReadHistory";
+                    AnimeManga === "Anime" || AnimeManga === "Movies"
+                      ? "WatchHistory"
+                      : "ReadHistory";
                   const idCol =
-                    AnimeManga === "Anime" ? "anime_id" : "manga_id";
+                    AnimeManga === "Anime" || AnimeManga === "Movies"
+                      ? "anime_id"
+                      : "manga_id";
                   const titleCol =
-                    AnimeManga === "Anime" ? "anime_title" : "manga_title";
+                    AnimeManga === "Anime" || AnimeManga === "Movies"
+                      ? "anime_title"
+                      : "manga_title";
                   const histRow = await global.db
                     .prepare(
                       `SELECT ${titleCol} FROM ${histTable} WHERE ${idCol} = ? LIMIT 1`,
@@ -1761,7 +1877,11 @@ router.post(
                     resolvedMalId = parseInt(localRow.MalID);
                   }
                   resolvedId = localRow.id;
-                  resolvedProvider = localRow.provider || "pahe";
+                  resolvedProvider =
+                    localRow.provider ||
+                    (AnimeManga === "Movies"
+                      ? setting.Moviesprovider || "provider"
+                      : "pahe");
                 }
               } catch (_) {}
             }
@@ -1826,6 +1946,13 @@ router.post(
                 }
               }
             } catch (_) {}
+          }
+
+          if (!resolvedId && AnimeManga === "Movies" && id) {
+            resolvedId = id;
+            resolvedProvider =
+              setting?.Moviesprovider ||
+              (await reconcileActiveProvider("Movies"));
           }
 
           if (resolvedId && resolvedProvider) {
@@ -2580,6 +2707,44 @@ router.post(
                 );
               }
             }
+          } else if (AnimeManga === "Movies") {
+            const Moviesprovider = await providerFetch(
+              "Movies",
+              (LocalMalProvider !== "local" && LocalMalProvider !== "provider"
+                ? LocalMalProvider
+                : provider) ?? null,
+            );
+            const MovieInfoData = await movieInfo(
+              Moviesprovider,
+              setting?.CustomDownloadLocationMovies,
+              id,
+            );
+            if (MovieInfoData) {
+              Object.assign(data, MovieInfoData);
+
+              try {
+                await global.db
+                  .prepare(
+                    `UPDATE Movies SET description = ?, status = ?, genres = ?, aired = ?, image_url = ?, provider = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+                  )
+                  .run(
+                    MovieInfoData.description || "",
+                    MovieInfoData.status || "",
+                    Array.isArray(MovieInfoData.genres)
+                      ? MovieInfoData.genres.join(",")
+                      : MovieInfoData.genres || "",
+                    MovieInfoData.aired || MovieInfoData.released || "",
+                    MovieInfoData.image_url || MovieInfoData.image || "",
+                    Moviesprovider.provider_name,
+                    id,
+                  );
+              } catch (dbErr) {
+                logger.error(
+                  `Failed to update local metadata for Movies ${id}: ${dbErr.message}`,
+                );
+              }
+            }
+            data.provider = Moviesprovider.provider_name;
           }
         } catch (err) {
           if (data && data.id) {
@@ -2592,7 +2757,12 @@ router.post(
         }
       }
 
-      if (data && global.mappingDb) {
+      if (AnimeManga === "Movies" && data) {
+        data.malid = null;
+        delete data.MalID;
+      }
+
+      if (AnimeManga !== "Movies" && data && global.mappingDb) {
         try {
           const customMappingRow = await global.db
             .prepare("SELECT malid FROM unlinked_mal_ids WHERE id = ?")
@@ -2900,7 +3070,7 @@ router.post(
         }
       }
 
-      if (data.malid && global.MalLoggedIn) {
+      if (AnimeManga !== "Movies" && data.malid && global.MalLoggedIn) {
         try {
           if (AnimeManga === "Anime") {
             const MalInfo = await global.db
@@ -2940,6 +3110,12 @@ router.post(
               `SELECT CustomTag FROM Anime WHERE id = ? OR folder_name = ?`,
             )
             .get(id, id);
+        } else if (AnimeManga === "Movies") {
+          tagRow = await global.db
+            .prepare(
+              `SELECT CustomTag FROM Movies WHERE id = ? OR folder_name = ?`,
+            )
+            .get(id, id);
         } else {
           tagRow = await global.db
             .prepare(
@@ -2948,7 +3124,7 @@ router.post(
             .get(id, id);
         }
 
-        const targetMalId = data?.malid;
+        const targetMalId = AnimeManga !== "Movies" ? data?.malid : null;
         if (!tagRow?.CustomTag && targetMalId) {
           const malRow = await global.db
             .prepare(
@@ -2970,7 +3146,7 @@ router.post(
       if (data) {
         data.scraper_image = data.image || null;
 
-        if (data.malid) {
+        if (AnimeManga !== "Movies" && data.malid) {
           try {
             let remoteImg = null;
             if (global.mappingDb && AnimeManga === "Anime") {
@@ -3060,24 +3236,33 @@ router.post(
   },
 );
 
-// Fetches Anime Episodes or Manga Chapters
+// Fetches Anime Episodes, Movies/Series Episodes, or Manga Chapters
 router.post("/api/info/items", async (req, res) => {
   let { id, page, provider, type } = req.body;
   page = parseInt(page ?? 1);
+  const isVideo = type === "Anime" || type === "Movies";
   const isAnime = type === "Anime";
-  const fetchFunction = isAnime ? fetchEpisode : fetchChapters;
-  const errorName = isAnime ? "Episodes" : "Chapters";
+  const fetchFunction =
+    type === "Movies"
+      ? async (providerObj, itemId, pg) => {
+          const info = await movieInfo(providerObj, null, itemId);
+          return { episodes: info?.episodes || [] };
+        }
+      : isAnime
+        ? fetchEpisode
+        : fetchChapters;
+  const errorName = isVideo ? "Episodes" : "Chapters";
 
   if (global.db && id) {
     try {
-      const table = isAnime ? "Anime" : "Manga";
+      const table = type === "Movies" ? "Movies" : isAnime ? "Anime" : "Manga";
       const exists = await global.db
         .prepare(`SELECT id FROM ${table} WHERE id = ?`)
         .get(id);
       if (!exists) {
-        const histTable = isAnime ? "WatchHistory" : "ReadHistory";
-        const idCol = isAnime ? "anime_id" : "manga_id";
-        const titleCol = isAnime ? "anime_title" : "manga_title";
+        const histTable = isVideo ? "WatchHistory" : "ReadHistory";
+        const idCol = isVideo ? "anime_id" : "manga_id";
+        const titleCol = isVideo ? "anime_title" : "manga_title";
         const hist = await global.db
           .prepare(
             `SELECT ${titleCol} FROM ${histTable} WHERE ${idCol} = ? LIMIT 1`,
@@ -3190,12 +3375,16 @@ router.post("/api/info/items", async (req, res) => {
 
 // Play Video From m3u8 url
 router.post("/api/watch", async (req, res) => {
-  const { ep, epNum, Downloaded, provider = null, subdub } = req.body;
+  const { ep, epNum, Downloaded, provider = null, subdub, type } = req.body;
   try {
     if (!Downloaded) {
       if (!ep) throw new Error("Episode ID Not Found");
-      const Animeprovider = await providerFetch("Anime", provider);
-      let sourcesArray = await fetchEpisodeSources(Animeprovider, ep, subdub);
+      const mediaType = type === "Movies" ? "Movies" : "Anime";
+      const Animeprovider = await providerFetch(mediaType, provider);
+      let sourcesArray =
+        mediaType === "Movies"
+          ? await fetchMovieSources(Animeprovider, ep, subdub)
+          : await fetchEpisodeSources(Animeprovider, ep, subdub);
 
       if (sourcesArray) {
         const prefSubDub = subdub || "sub";
@@ -3294,9 +3483,15 @@ router.post("/api/watch", async (req, res) => {
         intro: null,
       };
 
+      const mediaType = req.body.type === "Movies" ? "Movies" : "Anime";
+      const downloadLocation =
+        mediaType === "Movies"
+          ? config?.CustomDownloadLocationMovies
+          : config?.CustomDownloadLocationAnime;
+
       const SourcesData = await getSourceById(
-        "Anime",
-        config?.CustomDownloadLocationAnime,
+        mediaType,
+        downloadLocation,
         ep,
         epNum,
         subdub,
@@ -3333,10 +3528,11 @@ router.post("/api/watch", async (req, res) => {
 
 // Resolve specific server stream on demand (lazy loading)
 router.post("/api/watch/server", async (req, res) => {
-  const { provider = null, server } = req.body;
+  const { provider = null, server, type } = req.body;
   try {
     if (!server) throw new Error("Server payload missing");
-    const Animeprovider = await providerFetch("Anime", provider);
+    const mediaType = type === "Movies" ? "Movies" : "Anime";
+    const Animeprovider = await providerFetch(mediaType, provider);
     const resolved = await processServer(Animeprovider, server);
     if (!resolved) {
       return res.json({ error: true, message: "Failed to resolve server" });
@@ -3395,6 +3591,7 @@ async function getAllowedMediaBases() {
     for (const loc of [
       config?.CustomDownloadLocationAnime,
       config?.CustomDownloadLocationManga,
+      config?.CustomDownloadLocationMovies,
     ]) {
       if (loc && typeof loc === "string") {
         allowedBases.add(path.resolve(loc));
@@ -4129,6 +4326,9 @@ router.get(
 );
 
 async function linkMediaItem({ oldId, malId, type, title, image }) {
+  if (type === "Movies") {
+    throw new Error("Movies do not support database mapping or MAL linking");
+  }
   const itemType = type || "Anime";
   const malIdStr = malId ? String(malId) : null;
 

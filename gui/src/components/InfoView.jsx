@@ -149,6 +149,7 @@ export default function InfoView({
   const [isLinkingMapping, setIsLinkingMapping] = useState(false);
 
   const handleMappingSearch = async (overrideQuery) => {
+    if (type === "Movies") return;
     const q = (
       overrideQuery !== undefined ? overrideQuery : mappingSearchQuery
     ).trim();
@@ -174,6 +175,7 @@ export default function InfoView({
   };
 
   const handleLinkMappingItem = async (item) => {
+    if (type === "Movies") return;
     setIsLinkingMapping(true);
     try {
       const res = await fetch("/api/local/link-mapping", {
@@ -224,6 +226,7 @@ export default function InfoView({
   };
 
   useEffect(() => {
+    if (type === "Movies") return;
     if (details && details.error) {
       const initialQ = propTitle || id || "";
       if (initialQ) {
@@ -231,7 +234,7 @@ export default function InfoView({
         handleMappingSearch(initialQ);
       }
     }
-  }, [details]);
+  }, [details, type]);
 
   const onWatch = async (...args) => {
     const isNotInLibrary =
@@ -389,7 +392,7 @@ export default function InfoView({
   const isDownloaded = (itemNum, subdub = null) => {
     const num = parseFloat(itemNum);
     if (isNaN(num)) return false;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const episodes = details?.DownloadedEpisodes;
       if (Array.isArray(episodes)) {
         return episodes.map(Number).includes(num);
@@ -414,7 +417,7 @@ export default function InfoView({
   };
 
   const hasDownloads =
-    type === "Anime"
+    type === "Anime" || type === "Movies"
       ? Array.isArray(details?.DownloadedEpisodes)
         ? details.DownloadedEpisodes.length > 0
         : (details?.DownloadedEpisodes?.sub?.length || 0) +
@@ -938,7 +941,7 @@ export default function InfoView({
   const isItemWatched = useCallback(
     (item) => {
       const epStatus =
-        type === "Anime"
+        type === "Anime" || type === "Movies"
           ? (historyProgress?.episodesStatus || []).find(
               (h) => Number(h.number) === Number(item.number),
             )
@@ -963,7 +966,7 @@ export default function InfoView({
   const sortedItems = useMemo(() => {
     if (sortOrder === "downloaded") {
       const allDownloadedNums =
-        type === "Anime"
+        type === "Anime" || type === "Movies"
           ? Array.from(
               new Set(
                 Array.isArray(details?.DownloadedEpisodes)
@@ -986,7 +989,7 @@ export default function InfoView({
         );
         if (existingItem) return existingItem;
 
-        if (type === "Anime") {
+        if (type === "Anime" || type === "Movies") {
           const subList = details?.DownloadedEpisodes?.sub || [];
           const dubList = details?.DownloadedEpisodes?.dub || [];
           const localLangs = [];
@@ -1194,7 +1197,7 @@ export default function InfoView({
   ) => {
     setItemsLoading(true);
     try {
-      const isAnime = type === "Anime";
+      const isAnime = type === "Anime" || type === "Movies";
       const response = await fetch("/api/info/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1261,7 +1264,7 @@ export default function InfoView({
   };
 
   const fallbackToDownloaded = (targetDetails = details) => {
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = targetDetails?.DownloadedEpisodes;
       const subList = Array.isArray(dl) ? dl : dl?.sub || [];
       const dubList = Array.isArray(dl) ? dl : dl?.dub || [];
@@ -1313,7 +1316,7 @@ export default function InfoView({
 
   const playItem = (targetItem, overrideSubDub = null) => {
     const activeSubDub = overrideSubDub || dubSelect;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = details?.DownloadedEpisodes;
       const isDownloadedLocal = Array.isArray(dl)
         ? dl.map(Number).includes(Number(targetItem.number))
@@ -1457,7 +1460,7 @@ export default function InfoView({
             if (isNaN(epNum)) return prevDetails;
 
             const updated = { ...prevDetails };
-            if (type === "Anime") {
+            if (type === "Anime" || type === "Movies") {
               const subdub = data.SubDub || "sub";
               if (Array.isArray(updated.DownloadedEpisodes)) {
                 if (!updated.DownloadedEpisodes.map(Number).includes(epNum)) {
@@ -1580,7 +1583,7 @@ export default function InfoView({
 
   const hasAnyDownloads = useMemo(() => {
     if (!details) return false;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = details.DownloadedEpisodes;
       if (Array.isArray(dl)) return dl.length > 0;
       const subList = dl?.sub || [];
@@ -1839,7 +1842,7 @@ export default function InfoView({
     );
     if (sorted.length > 0) {
       const targetItem = sorted[0];
-      if (type === "Anime") {
+      if (type === "Anime" || type === "Movies") {
         const dl = details?.DownloadedEpisodes;
         const isDownloadedLocal = Array.isArray(dl)
           ? dl.map(Number).includes(Number(targetItem.number))
@@ -1883,7 +1886,7 @@ export default function InfoView({
     );
     if (sorted.length > 0) {
       const targetItem = sorted[sorted.length - 1];
-      if (type === "Anime") {
+      if (type === "Anime" || type === "Movies") {
         const dl = details?.DownloadedEpisodes;
         const isDownloadedLocal = Array.isArray(dl)
           ? dl.map(Number).includes(Number(targetItem.number))
@@ -1924,7 +1927,7 @@ export default function InfoView({
   // Download Trigger
   const handleDownload = async (singleItem = null) => {
     try {
-      const isAnime = type === "Anime";
+      const isAnime = type === "Anime" || type === "Movies";
       const singleMulti = singleItem ? "Single" : "Multi";
       const endpoint = `/api/download/${type}/${singleMulti}`;
 
@@ -2191,7 +2194,7 @@ export default function InfoView({
 
   // MAL Status sync
   const handleMalSync = async () => {
-    if (!details?.malid) return;
+    if (type === "Movies" || !details?.malid) return;
     if (malStatus === "not_in_list") {
       swalInfo(
         "Status Required",
@@ -2221,7 +2224,7 @@ export default function InfoView({
   };
 
   const handleMalRemove = async () => {
-    if (!details?.malid) return;
+    if (type === "Movies" || !details?.malid) return;
 
     const result = await swalConfirm(
       "Remove from MyAnimeList?",
@@ -2298,7 +2301,7 @@ export default function InfoView({
           type: type,
           id: details?.id || id,
           provider: activeProvider,
-          MalID: details?.malid || details?.MalID,
+          MalID: type === "Movies" ? null : (details?.malid || details?.MalID),
           CustomTag: updatedTag,
         }),
       });
@@ -2335,6 +2338,7 @@ export default function InfoView({
   };
 
   const startMalLink = () => {
+    if (type === "Movies") return;
     setIsLinkingMal(true);
     const initialQuery = details?.title || "";
     setMalSearchQuery(initialQuery);
@@ -2344,7 +2348,7 @@ export default function InfoView({
   };
 
   const performMalSearch = async (query) => {
-    if (!query) return;
+    if (type === "Movies" || !query) return;
     setMalSearchLoading(true);
     try {
       const searchType = type === "Anime" ? "anime" : "manga";
@@ -2474,6 +2478,7 @@ export default function InfoView({
   };
 
   const handleUnlinkMal = async () => {
+    if (type === "Movies") return;
     const confirmResult = await Swal.fire({
       title: "Unlink MyAnimeList?",
       text: "Are you sure you want to unlink this item from MyAnimeList?",
@@ -2520,7 +2525,7 @@ export default function InfoView({
 
   // Delete local catalog entry
   const handleDeleteLocal = async () => {
-    const isAnime = type === "Anime";
+    const isAnime = type === "Anime" || type === "Movies";
     const allDownloaded = [];
     if (isAnime) {
       const dl = details?.DownloadedEpisodes;
@@ -2636,7 +2641,7 @@ export default function InfoView({
 
   // Bulk Delete Trigger
   const handleBulkDelete = async () => {
-    const isAnime = type === "Anime";
+    const isAnime = type === "Anime" || type === "Movies";
     const selectedDownloaded = Array.from(selectedItems).filter((num) => {
       if (isAnime) {
         return isDownloaded(num, "sub") || isDownloaded(num, "dub");
@@ -2736,7 +2741,12 @@ export default function InfoView({
             className="u-style-31"
           />
           <h2 className="u-style-32">
-            {type === "Anime" ? "Anime" : "Manga"} Data Not Found
+            {type === "Manga"
+              ? "Manga"
+              : type === "Movies"
+                ? "Movie / Series"
+                : "Anime"}{" "}
+            Data Not Found
           </h2>
           <p className="u-style-33">
             {details?.message ||
@@ -2804,8 +2814,9 @@ export default function InfoView({
           </div>
 
           {/* SIMILAR MAPPING SEARCH & MAL LINKING SECTION */}
-          <div
-            style={{
+          {type !== "Movies" && (
+            <div
+              style={{
               marginTop: "30px",
               borderTop: "1px solid rgba(255, 255, 255, 0.1)",
               paddingTop: "20px",
@@ -2996,6 +3007,7 @@ export default function InfoView({
               </div>
             )}
           </div>
+          )}
         </div>
       </div>
     );
@@ -3010,7 +3022,7 @@ export default function InfoView({
 
   const numToDownload = Array.from(selectedItems).filter((num) => {
     const downloaded =
-      type === "Anime"
+      type === "Anime" || type === "Movies"
         ? isDownloaded(num, "sub") || isDownloaded(num, "dub")
         : isDownloaded(num);
     return !downloaded;
@@ -3018,7 +3030,7 @@ export default function InfoView({
 
   const numToDelete = Array.from(selectedItems).filter((num) => {
     const downloaded =
-      type === "Anime"
+      type === "Anime" || type === "Movies"
         ? isDownloaded(num, "sub") || isDownloaded(num, "dub")
         : isDownloaded(num);
     return downloaded;
@@ -3164,13 +3176,13 @@ export default function InfoView({
                     ) : (
                       <Play size={16} className="u-style-35" />
                     )}
-                    {type === "Anime"
+                    {type === "Manga"
                       ? nextToPlay === 1
-                        ? "Start watching Episode 1"
-                        : `Continue Watching Episode ${nextToPlay}`
-                      : nextToPlay === 1
                         ? "Start reading Chapter 1"
-                        : `Continue Reading Chapter ${nextToPlay}`}
+                        : `Continue Reading Chapter ${nextToPlay}`
+                      : nextToPlay === 1
+                        ? "Start watching Episode 1"
+                        : `Continue Watching Episode ${nextToPlay}`}
                   </button>
                 )}
 
@@ -3385,123 +3397,127 @@ export default function InfoView({
           </div>
 
           {/* Consolidated MyAnimeList Integration Box */}
-          <div className="mal-box glass-panel">
-            <div className="mal-box-header u-style-39">
-              <h3 className="mal-title u-style-11">MyAnimeList Integration</h3>
-              {details?.malid ? (
-                <div className="mal-link-status u-style-27">
-                  <span className="mal-link-badge">
-                    Linked (ID: {details.malid})
-                  </span>
-                  <button onClick={handleUnlinkMal} className="btn-unlink">
-                    Unlink
-                  </button>
-                </div>
-              ) : (
-                <button onClick={startMalLink} className="btn-link-mal">
-                  Link MyAnimeList Title
-                </button>
-              )}
-            </div>
-
-            {details?.malid ? (
-              details?.MalLoggedIn ? (
-                <div className="mal-row">
-                  <div className="input-group">
-                    <label className="input-label">
-                      {type === "Anime" ? "Watched Episodes" : "Read Chapters"}
-                    </label>
-                    <input
-                      type="number"
-                      value={malWatched}
-                      onChange={(e) =>
-                        setMalWatched(parseInt(e.target.value) || 0)
-                      }
-                      className="input-val"
-                    />
+          {type !== "Movies" && (
+            <div className="mal-box glass-panel">
+              <div className="mal-box-header u-style-39">
+                <h3 className="mal-title u-style-11">MyAnimeList Integration</h3>
+                {details?.malid ? (
+                  <div className="mal-link-status u-style-27">
+                    <span className="mal-link-badge">
+                      Linked (ID: {details.malid})
+                    </span>
+                    <button onClick={handleUnlinkMal} className="btn-unlink">
+                      Unlink
+                    </button>
                   </div>
-                  <div
-                    className="input-group u-style-40"
-                    ref={malStatusDropdownRef}
-                  >
-                    <label className="input-label">Status</label>
-                    <div
-                      className={`custom-dropdown-trigger ${isMalStatusDropdownOpen ? "open" : ""}`}
-                      onClick={() =>
-                        setIsMalStatusDropdownOpen(!isMalStatusDropdownOpen)
-                      }
-                    >
-                      <span className="custom-dropdown-trigger-text">
-                        {getMalStatusLabel(malStatus)}
-                      </span>
-                      <ChevronDown
-                        className="custom-dropdown-chevron"
-                        size={16}
+                ) : (
+                  <button onClick={startMalLink} className="btn-link-mal">
+                    Link MyAnimeList Title
+                  </button>
+                )}
+              </div>
+
+              {details?.malid ? (
+                details?.MalLoggedIn ? (
+                  <div className="mal-row">
+                    <div className="input-group">
+                      <label className="input-label">
+                        {type === "Manga"
+                          ? "Read Chapters"
+                          : "Watched Episodes"}
+                      </label>
+                      <input
+                        type="number"
+                        value={malWatched}
+                        onChange={(e) =>
+                          setMalWatched(parseInt(e.target.value) || 0)
+                        }
+                        className="input-val"
                       />
                     </div>
-
-                    {isMalStatusDropdownOpen && (
-                      <div className="custom-dropdown-menu">
-                        {malStatusOptions.map((statusOption) => (
-                          <div
-                            key={statusOption}
-                            className={`custom-dropdown-item ${malStatus === statusOption ? "selected" : ""}`}
-                            onClick={() => {
-                              setMalStatus(statusOption);
-                              setIsMalStatusDropdownOpen(false);
-                            }}
-                          >
-                            {getMalStatusLabel(statusOption)}
-                          </div>
-                        ))}
+                    <div
+                      className="input-group u-style-40"
+                      ref={malStatusDropdownRef}
+                    >
+                      <label className="input-label">Status</label>
+                      <div
+                        className={`custom-dropdown-trigger ${isMalStatusDropdownOpen ? "open" : ""}`}
+                        onClick={() =>
+                          setIsMalStatusDropdownOpen(!isMalStatusDropdownOpen)
+                        }
+                      >
+                        <span className="custom-dropdown-trigger-text">
+                          {getMalStatusLabel(malStatus)}
+                        </span>
+                        <ChevronDown
+                          className="custom-dropdown-chevron"
+                          size={16}
+                        />
                       </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={handleMalSync}
-                    disabled={malSyncing}
-                    className="btn-sync glow-button"
-                  >
-                    {malSyncing ? (
-                      <Loader2 size={16} className="spin" />
-                    ) : (
-                      "Save Status"
-                    )}
-                  </button>
-                  {malStatus !== "not_in_list" && (
+
+                      {isMalStatusDropdownOpen && (
+                        <div className="custom-dropdown-menu">
+                          {malStatusOptions.map((statusOption) => (
+                            <div
+                              key={statusOption}
+                              className={`custom-dropdown-item ${malStatus === statusOption ? "selected" : ""}`}
+                              onClick={() => {
+                                setMalStatus(statusOption);
+                                setIsMalStatusDropdownOpen(false);
+                              }}
+                            >
+                              {getMalStatusLabel(statusOption)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <button
-                      onClick={handleMalRemove}
+                      onClick={handleMalSync}
                       disabled={malSyncing}
-                      className="btn-unlink u-style-41"
+                      className="btn-sync glow-button"
                     >
                       {malSyncing ? (
                         <Loader2 size={16} className="spin" />
                       ) : (
-                        "Remove from List"
+                        "Save Status"
                       )}
                     </button>
-                  )}
-                </div>
+                    {malStatus !== "not_in_list" && (
+                      <button
+                        onClick={handleMalRemove}
+                        disabled={malSyncing}
+                        className="btn-unlink u-style-41"
+                      >
+                        {malSyncing ? (
+                          <Loader2 size={16} className="spin" />
+                        ) : (
+                          "Remove from List"
+                        )}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mal-unlinked-placeholder u-style-42">
+                    Log in to MyAnimeList in Settings to synchronize your status
+                    and progress automatically.
+                  </p>
+                )
               ) : (
                 <p className="mal-unlinked-placeholder u-style-42">
-                  Log in to MyAnimeList in Settings to synchronize your status
-                  and progress automatically.
+                  This title is not linked to a MyAnimeList entry. Link it to
+                  synchronize your status and watch history automatically.
                 </p>
-              )
-            ) : (
-              <p className="mal-unlinked-placeholder u-style-42">
-                This title is not linked to a MyAnimeList entry. Link it to
-                synchronize your status and watch history automatically.
-              </p>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
       {/* Episodes / Chapters List */}
       <div className="items-section">
         <div className="section-header">
-          <h2>{type === "Anime" ? "Episodes List" : "Chapters List"}</h2>
+          <h2>{type === "Manga" ? "Chapters List" : "Episodes List"}</h2>
         </div>
         {episodesOrChapters.length > 0 && (
           <div className="bulk-actions">
@@ -3511,7 +3527,7 @@ export default function InfoView({
               <input
                 type="text"
                 placeholder={
-                  type === "Anime" ? "Search episode..." : "Search chapter..."
+                  type === "Manga" ? "Search chapter..." : "Search episode..."
                 }
                 value={episodeSearchQuery}
                 onChange={(e) => setEpisodeSearchQuery(e.target.value)}
@@ -3560,11 +3576,11 @@ export default function InfoView({
                     ? [
                         {
                           value: "watched",
-                          label: type === "Anime" ? "WATCHED" : "READ",
+                          label: type === "Manga" ? "READ" : "WATCHED",
                         },
                         {
                           value: "unwatched",
-                          label: type === "Anime" ? "UNWATCHED" : "UNREAD",
+                          label: type === "Manga" ? "UNREAD" : "UNWATCHED",
                         },
                       ]
                     : []),
@@ -3780,7 +3796,7 @@ export default function InfoView({
               }}
             >
               <p style={{ fontSize: "1.05em", marginBottom: "8px" }}>
-                No {type === "Anime" ? "episodes" : "chapters"} available from{" "}
+                No {type === "Manga" ? "chapters" : "episodes"} available from{" "}
                 {details?.provider || "this provider"}.
               </p>
               {details?.linkedProviders &&
@@ -3803,7 +3819,7 @@ export default function InfoView({
             const isLocal = localMalProvider === "local";
 
             const epStatus =
-              type === "Anime"
+              type === "Anime" || type === "Movies"
                 ? (historyProgress?.episodesStatus || []).find(
                     (h) => Number(h.number) === Number(item.number),
                   )
@@ -3855,11 +3871,11 @@ export default function InfoView({
                       />
                     )}
                     <span className="item-num">
-                      {type === "Anime"
-                        ? `Episode ${item.number}`
-                        : `Chapter ${item.number}`}
+                      {type === "Manga"
+                        ? `Chapter ${item.number}`
+                        : `Episode ${item.number}`}
                     </span>
-                    {type === "Anime" &&
+                    {type !== "Manga" &&
                       item.title &&
                       item.title !== `Episode ${item.number}` && (
                         <span title={item.title} className="item-title-sub">
@@ -3879,13 +3895,13 @@ export default function InfoView({
                     {(() => {
                       if (!epStatus) return null;
                       const curVal =
-                        type === "Anime"
-                          ? epStatus.currentTime
-                          : epStatus.currentPage;
+                        type === "Manga"
+                          ? epStatus.currentPage
+                          : epStatus.currentTime;
                       const totVal =
-                        type === "Anime"
-                          ? epStatus.duration
-                          : epStatus.totalPages;
+                        type === "Manga"
+                          ? epStatus.totalPages
+                          : epStatus.duration;
                       if (
                         curVal === undefined ||
                         curVal === null ||
@@ -3909,9 +3925,9 @@ export default function InfoView({
                             />
                           </div>
                           <span className="item-progress-text">
-                            {type === "Anime"
-                              ? `${formatTime(curVal)} / ${formatTime(totVal)}`
-                              : `Page ${curVal}/${totVal}`}
+                            {type === "Manga"
+                              ? `Page ${curVal}/${totVal}`
+                              : `${formatTime(curVal)} / ${formatTime(totVal)}`}
                           </span>
                         </div>
                       );
@@ -3937,7 +3953,7 @@ export default function InfoView({
 
                 {/* LINE 2: All sub, dub, hsub, download button */}
                 <div className="item-card-row-bottom">
-                  {type === "Anime" ? (
+                  {type === "Anime" || type === "Movies" ? (
                     <>
                       {isDownloaded(item.number) ? (
                         <div className="badge-and-action">
@@ -4368,7 +4384,7 @@ export default function InfoView({
       </div>
 
       {/* MAL Link Modal Overlay */}
-      {isLinkingMal && (
+      {type !== "Movies" && isLinkingMal && (
         <div className="mal-modal-overlay">
           <div className="mal-modal-card">
             <div className="mal-modal-header">

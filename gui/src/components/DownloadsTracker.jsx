@@ -344,7 +344,7 @@ export default function DownloadsTracker() {
                   ? ` ( ${item.config.quality} )`
                   : "";
                 const displayTitle =
-                  item.Type === "Anime"
+                  item.Type === "Anime" || item.Type === "Movies"
                     ? `EP ${item.EpNum} ${item.Title}${qualStr}`
                     : `CHP ${item.EpNum} ${item.Title}${qualStr}`;
                 const isItemCooling =

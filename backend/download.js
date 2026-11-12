@@ -2,6 +2,7 @@ const fs = require("fs");
 const {
   animeinfo,
   MangaInfo,
+  movieInfo,
   fetchEpisode,
   fetchChapters,
 } = require("./utils/AnimeManga");
@@ -286,6 +287,168 @@ async function downloadAnimeSingle(
   }
 }
 
+// Handles Multiple Movies / Episodes Download
+async function downloadMovieMulti(
+  provider = null,
+  movieid,
+  Episodes = [],
+  Title,
+  SubDub,
+  malid = null,
+) {
+  return downloadMediaMulti({
+    type: "Movies",
+    provider,
+    mediaId: movieid,
+    items: Episodes,
+    title: Title,
+    subDub: SubDub,
+    malid,
+    singleDownloadFn: downloadMovieSingle,
+    fetchAllItemsFn: async (prov, mId) => {
+      const data = await movieInfo(prov, null, mId);
+      return data?.episodes || [];
+    },
+  });
+}
+
+// Handles Single Movie / Episode Download
+async function downloadMovieSingle(
+  provider = null,
+  movieid,
+  episodeid,
+  number,
+  Title,
+  saveinfo = false,
+  preFetchedConfig = null,
+  preFetchedProvider = null,
+  returnItemOnly = false,
+  malid = null,
+  subdub = null,
+) {
+  if (!episodeid) {
+    return {
+      error: true,
+      message:
+        "Missing episode ID — cannot queue download. Re-add it from the episode list.",
+    };
+  }
+  try {
+    const config = preFetchedConfig || (await settingfetch());
+    const Moviesprovider =
+      preFetchedProvider || (await providerFetch("Movies", provider));
+
+    let resolvedSubDub = subdub || "sub";
+
+    if (saveinfo) {
+      const existing = await queryOne("SELECT id FROM Movies WHERE id = ?", [
+        movieid,
+      ]);
+      if (!existing) {
+        const moviedata = await movieInfo(
+          Moviesprovider,
+          config?.CustomDownloadLocationMovies,
+          movieid,
+        );
+        if (moviedata) {
+          const finalTitle = moviedata?.title || Title;
+          MetadataAdd("Movies", {
+            id: movieid,
+            title: finalTitle,
+            provider: Moviesprovider.provider_name,
+            type: moviedata.type ?? "Movie",
+            description: moviedata.description ?? null,
+            status: moviedata.status ?? null,
+            genres:
+              moviedata?.genres?.length > 0
+                ? Array.isArray(moviedata.genres)
+                  ? moviedata.genres.join(",")
+                  : moviedata.genres
+                : "",
+            aired: moviedata?.aired || moviedata?.released || null,
+            ImageUrl: moviedata?.image_url || moviedata?.image,
+            EpisodesDataId: null,
+            MalID: null,
+          });
+        }
+      }
+    }
+
+    let is_in_queue = await checkEpisodeDownload(episodeid);
+    if (is_in_queue) {
+      return {
+        error: true,
+        message: "Already in queue",
+      };
+    }
+
+    try {
+      let movieMapping = await FindMapping(
+        "Movies",
+        movieid,
+        null,
+        config?.CustomDownloadLocationMovies,
+      );
+      if (movieMapping && movieMapping.DownloadedEpisodes) {
+        const num = parseFloat(number);
+        const downloadedList = Array.isArray(movieMapping.DownloadedEpisodes)
+          ? movieMapping.DownloadedEpisodes
+          : [];
+        if (downloadedList.map(Number).includes(num)) {
+          return {
+            error: true,
+            message: "Already downloaded",
+          };
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    const queueItem = {
+      Type: "Movies",
+      EpNum: number,
+      id: movieid,
+      Title: Title,
+      SubDub: resolvedSubDub,
+      malid: null,
+      config: {
+        Animeprovider: Moviesprovider?.provider_name,
+        Moviesprovider: Moviesprovider?.provider_name,
+        quality: config?.quality,
+        mergeSubtitles: config?.mergeSubtitles,
+        subtitleFormat: config?.subtitleFormat,
+        CustomDownloadLocation: config?.CustomDownloadLocationMovies,
+        CustomDownloadLocationMovies: config?.CustomDownloadLocationMovies,
+        jellyfinCompatibility: config?.jellyfinCompatibility,
+        animeNamingScheme: config?.animeNamingScheme || "default",
+      },
+      epid: episodeid,
+      totalSegments: 0,
+      currentSegments: 0,
+    };
+
+    if (returnItemOnly) {
+      return {
+        error: false,
+        queueItem,
+      };
+    }
+
+    await addToQueue(queueItem);
+    return {
+      error: false,
+      message: "Added To Queue!",
+    };
+  } catch (err) {
+    logger.error(`Error in downloadMovieSingle: ${err.message}`);
+    return {
+      error: true,
+      message: err.message,
+    };
+  }
+}
+
 // Handles Multiple Chapters Download
 async function downloadMangaMulti(
   provider = null,
@@ -519,6 +682,9 @@ async function getBaseDownloadDir(type) {
   if (type === "Manga") {
     return setting?.CustomDownloadLocationManga || (await getDownloadsFolder());
   }
+  if (type === "Movies") {
+    return setting?.CustomDownloadLocationMovies || (await getDownloadsFolder());
+  }
   return await getDownloadsFolder();
 }
 
@@ -595,6 +761,8 @@ module.exports = {
   downloadAnimeMulti,
   downloadMangaSingle,
   downloadMangaMulti,
+  downloadMovieSingle,
+  downloadMovieMulti,
   getBaseDownloadDir,
   cleanupEmptyDownloadFolder,
 };

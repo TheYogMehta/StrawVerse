@@ -12,12 +12,14 @@ const {
   directoryMaker,
   mediaServerDir,
   MangaDir,
+  MovieDir,
 } = require("./DirectoryMaker");
 const {
   MangaChapterFetch,
   DownloadChapters,
   fetchEpisode,
   fetchEpisodeSources,
+  fetchMovieSources,
   processServer,
 } = require("./AnimeManga");
 const {
@@ -581,7 +583,10 @@ async function continuousExecution() {
 
       (async () => {
         try {
-          if (currentTask?.Type === "Anime") {
+          if (
+            currentTask?.Type === "Anime" ||
+            currentTask?.Type === "Movies"
+          ) {
             let {
               config,
               Title,
@@ -590,10 +595,11 @@ async function continuousExecution() {
               SubDub,
               malid,
               id: animeId,
+              Type,
             } = currentTask;
             if (config && Title && EpNum && epid && SubDub) {
               await downloadep(
-                config,
+                { ...config, Type },
                 Title,
                 EpNum,
                 epid,
@@ -603,7 +609,7 @@ async function continuousExecution() {
               );
             } else {
               logger.error(
-                `Error message: Some Anime Data missing [ removing from queue ]`,
+                `Error message: Some ${currentTask.Type || "Media"} Data missing [ removing from queue ]`,
               );
               await removeQueue(currentTask.epid, false);
               return;
@@ -768,29 +774,41 @@ async function downloadep(
   logger.info(`[queueWorker] ${AnimeEpId} phase: dir-start`);
   const liveSettings = (await settingfetch()) || {};
   let directoryPath;
+  const isMovie =
+    Videoconfig?.Type === "Movies" || !!Videoconfig?.Moviesprovider;
+  const dlLoc =
+    (isMovie
+      ? Videoconfig?.CustomDownloadLocationMovies
+      : Videoconfig?.CustomDownloadLocationAnime) ||
+    Videoconfig?.CustomDownloadLocation;
+
   if (liveSettings.mediaServerNaming === true) {
     // Season and show folder picked on the show's page (default: S1, title)
     const show = liveSettings.mediaServerShows?.[String(animeId)] || {};
     const season = parseInt(show.season, 10);
-    const dlLoc =
-      Videoconfig?.CustomDownloadLocationAnime ||
-      Videoconfig?.CustomDownloadLocation;
     directoryPath = await mediaServerDir(
       String(show.series || "").trim() || Title,
       Number.isInteger(season) && season >= 0 ? season : 1,
       dlLoc,
       animeId || AnimeEpId,
     );
-    try {
-      const { generateNfoAndPosterForAnime } = require("./mediaServer");
-      generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(() => {});
-    } catch (_) {}
+    if (!isMovie) {
+      try {
+        const { generateNfoAndPosterForAnime } = require("./mediaServer");
+        generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(() => {});
+      } catch (_) {}
+    }
+  } else if (isMovie) {
+    directoryPath = await MovieDir(
+      Title,
+      dlLoc,
+      animeId || AnimeEpId,
+    );
   } else {
     directoryPath = await directoryMaker(
       Title,
       EpNum,
-      Videoconfig?.CustomDownloadLocationAnime ||
-        Videoconfig?.CustomDownloadLocation,
+      dlLoc,
       animeId || AnimeEpId,
     );
   }
@@ -841,7 +859,13 @@ async function downloadEpisodeByQuality(
   animeId,
 ) {
   try {
-    const provider = await providerFetch("Anime", config.Animeprovider);
+    const isMovie = config?.Type === "Movies" || !!config?.Moviesprovider;
+    const provider = await providerFetch(
+      isMovie ? "Movies" : "Anime",
+      isMovie
+        ? config.Moviesprovider || config.Animeprovider
+        : config.Animeprovider,
+    );
     logger.info(`[queueWorker] ${epid} phase: provider-ok, fetching sources`);
     let resolvedEpid = epid;
     if (subdub && !epid.endsWith(`-${subdub}`) && !epid.endsWith("-both")) {
@@ -855,11 +879,17 @@ async function downloadEpisodeByQuality(
     while (fetchAttempt < maxFetchAttempts && !sourcesArray) {
       fetchAttempt++;
       try {
-        sourcesArray = await fetchEpisodeSources(
-          provider,
-          resolvedEpid,
-          subdub,
-        );
+        sourcesArray = isMovie
+          ? await fetchMovieSources(
+              provider,
+              resolvedEpid,
+              subdub,
+            )
+          : await fetchEpisodeSources(
+              provider,
+              resolvedEpid,
+              subdub,
+            );
       } catch (err) {
         lastFetchErr = err;
         logger.warn(

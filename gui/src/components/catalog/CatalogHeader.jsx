@@ -45,7 +45,9 @@ export default function CatalogHeader({
               placeholder={
                 provider === "mal" && catalogSource?.startsWith("unique:")
                   ? `Search unmapped ${type.toLowerCase()}...`
-                  : `Search ${type}...`
+                  : type === "Movies"
+                    ? "Search Movies & Series..."
+                    : `Search ${type}...`
               }
               value={searchQuery}
               onChange={(e) => onSearchQueryChange(e.target.value)}
@@ -73,6 +75,13 @@ export default function CatalogHeader({
             className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
           >
             Manga
+          </button>
+          <button
+            type="button"
+            onClick={() => onTypeChange && onTypeChange("Movies")}
+            className={`market-tab-btn ${type === "Movies" ? "active" : ""}`}
+          >
+            Movies & Series
           </button>
         </div>
       )}

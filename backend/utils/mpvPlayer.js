@@ -18,7 +18,11 @@ const {
   settingfetch,
 } = require("./settings");
 const { getSourceById } = require("./Metadata");
-const { processServer, fetchEpisodeSources } = require("./AnimeManga");
+const {
+  processServer,
+  fetchEpisodeSources,
+  fetchMovieSources,
+} = require("./AnimeManga");
 const { verifyStreamReachability } = require("./streamVerifier");
 const { sortSourcesByPreferredQuality } = require("./constants");
 
@@ -395,15 +399,17 @@ async function playInMpv(window, options) {
       episode = 1;
     }
   }
+  let mediaType = options.type === "Movies" ? "Movies" : "Anime";
+  let malid = mediaType === "Movies" ? null : (options.malid || "");
   let episodeId = options.episodeId || options.episode || episode;
-  let title = options.title || "Anime";
+  let title = options.title || (mediaType === "Movies" ? "Movie" : "Anime");
   let mediaId = options.mediaId;
   if (mediaId && global.db) {
     try {
       const row = global.db
-        .prepare("SELECT id FROM Anime WHERE id = ?")
+        .prepare(`SELECT id FROM ${mediaType} WHERE id = ?`)
         .get(mediaId);
-      if (!row && malid) {
+      if (!row && malid && mediaType === "Anime") {
         const rowByMal = global.db
           .prepare("SELECT id FROM Anime WHERE MalID = ? LIMIT 1")
           .get(String(malid));
@@ -415,7 +421,6 @@ async function playInMpv(window, options) {
   }
   let image = options.image || "";
   let provider = options.provider || "";
-  let malid = options.malid || "";
   let subdub = options.subdub || "sub";
   let url = options.url || "";
 
@@ -534,9 +539,13 @@ async function playInMpv(window, options) {
     if (!mediaId) return false;
     try {
       const config = await settingfetch();
+      const customDir =
+        mediaType === "Movies"
+          ? config?.CustomDownloadLocationMovies
+          : config?.CustomDownloadLocationAnime;
       const localData = await getSourceById(
-        "Anime",
-        config?.CustomDownloadLocationAnime,
+        mediaType,
+        customDir,
         mediaId,
         episode,
         subdub,
@@ -735,17 +744,32 @@ async function playInMpv(window, options) {
       });
     }
     try {
-      const Animeprovider = await providerFetch("Anime", provider);
-      const fetched = await fetchEpisodeSources(
-        Animeprovider,
-        episodeId,
-        subdub,
-      );
-      if (fetched && Array.isArray(fetched.sources)) {
-        activeSources = fetched.sources;
-      }
-      if (fetched && Array.isArray(fetched.subtitles)) {
-        activeSubtitles = fetched.subtitles;
+      if (mediaType === "Movies") {
+        const Moviesprovider = await providerFetch("Movies", provider);
+        const fetched = await fetchMovieSources(
+          Moviesprovider,
+          episodeId,
+          subdub,
+        );
+        if (fetched && Array.isArray(fetched.sources)) {
+          activeSources = fetched.sources;
+        }
+        if (fetched && Array.isArray(fetched.subtitles)) {
+          activeSubtitles = fetched.subtitles;
+        }
+      } else {
+        const Animeprovider = await providerFetch("Anime", provider);
+        const fetched = await fetchEpisodeSources(
+          Animeprovider,
+          episodeId,
+          subdub,
+        );
+        if (fetched && Array.isArray(fetched.sources)) {
+          activeSources = fetched.sources;
+        }
+        if (fetched && Array.isArray(fetched.subtitles)) {
+          activeSubtitles = fetched.subtitles;
+        }
       }
       logger.info(
         `[MPV] Fetched ${activeSources.length} sources and ${activeSubtitles.length} subtitles from ${provider}`,
@@ -801,15 +825,15 @@ async function playInMpv(window, options) {
           logger.info(
             `[MPV Startup] Resolving server #${i + 1} "${src.name || src.quality}"...`,
           );
-          const Animeprovider = await providerFetch("Anime", provider);
-          const resolved = await processServer(Animeprovider, src);
+          const ActiveProvider = await providerFetch(mediaType, provider);
+          const resolved = await processServer(ActiveProvider, src);
           if (resolved && resolved.url) {
             try {
               const streamDomain = new URL(resolved.url).hostname;
               const ref =
                 resolved.headers?.Referer ||
                 resolved.headers?.referer ||
-                (Animeprovider?.baseUrl ? Animeprovider.baseUrl + "/" : null);
+                (ActiveProvider?.baseUrl ? ActiveProvider.baseUrl + "/" : null);
               if (global.registerSubrequestHeaders && resolved.headers) {
                 global.registerSubrequestHeaders(
                   streamDomain,
@@ -967,7 +991,10 @@ async function playInMpv(window, options) {
   }
 
   // Start AniSkip fetch asynchronously without blocking MPV spawn
-  const skipTimesPromise = fetchSkipTimes(malid, episode, options.duration);
+  const skipTimesPromise =
+    mediaType === "Movies"
+      ? Promise.resolve(null)
+      : fetchSkipTimes(malid, episode, options.duration);
 
   const resolvedUrl = resolvePathOrUrl(playTargetUrl);
   const isExternal = resolvedUrl.startsWith("http");
@@ -1597,6 +1624,7 @@ async function playInMpv(window, options) {
 
   global.activeMpvSession = {
     mediaId,
+    type: mediaType,
     title,
     episode,
     episodeId,
@@ -1918,7 +1946,7 @@ async function playInMpv(window, options) {
 
       updateHistory({
         mediaId: curMediaId,
-        type: "Anime",
+        type: sess?.type || mediaType,
         title: curTitle,
         number: curEpisode,
         currentTime: currT,
@@ -2058,12 +2086,12 @@ async function playInMpv(window, options) {
                         logger.info(
                           `[MPV IPC] Resolving server "${targetServer.name || targetServer.quality}"...`,
                         );
-                        const Animeprovider = await providerFetch(
-                          "Anime",
+                        const ActiveProvider = await providerFetch(
+                          mediaType,
                           provider,
                         );
                         const resolved = await processServer(
-                          Animeprovider,
+                          ActiveProvider,
                           targetServer,
                         );
                         if (resolved && resolved.url) {
@@ -2072,8 +2100,8 @@ async function playInMpv(window, options) {
                             const ref =
                               resolved.headers?.Referer ||
                               resolved.headers?.referer ||
-                              (Animeprovider?.baseUrl
-                                ? Animeprovider.baseUrl + "/"
+                              (ActiveProvider?.baseUrl
+                                ? ActiveProvider.baseUrl + "/"
                                 : null);
                             if (
                               global.registerSubrequestHeaders &&
@@ -2218,7 +2246,7 @@ async function playInMpv(window, options) {
             lastSavedTime = currentTime;
             updateHistory({
               mediaId: mediaId,
-              type: "Anime",
+              type: mediaType,
               title: title,
               number: episode,
               currentTime: currentTime,
@@ -2403,7 +2431,7 @@ async function playInMpv(window, options) {
       lastSavedTime = currentTime;
       await updateHistory({
         mediaId: mediaId,
-        type: "Anime",
+        type: mediaType,
         title: title,
         number: episode,
         currentTime: currentTime,

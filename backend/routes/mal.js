@@ -47,6 +47,9 @@ router.get("/mal/logout", async (req, res) => {
 router.post("/api/mal/update", async (req, res) => {
   try {
     let { malid, episodes, status, type } = req.body;
+    if (type === "Movies") {
+      return res.status(400).json({ error: "Movies do not support MyAnimeList tracking" });
+    }
     const isAnime = !type || type.toLowerCase() === "anime";
 
     episodes = parseInt(episodes) || 0;
@@ -78,6 +81,9 @@ router.post("/api/mal/update", async (req, res) => {
 router.post("/api/mal/remove", async (req, res) => {
   try {
     const { malid, type } = req.body;
+    if (type === "Movies") {
+      return res.status(400).json({ error: "Movies do not support MyAnimeList tracking" });
+    }
     if (!malid) throw new Error("MAL ID is missing");
     const isAnime = !type || type.toLowerCase() === "anime";
 
@@ -126,6 +132,9 @@ router.get("/api/mal/search", async (req, res) => {
 router.post("/api/mal/link", async (req, res) => {
   try {
     let { type, id, MalID, provider, title } = req.body;
+    if (type === "Movies") {
+      return res.status(400).json({ error: "Movies do not support MyAnimeList linking" });
+    }
     if (!type || !id) {
       throw new Error("Missing type or id");
     }

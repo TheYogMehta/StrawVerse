@@ -63,6 +63,7 @@ const SETTINGS_TABS = [
   "general",
   "anime",
   "manga",
+  "movies",
   "tags",
   "history",
   "changelog",
@@ -147,6 +148,7 @@ export default function SettingsView({
   const [animeProvider, setAnimeProvider] = useState("");
   const [quality, setQuality] = useState("1080p");
   const [mangaProvider, setMangaProvider] = useState("");
+  const [moviesProvider, setMoviesProvider] = useState("");
   const [autoLoadNextChapter, setAutoLoadNextChapter] = useState(true);
   const [pagination, setPagination] = useState(false);
   const [malStatus, setMalStatus] = useState("watching");
@@ -161,10 +163,12 @@ export default function SettingsView({
   const [downloadNotification, setDownloadNotification] = useState(true);
   const [animeDownloadLocation, setAnimeDownloadLocation] = useState("");
   const [mangaDownloadLocation, setMangaDownloadLocation] = useState("");
+  const [moviesDownloadLocation, setMoviesDownloadLocation] = useState("");
   const [mangaAutoScrollSpeed, setMangaAutoScrollSpeed] = useState(2);
   const [browsingFolder, setBrowsingFolder] = useState(false);
   const [animeNamingScheme, setAnimeNamingScheme] = useState("default");
   const [mangaNamingScheme, setMangaNamingScheme] = useState("default");
+  const [moviesNamingScheme, setMoviesNamingScheme] = useState("default");
   const [jellyfinCompatibility, setJellyfinCompatibility] = useState(false);
   const [externalLogEnabled, setExternalLogEnabled] = useState(true);
   const [maxLogFiles, setMaxLogFiles] = useState(5);
@@ -264,7 +268,12 @@ export default function SettingsView({
 
   const handleBrowseLocation = async (type) => {
     const isAnime = type === "Anime";
-    const currentLoc = isAnime ? animeDownloadLocation : mangaDownloadLocation;
+    const isMovies = type === "Movies";
+    const currentLoc = isMovies
+      ? moviesDownloadLocation
+      : isAnime
+        ? animeDownloadLocation
+        : mangaDownloadLocation;
     const defaultPlaceholder = isMobileApp()
       ? `/StrawVerse/${type}`
       : `Downloads/${type}`;
@@ -274,7 +283,8 @@ export default function SettingsView({
       try {
         const result = await window.sharedStateAPI.selectDirectory(currentLoc);
         if (result?.success && result.path) {
-          if (isAnime) setAnimeDownloadLocation(result.path);
+          if (isMovies) setMoviesDownloadLocation(result.path);
+          else if (isAnime) setAnimeDownloadLocation(result.path);
           else setMangaDownloadLocation(result.path);
         } else if (result && !result.canceled && result.error) {
           swalError("Could Not Pick Folder", result.error);
@@ -301,7 +311,8 @@ export default function SettingsView({
       confirmButtonColor: "var(--primary-accent)",
     });
     if (customPath !== undefined && customPath !== null) {
-      if (isAnime) setAnimeDownloadLocation(customPath.trim());
+      if (isMovies) setMoviesDownloadLocation(customPath.trim());
+      else if (isAnime) setAnimeDownloadLocation(customPath.trim());
       else setMangaDownloadLocation(customPath.trim());
     }
   };
@@ -351,7 +362,9 @@ export default function SettingsView({
     const list =
       type === "Anime"
         ? settings.installedExtensions.Anime
-        : settings.installedExtensions.Manga;
+        : type === "Movies"
+          ? settings.installedExtensions.Movies
+          : settings.installedExtensions.Manga;
     const cleanName = String(name || "")
       .toLowerCase()
       .replace(/^@/, "");
@@ -718,6 +731,7 @@ export default function SettingsView({
         setAnimeProvider(s.Animeprovider || "");
         setQuality(s.quality || "1080p");
         setMangaProvider(s.Mangaprovider || "");
+        setMoviesProvider(s.Moviesprovider || "");
         setAutoLoadNextChapter(s.autoLoadNextChapter);
         setPagination(s.Pagination);
         setMalStatus(s.status || "watching");
@@ -746,6 +760,7 @@ export default function SettingsView({
         );
         setAnimeDownloadLocation(s.CustomDownloadLocationAnime || "");
         setMangaDownloadLocation(s.CustomDownloadLocationManga || "");
+        setMoviesDownloadLocation(s.CustomDownloadLocationMovies || "");
         setMangaAutoScrollSpeed(
           s.mangaAutoScrollSpeed !== undefined
             ? parseInt(s.mangaAutoScrollSpeed, 10) || 2
@@ -753,6 +768,7 @@ export default function SettingsView({
         );
         setAnimeNamingScheme(s.animeNamingScheme || "default");
         setMangaNamingScheme(s.mangaNamingScheme || "default");
+        setMoviesNamingScheme(s.moviesNamingScheme || "default");
         setJellyfinCompatibility(Boolean(s.jellyfinCompatibility));
         setExternalLogEnabled(
           s.externalLogEnabled !== undefined ? s.externalLogEnabled : true,
@@ -835,7 +851,7 @@ export default function SettingsView({
   const handleDeleteHistory = async (type, id, title, number) => {
     const result = await swalConfirm(
       "Delete History Entry?",
-      `Are you sure you want to delete the tracking entry for "${title}" (${type === "Anime" ? "Episode" : "Chapter"} ${number})? This will update your watch/read statistics.`,
+      `Are you sure you want to delete the tracking entry for "${title}" (${type === "Manga" ? "Chapter" : "Episode"} ${number})? This will update your watch/read statistics.`,
       "Yes, delete it!",
     );
 
@@ -940,6 +956,8 @@ export default function SettingsView({
     if (quality !== (settings.quality || "1080p")) dirty.quality = quality;
     if (mangaProvider !== (settings.Mangaprovider || ""))
       dirty.Mangaprovider = mangaProvider;
+    if (moviesProvider !== (settings.Moviesprovider || ""))
+      dirty.Moviesprovider = moviesProvider;
     if (autoLoadNextChapter !== settings.autoLoadNextChapter)
       dirty.autoLoadNextChapter = autoLoadNextChapter;
     if (pagination !== settings.Pagination) dirty.Pagination = pagination;
@@ -995,12 +1013,16 @@ export default function SettingsView({
       dirty.CustomDownloadLocationAnime = animeDownloadLocation;
     if (mangaDownloadLocation !== (settings.CustomDownloadLocationManga || ""))
       dirty.CustomDownloadLocationManga = mangaDownloadLocation;
+    if (moviesDownloadLocation !== (settings.CustomDownloadLocationMovies || ""))
+      dirty.CustomDownloadLocationMovies = moviesDownloadLocation;
     if (mangaAutoScrollSpeed !== (settings.mangaAutoScrollSpeed || 2))
       dirty.mangaAutoScrollSpeed = mangaAutoScrollSpeed;
     if (animeNamingScheme !== (settings.animeNamingScheme || "default"))
       dirty.animeNamingScheme = animeNamingScheme;
     if (mangaNamingScheme !== (settings.mangaNamingScheme || "default"))
       dirty.mangaNamingScheme = mangaNamingScheme;
+    if (moviesNamingScheme !== (settings.moviesNamingScheme || "default"))
+      dirty.moviesNamingScheme = moviesNamingScheme;
     if (jellyfinCompatibility !== (settings.jellyfinCompatibility || false))
       dirty.jellyfinCompatibility = jellyfinCompatibility;
     if (
@@ -1087,10 +1109,11 @@ export default function SettingsView({
           ).catch(() => {});
         }
 
-        if (dirty.Animeprovider || dirty.Mangaprovider) {
+        if (dirty.Animeprovider || dirty.Mangaprovider || dirty.Moviesprovider) {
           if (window.catalogCache) {
             delete window.catalogCache[`Anime_provider`];
             delete window.catalogCache[`Manga_provider`];
+            delete window.catalogCache[`Movies_provider`];
           }
         }
 
@@ -1117,6 +1140,7 @@ export default function SettingsView({
       animeProvider !== (settings.Animeprovider || "") ||
       quality !== (settings.quality || "1080p") ||
       mangaProvider !== (settings.Mangaprovider || "") ||
+      moviesProvider !== (settings.Moviesprovider || "") ||
       autoLoadNextChapter !== settings.autoLoadNextChapter ||
       pagination !== settings.Pagination ||
       malStatus !== (settings.status || "watching") ||
@@ -1147,9 +1171,11 @@ export default function SettingsView({
           : true) ||
       animeDownloadLocation !== (settings.CustomDownloadLocationAnime || "") ||
       mangaDownloadLocation !== (settings.CustomDownloadLocationManga || "") ||
+      moviesDownloadLocation !== (settings.CustomDownloadLocationMovies || "") ||
       mangaAutoScrollSpeed !== (settings.mangaAutoScrollSpeed || 2) ||
       animeNamingScheme !== (settings.animeNamingScheme || "default") ||
       mangaNamingScheme !== (settings.mangaNamingScheme || "default") ||
+      moviesNamingScheme !== (settings.moviesNamingScheme || "default") ||
       jellyfinCompatibility !== (settings.jellyfinCompatibility || false) ||
       externalLogEnabled !==
         (settings.externalLogEnabled !== undefined
@@ -1354,6 +1380,13 @@ export default function SettingsView({
               className={`settings-tab-btn ${activeTab === "manga" ? "active" : ""}`}
             >
               Manga Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("movies")}
+              className={`settings-tab-btn ${activeTab === "movies" ? "active" : ""}`}
+            >
+              Movies & Series
             </button>
             <button
               type="button"
@@ -2916,6 +2949,179 @@ export default function SettingsView({
               </div>
             </div>
           )}
+
+          {activeTab === "movies" && (
+            <div className="settings-column">
+              {/* Provider Settings */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Provider Settings</h2>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Active Movies & Series Provider
+                    </div>
+                    <div className="settings-row-hint">
+                      Default scraper used to browse, search, and stream movies and TV series.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={moviesProvider || ""}
+                      onChange={setMoviesProvider}
+                      options={[
+                        { value: "", label: "None selected" },
+                        ...(settings?.providers?.Movies || []).map((name) => ({
+                          value: name,
+                          label: name,
+                          icon: getProviderIcon(name, "Movies"),
+                        })),
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">Preferred Video Quality</div>
+                    <div className="settings-row-hint">
+                      Default resolution prioritized when streaming or downloading.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={quality}
+                      onChange={setQuality}
+                      options={[
+                        { value: "1080p", label: "1080p (Full HD)" },
+                        { value: "720p", label: "720p (HD)" },
+                        { value: "480p", label: "480p (SD)" },
+                        { value: "360p", label: "360p (Data Saver)" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Subtitles & Audio */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Subtitles & Audio</h2>
+
+                <SettingsRow
+                  label="Merge Subtitles"
+                  desc="Burn soft subtitles directly into MP4 video file container when downloading."
+                >
+                  <label className="toggle-switch">
+                    <input
+                      type="checkbox"
+                      checked={mergeSubtitles}
+                      onChange={(e) => setMergeSubtitles(e.target.checked)}
+                    />
+                    <span className="toggle-slider"></span>
+                  </label>
+                </SettingsRow>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">Subtitle Format</div>
+                    <div className="settings-row-hint">
+                      File format used when extracting and saving external subtitle tracks.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={subtitleFormat}
+                      onChange={setSubtitleFormat}
+                      options={[
+                        { value: "vtt", label: "WebVTT (.vtt)" },
+                        { value: "srt", label: "SubRip (.srt)" },
+                        { value: "ass", label: "Advanced SubStation (.ass)" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Downloads & Storage */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Downloads & Storage</h2>
+
+                <SettingsRow
+                  label="Movies & Series Download Location"
+                  desc="Where downloaded movies and series are saved. Custom paths download video files directly inside without creating an extra Movies subfolder."
+                >
+                  <div className="download-location-picker">
+                    <input
+                      type="text"
+                      className="settings-text-input download-location-path"
+                      value={moviesDownloadLocation}
+                      placeholder={
+                        isMobileApp()
+                          ? "Default (/StrawVerse/Movies)"
+                          : "Default (Downloads/Movies)"
+                      }
+                      readOnly
+                      title={
+                        moviesDownloadLocation ||
+                        (isMobileApp()
+                          ? "Default (/StrawVerse/Movies)"
+                          : "Default (Downloads/Movies)")
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="settings-market-btn download-location-btn"
+                      onClick={() => handleBrowseLocation("Movies")}
+                      disabled={browsingFolder}
+                    >
+                      <FolderOpen size={14} />
+                      {browsingFolder ? "Browsing..." : "Browse"}
+                    </button>
+                    {moviesDownloadLocation && (
+                      <button
+                        type="button"
+                        className="theme-reset-btn"
+                        onClick={() => setMoviesDownloadLocation("")}
+                        title="Reset to default Movies Downloads folder"
+                        aria-label="Reset Movies download location"
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Video Download Naming Scheme"
+                  desc="Naming scheme for downloaded movie and series video files."
+                >
+                  <Dropdown
+                    value={moviesNamingScheme}
+                    onChange={setMoviesNamingScheme}
+                    options={[
+                      { value: "default", label: "Default (Title - 01.mp4)" },
+                      {
+                        value: "title_s01e01",
+                        label: "Plex / Jellyfin (Title - S01E01.mp4)",
+                      },
+                      {
+                        value: "title_ep",
+                        label: "Standard (Title - Episode 1.mp4)",
+                      },
+                      {
+                        value: "title_only",
+                        label: "Movie Only (Title.mp4)",
+                      },
+                    ]}
+                    minWidth={240}
+                  />
+                </SettingsRow>
+              </div>
+            </div>
+          )}
           {activeTab === "history" && (
             <div className="u-style-83">
               {statsLoading ? (
@@ -2936,8 +3142,9 @@ export default function SettingsView({
                         <span className="settings-stat-unit">hrs</span>
                       </h3>
                       <p className="settings-stat-card-sub">
-                        {stats?.completedEpisodes || 0} episodes watched (
-                        {stats?.distinctAnime || 0} Anime)
+                        {stats?.completedEpisodes || 0} episodes / movies watched (
+                        {stats?.distinctAnime || 0} Anime
+                        {stats?.distinctMovies ? `, ${stats.distinctMovies} Movies & Series` : ""})
                       </p>
                     </div>
                     <div className="settings-stat-card glass-panel">
@@ -2965,14 +3172,14 @@ export default function SettingsView({
 
                         {/* Segmented Toggle Control */}
                         <div className="segmented-toggle-wrapper">
-                          {["All", "Anime", "Manga"].map((t) => (
+                          {["All", "Anime", "Manga", "Movies"].map((t) => (
                             <button
                               key={t}
                               type="button"
                               onClick={() => setHistoryFilter(t)}
                               className={`segmented-toggle-btn ${historyFilter === t ? "active" : ""}`}
                             >
-                              {t}
+                              {t === "Movies" ? "Movies & Series" : t}
                             </button>
                           ))}
                         </div>
@@ -3040,7 +3247,7 @@ export default function SettingsView({
                               >
                                 <div className="settings-history-item-left">
                                   <span
-                                    className={`settings-history-type-badge ${item.type === "Anime" ? "" : "manga"}`}
+                                    className={`settings-history-type-badge ${item.type === "Anime" ? "" : item.type === "Movies" ? "movies" : "manga"}`}
                                   >
                                     {item.type}
                                   </span>
@@ -3064,9 +3271,9 @@ export default function SettingsView({
                                       )}
                                     </div>
                                     <span className="settings-history-item-meta">
-                                      {item.type === "Anime"
-                                        ? "Episode"
-                                        : "Chapter"}{" "}
+                                      {item.type === "Manga"
+                                        ? "Chapter"
+                                        : "Episode"}{" "}
                                       {item.number} • Spent {formattedTime}
                                     </span>
                                   </div>
@@ -3144,6 +3351,13 @@ export default function SettingsView({
                     className={`tag-type-btn ${tagType === "Manga" ? "active" : ""}`}
                   >
                     Manga Tags
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTagType("Movies")}
+                    className={`tag-type-btn ${tagType === "Movies" ? "active" : ""}`}
+                  >
+                    Movies & Series Tags
                   </button>
                 </div>
               </div>

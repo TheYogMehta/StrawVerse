@@ -228,7 +228,7 @@ async function resolveMalIdFromMapping({
   mediaType = null,
   installedOnly = false,
 }) {
-  if (!id || !global.mappingDb) return null;
+  if (!id || !global.mappingDb || mediaType === "Movies") return null;
   const cleanId = String(id).trim();
   if (!cleanId) return null;
 

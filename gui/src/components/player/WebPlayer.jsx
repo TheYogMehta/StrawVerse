@@ -117,6 +117,7 @@ export default function VideoPlayer({
   onBack,
   malid,
   hideExit = false,
+  type = "Anime",
 }) {
   const videoRef = useRef(null);
   const loadedSubMapRef = useRef({});
@@ -695,7 +696,7 @@ export default function VideoPlayer({
       if (skipTimes && skipTimes.length > 0) {
         return;
       }
-      if (!malid) {
+      if (type === "Movies" || !malid) {
         setSkipTimes([]);
         return;
       }
@@ -819,7 +820,7 @@ export default function VideoPlayer({
       try {
         await apiPost("/api/history/update", {
           mediaId: id,
-          type: "Anime",
+          type: type || "Anime",
           title: animeTitleVal,
           number: currentEpisodeObj ? currentEpisodeObj.number : 1,
           currentTime,
@@ -847,7 +848,7 @@ export default function VideoPlayer({
       try {
         const epNum = currentEpisodeObj ? currentEpisodeObj.number : 1;
         const res = await fetch(
-          `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=Anime`,
+          `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=${encodeURIComponent(type || "Anime")}`,
         );
         const progressData = await res.json();
 
@@ -955,6 +956,7 @@ export default function VideoPlayer({
               epNum: targetEpNum,
               Downloaded: true,
               subdub: playerSubDub,
+              type: type || "Anime",
             }
           : {
               ep: targetEp,
@@ -963,6 +965,7 @@ export default function VideoPlayer({
               Downloaded: false,
               subdub: playerSubDub,
               provider: provider,
+              type: type || "Anime",
             },
         { signal },
       );

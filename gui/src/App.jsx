@@ -344,7 +344,9 @@ export default function App() {
             ? "anime"
             : rawTab === "manga"
               ? "manga"
-              : rawTab || "general";
+              : rawTab === "movies"
+                ? "movies"
+                : rawTab || "general";
         const scrollTo =
           data?.tab === "subtitles" || data?.scrollTo === "subtitles"
             ? "subtitle-customization"
@@ -356,6 +358,8 @@ export default function App() {
         if (window.catalogCache) {
           delete window.catalogCache["Anime_local"];
           delete window.catalogCache["Anime_provider"];
+          delete window.catalogCache["Movies_local"];
+          delete window.catalogCache["Movies_provider"];
         }
         setHistory((prev) =>
           prev.map((item) => {
@@ -620,6 +624,7 @@ export default function App() {
                 provider,
                 image,
                 malid,
+                type: current.params.type,
               });
             }}
             onRead={(
@@ -721,12 +726,15 @@ export default function App() {
               if (view === "home") {
                 delete window.catalogCache[`Anime_local`];
                 delete window.catalogCache[`Manga_local`];
+                delete window.catalogCache[`Movies_local`];
               } else if (view === "discover") {
                 delete window.catalogCache[`Anime_provider`];
                 delete window.catalogCache[`Manga_provider`];
+                delete window.catalogCache[`Movies_provider`];
               } else if (view === "filters") {
                 delete window.catalogCache[`Anime_mal`];
                 delete window.catalogCache[`Manga_mal`];
+                delete window.catalogCache[`Movies_mal`];
               }
             }
             if (view === current.view) {
@@ -748,6 +756,7 @@ export default function App() {
         <Suspense fallback={<ViewLoading />}>
           <VideoPlayer
             id={activePlayerParams.id}
+            type={activePlayerParams.type}
             episodeNumOrId={activePlayerParams.ep}
             isDownloaded={activePlayerParams.isDownloaded}
             subdub={activePlayerParams.subdub}

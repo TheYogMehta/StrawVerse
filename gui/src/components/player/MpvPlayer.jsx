@@ -16,6 +16,7 @@ export default function VideoPlayer({
   onBack,
   playerSubDub = "sub",
   subdub,
+  type = "Anime",
 }) {
   const [loading, setLoading] = useState(true);
   const [statusMsg, setStatusMsg] = useState("Initializing MPV player...");
@@ -84,11 +85,12 @@ export default function VideoPlayer({
         title: animeTitle,
         image: image,
         provider: provider,
-        malid: malid,
+        malid: type === "Movies" ? null : malid,
         subdub: subdub || playerSubDub,
         episodes: sortedEpisodes,
         hasNext,
         hasPrev,
+        type: type || "Anime",
       })
       .then((res) => {
         if (res && res.error) {

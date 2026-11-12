@@ -151,7 +151,12 @@ router.post("/api/cache/clear", async (req, res) => {
 router.get("/api/marketplace", async (req, res) => {
   try {
     const { fetchAggregatedMarketplace } = require("../utils/settings");
-    const activeType = req.query.type === "Manga" ? "Manga" : "Anime";
+    const activeType =
+      req.query.type === "Manga"
+        ? "Manga"
+        : req.query.type === "Movies" || req.query.type === "movies-tvshows"
+          ? "Movies"
+          : "Anime";
     const data = await fetchAggregatedMarketplace(activeType);
     res.json(data);
   } catch (err) {

@@ -16,12 +16,12 @@ export default function LibraryStats({
         </div>
         <div className="stat-content">
           <span className="stat-label">
-            {type === "Anime" ? "Time Watched" : "Time Read"}
+            {type === "Manga" ? "Time Read" : "Time Watched"}
           </span>
           <span className="stat-value">
-            {type === "Anime"
-              ? `${stats.watchHours || 0} hrs`
-              : `${stats.readHours || 0} hrs`}
+            {type === "Manga"
+              ? `${stats.readHours || 0} hrs`
+              : `${stats.watchHours || 0} hrs`}
           </span>
         </div>
       </div>
@@ -32,32 +32,38 @@ export default function LibraryStats({
         </div>
         <div className="stat-content">
           <span className="stat-label">
-            {type === "Anime" ? "Episodes" : "Chapters"}
+            {type === "Manga" ? "Chapters" : "Episodes / Movies"}
           </span>
           <span className="stat-value">
-            {type === "Anime"
-              ? `${stats.completedEpisodes || 0} eps`
-              : `${stats.completedChapters || 0} chs`}
+            {type === "Manga"
+              ? `${stats.completedChapters || 0} chs`
+              : `${stats.completedEpisodes || 0} eps`}
           </span>
         </div>
       </div>
 
       <div className="library-stat-card glass-panel">
         <div className="stat-icon-wrapper blue-glow">
-          {type === "Anime" ? (
-            <Tv size={16} className="stat-icon" />
-          ) : (
+          {type === "Manga" ? (
             <BookOpen size={16} className="stat-icon" />
+          ) : (
+            <Tv size={16} className="stat-icon" />
           )}
         </div>
         <div className="stat-content">
           <span className="stat-label">
-            {type === "Anime" ? "Total Series" : "Total Titles"}
+            {type === "Anime"
+              ? "Total Series"
+              : type === "Movies"
+                ? "Total Movies & Series"
+                : "Total Titles"}
           </span>
           <span className="stat-value">
             {type === "Anime"
               ? `${stats.distinctAnime || 0} Anime`
-              : `${stats.distinctManga || 0} Manga`}
+              : type === "Movies"
+                ? `${stats.distinctMovies || 0} Titles`
+                : `${stats.distinctManga || 0} Manga`}
           </span>
         </div>
       </div>
