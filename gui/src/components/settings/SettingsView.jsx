@@ -851,7 +851,7 @@ export default function SettingsView({
   const handleDeleteHistory = async (type, id, title, number) => {
     const result = await swalConfirm(
       "Delete History Entry?",
-      `Are you sure you want to delete the tracking entry for "${title}" (${type === "Anime" ? "Episode" : "Chapter"} ${number})? This will update your watch/read statistics.`,
+      `Are you sure you want to delete the tracking entry for "${title}" (${type === "Manga" ? "Chapter" : "Episode"} ${number})? This will update your watch/read statistics.`,
       "Yes, delete it!",
     );
 
@@ -3247,7 +3247,7 @@ export default function SettingsView({
                               >
                                 <div className="settings-history-item-left">
                                   <span
-                                    className={`settings-history-type-badge ${item.type === "Anime" ? "" : "manga"}`}
+                                    className={`settings-history-type-badge ${item.type === "Anime" ? "" : item.type === "Movies" ? "movies" : "manga"}`}
                                   >
                                     {item.type}
                                   </span>
@@ -3271,9 +3271,9 @@ export default function SettingsView({
                                       )}
                                     </div>
                                     <span className="settings-history-item-meta">
-                                      {item.type === "Anime"
-                                        ? "Episode"
-                                        : "Chapter"}{" "}
+                                      {item.type === "Manga"
+                                        ? "Chapter"
+                                        : "Episode"}{" "}
                                       {item.number} • Spent {formattedTime}
                                     </span>
                                   </div>

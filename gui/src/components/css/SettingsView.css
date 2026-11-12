@@ -364,6 +364,12 @@
   border: 1px solid rgba(16, 185, 129, 0.25);
 }
 
+.settings-history-type-badge.movies {
+  background-color: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+}
+
 .settings-history-item-title {
   font-size: 15px;
   font-weight: 600;
