@@ -12,13 +12,13 @@ artifacts:
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/StrawVerse.Setup.11.2.2.exe
     platform: windows
     size: 237.28
-    sha512: 5DE601E3CF7028345EACDE0B3DB65908D4F8E5CE664991DB96646D2A9C55098C63B26BD1C1244794972F293622E15BA932DAB7CFCD014204DB181C2891EC02C9
+    sha512: 902EA97A0AC66F4BE33F7E571FC9E979A258448F8FF0B08C401B3C8879352512E246303927BE09289BC009DE261664F90080D70C70631BD7FEE990C3666DD269
 
   - name: app-release.apk
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/app-release.apk
     platform: android
     size: 135.26
-    sha512: C0E2F8E56BF90C942CD0FC3BD1FD538E48A7B1B912246836FA3EA9483504DF53CCA4D5654BB269810B1BE4F056097D78B049BE315D1EAE6BDD6D9B1A5790ACEE
+    sha512: 10F3113E38969C8A4D20A883D65B9D980E115B7A5A3CC261FE851B95652584EDC807CDB7765D761FBE54C3A615646BF9820E953F773BDE2EE4A0BEA9702C5521
 
   - name: strawverse-11.2.2.AppImage
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/strawverse-11.2.2.AppImage
@@ -43,7 +43,7 @@ artifacts:
 changelog:
   - "[11.2.2]"
   - "**Download resilience**: If a subtitle/dub category has no working servers (hardsub-only episodes), the downloader falls back to the opposite category, then to unfiltered servers, instead of failing after 3 retries"
-  - "**Soft subtitles on download**: Downloads prefer soft-sub servers over hardsub (burned-in) sources when you pick \"sub\"; subtitle files are always written next to the video (e.g. `2Ep.eng.vtt`) so players like MX Player auto-detect them and the subtitle on/off toggle works"
+  - "**Soft subtitles on download**: Downloads prefer soft-sub servers over hardsub (burned-in) sources when you pick \"sub\", so subtitles are never painted into the video frames"
   - "**Filter panel collapse**: Caret arrow (^) on the filter panel header collapses/expands the filter grid"
   - "**Faster filter badges**: Badge metadata loads after applying filters with a 250 ms debounce, bulk fetch of 48 items, and duplicate-fetch caching"
   - "**Anikoto speed**: Provider metadata cache keys use the provider name (fixes cache misses vs the official anikoto build)"

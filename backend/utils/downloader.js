@@ -1875,7 +1875,7 @@ class downloader {
           );
 
           if (fs.existsSync(subtitlePath)) {
-            if (!this.MergeSubtitles && this.mp4) {
+            if (!this.MergeSubtitles && this.fileBase && this.mp4) {
               const siblingSubPath = path.join(
                 this.directory,
                 `${path.parse(this.mp4).name}.${normalizedLang}.${finalExt}`,
@@ -1945,7 +1945,7 @@ class downloader {
           }
 
           await fs.promises.writeFile(subtitlePath, subtitleData, "utf8");
-          if (!this.MergeSubtitles && this.mp4) {
+          if (!this.MergeSubtitles && this.fileBase && this.mp4) {
             const siblingSubPath = path.join(
               this.directory,
               `${path.parse(this.mp4).name}.${normalizedLang}.${finalExt}`,
