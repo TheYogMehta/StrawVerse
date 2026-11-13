@@ -12,13 +12,13 @@ artifacts:
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/StrawVerse.Setup.11.2.2.exe
     platform: windows
     size: 237.28
-    sha512: 902EA97A0AC66F4BE33F7E571FC9E979A258448F8FF0B08C401B3C8879352512E246303927BE09289BC009DE261664F90080D70C70631BD7FEE990C3666DD269
+    sha512: B18F2758E3A15A28A951C586089534E728A8EAF72333F0CCA0E40AA2EBD5DAB9089661BC88A622A8B664FD52A3008F1DDC0C20CBD0892F3D71254C9A3F481150
 
   - name: app-release.apk
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/app-release.apk
     platform: android
     size: 135.26
-    sha512: 10F3113E38969C8A4D20A883D65B9D980E115B7A5A3CC261FE851B95652584EDC807CDB7765D761FBE54C3A615646BF9820E953F773BDE2EE4A0BEA9702C5521
+    sha512: CC9BC36232F2C4C30DE30372B6535948255C4D30D010EB1D9AD6D1EDEA0B268F400963007CB5FCD69E15A8A75CB72D29CD08E16E7D9EB2535E858A5647859D89
 
   - name: strawverse-11.2.2.AppImage
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/strawverse-11.2.2.AppImage
@@ -45,6 +45,9 @@ changelog:
   - "**Download resilience**: If a subtitle/dub category has no working servers (hardsub-only episodes), the downloader falls back to the opposite category, then to unfiltered servers, instead of failing after 3 retries"
   - "**Soft subtitles on download**: Downloads prefer soft-sub servers over hardsub (burned-in) sources when you pick \"sub\", so subtitles are never painted into the video frames"
   - "**Filter panel collapse**: Caret arrow (^) on the filter panel header collapses/expands the filter grid"
+  - "**Filters start collapsed**: The Discover/Filters panel now opens collapsed by default; the caret expands it"
+  - "**Discover keeps your place**: Switching sections (e.g. Downloads to Discover) restores the list, page, scroll position and filters you were last seeing; re-tapping the active nav icon still refreshes"
+  - "**Log rotation fixed**: Only the 3 newest session logs are kept - older logs are now deleted at startup (previously the folder settled at 4 files)"
   - "**Faster filter badges**: Badge metadata loads after applying filters with a 250 ms debounce, bulk fetch of 48 items, and duplicate-fetch caching"
   - "**Anikoto speed**: Provider metadata cache keys use the provider name (fixes cache misses vs the official anikoto build)"
   - "**Quieter Android logs**: Native HTTP fallback warning only prints when BOTH the native bridge and the Node fallback fail (was spamming on every routine fallback)"
