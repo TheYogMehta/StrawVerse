@@ -253,6 +253,17 @@ async function refreshCdnClearance(targetUrl, referer = null) {
   }
 }
 
+function parseSpeedFloorBps(speedStr) {
+  if (!speedStr || speedStr === "0" || speedStr === "Disabled") return 0;
+  const str = String(speedStr).toLowerCase().trim();
+  const numMatch = str.match(/([\d.]+)/);
+  if (!numMatch) return 300 * 1024;
+  const num = parseFloat(numMatch[1]);
+  if (str.includes("mb")) return Math.round(num * 1024 * 1024);
+  if (str.includes("kb")) return Math.round(num * 1024);
+  return Math.round(num);
+}
+
 class downloader {
   constructor({
     directory,
@@ -267,10 +278,12 @@ class downloader {
     quality = null,
     isM3U8 = true,
     fileBase = null,
+    minDownloadSpeed = null,
   }) {
     this.directory = directory;
     this.fileBase = fileBase;
     this.quality = quality;
+    this.minDownloadSpeed = minDownloadSpeed;
     if (streamUrl?.url) {
       this.streamUrl = streamUrl.url;
       this.headers = streamUrl.headers ?? headers;
@@ -355,19 +368,26 @@ class downloader {
     }
   }
 
-  async fetchMediaBytes(url, timeoutMs = 60000) {
+  async fetchMediaBytes(url, timeoutMs = 30000) {
     const client = global.axios || require("axios");
-    const res = await client.get(url, {
-      headers: await this.getMediaRequestHeaders(url),
-      responseType: "arraybuffer",
-      timeout: timeoutMs,
-    });
-    this.absorbResponseCookies(res?.headers);
-    const data = res?.data;
-    if (!data || data.length === 0) {
-      throw new Error("Received empty segment payload");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await client.get(url, {
+        headers: await this.getMediaRequestHeaders(url),
+        responseType: "arraybuffer",
+        signal: controller.signal,
+        timeout: timeoutMs,
+      });
+      this.absorbResponseCookies(res?.headers);
+      const data = res?.data;
+      if (!data || data.length === 0) {
+        throw new Error("Received empty segment payload");
+      }
+      return Buffer.isBuffer(data) ? data : Buffer.from(data);
+    } finally {
+      clearTimeout(timer);
     }
-    return Buffer.isBuffer(data) ? data : Buffer.from(data);
   }
 
   async fetchMediaText(url, timeoutMs = 30000) {
@@ -1301,19 +1321,22 @@ class downloader {
       // single bad segment aborted the whole episode).
       const MAX_CONCURRENCY = 16;
       CONCURRENCY = Math.min(CONCURRENCY, MAX_CONCURRENCY);
-      // Slow-mirror escape: kwik mirrors throttle per-host (0.04 MB/s seen
-      // on akirax.buzz vs 5 MB/s bursts on mikora.top). If the first 16
-      // freshly-downloaded segments average under the floor, abort with the
-      // host attached so the queue retries on a different server instead of
-      // trickling for over an hour.
-      const SLOW_HOST_FLOOR_BPS = 60 * 1024;
-      const SLOW_HOST_AFTER_FRESH = 16;
+      
+      const targetSpeedFloorBps = parseSpeedFloorBps(
+        this.minDownloadSpeed !== null && this.minDownloadSpeed !== undefined
+          ? this.minDownloadSpeed
+          : "300 KB/s",
+      );
       const dlStartTime = Date.now();
       let freshCount = 0;
       let currentIndex = 0;
       let stopDownloading = false;
       let failedSegmentsCount = 0;
       if (!this._keyPromiseCache) this._keyPromiseCache = {};
+
+      const speedSamples = [];
+      let isBoosting = false;
+      let boostStartTime = 0;
 
       const downloadSingleSegment = async (index, retryCount = 0) => {
         if (
@@ -1383,7 +1406,7 @@ class downloader {
             }
             const cipherBytes = await this.fetchWithClearanceRetry(
               segUrl,
-              async () => this.fetchMediaBytes(segUrl, 60000),
+              async () => this.fetchMediaBytes(segUrl, 25000),
             );
             const cipherText = stripPngHeader(cipherBytes);
             const decipher = crypto.createDecipheriv(
@@ -1398,7 +1421,7 @@ class downloader {
           } else {
             const segBytes = await this.fetchWithClearanceRetry(
               segUrl,
-              async () => this.fetchMediaBytes(segUrl, 60000),
+              async () => this.fetchMediaBytes(segUrl, 25000),
             );
             body = stripPngHeader(segBytes);
           }
@@ -1498,6 +1521,11 @@ class downloader {
             return;
           }
 
+          const remainingSegments = this.Segments.length - completedCount;
+          if (remainingSegments <= 8 && remainingSegments > 0) {
+            CONCURRENCY = Math.max(CONCURRENCY, remainingSegments);
+          }
+
           while (
             activeWorkers < CONCURRENCY &&
             nextIndex < this.Segments.length &&
@@ -1517,6 +1545,10 @@ class downloader {
                     this.downloadedTotalBytes =
                       (this.downloadedTotalBytes || 0) + downloadedBytes;
                     freshCount++;
+                    speedSamples.push({
+                      time: Date.now(),
+                      bytes: downloadedBytes,
+                    });
                   }
                   this.currentSegments = Math.min(
                     this.Segments.length,
@@ -1525,30 +1557,65 @@ class downloader {
                   this.logProgress(null, CONCURRENCY);
                 }
 
-                // Slow-mirror escape hatch (see above): judge only once,
-                // after enough fresh bytes to see past handshake noise, and
-                // never on mostly-resumed downloads.
-                if (
-                  completedCount === SLOW_HOST_AFTER_FRESH &&
-                  freshCount >= SLOW_HOST_AFTER_FRESH
-                ) {
-                  const elapsedSec = (Date.now() - dlStartTime) / 1000;
-                  const overallBps =
-                    elapsedSec > 0
-                      ? (this.downloadedTotalBytes || 0) / elapsedSec
+                if (targetSpeedFloorBps > 0) {
+                  const now = Date.now();
+                  const cutoff = now - 15000;
+                  while (
+                    speedSamples.length > 0 &&
+                    speedSamples[0].time < cutoff
+                  ) {
+                    speedSamples.shift();
+                  }
+
+                  let rollingBytes = 0;
+                  for (const s of speedSamples) rollingBytes += s.bytes;
+                  const rollingDurationSec =
+                    speedSamples.length > 1
+                      ? (now - speedSamples[0].time) / 1000
                       : 0;
-                  if (overallBps < SLOW_HOST_FLOOR_BPS) {
-                    let slowHost = domainName;
-                    try {
-                      slowHost = new URL(this.streamUrl).hostname;
-                    } catch (_) {}
-                    stopDownloading = true;
-                    const slowErr = new Error(
-                      `SCRAPER_TEMPORARY_ERROR: segment host ${slowHost} too slow (${Math.round(overallBps / 1024)} KB/s over first ${SLOW_HOST_AFTER_FRESH} segments), trying another server`,
-                    );
-                    slowErr.failedHost = slowHost;
-                    reject(slowErr);
-                    return;
+                  const rollingBps =
+                    rollingDurationSec >= 3
+                      ? rollingBytes / rollingDurationSec
+                      : 0;
+
+                  const isWarmup =
+                    now - dlStartTime < 8000 || freshCount < 6;
+
+                  if (!isWarmup && rollingDurationSec >= 5 && rollingBps > 0) {
+                    if (rollingBps < targetSpeedFloorBps) {
+                      if (!isBoosting) {
+                        isBoosting = true;
+                        boostStartTime = now;
+                        CONCURRENCY = MAX_CONCURRENCY;
+                        logger.info(
+                          `[Downloader] Download speed ${Math.round(rollingBps / 1024)} KB/s below floor (${Math.round(targetSpeedFloorBps / 1024)} KB/s). Boosting concurrency to ${MAX_CONCURRENCY} threads.`,
+                        );
+                        enqueueNext();
+                      } else if (now - boostStartTime >= 12000) {
+                        const remaining =
+                          this.Segments.length - completedCount;
+                        if (remaining > 8) {
+                          let slowHost = domainName;
+                          try {
+                            slowHost = new URL(this.streamUrl).hostname;
+                          } catch (_) {}
+                          stopDownloading = true;
+                          const slowErr = new Error(
+                            `SLOW_MIRROR_FAILOVER: host ${slowHost} speed ${Math.round(rollingBps / 1024)} KB/s below floor (${Math.round(targetSpeedFloorBps / 1024)} KB/s)`,
+                          );
+                          slowErr.isSlowMirror = true;
+                          slowErr.failedHost = slowHost;
+                          slowErr.bps = rollingBps;
+                          reject(slowErr);
+                          return;
+                        }
+                      }
+                    } else if (isBoosting) {
+                      isBoosting = false;
+                      logger.info(
+                        `[Downloader] Speed recovered to ${Math.round(rollingBps / 1024)} KB/s after concurrency boost.`,
+                      );
+                    }
                   }
                 }
 
@@ -1559,10 +1626,10 @@ class downloader {
                   recordDomainBatchSuccess(domainName, throughput);
                   sampleBytesDownloaded = 0;
                   sampleStartTime = Date.now();
-                  CONCURRENCY = Math.min(
-                    await getDomainConcurrency(domainName, 16),
-                    MAX_CONCURRENCY,
-                  );
+                  if (!isBoosting) {
+                    const tuned = await getDomainConcurrency(domainName, 16);
+                    CONCURRENCY = Math.max(4, Math.min(tuned, MAX_CONCURRENCY));
+                  }
                 }
 
                 if (completedCount >= this.Segments.length) {
@@ -1620,41 +1687,48 @@ class downloader {
           throw abortErr;
         }
         this.logProgress(
-          `Retrying ${failedIndices.length} failed segment(s) one by one...`,
+          `Retrying ${failedIndices.length} failed segment(s) concurrently...`,
         );
-        // Cap the sequential pass: many failures means a dead host, which
+        // Cap the retry pass: many failures means a dead host, which
         // the mass-fail check above already handles; this bounds worst-case
-        // time when right at the threshold. Deferred items stay failing so
-        // the episode aborts fast instead of grinding them one by one.
+        // time when right at the threshold.
         const secondPass = failedIndices.slice(0, 12);
         const stillFailing = [...failedIndices.slice(12)];
-        for (const fIdx of secondPass) {
-          if (
-            stopDownloading ||
-            (global.isQueuePaused && global.isQueuePaused()) ||
-            (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
-          ) {
-            stillFailing.push(fIdx);
-            continue;
-          }
-          try {
-            const bytes = await downloadSingleSegment(fIdx, 0);
-            if (typeof bytes === "number") {
-              this.downloadedTotalBytes =
-                (this.downloadedTotalBytes || 0) + bytes;
+        let spIdx = 0;
+        const spWorkersCount = Math.min(4, secondPass.length);
+        const spWorkers = Array(spWorkersCount)
+          .fill(null)
+          .map(async () => {
+            while (spIdx < secondPass.length) {
+              const fIdx = secondPass[spIdx++];
+              if (
+                stopDownloading ||
+                (global.isQueuePaused && global.isQueuePaused()) ||
+                (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
+              ) {
+                stillFailing.push(fIdx);
+                continue;
+              }
+              try {
+                const bytes = await downloadSingleSegment(fIdx, 0);
+                if (typeof bytes === "number") {
+                  this.downloadedTotalBytes =
+                    (this.downloadedTotalBytes || 0) + bytes;
+                }
+                this.currentSegments = Math.min(
+                  this.Segments.length,
+                  this.currentSegments + 1,
+                );
+                this.logProgress(null, CONCURRENCY);
+              } catch (err) {
+                stillFailing.push(fIdx);
+                logger.error(
+                  `[Download] Segment ${fIdx} failed on second pass: ${err.message}`,
+                );
+              }
             }
-            this.currentSegments = Math.min(
-              this.Segments.length,
-              this.currentSegments + 1,
-            );
-            this.logProgress(null, CONCURRENCY);
-          } catch (err) {
-            stillFailing.push(fIdx);
-            logger.error(
-              `[Download] Segment ${fIdx} failed on second pass: ${err.message}`,
-            );
-          }
-        }
+          });
+        await Promise.all(spWorkers);
         failedIndices = stillFailing;
         if (failedIndices.length > 0) {
           failedSegmentsCount = failedIndices.length;
@@ -2036,7 +2110,8 @@ class downloader {
           ffmpegArgs.push("-c", "copy");
         }
 
-        ffmpegArgs.push(this.mp4);
+        const tempOutput = `${this.mp4}.remux.mp4`;
+        ffmpegArgs.push(tempOutput);
 
         try {
           const stats = fs.statSync(this.SegmentsFile);
@@ -2059,55 +2134,100 @@ class downloader {
               : ""),
         };
 
-        await new Promise((resolve, reject) => {
-          const child = spawn(currentFfmpegPath, ffmpegArgs, { env: spawnEnv });
-          let ffmpegOutput = "";
+        const runFfmpeg = (args) => {
+          return new Promise((resolve, reject) => {
+            const child = spawn(currentFfmpegPath, args, { env: spawnEnv });
+            let ffmpegOutput = "";
 
-          if (child.stdout) {
-            child.stdout.on("data", (data) => {
-              ffmpegOutput += data.toString();
-            });
-          }
-          if (child.stderr) {
-            child.stderr.on("data", (data) => {
-              ffmpegOutput += data.toString();
-            });
-          }
-
-          child.on("close", (code, signal) => {
-            if (code !== 0) {
-              logger.error(`[Video Remux] FFmpeg output:\n${ffmpegOutput}`);
-              return reject(
-                new Error(
-                  `FFmpeg exited with code ${code}${signal ? ` (signal: ${signal})` : ""}`,
-                ),
-              );
+            if (child.stdout) {
+              child.stdout.on("data", (data) => {
+                ffmpegOutput += data.toString();
+              });
             }
-            resolve();
-          });
+            if (child.stderr) {
+              child.stderr.on("data", (data) => {
+                ffmpegOutput += data.toString();
+              });
+            }
 
-          child.on("error", (err) => {
-            reject(new Error(`Failed to start FFmpeg: ${err.message}`));
-          });
-        });
+            child.on("close", (code, signal) => {
+              if (code !== 0) {
+                logger.error(`[Video Remux] FFmpeg output:\n${ffmpegOutput}`);
+                return reject(
+                  new Error(
+                    `FFmpeg exited with code ${code}${signal ? ` (signal: ${signal})` : ""}`,
+                  ),
+                );
+              }
+              resolve();
+            });
 
-        ffmpegSucceeded = true;
+            child.on("error", (err) => {
+              reject(new Error(`Failed to start FFmpeg: ${err.message}`));
+            });
+          });
+        };
+
+        try {
+          await runFfmpeg(ffmpegArgs);
+          ffmpegSucceeded = true;
+        } catch (initialErr) {
+          ffmpegError = initialErr;
+          // If subtitles merge failed, try fallback without subtitles (video/audio copy only)
+          if (this.MergeSubtitles && this.downloadedPaths.length > 0) {
+            logger.warn(
+              `[Video Remux] Remux with subtitles failed (${initialErr.message}). Retrying remux with video/audio only...`,
+            );
+            await fs.promises.unlink(tempOutput).catch(() => {});
+            const fallbackArgs = [
+              "-y",
+              "-f",
+              "mpegts",
+              "-i",
+              this.SegmentsFile,
+              "-c",
+              "copy",
+              tempOutput,
+            ];
+            try {
+              await runFfmpeg(fallbackArgs);
+              ffmpegSucceeded = true;
+            } catch (fallbackErr) {
+              logger.warn(
+                `[Video Remux] Fallback remux also failed: ${fallbackErr.message}`,
+              );
+              ffmpegError = fallbackErr;
+            }
+          }
+        }
       } catch (err) {
         ffmpegError = err;
       }
 
-      if (ffmpegSucceeded) {
+      const tempOutput = `${this.mp4}.remux.mp4`;
+      if (ffmpegSucceeded && fs.existsSync(tempOutput)) {
         try {
+          await fs.promises.unlink(this.mp4).catch(() => {});
+          await fs.promises.rename(tempOutput, this.mp4);
           const stats = fs.statSync(this.mp4);
           logger.info(
             `[Video Remux] Output MP4 file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB (${stats.size} bytes)`,
           );
         } catch (e) {
           logger.error(
-            `[Video Remux] Failed to check MP4 file size: ${e.message}`,
+            `[Video Remux] Failed to finalize MP4 file: ${e.message}`,
           );
         }
       } else {
+        // Ensure no corrupt/truncated partial file is left behind
+        try {
+          if (fs.existsSync(tempOutput)) {
+            await fs.promises.unlink(tempOutput).catch(() => {});
+          }
+          if (fs.existsSync(this.mp4)) {
+            await fs.promises.unlink(this.mp4).catch(() => {});
+          }
+        } catch (_) {}
         logger.warn(
           `[Video Remux] FFmpeg failed: ${ffmpegError?.message}. Keeping .ts file as output.`,
         );
@@ -2329,7 +2449,10 @@ async function download(args) {
     if (err.message === "Queue Paused") {
       throw err;
     }
-    await obj.CleanEverything(true);
+    const isSlow =
+      err?.isSlowMirror ||
+      (err?.message && err.message.includes("SLOW_MIRROR_FAILOVER"));
+    await obj.CleanEverything(!isSlow);
     if (err.message === "Episode Cancelled") {
       throw err;
     }

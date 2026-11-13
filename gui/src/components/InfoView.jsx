@@ -20,7 +20,7 @@ import {
   Check,
 } from "lucide-react";
 import Swal from "sweetalert2";
-import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
+import { swalSuccess, swalError, swalConfirm, swalInfo } from "../utils/swal";
 import {
   apiPost,
   parseTags,
@@ -147,6 +147,7 @@ export default function InfoView({
   const [mappingResults, setMappingResults] = useState([]);
   const [isSearchingMapping, setIsSearchingMapping] = useState(false);
   const [isLinkingMapping, setIsLinkingMapping] = useState(false);
+  const [probingDownloadId, setProbingDownloadId] = useState(null);
 
   const handleMappingSearch = async (overrideQuery) => {
     if (type === "Movies") return;
@@ -1926,12 +1927,15 @@ export default function InfoView({
 
   // Download Trigger
   const handleDownload = async (singleItem = null) => {
+    const probeId = singleItem ? singleItem.id || singleItem.number : "bulk";
+    setProbingDownloadId(probeId);
     try {
       const isAnime = type === "Anime" || type === "Movies";
       const singleMulti = singleItem ? "Single" : "Multi";
       const endpoint = `/api/download/${type}/${singleMulti}`;
 
-      let chosenLang = null;
+      let chosenLang = "sub";
+      let chosenQuality = "1080p";
 
       if (isAnime) {
         const targetEpisodes = singleItem
@@ -1939,6 +1943,11 @@ export default function InfoView({
           : episodesOrChapters.filter((item) =>
               selectedItems.has(Number(item.number)),
             );
+
+        if (!targetEpisodes || targetEpisodes.length === 0) {
+          swalError("No Items", "No episodes selected to download.");
+          return;
+        }
 
         let hasSub = false;
         let hasDub = false;
@@ -1959,160 +1968,236 @@ export default function InfoView({
         if (hasSub) availableLangs.push("sub");
         if (hasDub) availableLangs.push("dub");
         if (hasHsub) availableLangs.push("hsub");
+        if (availableLangs.length === 0) availableLangs.push("sub");
 
-        if (availableLangs.length > 1) {
-          const inputOptions = {};
-          if (hasSub) inputOptions.sub = "SUB";
-          if (hasDub) inputOptions.dub = "DUB";
-          if (hasHsub) inputOptions.hsub = "Hardsub (HSUB)";
-
-          const result = await Swal.fire({
-            title: "Select Version",
-            html: `
-              <style>
-                .swal2-html-container {
-                  overflow: visible !important;
-                  z-index: 20 !important;
-                  position: relative !important;
-                }
-                .swal2-popup {
-                  overflow: visible !important;
-                }
-                .swal2-actions {
-                  z-index: 10 !important;
-                  position: relative !important;
-                }
-                #swal-version-menu {
-                  border: 1px solid var(--border);
-                  border-radius: 8px;
-                  background: var(--bg-secondary);
-                  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-                }
-              </style>
-              <div style="margin-bottom: 16px; font-size: 14px; color: var(--text-muted); line-height: 1.5; text-align: center;">
-                ${
-                  singleItem
-                    ? `Choose the language version to download for Episode <strong>${singleItem.number}</strong>:`
-                    : `Choose the language version to download for the <strong>${targetEpisodes.length}</strong> selected episodes:`
-                }
-              </div>
-              <div class="input-group" style="position: relative; width: 100%; text-align: left; box-sizing: border-box;">
-                <div class="custom-dropdown-trigger" id="swal-version-trigger" style="display: flex; align-items: center; justify-content: space-between; min-height: 38px;">
-                  <span class="custom-dropdown-trigger-text" id="swal-version-text" style="color: var(--text-muted);">Select version</span>
-                  <svg class="custom-dropdown-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                </div>
-                <div class="custom-dropdown-menu" id="swal-version-menu" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; width: 100%; box-sizing: border-box; z-index: 9999;">
-                  ${Object.entries(inputOptions)
-                    .map(
-                      ([key, label]) => `
-                    <div class="custom-dropdown-item" data-value="${key}" style="display: flex; align-items: center; padding: 8px 12px; cursor: pointer;">
-                      ${label}
-                    </div>
-                  `,
-                    )
-                    .join("")}
-                </div>
-              </div>
-              ${
-                msShow
-                  ? `<div style="margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
-                Jellyfin/Plex naming: saves to <strong>${String(
-                  msShow.series || details?.title || "",
-                )
-                  .replace(/&/g, "&amp;")
-                  .replace(/</g, "&lt;")
-                  .replace(
-                    />/g,
-                    "&gt;",
-                  )}\\${msShow.season === 0 ? "Season 00 (Specials)" : `Season ${String(msShow.season).padStart(2, "0")}`}</strong>.<br>
-                To change this, cancel and set <strong>Season</strong> and <strong>Show folder</strong> above the episode list.
-              </div>`
-                  : ""
-              }
-            `,
-            showCancelButton: true,
-            confirmButtonText: "Confirm",
-            cancelButtonText: "Cancel",
-            background: "var(--bg-secondary)",
-            color: "var(--text-main)",
-            confirmButtonColor: "var(--accent)",
-            cancelButtonColor: "var(--bg-tertiary)",
-            didOpen: () => {
-              const trigger = Swal.getHtmlContainer().querySelector(
-                "#swal-version-trigger",
-              );
-              const menu =
-                Swal.getHtmlContainer().querySelector("#swal-version-menu");
-              const items = Swal.getHtmlContainer().querySelectorAll(
-                ".custom-dropdown-item",
-              );
-              const textSpan =
-                Swal.getHtmlContainer().querySelector("#swal-version-text");
-
-              let selectedVal = "";
-
-              const handleOutsideClick = (e) => {
-                if (!trigger.contains(e.target) && !menu.contains(e.target)) {
-                  trigger.classList.remove("open");
-                  menu.style.display = "none";
-                }
-              };
-
-              trigger.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const isOpen = trigger.classList.contains("open");
-                if (isOpen) {
-                  trigger.classList.remove("open");
-                  menu.style.display = "none";
-                  document.removeEventListener("click", handleOutsideClick);
-                } else {
-                  trigger.classList.add("open");
-                  menu.style.display = "block";
-                  document.addEventListener("click", handleOutsideClick);
-                }
-              });
-
-              items.forEach((item) => {
-                item.addEventListener("click", (e) => {
-                  e.stopPropagation();
-                  selectedVal = item.getAttribute("data-value");
-                  textSpan.textContent = item.textContent.trim();
-                  textSpan.style.color = "white";
-
-                  items.forEach((i) => i.classList.remove("selected"));
-                  item.classList.add("selected");
-
-                  trigger.classList.remove("open");
-                  menu.style.display = "none";
-                  document.removeEventListener("click", handleOutsideClick);
-
-                  trigger.setAttribute("data-selected-value", selectedVal);
-                  Swal.resetValidationMessage();
-                });
-              });
-            },
-            preConfirm: () => {
-              const trigger = Swal.getHtmlContainer().querySelector(
-                "#swal-version-trigger",
-              );
-              const selectedValue = trigger.getAttribute("data-selected-value");
-              if (!selectedValue) {
-                Swal.showValidationMessage("Please select a version");
-                return false;
-              }
-              return selectedValue;
-            },
-          });
-
-          if (!result.value) {
-            return; // user cancelled
+        let defaultQuality = "1080p";
+        try {
+          if (window.sharedStateAPI?.getSettings) {
+            const sRes = await window.sharedStateAPI.getSettings(["quality"]);
+            if (sRes?.settings?.quality) defaultQuality = sRes.settings.quality;
           }
-          chosenLang = result.value;
-        } else if (availableLangs.length === 1) {
-          chosenLang = availableLangs[0];
-        } else {
-          chosenLang = "sub";
+        } catch (_) {}
+
+        // Probe first episode for available qualities
+        const probeEp = singleItem || targetEpisodes[0];
+        let availableQualities = [];
+        if (probeEp?.id) {
+          try {
+            const probeController = new AbortController();
+            const probeTimer = setTimeout(() => probeController.abort(), 4000);
+            const probeData = await apiPost(
+              "/api/watch",
+              {
+                ep: probeEp.id,
+                epNum: probeEp.number,
+                animeId: id,
+                Downloaded: false,
+                provider: details?.provider,
+                type: type || "Anime",
+              },
+              { signal: probeController.signal },
+            );
+            clearTimeout(probeTimer);
+
+            const rawSources = [
+              ...(Array.isArray(probeData?.sources) ? probeData.sources : []),
+              ...(Array.isArray(probeData?.sub?.sources)
+                ? probeData.sub.sources
+                : []),
+              ...(Array.isArray(probeData?.dub?.sources)
+                ? probeData.dub.sources
+                : []),
+              ...(Array.isArray(probeData?.hsub?.sources)
+                ? probeData.hsub.sources
+                : []),
+            ];
+
+            const foundQuals = new Set();
+            rawSources.forEach((s) => {
+              const qStr = String(s?.quality || s?.name || "").toLowerCase();
+              const match = qStr.match(/(\d+)p/);
+              if (match) foundQuals.add(`${match[1]}p`);
+              else if (qStr.includes("1080")) foundQuals.add("1080p");
+              else if (qStr.includes("720")) foundQuals.add("720p");
+              else if (qStr.includes("480")) foundQuals.add("480p");
+              else if (qStr.includes("360")) foundQuals.add("360p");
+            });
+
+            if (foundQuals.size > 0) {
+              const standardOrder = ["1080p", "720p", "480p", "360p"];
+              availableQualities = standardOrder.filter((q) =>
+                foundQuals.has(q),
+              );
+              foundQuals.forEach((q) => {
+                if (!availableQualities.includes(q)) availableQualities.push(q);
+              });
+            }
+          } catch (_) {}
         }
+
+        if (availableQualities.length === 0) {
+          availableQualities = ["1080p", "720p", "480p", "360p"];
+        }
+
+        const selectedQualityDefault = availableQualities.includes(
+          defaultQuality,
+        )
+          ? defaultQuality
+          : availableQualities[0] || "1080p";
+
+        const result = await Swal.fire({
+          title: "Download Options",
+          html: `
+            <style>
+              .swal2-html-container {
+                overflow: visible !important;
+                z-index: 20 !important;
+                position: relative !important;
+                text-align: left !important;
+              }
+              .swal2-popup {
+                overflow: visible !important;
+                border-radius: 12px !important;
+              }
+              .swal-dl-section-label {
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--text-main, #ffffff);
+                margin-bottom: 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+              .swal-pill-group {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-bottom: 16px;
+                justify-content: flex-start;
+              }
+              .swal-pill-btn {
+                flex: 1 1 auto;
+                min-width: 65px;
+                padding: 8px 14px;
+                border-radius: 8px;
+                border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+                background: var(--bg-tertiary, #222222);
+                color: var(--text-muted, #aaaaaa);
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                text-align: center;
+                transition: all 0.2s ease;
+              }
+              .swal-pill-btn:hover {
+                background: var(--bg-hover, #333333);
+                color: var(--text-main, #ffffff);
+              }
+              .swal-pill-btn.active {
+                background: var(--accent, #e50914) !important;
+                border-color: var(--accent, #e50914) !important;
+                color: #ffffff !important;
+                box-shadow: 0 2px 10px rgba(229, 9, 20, 0.4);
+              }
+            </style>
+            <div style="margin-bottom: 16px; font-size: 14px; color: var(--text-muted); line-height: 1.5; text-align: center;">
+              ${
+                singleItem
+                  ? `Choose download options for Episode <strong>${singleItem.number}</strong>:`
+                  : `Choose download options for <strong>${targetEpisodes.length}</strong> selected episodes:`
+              }
+            </div>
+            ${
+              availableLangs.length > 1
+                ? `
+              <div class="swal-dl-section-label">Language Version</div>
+              <div class="swal-pill-group" id="swal-lang-pills">
+                ${availableLangs
+                  .map(
+                    (lang, idx) => `
+                  <button type="button" class="swal-pill-btn swal-lang-btn ${idx === 0 ? "active" : ""}" data-value="${lang}">
+                    ${lang.toUpperCase()}
+                  </button>
+                `,
+                  )
+                  .join("")}
+              </div>
+            `
+                : ""
+            }
+            <div class="swal-dl-section-label">Video Quality</div>
+            <div class="swal-pill-group" id="swal-quality-pills">
+              ${availableQualities
+                .map(
+                  (q) => `
+                <button type="button" class="swal-pill-btn swal-quality-btn ${q === selectedQualityDefault ? "active" : ""}" data-value="${q}">
+                  ${q}
+                </button>
+              `,
+                )
+                .join("")}
+            </div>
+            ${
+              msShow
+                ? `<div style="margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
+              Jellyfin/Plex naming: saves to <strong>${String(
+                msShow.series || details?.title || "",
+              )
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(
+                  />/g,
+                  "&gt;",
+                )}\\${msShow.season === 0 ? "Season 00 (Specials)" : `Season ${String(msShow.season).padStart(2, "0")}`}</strong>.<br>
+              To change this, cancel and set <strong>Season</strong> and <strong>Show folder</strong> above the episode list.
+            </div>`
+                : ""
+            }
+          `,
+          showCancelButton: true,
+          confirmButtonText: "Download",
+          cancelButtonText: "Cancel",
+          background: "var(--bg-secondary)",
+          color: "var(--text-main)",
+          confirmButtonColor: "var(--accent)",
+          cancelButtonColor: "var(--bg-tertiary)",
+          didOpen: () => {
+            const popup = Swal.getHtmlContainer();
+            const langBtns = popup.querySelectorAll(".swal-lang-btn");
+            langBtns.forEach((btn) => {
+              btn.addEventListener("click", () => {
+                langBtns.forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
+              });
+            });
+            const qualBtns = popup.querySelectorAll(".swal-quality-btn");
+            qualBtns.forEach((btn) => {
+              btn.addEventListener("click", () => {
+                qualBtns.forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
+              });
+            });
+          },
+          preConfirm: () => {
+            const popup = Swal.getHtmlContainer();
+            const activeLangBtn = popup.querySelector(".swal-lang-btn.active");
+            const activeQualBtn = popup.querySelector(
+              ".swal-quality-btn.active",
+            );
+            const selLang = activeLangBtn
+              ? activeLangBtn.getAttribute("data-value")
+              : availableLangs[0] || "sub";
+            const selQual = activeQualBtn
+              ? activeQualBtn.getAttribute("data-value")
+              : selectedQualityDefault;
+            return { subdub: selLang, quality: selQual };
+          },
+        });
+
+        if (!result.value) {
+          return; // user cancelled
+        }
+        chosenLang = result.value.subdub;
+        chosenQuality = result.value.quality;
       }
 
       let bodyData = {};
@@ -2124,7 +2209,7 @@ export default function InfoView({
           number: singleItem.number,
           provider: details?.provider,
           malid: details?.malid || details?.MalID,
-          ...(isAnime ? { subdub: chosenLang } : {}),
+          ...(isAnime ? { subdub: chosenLang, quality: chosenQuality } : {}),
         };
       } else {
         const itemsToDownload = [];
@@ -2152,7 +2237,7 @@ export default function InfoView({
           Title: details?.title,
           provider: details?.provider,
           malid: details?.malid || details?.MalID,
-          ...(isAnime ? { SubDub: chosenLang } : {}),
+          ...(isAnime ? { SubDub: chosenLang, quality: chosenQuality } : {}),
         };
       }
 
@@ -2178,6 +2263,8 @@ export default function InfoView({
     } catch (err) {
       console.error(err);
       swalError("Error", "Failed to add to download queue.");
+    } finally {
+      setProbingDownloadId(null);
     }
   };
 
@@ -3765,9 +3852,14 @@ export default function InfoView({
                   <button
                     onClick={() => handleDownload()}
                     className="btn-download-all"
+                    disabled={probingDownloadId !== null}
                   >
                     <Download size={16} />
-                    <span>Download Checked ({numToDownload})</span>
+                    <span>
+                      {probingDownloadId === "bulk"
+                        ? "Checking sources..."
+                        : `Download Checked (${numToDownload})`}
+                    </span>
                   </button>
                 )}
                 {numToDelete > 0 && (
@@ -4118,9 +4210,15 @@ export default function InfoView({
                                   }}
                                   className="badge-subdub download-btn"
                                   title="Download Episode"
+                                  disabled={probingDownloadId !== null}
                                 >
                                   <Download size={11} />
-                                  <span>DOWNLOAD</span>
+                                  <span>
+                                    {probingDownloadId ===
+                                    (item.id || item.number)
+                                      ? "CHECKING..."
+                                      : "DOWNLOAD"}
+                                  </span>
                                 </button>
                               </div>
                             )

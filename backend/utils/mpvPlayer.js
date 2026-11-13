@@ -287,8 +287,11 @@ const getIpcPath = () => {
   }
 };
 
-const connectIpc = (ipcPath, retryCount = 0) => {
+const connectIpc = (ipcPath, retryCount = 0, requestId = null) => {
   return new Promise((resolve, reject) => {
+    if (requestId !== null && global.activePlayRequestId !== requestId) {
+      return reject(new Error("Request superseded before IPC connected"));
+    }
     const client = net.connect(ipcPath);
 
     client.on("connect", () => {
@@ -296,9 +299,12 @@ const connectIpc = (ipcPath, retryCount = 0) => {
     });
 
     client.on("error", (err) => {
+      if (requestId !== null && global.activePlayRequestId !== requestId) {
+        return reject(new Error("Request superseded during IPC connection"));
+      }
       if (retryCount < 20) {
         setTimeout(() => {
-          connectIpc(ipcPath, retryCount + 1)
+          connectIpc(ipcPath, retryCount + 1, requestId)
             .then(resolve)
             .catch(reject);
         }, 150);
@@ -1034,8 +1040,9 @@ async function playInMpv(window, options) {
     "--sub-shadow-offset=0",
     "--sub-margin-y=36",
     "--profile=fast",
-    "--hwdec=auto",
+    "--hwdec=auto-safe",
     "--video-sync=audio",
+    "--hr-seek-framedrop=yes",
     "--audio-pitch-correction=yes",
     "--force-window=yes",
     "--idle=yes",
@@ -1263,6 +1270,13 @@ async function playInMpv(window, options) {
   }
 
   args.push(playUrl);
+
+  if (global.activePlayRequestId !== currentRequestId) {
+    logger.info(
+      `[MPV] Launch request #${currentRequestId} superseded by #${global.activePlayRequestId}, aborting.`,
+    );
+    return { success: false, aborted: true };
+  }
 
   const isProcessAlive =
     global.activeMpvProcess &&
@@ -1645,6 +1659,13 @@ async function playInMpv(window, options) {
     options,
   };
 
+  if (global.activePlayRequestId !== currentRequestId) {
+    logger.info(
+      `[MPV] Launch request #${currentRequestId} superseded by #${global.activePlayRequestId} before process spawn, aborting.`,
+    );
+    return { success: false, aborted: true };
+  }
+
   const mpvExe = getMpvPath();
   const mpvExists =
     mpvExe && (path.isAbsolute(mpvExe) ? fs.existsSync(mpvExe) : true);
@@ -1763,7 +1784,7 @@ async function playInMpv(window, options) {
   setTimeout(sendStarted, 500);
 
   try {
-    client = await connectIpc(ipcPath);
+    client = await connectIpc(ipcPath, 0, currentRequestId);
     global.activeMpvClient = client;
     logger.info(`[MPV IPC] Successfully connected to IPC socket: ${ipcPath}`);
     client.write(
@@ -2401,9 +2422,15 @@ async function playInMpv(window, options) {
       }
     });
   } catch (err) {
-    logger.error(
-      `[MPV] IPC connection warning (playing without direct sync): ${err.message}`,
-    );
+    if (global.activePlayRequestId !== currentRequestId) {
+      logger.info(
+        `[MPV] Request #${currentRequestId} superseded by #${global.activePlayRequestId}, suppressing IPC error: ${err.message}`,
+      );
+    } else {
+      logger.error(
+        `[MPV] IPC connection warning (playing without direct sync): ${err.message}`,
+      );
+    }
   }
 
   let terminated = false;

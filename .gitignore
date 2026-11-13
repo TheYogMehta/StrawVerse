@@ -37,3 +37,5 @@ app.log
 *.db-shm
 .DS_Store
 **/.DS_Store
+graphify-out/
+.agents/
