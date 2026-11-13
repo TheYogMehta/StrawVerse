@@ -479,6 +479,7 @@ function isRetryableError(err) {
     return false;
   }
   return (
+    msg.includes("slow_mirror_failover") ||
     msg.includes("scraper_temporary_error") ||
     msg.includes("stream link") ||
     msg.includes("resolution timeout") ||
@@ -659,17 +660,43 @@ async function continuousExecution() {
               await removeQueue(currentTask.epid, false);
             }
           } else if (isRetryableError(err)) {
-            // Remember dead mirror hosts so the retry resolves a different server.
+            const isSlow =
+              err?.isSlowMirror ||
+              (err?.message && err.message.includes("SLOW_MIRROR_FAILOVER"));
+            // Remember dead/slow mirror hosts so the retry resolves a different server.
             if (err.failedHost && currentTask?.epid) {
               const known = hostSkipByEpid.get(currentTask.epid) || [];
               if (!known.includes(err.failedHost)) {
                 known.push(err.failedHost);
                 hostSkipByEpid.set(currentTask.epid, known);
                 logger.warn(
-                  `[queueWorker] Excluding dead host ${err.failedHost} for ${currentTask.epid} on retry`,
+                  `[queueWorker] Excluding ${isSlow ? "slow" : "dead"} host ${err.failedHost} for ${currentTask.epid} on retry`,
                 );
               }
             }
+
+            if (isSlow) {
+              logger.info(
+                `[queueWorker] Slow mirror failover on ${currentTask?.epid} from host ${err.failedHost}. Switching immediately to alternate mirror...`,
+              );
+              const cleanEp =
+                currentTask.EpNum !== undefined && currentTask.EpNum !== null
+                  ? String(currentTask.EpNum)
+                  : "";
+              const switchCaption = `Switching to faster mirror for EP ${cleanEp}...`;
+              await updateQueue(currentTask.epid, 0, 0, switchCaption);
+              try {
+                global.sendToRenderer("download-logger", {
+                  caption: switchCaption,
+                  totalSegments: 0,
+                  currentSegments: 0,
+                  epid: currentTask.epid,
+                  isPaused: isQueuePaused(),
+                });
+              } catch (_) {}
+              return;
+            }
+
             currentTask.retryCount = (currentTask.retryCount || 0) + 1;
             const maxRetries = 3;
             if (currentTask.retryCount >= maxRetries) {
@@ -847,6 +874,48 @@ async function downloadep(
   }
 }
 
+function extractSourceQualityHeight(s) {
+  const qStr = String(s?.quality || s?.name || "").toLowerCase();
+  const match = qStr.match(/(\d+)p/);
+  if (match) return parseInt(match[1], 10);
+  if (qStr.includes("1080")) return 1080;
+  if (qStr.includes("720")) return 720;
+  if (qStr.includes("480")) return 480;
+  if (qStr.includes("360")) return 360;
+  return 0;
+}
+
+async function inspectStreamMaxHeight(streamUrl, headers = {}) {
+  if (!streamUrl || typeof streamUrl !== "string") return 0;
+  try {
+    const res = await axios.get(streamUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        ...headers,
+      },
+      timeout: 5000,
+      responseType: "text",
+    });
+    const body = typeof res.data === "string" ? res.data : "";
+    if (body.includes("#EXT-X-STREAM-INF:")) {
+      let maxHeight = 0;
+      const lines = body.split("\n");
+      for (const line of lines) {
+        const resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
+        if (resMatch) {
+          const h = parseInt(resMatch[1], 10);
+          if (h > maxHeight) maxHeight = h;
+        }
+      }
+      return maxHeight;
+    }
+    return 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
 // Download episode by quality
 async function downloadEpisodeByQuality(
   config,
@@ -1016,18 +1085,27 @@ async function downloadEpisodeByQuality(
       [];
 
     const Animeprovider = provider;
+    const targetQualStr = config?.quality ?? "1080p";
+    const targetHeight =
+      parseInt(String(targetQualStr).replace(/\D/g, ""), 10) || 1080;
     const sortedSources = sortSourcesByPreferredQuality(
       sourcesList,
-      config?.quality ?? "1080p",
+      targetQualStr,
     );
 
     let selectedSource = null;
+    let bestQualityFallback = null;
+    let bestFallbackHeight = 0;
+    let bestFallbackSubtitles = null;
     let fallbackExcludedSource = null;
     let fallbackUnverifiedSource = null;
 
     for (let i = 0; i < sortedSources.length; i++) {
       const src = sortedSources[i];
       if (!src) continue;
+
+      let candidate = null;
+      let candidateSubtitles = null;
 
       if (src.isUnresolved || !src.url) {
         try {
@@ -1054,7 +1132,7 @@ async function downloadEpisodeByQuality(
               }
               continue;
             }
-            selectedSource = {
+            candidate = {
               ...src,
               ...resolved,
               isUnresolved: false,
@@ -1063,9 +1141,8 @@ async function downloadEpisodeByQuality(
               Array.isArray(resolved.subtitles) &&
               resolved.subtitles.length > 0
             ) {
-              subtitles = resolved.subtitles;
+              candidateSubtitles = resolved.subtitles;
             }
-            break;
           } else {
             logger.warn(
               `[Download] Server #${i + 1} "${src.name || src.quality}" resolution failed or returned no stream URL. Trying fallback server...`,
@@ -1095,30 +1172,72 @@ async function downloadEpisodeByQuality(
           fallbackUnverifiedSource = src;
         }
         if (sortedSources.length === 1) {
-          selectedSource = src;
-          break;
-        }
-        const isAlive = await verifyStreamReachability(
-          src.url,
-          src.headers || {},
-          src.isM3U8 !== false,
-        );
-        if (isAlive.ok || isAlive.isProtected) {
-          selectedSource = src;
-          break;
+          candidate = src;
         } else {
-          logger.warn(
-            `[Download] Server #${i + 1} "${src.name || src.quality}" stream verification failed: ${isAlive.message}. Trying fallback server...`,
+          const isAlive = await verifyStreamReachability(
+            src.url,
+            src.headers || {},
+            src.isM3U8 !== false,
           );
+          if (isAlive.ok || isAlive.isProtected) {
+            candidate = src;
+          } else {
+            logger.warn(
+              `[Download] Server #${i + 1} "${src.name || src.quality}" stream verification failed: ${isAlive.message}. Trying fallback server...`,
+            );
+          }
+        }
+      }
+
+      if (candidate) {
+        if (targetHeight > 0 && sortedSources.length > 1) {
+          let qualHeight = extractSourceQualityHeight(candidate);
+          if (qualHeight === 0 && candidate.isM3U8 !== false) {
+            qualHeight = await inspectStreamMaxHeight(
+              candidate.url,
+              candidate.headers || {},
+            );
+          }
+
+          if (qualHeight >= targetHeight) {
+            logger.info(
+              `[Download] Server #${i + 1} "${src.name || src.quality}" satisfies requested quality (${qualHeight}p >= ${targetHeight}p). Selecting this server.`,
+            );
+            selectedSource = candidate;
+            if (candidateSubtitles) subtitles = candidateSubtitles;
+            break;
+          } else {
+            logger.info(
+              `[Download] Server #${i + 1} "${src.name || src.quality}" provides ${qualHeight ? `${qualHeight}p` : "unknown resolution"} (requested: ${targetHeight}p). Retaining as fallback...`,
+            );
+            if (!bestQualityFallback || qualHeight > bestFallbackHeight) {
+              bestQualityFallback = candidate;
+              bestFallbackHeight = qualHeight;
+              if (candidateSubtitles) bestFallbackSubtitles = candidateSubtitles;
+            }
+          }
+        } else {
+          selectedSource = candidate;
+          if (candidateSubtitles) subtitles = candidateSubtitles;
+          break;
         }
       }
     }
 
+    if (!selectedSource && bestQualityFallback) {
+      logger.info(
+        `[Download] No server matched requested quality ${targetHeight}p. Proceeding with best available server (${bestFallbackHeight ? `${bestFallbackHeight}p` : "default"}).`,
+      );
+      selectedSource = bestQualityFallback;
+      if (bestFallbackSubtitles) subtitles = bestFallbackSubtitles;
+    }
+
     if (!selectedSource && fallbackExcludedSource) {
       logger.warn(
-        `[Download] All available servers are on previously excluded host(s). Reusing best available server to allow download to proceed.`,
+        `[Download] All available servers are on previously excluded host(s). Reusing best available server in permissive mode to allow download to proceed.`,
       );
       selectedSource = fallbackExcludedSource;
+      if (config) config.permissiveMode = true;
     }
 
     if (!selectedSource && fallbackUnverifiedSource) {
@@ -1201,6 +1320,9 @@ async function downloadEpisodeByQuality(
       currentSettings.mediaServerNaming === true
         ? mediaServerFileBase(directoryName, episodeNumber, dlQuality)
         : null,
+      config?.permissiveMode
+        ? "0"
+        : currentSettings.minDownloadSpeed || "300 KB/s",
     );
     hostSkipByEpid.delete(epid);
 
@@ -1279,6 +1401,7 @@ async function downloadVideo(
   headers = {},
   isM3U8 = true,
   fileBase = null,
+  minDownloadSpeed = null,
 ) {
   try {
     const qualStr = quality ? ` ( ${quality} )` : "";
@@ -1302,6 +1425,7 @@ async function downloadVideo(
       headers: headers,
       isM3U8: isM3U8,
       fileBase: fileBase,
+      minDownloadSpeed: minDownloadSpeed,
     });
   } catch (err) {
     if (err.message === "Queue Paused" || err.message === "Episode Cancelled") {
@@ -1311,6 +1435,8 @@ async function downloadVideo(
     const wrapped = new Error(`Failed To Download: ${errMsg}`);
     // Preserve dead-host info so the queue can exclude the mirror on retry.
     if (err?.failedHost) wrapped.failedHost = err.failedHost;
+    if (err?.isSlowMirror) wrapped.isSlowMirror = true;
+    if (err?.bps) wrapped.bps = err.bps;
     throw wrapped;
   }
 }

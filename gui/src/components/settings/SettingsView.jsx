@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useState, useEffect, useRef } from "react";
+import Swal from "sweetalert2";
 import {
   Loader2,
   LogOut,
@@ -147,6 +148,7 @@ export default function SettingsView({
   // Form states
   const [animeProvider, setAnimeProvider] = useState("");
   const [quality, setQuality] = useState("1080p");
+  const [minDownloadSpeed, setMinDownloadSpeed] = useState("300 KB/s");
   const [mangaProvider, setMangaProvider] = useState("");
   const [moviesProvider, setMoviesProvider] = useState("");
   const [autoLoadNextChapter, setAutoLoadNextChapter] = useState(true);
@@ -730,6 +732,7 @@ export default function SettingsView({
         const s = data.settings;
         setAnimeProvider(s.Animeprovider || "");
         setQuality(s.quality || "1080p");
+        setMinDownloadSpeed(s.minDownloadSpeed || "300 KB/s");
         setMangaProvider(s.Mangaprovider || "");
         setMoviesProvider(s.Moviesprovider || "");
         setAutoLoadNextChapter(s.autoLoadNextChapter);
@@ -954,6 +957,8 @@ export default function SettingsView({
     if (animeProvider !== (settings.Animeprovider || ""))
       dirty.Animeprovider = animeProvider;
     if (quality !== (settings.quality || "1080p")) dirty.quality = quality;
+    if (minDownloadSpeed !== (settings.minDownloadSpeed || "300 KB/s"))
+      dirty.minDownloadSpeed = minDownloadSpeed;
     if (mangaProvider !== (settings.Mangaprovider || ""))
       dirty.Mangaprovider = mangaProvider;
     if (moviesProvider !== (settings.Moviesprovider || ""))
@@ -1139,6 +1144,7 @@ export default function SettingsView({
     const changed =
       animeProvider !== (settings.Animeprovider || "") ||
       quality !== (settings.quality || "1080p") ||
+      minDownloadSpeed !== (settings.minDownloadSpeed || "300 KB/s") ||
       mangaProvider !== (settings.Mangaprovider || "") ||
       moviesProvider !== (settings.Moviesprovider || "") ||
       autoLoadNextChapter !== settings.autoLoadNextChapter ||
@@ -2120,6 +2126,32 @@ export default function SettingsView({
                         { value: "1080p", label: "1080p (Full HD)" },
                         { value: "720p", label: "720p (HD)" },
                         { value: "360p", label: "360p (SD)" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Minimum Download Speed
+                    </div>
+                    <div className="settings-row-hint">
+                      Automatically boost parallel connections and switch to faster mirrors if download speed falls below this floor.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={minDownloadSpeed}
+                      onChange={setMinDownloadSpeed}
+                      options={[
+                        { value: "0", label: "Disabled" },
+                        { value: "150 KB/s", label: "150 KB/s" },
+                        { value: "300 KB/s", label: "300 KB/s (Default)" },
+                        { value: "500 KB/s", label: "500 KB/s" },
+                        { value: "1 MB/s", label: "1 MB/s" },
+                        { value: "2 MB/s", label: "2 MB/s" },
                       ]}
                       minWidth={200}
                     />

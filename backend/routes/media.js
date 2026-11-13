@@ -3210,6 +3210,50 @@ router.post(
         }
       }
 
+      if (
+        (!Array.isArray(data.DownloadedEpisodes) ||
+          data.DownloadedEpisodes.length === 0) &&
+        (AnimeManga === "Anime" || AnimeManga === "Movies")
+      ) {
+        try {
+          const dlCheck = await FindMapping(
+            AnimeManga,
+            data.id || id,
+            data.malid || null,
+            AnimeManga === "Anime"
+              ? setting?.CustomDownloadLocationAnime
+              : setting?.CustomDownloadLocationMovies,
+          );
+          if (
+            dlCheck &&
+            Array.isArray(dlCheck.DownloadedEpisodes) &&
+            dlCheck.DownloadedEpisodes.length > 0
+          ) {
+            data.DownloadedEpisodes = dlCheck.DownloadedEpisodes;
+          }
+        } catch (_) {}
+      } else if (
+        (!Array.isArray(data.DownloadedChapters) ||
+          data.DownloadedChapters.length === 0) &&
+        AnimeManga === "Manga"
+      ) {
+        try {
+          const dlCheck = await FindMapping(
+            AnimeManga,
+            data.id || id,
+            data.malid || null,
+            setting?.CustomDownloadLocationManga,
+          );
+          if (
+            dlCheck &&
+            Array.isArray(dlCheck.DownloadedChapters) &&
+            dlCheck.DownloadedChapters.length > 0
+          ) {
+            data.DownloadedChapters = dlCheck.DownloadedChapters;
+          }
+        } catch (_) {}
+      }
+
       if (!data?.id) throw new Error(`No ${AnimeManga} Found with id '${id}'`);
       return res.json(data);
     } catch (err) {
@@ -3360,6 +3404,25 @@ router.post("/api/info/items", async (req, res) => {
       if (data.hasNextPage === undefined && data.totalPages !== undefined) {
         data.hasNextPage = page < data.totalPages;
       }
+
+      try {
+        const setting = await settingfetch();
+        const dlCheck = await FindMapping(
+          type,
+          id,
+          null,
+          type === "Anime"
+            ? setting?.CustomDownloadLocationAnime
+            : type === "Movies"
+              ? setting?.CustomDownloadLocationMovies
+              : setting?.CustomDownloadLocationManga,
+        );
+        if (isAnime && dlCheck && Array.isArray(dlCheck.DownloadedEpisodes)) {
+          data.DownloadedEpisodes = dlCheck.DownloadedEpisodes;
+        } else if (!isAnime && dlCheck && Array.isArray(dlCheck.DownloadedChapters)) {
+          data.DownloadedChapters = dlCheck.DownloadedChapters;
+        }
+      } catch (_) {}
 
       return res.json(data);
     } else {
