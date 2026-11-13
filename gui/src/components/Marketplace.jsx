@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   Loader2,
   Download,
@@ -39,8 +39,9 @@ export default function Marketplace({ initialType }) {
   const [loading, setLoading] = useState(true);
   const [processingId, setProcessingId] = useState(null);
   const [showRepoModal, setShowRepoModal] = useState(false);
+  const activeTabRef = useRef(activeType);
 
-  const fetchMarketplace = async () => {
+  const fetchMarketplace = async (targetType = activeType) => {
     setLoading(true);
     try {
       let extList = [];
@@ -51,7 +52,7 @@ export default function Marketplace({ initialType }) {
       if (window.sharedStateAPI && window.sharedStateAPI.getMarketplace) {
         try {
           const marketData =
-            await window.sharedStateAPI.getMarketplace(activeType);
+            await window.sharedStateAPI.getMarketplace(targetType);
           extList = marketData?.items || [];
           repoList = marketData?.repos || [];
           fetchedSuccessfully = true;
@@ -66,7 +67,7 @@ export default function Marketplace({ initialType }) {
       // 2. HTTP API fallback if running on web/mobile or IPC didn't fetch
       if (!fetchedSuccessfully) {
         try {
-          const resp = await fetch(`/api/marketplace?type=${activeType}`);
+          const resp = await fetch(`/api/marketplace?type=${targetType}`);
           if (resp.ok) {
             const data = await resp.json();
             extList = data?.items || [];
@@ -76,6 +77,11 @@ export default function Marketplace({ initialType }) {
         } catch (httpErr) {
           console.warn("HTTP getMarketplace failed:", httpErr);
         }
+      }
+
+      // Stale response guard: discard if user switched tabs in the meantime
+      if (activeTabRef.current !== targetType) {
+        return;
       }
 
       setExtensions(extList);
@@ -151,13 +157,32 @@ export default function Marketplace({ initialType }) {
     } catch (err) {
       console.error("fetchMarketplace error:", err);
     } finally {
-      setLoading(false);
+      if (activeTabRef.current === targetType) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchMarketplace();
+    activeTabRef.current = activeType;
+    setExtensions([]);
+    fetchMarketplace(activeType);
   }, [activeType]);
+
+  // If the currently selected repository filter is removed or not found, reset to 'all'
+  useEffect(() => {
+    if (
+      selectedRepoFilter !== "all" &&
+      repos.length > 0 &&
+      !repos.some(
+        (r) =>
+          (r.id || `${r.owner}/${r.name}`).toLowerCase() ===
+          selectedRepoFilter.toLowerCase(),
+      )
+    ) {
+      setSelectedRepoFilter("all");
+    }
+  }, [repos, selectedRepoFilter]);
 
   const isAppVersionBelow = (current, minRequired) => {
     if (!current || !minRequired) return false;
@@ -323,7 +348,7 @@ export default function Marketplace({ initialType }) {
   const handleAction = async (taskType, provider) => {
     const providerId =
       provider.uniqueId ||
-      `${provider.repoOwner || "TheYogMehta"}/${provider.name}`;
+      `${provider.repoId || `${provider.repoOwner || "TheYogMehta"}/${provider.repoName || "repo"}`}/${provider.name}`;
 
     if (taskType === "remove") {
       const confirmResult = await swalConfirm(
@@ -514,16 +539,29 @@ export default function Marketplace({ initialType }) {
   };
 
   const visibleExtensions = extensions.filter((provider) => {
+    // 1. Strict tab category matching
+    const normTab = String(activeType || "").toLowerCase();
+    const isMoviesTab = normTab === "movies" || normTab === "movies-tvshows";
+    const pType = String(provider.type || "").toLowerCase();
+    const pCategory = String(provider.category || "").toLowerCase();
+    const matchesTab = isMoviesTab
+      ? pType === "movies" || pCategory === "movies-tvshows"
+      : pType === normTab || pCategory === normTab;
+
+    if (!matchesTab) return false;
+
+    // 2. Disabled scraper check
     if (provider.disabled) {
       return isInstalled(provider);
     }
+
+    // 3. Strict repository selection filter
     if (selectedRepoFilter !== "all") {
-      const pRepo = (
-        provider.repoId || `${provider.repoOwner}/${provider.repoName}`
-      ).toLowerCase();
-      const pOwner = (provider.repoOwner || "").toLowerCase();
       const filterLower = selectedRepoFilter.toLowerCase();
-      if (pRepo !== filterLower && pOwner !== filterLower) {
+      const pRepo = (
+        provider.repoId || `${provider.repoOwner || ""}/${provider.repoName || ""}`
+      ).toLowerCase();
+      if (pRepo !== filterLower) {
         return false;
       }
     }
@@ -618,7 +656,7 @@ export default function Marketplace({ initialType }) {
               const inUse = installed && isProviderInUse(provider);
               const cardId =
                 provider.uniqueId ||
-                `${provider.repoOwner || "TheYogMehta"}/${provider.name}`;
+                `${provider.repoId || `${provider.repoOwner || "TheYogMehta"}/${provider.repoName || "repo"}`}/${provider.name}`;
               const isProcessing = processingId === cardId;
               const logoUrl =
                 provider.icon ||

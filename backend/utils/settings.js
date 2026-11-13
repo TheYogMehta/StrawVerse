@@ -837,8 +837,35 @@ function parseExtensionRepoUrl(inputUrl) {
 }
 
 function getExtensionRepos() {
+  const normalize = (list) => {
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((r) => r && (r.owner || r.id || r.url))
+      .map((r) => {
+        let owner = r.owner;
+        let name = r.name;
+        let id = r.id;
+        if (!owner && id && id.includes("/")) {
+          owner = id.split("/")[0];
+          name = name || id.split("/")[1];
+        }
+        if (!name && id && id.includes("/")) {
+          name = id.split("/")[1];
+        }
+        owner = owner || "custom";
+        name = name || "repo";
+        id = id || `${owner}/${name}`;
+        return {
+          ...r,
+          id,
+          owner,
+          name,
+        };
+      });
+  };
+
   if (Array.isArray(config?.extension_repos)) {
-    return config.extension_repos;
+    return normalize(config.extension_repos);
   }
 
   // Backward compatibility with config.custom_extension_repos
@@ -869,7 +896,7 @@ function getExtensionRepos() {
         }
       }
     }
-    return list;
+    return normalize(list);
   }
 
   return [DEFAULT_EXTENSION_REPO];
@@ -1067,15 +1094,20 @@ async function fetchAggregatedMarketplace(activeType = "Anime") {
           list = Array.isArray(data[activeType]) ? data[activeType] : [];
         }
         const repoId = repo.id || `${repo.owner}/${repo.name}`;
+        const repoName =
+          repo.name || (repoId.includes("/") ? repoId.split("/")[1] : "repo");
+        const repoOwner =
+          repo.owner ||
+          (repoId.includes("/") ? repoId.split("/")[0] : "custom");
         return list.map((item) => ({
           ...item,
           type: isMovies ? "Movies" : activeType,
           category: isMovies ? "movies-tvshows" : activeType,
-          repoOwner: repo.owner,
-          repoName: repo.name,
+          repoOwner,
+          repoName,
           repoId,
           repoBaseUrl: repo.rawBaseUrl,
-          uniqueId: `${repo.owner}/${item.name}`,
+          uniqueId: `${repoId}/${item.name}`,
           isDefaultRepo: !!repo.isDefault,
         }));
       } catch (err) {
