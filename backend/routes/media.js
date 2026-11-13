@@ -3193,7 +3193,7 @@ router.post("/api/info/extras", async (req, res) => {
 // ---------------------------------------------------------------------------
 const bulkLangsCache = new Map();
 const BULK_META_TTL = 15 * 60 * 1000;
-const BULK_META_MAX_ITEMS = 24;
+const BULK_META_MAX_ITEMS = 48;
 const BULK_META_CONCURRENCY = 2;
 
 async function runPool(items, limit, worker) {

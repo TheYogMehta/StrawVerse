@@ -5,20 +5,20 @@
 
 version: 11.2.2
 versionCode: 27
-releaseDate: '2026-11-10'
+releaseDate: '2026-11-13'
 
 artifacts:
   - name: StrawVerse.Setup.11.2.2.exe
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/StrawVerse.Setup.11.2.2.exe
     platform: windows
     size: 237.28
-    sha512: EC08A1CF3DCEBB6FC175BB05DC63C208204C21901EC62AAA0D2063C9791B4F030A35477AEAF92884802D7AD09A87A04EC92719AB1788FBAF0F8E958BE6C9A437
+    sha512: 5DE601E3CF7028345EACDE0B3DB65908D4F8E5CE664991DB96646D2A9C55098C63B26BD1C1244794972F293622E15BA932DAB7CFCD014204DB181C2891EC02C9
 
   - name: app-release.apk
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/app-release.apk
     platform: android
     size: 135.26
-    sha512: 3D8B4D4BA746F44DE9FB93607B072BA95211F5D08FDE0E9C91BFFE74B8AF8DBAD88B8114B8F15FA1D73B5C7589946A7D614B0BEE97447B61D97A5861CF8920BA
+    sha512: C0E2F8E56BF90C942CD0FC3BD1FD538E48A7B1B912246836FA3EA9483504DF53CCA4D5654BB269810B1BE4F056097D78B049BE315D1EAE6BDD6D9B1A5790ACEE
 
   - name: strawverse-11.2.2.AppImage
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/strawverse-11.2.2.AppImage
@@ -42,13 +42,19 @@ artifacts:
 
 changelog:
   - "[11.2.2]"
-    - **Mapping sync fix**: One broken provider table returning HTTP 500 no longer aborts the whole mapping sync — core tables (anime/manga) now sync even when a provider table fails
-    - **Faster startup**: Auto-update check deferred 8s; image-cache cleanup batches deletes; snapshot apply removes 80k+ per-row queries
-    - **repo enable/disable**: Toggle extension repositories on/off; disabled repos hide but installed items remain
-    - **Discover provider switcher**: Provider picker left of Anime/Manga toggle; clears caches, reloads page 1
-    - **Description copy button**: Copy full raw text (strips `[more]`)
-    - **Plex & Jellyfin section**: Dedicated settings before Subtitle Customization & Appearance
-    - **Info page seasons**: Now includes OVA, MOVIE, and SPECIAL formats (not just TV series)
-    - **Changelog merge**: Merged upstream [11.2.1] entries ([manga reader overhaul](https://github.com/TheYogMehta/StrawVerse/releases/tag/v11.2.1), [mapping/Manga schema fixes](https://github.com/TheYogMehta/StrawVerse/releases/tag/v11.2.0))
-    - **Fixed Android bugs**: Browse button dead (missing `Swal` import), provider picker hidden (gate relaxed `> 1` → `>= 1`)
-    - **Version continues as 11.2.2** above upstream's 11.2.1
+  - "**Download resilience**: If a subtitle/dub category has no working servers (hardsub-only episodes), the downloader falls back to the opposite category, then to unfiltered servers, instead of failing after 3 retries"
+  - "**Soft subtitles on download**: Downloads prefer soft-sub servers over hardsub (burned-in) sources when you pick \"sub\"; subtitle files are always written next to the video (e.g. `2Ep.eng.vtt`) so players like MX Player auto-detect them and the subtitle on/off toggle works"
+  - "**Filter panel collapse**: Caret arrow (^) on the filter panel header collapses/expands the filter grid"
+  - "**Faster filter badges**: Badge metadata loads after applying filters with a 250 ms debounce, bulk fetch of 48 items, and duplicate-fetch caching"
+  - "**Anikoto speed**: Provider metadata cache keys use the provider name (fixes cache misses vs the official anikoto build)"
+  - "**Quieter Android logs**: Native HTTP fallback warning only prints when BOTH the native bridge and the Node fallback fail (was spamming on every routine fallback)"
+  - "**Mapping sync fix**: One broken provider table returning HTTP 500 no longer aborts the whole mapping sync — core tables (anime/manga) now sync even when a provider table fails"
+  - "**Faster startup**: Auto-update check deferred 8s; image-cache cleanup batches deletes; snapshot apply removes 80k+ per-row queries"
+  - "**repo enable/disable**: Toggle extension repositories on/off; disabled repos hide but installed items remain"
+  - "**Discover provider switcher**: Provider picker left of Anime/Manga toggle; clears caches, reloads page 1"
+  - "**Description copy button**: Copy full raw text (strips `[more]`)"
+  - "**Plex & Jellyfin section**: Dedicated settings before Subtitle Customization & Appearance"
+  - "**Info page seasons**: Now includes OVA, MOVIE, and SPECIAL formats (not just TV series)"
+  - "**Changelog merge**: Merged upstream [11.2.1] entries ([manga reader overhaul](https://github.com/TheYogMehta/StrawVerse/releases/tag/v11.2.1), [mapping/Manga schema fixes](https://github.com/TheYogMehta/StrawVerse/releases/tag/v11.2.0))"
+  - "**Fixed Android bugs**: Browse button dead (missing `Swal` import), provider picker hidden (gate relaxed `> 1` → `>= 1`)"
+  - "**Version continues as 11.2.2** above upstream's 11.2.1"

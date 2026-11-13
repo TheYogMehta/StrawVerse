@@ -361,9 +361,7 @@ export default function Catalog({
   const [errorMsg, setErrorMsg] = useState(() => cache?.errorMsg || "");
   const [localTags, setLocalTags] = useState([]);
   const [tagModalMedia, setTagModalMedia] = useState(null);
-  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(
-    () => provider === "mal",
-  );
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(true);
   const [installedProvidersList, setInstalledProvidersList] = useState([]);
   const [providerMetadataList, setProviderMetadataList] = useState([]);
   const [activeProviderName, setActiveProviderName] = useState("");
@@ -552,7 +550,22 @@ export default function Catalog({
         break;
       }
     }
-    const langsBatch = type === "Anime" ? needLangs : [];
+          // Skip if cardMeta already has all the needed data (from previous filter changes)
+      if (cardMeta && Object.keys(cardMeta).length >= displayResults.length) {
+        const hasAllStatus = displayResults.every((item) => {
+          const key = getItemMetaKey(item);
+          return cardMeta[key]?.status !== null;
+        });
+        const hasAllLangs = displayResults.every((item) => {
+          const key = getItemMetaKey(item);
+          return cardMeta[key]?.langs !== null;
+        });
+        if (hasAllStatus && hasAllLangs) {
+          setCardMeta((prev) => prev);
+          return;
+        }
+      }
+      const langsBatch = type === "Anime" ? needLangs : [];
     if (!needStatus.length && !langsBatch.length) return;
 
     const timer = setTimeout(async () => {
@@ -616,7 +629,7 @@ export default function Catalog({
             ]
           : []),
       ]);
-    }, 500);
+    }, 250);
     return () => clearTimeout(timer);
   }, [displayResults, type, provider, cardMeta]);
 
@@ -2663,6 +2676,19 @@ export default function Catalog({
     discoverTab,
   ]);
 
+  const filterToggleBtn = (
+    <button
+      type="button"
+      onClick={() => setIsFilterPanelOpen((prev) => !prev)}
+      className={`filter-toggle-btn${isFilterPanelOpen ? " is-open" : ""}`}
+      title={isFilterPanelOpen ? "Collapse filters" : "Expand filters"}
+      aria-label={isFilterPanelOpen ? "Collapse filters" : "Expand filters"}
+      aria-expanded={isFilterPanelOpen}
+    >
+      <ChevronDown size={15} />
+    </button>
+  );
+
   return (
     <div ref={wrapperRef} onScroll={handleScroll} className="catalog-wrapper">
       <CatalogHeader
@@ -2743,20 +2769,25 @@ export default function Catalog({
                 </div>
               </div>
             </div>
-            {activeFilterCount > 0 && (
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="filter-reset-btn"
-                title="Clear all filters"
-              >
-                <RotateCcw size={13} />
-                <span>Reset All</span>
-              </button>
-            )}
+            <div className="filter-panel-actions">
+              {activeFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="filter-reset-btn"
+                  title="Clear all filters"
+                >
+                  <RotateCcw size={13} />
+                  <span>Reset All</span>
+                </button>
+              )}
+              {filterToggleBtn}
+            </div>
           </div>
 
-          <div className="filter-grid">
+          <div
+            className={`filter-grid${isFilterPanelOpen ? "" : " is-collapsed"}`}
+          >
             {/* 1. User Tags */}
             {localTags.length > 0 && (
               <div className="filter-group">
@@ -2918,19 +2949,24 @@ export default function Catalog({
                 )}
               </div>
             </div>
-            {activeFilterCount > 0 && (
-              <button
-                type="button"
-                onClick={handleResetFilters}
-                className="filter-reset-btn"
-                title="Clear all filters"
-              >
-                <RotateCcw size={13} />
-                <span>Reset All</span>
-              </button>
-            )}
+            <div className="filter-panel-actions">
+              {activeFilterCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="filter-reset-btn"
+                  title="Clear all filters"
+                >
+                  <RotateCcw size={13} />
+                  <span>Reset All</span>
+                </button>
+              )}
+              {filterToggleBtn}
+            </div>
           </div>
-          <div className="filter-grid">
+          <div
+            className={`filter-grid${isFilterPanelOpen ? "" : " is-collapsed"}`}
+          >
             {Object.entries(availableFilters).map(([key, filter]) => (
               <div key={key} className="filter-group">
                 <label className="filter-label">{filter.label}</label>

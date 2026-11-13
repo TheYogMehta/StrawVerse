@@ -988,6 +988,42 @@ async function downloadEpisodeByQuality(
       sourcesList = extractSources(sourcesArray, subdub);
     }
 
+    // Graceful fallback: if requested category (sub/dub/hsub) returned empty,
+    // try the other category and the unfiltered list. This handles cases where
+    // the anikoto site returns servers for a different sub-dub type than requested
+    // (e.g., episode 1 is hardsub-only, user requested softsub).
+    if ((!sourcesList || sourcesList.length === 0) && subdub) {
+      // Try opposite category (sub <-> dub <-> hsub)
+      const tryCategory =
+        subdub.toLowerCase() === "sub" ? "dub" : subdub.toLowerCase() === "dub" ? "hsub" : "sub";
+      try {
+        const fallback = await fetchEpisodeSources(provider, resolvedEpid, tryCategory);
+        const fallbackList = extractSources(fallback, tryCategory);
+        if (fallbackList && fallbackList.length > 0) {
+          logger.info(
+            `[Download] Fallback: Requested ${subdub} returned empty, used ${tryCategory} instead.`,
+          );
+          sourcesArray = fallback;
+          sourcesList = fallbackList;
+        }
+      } catch (e) {}
+    }
+
+    // Final fallback: try without any category suffix (get all servers)
+    if ((!sourcesList || sourcesList.length === 0) && resolvedEpid !== epid) {
+      try {
+        const noCategory = await fetchEpisodeSources(provider, epid, null);
+        const noCatList = extractSources(noCategory, null);
+        if (noCatList && noCatList.length > 0) {
+          logger.info(
+            `[Download] Final fallback: Requested ${subdub} returned empty, used unfiltered servers.`,
+          );
+          sourcesArray = noCategory;
+          sourcesList = noCatList;
+        }
+      } catch (e) {}
+    }
+
     // Stale queued episode IDs (e.g. anikoto session tokens expire, so a
     // task queued days ago resolves to nothing). Refresh via mapping: look
     // up the anime's current provider id, walk its episode list for the
@@ -1043,6 +1079,35 @@ async function downloadEpisodeByQuality(
       sourcesArray?.sub?.subtitles ||
       sourcesArray?.dub?.subtitles ||
       [];
+
+    // Prefer soft-sub servers when the user asked for "sub": an unfiltered
+    // fallback can return hardsub (hsub) servers whose subtitles are burned
+    // into the video frames and can't be toggled in a player.
+    if (sourcesList && sourcesList.length > 0 && subdub) {
+      const isHSub = (s) =>
+        s?.isHsub ||
+        s?.type === "hsub" ||
+        String(s?.quality || "").toLowerCase().includes("hsub");
+      const isDub = (s) =>
+        s?.isDub ||
+        s?.type === "dub" ||
+        String(s?.quality || "").toLowerCase().includes("dub");
+      const want = String(subdub).toLowerCase();
+      let preferred = [];
+      if (want === "sub") {
+        preferred = sourcesList.filter((s) => !isHSub(s) && !isDub(s));
+      } else if (want === "dub") {
+        preferred = sourcesList.filter((s) => isDub(s));
+      } else if (want === "hsub") {
+        preferred = sourcesList.filter((s) => isHSub(s));
+      }
+      if (preferred.length > 0 && preferred.length < sourcesList.length) {
+        logger.info(
+          `[Download] Using ${preferred.length}/${sourcesList.length} ${want} servers; skipping hardsub/burned-subtitle sources.`,
+        );
+        sourcesList = preferred;
+      }
+    }
 
     const Animeprovider = provider;
     const sortedSources = sortSourcesByPreferredQuality(
