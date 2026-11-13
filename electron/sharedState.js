@@ -14,6 +14,7 @@ const {
   getExtensionRepos,
   addExtensionRepo,
   removeExtensionRepo,
+  restoreDefaultExtensionRepo,
   fetchAggregatedMarketplace,
 } = require(path.join(backendDir, "utils", "settings"));
 const { getEffectiveLogDir } = require(
@@ -80,8 +81,12 @@ function registerSharedStateHandlers() {
     return await addExtensionRepo(url);
   });
 
-  ipcMain.handle("remove-extension-repo", async (event, owner) => {
-    return await removeExtensionRepo(owner);
+  ipcMain.handle("remove-extension-repo", async (event, identifier) => {
+    return await removeExtensionRepo(identifier);
+  });
+
+  ipcMain.handle("restore-default-extension-repo", async () => {
+    return await restoreDefaultExtensionRepo();
   });
 
   ipcMain.handle("get-settings", async (event, keys) => {
