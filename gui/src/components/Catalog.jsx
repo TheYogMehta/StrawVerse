@@ -361,7 +361,8 @@ export default function Catalog({
   const [errorMsg, setErrorMsg] = useState(() => cache?.errorMsg || "");
   const [localTags, setLocalTags] = useState([]);
   const [tagModalMedia, setTagModalMedia] = useState(null);
-  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(true);
+  // Filters start collapsed; the header caret expands them.
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
   const [installedProvidersList, setInstalledProvidersList] = useState([]);
   const [providerMetadataList, setProviderMetadataList] = useState([]);
   const [activeProviderName, setActiveProviderName] = useState("");

@@ -268,6 +268,12 @@ function configureExternalLogs(opts = {}) {
     if (!externalLogActive || !currentExternalLogPath) {
       currentExternalLogPath = buildSessionLogPath(dir);
     }
+    // Create this session's file before pruning so it counts toward the
+    // cap; pruning first keeps `max` old files and the new session then
+    // leaves the folder at max + 1 forever.
+    try {
+      fs.closeSync(fs.openSync(currentExternalLogPath, "a"));
+    } catch (_) {}
     if (!externalFileTransport) {
       externalFileTransport = new winston.transports.File({
         filename: currentExternalLogPath,

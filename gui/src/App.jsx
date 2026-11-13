@@ -736,19 +736,23 @@ export default function App() {
           currentView={current.view}
           setView={(view) => {
             cancelObsoleteNativeRequests();
-            if (window.catalogCache) {
-              if (view === "home") {
-                delete window.catalogCache[`Anime_local`];
-                delete window.catalogCache[`Manga_local`];
-              } else if (view === "discover") {
-                delete window.catalogCache[`Anime_provider`];
-                delete window.catalogCache[`Manga_provider`];
-              } else if (view === "filters") {
-                delete window.catalogCache[`Anime_mal`];
-                delete window.catalogCache[`Manga_mal`];
-              }
-            }
+            // Re-tapping the active view is an explicit refresh: wipe the
+            // cached list and remount. Switching TO a view keeps its cache
+            // so Discover returns to the page/scroll/filters the user was
+            // last seeing instead of restarting at page 1.
             if (view === current.view) {
+              if (window.catalogCache) {
+                if (view === "home") {
+                  delete window.catalogCache[`Anime_local`];
+                  delete window.catalogCache[`Manga_local`];
+                } else if (view === "discover") {
+                  delete window.catalogCache[`Anime_provider`];
+                  delete window.catalogCache[`Manga_provider`];
+                } else if (view === "filters") {
+                  delete window.catalogCache[`Anime_mal`];
+                  delete window.catalogCache[`Manga_mal`];
+                }
+              }
               setReloadCounter((prev) => prev + 1);
             }
             setHistory([{ view, params: {} }]);
