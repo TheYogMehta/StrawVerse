@@ -820,7 +820,14 @@ function parseExtensionRepoUrl(inputUrl) {
 
 function getExtensionRepos() {
   const customRepos = config?.custom_extension_repos;
-  const list = [DEFAULT_EXTENSION_REPO];
+  // The official repo is built fresh every call, so its enabled flag lives in
+  // its own config key; custom repos carry `enabled` on the stored entry.
+  const list = [
+    {
+      ...DEFAULT_EXTENSION_REPO,
+      enabled: config?.official_extension_repo_enabled !== false,
+    },
+  ];
   if (Array.isArray(customRepos)) {
     for (const repo of customRepos) {
       if (
@@ -828,11 +835,62 @@ function getExtensionRepos() {
         repo.owner &&
         repo.owner.toLowerCase() !== DEFAULT_EXTENSION_REPO.owner.toLowerCase()
       ) {
-        list.push(repo);
+        list.push({ ...repo, enabled: repo.enabled !== false });
       }
     }
   }
   return list;
+}
+
+async function toggleExtensionRepo(ownerOrUrl) {
+  if (!ownerOrUrl) throw new Error("Repository identifier is required.");
+
+  const isOfficial =
+    ownerOrUrl.toLowerCase() ===
+      DEFAULT_EXTENSION_REPO.owner.toLowerCase() ||
+    ownerOrUrl.toLowerCase() === DEFAULT_EXTENSION_REPO.url.toLowerCase();
+
+  if (isOfficial) {
+    const nextEnabled = config?.official_extension_repo_enabled === false;
+    config.official_extension_repo_enabled = nextEnabled;
+    await settingSave();
+    logger.info(
+      `[Marketplace] ${nextEnabled ? "Enabled" : "Disabled"} official extension repository`,
+    );
+    return {
+      success: true,
+      owner: DEFAULT_EXTENSION_REPO.owner,
+      enabled: nextEnabled,
+    };
+  }
+
+  const customList = Array.isArray(config?.custom_extension_repos)
+    ? config.custom_extension_repos
+    : [];
+  const idx = customList.findIndex((r) => {
+    if (!r) return false;
+    const owner = (r.owner || "").toLowerCase();
+    const url = (r.url || "").toLowerCase();
+    const marketUrl = (r.marketplaceUrl || "").toLowerCase();
+    const target = ownerOrUrl.toLowerCase();
+    return owner === target || url === target || marketUrl === target;
+  });
+  if (idx === -1) {
+    throw new Error(`Repository '${ownerOrUrl}' not found in custom repositories.`);
+  }
+
+  const nextEnabled = !(customList[idx].enabled !== false);
+  customList[idx] = { ...customList[idx], enabled: nextEnabled };
+  config.custom_extension_repos = customList;
+  await settingSave();
+  logger.info(
+    `[Marketplace] ${nextEnabled ? "Enabled" : "Disabled"} custom extension repo: @${customList[idx].owner}`,
+  );
+  return {
+    success: true,
+    owner: customList[idx].owner,
+    enabled: nextEnabled,
+  };
 }
 
 async function addExtensionRepo(inputUrl) {
@@ -959,6 +1017,10 @@ async function fetchAggregatedMarketplace(activeType = "Anime") {
           repoBaseUrl: repo.rawBaseUrl,
           uniqueId: `${repo.owner}/${item.name}`,
           isDefaultRepo: !!repo.isDefault,
+          // A disabled repo's items are still returned (so an extension
+          // installed from it stays visible and removable in the UI) — the
+          // frontend hides them unless they are actually installed.
+          repoEnabled: repo.enabled !== false,
         }));
       } catch (err) {
         logger.warn(
@@ -2016,6 +2078,7 @@ module.exports = {
   getExtensionRepos,
   addExtensionRepo,
   removeExtensionRepo,
+  toggleExtensionRepo,
   fetchAggregatedMarketplace,
   parseExtensionRepoUrl,
   getDefaultExtensionRepo: () => DEFAULT_EXTENSION_REPO,

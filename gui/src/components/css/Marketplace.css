@@ -561,9 +561,80 @@
   background: rgba(239, 68, 68, 0.15);
 }
 
+.repo-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.repo-item-card.disabled {
+  opacity: 0.55;
+}
+
+.repo-item-card.disabled .repo-item-url {
+  color: var(--text-muted);
+}
+
+.market-repo-badge.disabled {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.4);
+  color: #f87171;
+}
+
+/* Enable / disable switch for extension repositories */
+.repo-toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  border-radius: 20px;
+  border: 1px solid rgba(16, 185, 129, 0.5);
+  background: rgba(16, 185, 129, 0.25);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: var(--transition);
+}
+
+.repo-toggle .repo-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 18px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #34d399;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.repo-toggle.off {
+  border-color: var(--border);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.repo-toggle.off .repo-toggle-knob {
+  left: 2px;
+  background: var(--text-muted);
+}
+
+.repo-toggle:hover {
+  transform: scale(1.06);
+}
+
+.repo-modal-hint {
+  margin: 0;
+  flex: 1;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  text-align: left;
+}
+
 .repo-modal-footer {
   padding: 16px 24px;
   border-top: 1px solid var(--border);
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
 }

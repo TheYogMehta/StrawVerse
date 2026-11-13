@@ -63,6 +63,7 @@ export default function CatalogGrid({
   handlePageChange,
   handleRemoveFromLibrary,
   getItemTagInfo,
+  getCardMeta,
   onOpenTagModal,
 }) {
   const [loadingStatusText, setLoadingStatusText] = useState("");
@@ -279,6 +280,32 @@ export default function CatalogGrid({
                   )
                 )}
               </div>
+
+              {/* Airing status + sub/dub strip along the poster bottom */}
+              {(() => {
+                const meta = getCardMeta ? getCardMeta(item) : null;
+                if (!meta) return null;
+                return (
+                  <div className="card-foot-badges">
+                    {meta.status && (
+                      <span
+                        className={`foot-badge status-${meta.status.kind}`}
+                        title="Airing status"
+                      >
+                        {meta.status.label}
+                      </span>
+                    )}
+                    {meta.langs && (
+                      <span
+                        className="foot-badge langs-badge"
+                        title="Available audio"
+                      >
+                        {meta.langs}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="card-info">

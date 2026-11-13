@@ -167,6 +167,17 @@
   .search-form {
     width: 100%;
   }
+  .header-right-section {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  /* On mobile the Anime/Manga toggle flex-grows (mobile.css), so let the
+     provider picker share the row instead of being squeezed out. */
+  .discover-provider-select {
+    flex: 1 1 150px;
+    max-width: none;
+    min-width: 0;
+  }
 }
 
 .search-and-filter-wrapper {
@@ -767,6 +778,71 @@ html[style*="--catalog-columns: 12"] .img-container {
   text-overflow: ellipsis;
 }
 
+/* Status + sub/dub strip along the bottom of the poster */
+.card-foot-badges {
+  position: absolute;
+  left: var(--corner-offset, 4px);
+  right: var(--corner-offset, 4px);
+  bottom: var(--corner-offset, 4px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  z-index: 2;
+  pointer-events: none;
+  max-width: calc(100% - (var(--corner-offset, 4px) * 2));
+}
+
+.card-foot-badges .foot-badge {
+  background-color: rgba(15, 15, 20, 0.88);
+  color: #fff;
+  font-size: var(--badge-font-size, 11px);
+  font-weight: 700;
+  padding: var(--badge-padding-v, 4px) var(--badge-padding-h, 8px);
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  display: inline-flex;
+  align-items: center;
+  gap: clamp(2px, 1cqw, 4px);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  line-height: 1;
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-foot-badges .foot-badge.status-airing {
+  border-color: rgba(52, 211, 153, 0.55);
+  color: #34d399;
+}
+
+.card-foot-badges .foot-badge.status-complete {
+  border-color: rgba(96, 165, 250, 0.55);
+  color: #60a5fa;
+}
+
+.card-foot-badges .foot-badge.status-upcoming {
+  border-color: rgba(251, 191, 36, 0.55);
+  color: #fbbf24;
+}
+
+.card-foot-badges .foot-badge.status-hiatus {
+  border-color: rgba(192, 132, 252, 0.55);
+  color: #c084fc;
+}
+
+.card-foot-badges .foot-badge.status-cancelled {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #f87171;
+}
+
+.card-foot-badges .foot-badge.langs-badge {
+  color: #e5e7eb;
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
 .indicator-badge.schedule-badge {
   background-color: rgba(15, 15, 20, 0.88);
   border: 1px solid rgba(52, 211, 153, 0.5);
@@ -1213,6 +1289,46 @@ html[style*="--catalog-columns: 12"] .img-container {
   border: 1px solid var(--border);
   align-items: center;
   justify-self: end;
+}
+
+/* Discover header right column: provider picker left of the Anime/Manga toggle */
+.header-right-section {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.discover-provider-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--bg-secondary);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  color: var(--text-main);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 7px 30px 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  max-width: 210px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  transition: all 0.2s ease;
+}
+
+.discover-provider-select:hover {
+  border-color: var(--accent);
+}
+
+.discover-provider-select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
 .market-tab-btn {

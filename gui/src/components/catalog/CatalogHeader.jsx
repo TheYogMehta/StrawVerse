@@ -12,7 +12,33 @@ export default function CatalogHeader({
   onTypeChange,
   showTypeToggle = true,
   catalogSource = "mal",
+  installedProviders = [],
+  activeProvider = "",
+  onProviderChange,
 }) {
+  // Discover only: a provider picker sitting directly left of the
+  // Anime/Manga toggle, listing the extensions installed for this type.
+  const providerChoices = Array.isArray(installedProviders)
+    ? [...installedProviders]
+    : [];
+  if (activeProvider && !providerChoices.includes(activeProvider)) {
+    providerChoices.unshift(activeProvider);
+  }
+  // Show whenever at least one provider exists — with a single provider the
+  // picker still shows the active extension (it becomes a switcher as soon as
+  // more are installed), which is how Android surfaces it too.
+  const showProviderPicker =
+    provider === "provider" &&
+    typeof onProviderChange === "function" &&
+    providerChoices.length >= 1;
+
+  const providerLabel = (value) => {
+    const clean = String(value).replace(/^@/, "");
+    if (!clean.includes("/")) return clean;
+    const [owner, name] = clean.split("/");
+    return `${name} (@${owner})`;
+  };
+
   return (
     <header className="catalog-header">
       <div className="header-left-section">
@@ -60,31 +86,49 @@ export default function CatalogHeader({
         </div>
       </div>
 
-      {showTypeToggle && (
-        <div className="market-tabs-wrapper">
-          <button
-            type="button"
-            onClick={() => onTypeChange && onTypeChange("Anime")}
-            className={`market-tab-btn ${type === "Anime" ? "active" : ""}`}
+      <div className="header-right-section">
+        {showProviderPicker && (
+          <select
+            className="discover-provider-select"
+            value={activeProvider || providerChoices[0]}
+            onChange={(e) => onProviderChange(e.target.value)}
+            aria-label="Change active provider"
+            title="Choose which extension provider Discover uses"
           >
-            Anime
-          </button>
-          <button
-            type="button"
-            onClick={() => onTypeChange && onTypeChange("Manga")}
-            className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
-          >
-            Manga
-          </button>
-          <button
-            type="button"
-            onClick={() => onTypeChange && onTypeChange("Movies")}
-            className={`market-tab-btn ${type === "Movies" ? "active" : ""}`}
-          >
-            Movies & Series
-          </button>
-        </div>
-      )}
+            {providerChoices.map((value) => (
+              <option key={value} value={value}>
+                {providerLabel(value)}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {showTypeToggle && (
+          <div className="market-tabs-wrapper">
+            <button
+              type="button"
+              onClick={() => onTypeChange && onTypeChange("Anime")}
+              className={`market-tab-btn ${type === "Anime" ? "active" : ""}`}
+            >
+              Anime
+            </button>
+            <button
+              type="button"
+              onClick={() => onTypeChange && onTypeChange("Manga")}
+              className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
+            >
+              Manga
+            </button>
+            <button
+              type="button"
+              onClick={() => onTypeChange && onTypeChange("Movies")}
+              className={`market-tab-btn ${type === "Movies" ? "active" : ""}`}
+            >
+              Movies & Series
+            </button>
+          </div>
+        )}
+      </div>
     </header>
   );
 }

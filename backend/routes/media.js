@@ -41,6 +41,7 @@ const {
 } = require("../utils/mappingResolver");
 const { sanitizeFolderName, getUserDataPath } = require("../utils/constants");
 const { getDownloadsFolder } = require("../utils/DirectoryMaker");
+const { fetchStatuses } = require("../utils/anilistExtras");
 
 const router = express.Router();
 
@@ -104,6 +105,71 @@ function cleanBaseTitle(title) {
     .trim();
 }
 
+// A status only counts when we actually know it: "Unknown"/empty placeholders
+// written by the mapping sync are treated as "no status".
+function hasKnownStatus(value) {
+  if (value === null || value === undefined) return false;
+  const v = String(value).trim();
+  return !!v && !/^(unknown|tbd|n\/a|-)$/i.test(v);
+}
+
+// Airing/publishing status straight from the local + mapping databases, i.e.
+// the extension side. Used for cards with no MAL id (AniList can never answer
+// for them) and as a fallback when the AniList lookup fails, so a card is
+// never left without a badge when the provider/mapping data knows the status.
+async function statusFromDbs(item, isAnime) {
+  if (hasKnownStatus(item?.status)) return item.status;
+  const mediaWord = isAnime ? "Anime" : "Manga";
+
+  // 1. Local library row for this provider id.
+  if (item?.id && global.db) {
+    try {
+      const row = await global.db
+        .prepare(`SELECT status FROM ${mediaWord} WHERE id = ?`)
+        .get(String(item.id));
+      if (hasKnownStatus(row?.status)) return row.status;
+    } catch (_) {}
+  }
+
+  if (!global.mappingDb || !item) return null;
+
+  // 2. Unmapped provider rows (status persisted when the provider page was read).
+  const seg = String(item.provider || "")
+    .toLowerCase()
+    .split("/")
+    .pop();
+  const itemId = item.id != null ? String(item.id) : null;
+  try {
+    if (seg && itemId) {
+      const row = await global.mappingDb
+        .prepare(
+          "SELECT status FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider LIKE ?) AND id = ? AND media_type = ? LIMIT 1",
+        )
+        .get(seg, `@%/${seg}`, `%/${seg}`, itemId, mediaWord);
+      if (hasKnownStatus(row?.status)) return row.status;
+    }
+    if (itemId) {
+      const row = await global.mappingDb
+        .prepare(
+          "SELECT status FROM unmapped_items WHERE id = ? AND media_type = ? LIMIT 1",
+        )
+        .get(itemId, mediaWord);
+      if (hasKnownStatus(row?.status)) return row.status;
+    }
+    const name = String(item.title || "").trim();
+    if (name) {
+      const row = await global.mappingDb
+        .prepare(
+          "SELECT status FROM unmapped_items WHERE LOWER(TRIM(name)) = LOWER(?) AND media_type = ? LIMIT 1",
+        )
+        .get(name, mediaWord);
+      if (hasKnownStatus(row?.status)) return row.status;
+    }
+  } catch (_) {}
+
+  return null;
+}
+
 async function enrichResultsWithMappingImages(results, AnimeManga) {
   if (!results || !Array.isArray(results) || results.length === 0) {
     return results;
@@ -127,10 +193,13 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
       try {
         const table = isAnime ? "Anime" : "Manga";
         const row = await global.db
-          .prepare(`SELECT MalID FROM ${table} WHERE id = ?`)
+          .prepare(`SELECT MalID, status FROM ${table} WHERE id = ?`)
           .get(String(item.id));
         if (row && row.MalID) {
           malid = parseInt(row.MalID);
+        }
+        if (!hasKnownStatus(item.status) && hasKnownStatus(row?.status)) {
+          item.status = row.status;
         }
       } catch (_) {}
     }
@@ -203,11 +272,14 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
             }
             const row = await global.mappingDb
               .prepare(
-                `SELECT malid, image_url FROM ${malTable} WHERE title LIKE ? ${orderSql} LIMIT 1`,
+                `SELECT malid, image_url, status FROM ${malTable} WHERE title LIKE ? ${orderSql} LIMIT 1`,
               )
               .get(`${baseClean}%`);
             if (row && row.malid) {
               malid = parseInt(row.malid);
+            }
+            if (!hasKnownStatus(item.status) && hasKnownStatus(row?.status)) {
+              item.status = row.status;
             }
           }
         } catch (_) {}
@@ -222,8 +294,8 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
           const imgRow = await global.mappingDb
             .prepare(
               isAnime
-                ? "SELECT image_url, genres FROM anime WHERE malid = ? LIMIT 1"
-                : "SELECT image_url, genres FROM manga WHERE malid = ? LIMIT 1",
+                ? "SELECT image_url, genres, status FROM anime WHERE malid = ? LIMIT 1"
+                : "SELECT image_url, genres, status FROM manga WHERE malid = ? LIMIT 1",
             )
             .get(malid);
           if (imgRow && imgRow.image_url) {
@@ -231,6 +303,9 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
           }
           if (imgRow && imgRow.genres && !item.genres) {
             item.genres = imgRow.genres;
+          }
+          if (!hasKnownStatus(item.status) && hasKnownStatus(imgRow?.status)) {
+            item.status = imgRow.status;
           }
         } catch (_) {}
       }
@@ -258,6 +333,15 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
           } catch (_) {}
         }
       }
+    }
+
+    // Provider/extension fallback for anything still without a known status:
+    // local library row + mapping DB rows for this provider id / title.
+    if (!hasKnownStatus(item.status)) {
+      try {
+        const status = await statusFromDbs(item, isAnime);
+        if (status) item.status = status;
+      } catch (_) {}
     }
 
     if (!item.mal_image && global.mappingDb && (item.id || item.title)) {
@@ -3211,6 +3295,23 @@ router.post(
       }
 
       if (!data?.id) throw new Error(`No ${AnimeManga} Found with id '${id}'`);
+
+      // Extension-side status fallback for the title-row badge when AniList
+      // extras have nothing to say about this title.
+      if (!hasKnownStatus(data.status)) {
+        try {
+          const dbStatus = await statusFromDbs(
+            {
+              provider: data.provider || provider || null,
+              id: data.id || id,
+              title: data.title || null,
+            },
+            AnimeManga === "Anime",
+          );
+          if (dbStatus) data.status = dbStatus;
+        } catch (_) {}
+      }
+
       return res.json(data);
     } catch (err) {
       logger.error(
@@ -3235,6 +3336,199 @@ router.post(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// Bulk card metadata for Discover / Seasons / Recommendations cards:
+//   { [malid]: { status, langs } }
+// status comes from AniList (one batched request), langs from the provider's
+// episode list (anime only, small worker pool, cached so cards stay cheap).
+// The two lookups can be requested separately (includeStatus / includeLangs:
+// false) so the GUI can paint status badges without waiting on the slow
+// provider episode fetches.
+// ---------------------------------------------------------------------------
+const bulkLangsCache = new Map();
+const BULK_META_TTL = 15 * 60 * 1000;
+const BULK_META_MAX_ITEMS = 24;
+const BULK_META_CONCURRENCY = 2;
+
+async function runPool(items, limit, worker) {
+  const queue = [...items];
+  const size = Math.max(1, Math.min(limit, queue.length));
+  await Promise.all(
+    Array.from({ length: size }, async () => {
+      while (queue.length) {
+        const item = queue.shift();
+        try {
+          await worker(item);
+        } catch (_) {}
+      }
+    }),
+  );
+}
+
+// Extract the distinct audio languages out of a provider episode page.
+function langsFromEpisodes(episodes) {
+  const found = new Set();
+  for (const ep of episodes || []) {
+    if (Array.isArray(ep?.langs)) {
+      ep.langs.forEach((l) => found.add(String(l).toLowerCase()));
+    } else if (ep?.lang) {
+      found.add(String(ep.lang).toLowerCase());
+    } else {
+      const suffix = String(ep?.id || "").match(/-(sub|dub|hsub|both)$/);
+      if (suffix) found.add(suffix[1]);
+    }
+  }
+  return found.size ? [...found] : null;
+}
+
+function cacheBulkLangs(key, langs) {
+  if (bulkLangsCache.size > 500) {
+    const oldest = bulkLangsCache.keys().next().value;
+    if (oldest !== undefined) bulkLangsCache.delete(oldest);
+  }
+  bulkLangsCache.set(key, { expires: Date.now() + BULK_META_TTL, langs });
+}
+
+async function resolveBulkLangs(malid) {
+  const key = `Anime:${malid}`;
+  const hit = bulkLangsCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.langs;
+
+  let langs = null;
+  try {
+    const setting = await settingfetch();
+    const preferred = (setting?.Animeprovider || "pahe").toLowerCase();
+    const best = await getBestProviderForMalId(malid, "Anime", preferred);
+    if (best?.id && best?.provider) {
+      const providerObj = await providerFetch("Anime", best.provider);
+      const data = await fetchEpisode(providerObj, best.id, 1);
+      langs = langsFromEpisodes(data?.episodes);
+    }
+  } catch (_) {
+    langs = null;
+  }
+
+  cacheBulkLangs(key, langs);
+  return langs;
+}
+
+// Extension-side variant: the card already carries the provider name + provider
+// id it came from, so its episode list can be read straight from the extension
+// even when there is no MAL id to resolve.
+async function resolveProviderLangs(providerName, itemId) {
+  const key = `P:${String(providerName || "").toLowerCase()}:${itemId}`;
+  const hit = bulkLangsCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.langs;
+
+  let langs = null;
+  try {
+    const providerObj = await providerFetch("Anime", providerName);
+    const data = await fetchEpisode(providerObj, itemId, 1);
+    langs = langsFromEpisodes(data?.episodes);
+  } catch (_) {
+    langs = null;
+  }
+
+  cacheBulkLangs(key, langs);
+  return langs;
+}
+
+// POST /api/info/bulk-meta  { type, items: [{ malid } | { key, provider, id, title }], includeStatus?, includeLangs? }
+// Defaults: both true. Pass includeLangs:false for a fast status-only pass
+// (one batched AniList call) or includeStatus:false for the slow provider
+// episode-language pass, so status badges aren't held up by episode fetches.
+// Every entry may carry the provider name + provider id it came from, so cards
+// without a MAL id are still answered from the extension side: status from the
+// local/mapping databases, languages from the provider's own episode list.
+// Responses are keyed by the entry's `key` (the card's own cache key), which
+// for MAL-id-only callers is just the MAL id as before.
+router.post("/api/info/bulk-meta", async (req, res) => {
+  const { type, items } = req.body || {};
+  const isManga = type === "Manga";
+  const wantLangs = !isManga && req.body.includeLangs !== false;
+  const wantStatus = req.body.includeStatus !== false;
+
+  const entries = [];
+  const seen = new Set();
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it) continue;
+    const rawMalid = Number(it.malid);
+    const malid = Number.isInteger(rawMalid) && rawMalid > 0 ? rawMalid : null;
+    const provider = it.provider ? String(it.provider) : null;
+    const itemId = it.id !== undefined && it.id !== null ? String(it.id) : null;
+    const key =
+      it.key !== undefined && it.key !== null
+        ? String(it.key)
+        : malid !== null
+          ? String(malid)
+          : provider && itemId
+            ? `p:${provider}:${itemId}`
+            : null;
+    if (!key || seen.has(key)) continue;
+    if (malid === null && !(provider && itemId)) continue;
+    seen.add(key);
+    entries.push({
+      key,
+      malid,
+      provider,
+      id: itemId,
+      title: it.title ? String(it.title) : null,
+    });
+  }
+
+  entries.length = Math.min(entries.length, BULK_META_MAX_ITEMS);
+
+  if (!entries.length || (!wantLangs && !wantStatus)) {
+    return res.json({ meta: {} });
+  }
+
+  const meta = {};
+  for (const e of entries) meta[e.key] = { status: null, langs: null };
+
+  if (wantStatus) {
+    const malids = entries.filter((e) => e.malid !== null).map((e) => e.malid);
+    if (malids.length) {
+      try {
+        const statuses = await fetchStatuses(
+          malids,
+          isManga ? "MANGA" : "ANIME",
+        );
+        for (const e of entries) {
+          if (e.malid === null) continue;
+          if (statuses[e.malid]) meta[e.key].status = statuses[e.malid];
+        }
+      } catch (err) {
+        logger.warn(`[bulk-meta] status lookup failed: ${err.message}`);
+      }
+    }
+    // Provider/mapping fallback for entries AniList could not answer (no MAL
+    // id, unmapped, or a failed lookup).
+    const missing = entries.filter((e) => !meta[e.key].status);
+    if (missing.length) {
+      await runPool(missing, BULK_META_CONCURRENCY, async (e) => {
+        try {
+          const status = await statusFromDbs(
+            { provider: e.provider, id: e.id, title: e.title },
+            !isManga,
+          );
+          if (status) meta[e.key].status = status;
+        } catch (_) {}
+      });
+    }
+  }
+
+  if (wantLangs) {
+    await runPool(entries, BULK_META_CONCURRENCY, async (e) => {
+      meta[e.key].langs =
+        e.malid !== null
+          ? await resolveBulkLangs(e.malid)
+          : await resolveProviderLangs(e.provider, e.id);
+    });
+  }
+
+  res.json({ meta });
+});
 
 // Fetches Anime Episodes, Movies/Series Episodes, or Manga Chapters
 router.post("/api/info/items", async (req, res) => {

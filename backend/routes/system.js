@@ -194,6 +194,16 @@ router.delete("/api/marketplace/repos/:owner", async (req, res) => {
   }
 });
 
+router.post("/api/marketplace/repos/:owner/toggle", async (req, res) => {
+  try {
+    const { toggleExtensionRepo } = require("../utils/settings");
+    const result = await toggleExtensionRepo(req.params.owner);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // Extensions API (Add / Delete / Reload)
 router.post("/api/extensions", async (req, res) => {
   try {

@@ -18,6 +18,8 @@ import {
   RotateCcw,
   Copy,
   Check,
+  Captions,
+  Mic,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
@@ -27,6 +29,7 @@ import {
   getMalStatusOptions,
   getMalStatusLabel,
 } from "../utils/common";
+import { normalizeStatus, formatAudioLangs } from "../utils/mediaBadges";
 import Dropdown from "./common/Dropdown";
 import "./css/InfoView.css";
 
@@ -1433,6 +1436,22 @@ export default function InfoView({
     fetchDetails(true);
   }, [id, type, localMalProvider]);
 
+  // Airing status for the title row. The backend fills details.status from
+  // AniList first and falls back to the local/mapping DBs (extension side).
+  const statusBadge = useMemo(
+    () => normalizeStatus(details?.status, type),
+    [details?.status, type],
+  );
+
+  // "SUB" / "SUB & DUB" from the languages of the loaded episode list
+  const audioLangsLabel = useMemo(() => {
+    if (type !== "Anime") return null;
+    const merged = new Set();
+    for (const item of episodesOrChapters) {
+      getItemLangs(item, details, dubSelect).forEach((l) => merged.add(l));
+    }
+    return formatAudioLangs([...merged]) || "SUB";
+  }, [type, episodesOrChapters, details, dubSelect]);
   useEffect(() => {
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
       const handleDownloadComplete = (data) => {
@@ -3101,6 +3120,35 @@ export default function InfoView({
             {details?.type && (
               <span className="info-tag-meta">
                 {details.type.toUpperCase()}
+              </span>
+            )}
+            {statusBadge && (
+              <span
+                className={`info-tag-status status-${statusBadge.kind}`}
+                title="Airing status"
+              >
+                <span className="status-dot" />
+                {statusBadge.label}
+              </span>
+            )}
+            {audioLangsLabel && (
+              <span
+                className="info-tag-langs"
+                title={
+                  audioLangsLabel === "SUB & DUB"
+                    ? "Subtitled and dubbed"
+                    : audioLangsLabel === "DUB"
+                      ? "Dubbed only"
+                      : "Subtitled only"
+                }
+              >
+                {audioLangsLabel === "DUB" ? (
+                  <Mic size={12} />
+                ) : (
+                  <Captions size={12} />
+                )}
+                {audioLangsLabel === "SUB & DUB" && <Mic size={12} />}
+                {audioLangsLabel}
               </span>
             )}
             {details?.nextEpisodeIn && (

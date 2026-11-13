@@ -576,6 +576,25 @@
   }
 
   /* ---------------------------------------------------------------- */
+  /* Discover filter panel: two dropdowns per row on narrow screens */
+  /* ---------------------------------------------------------------- */
+  html .filter-panel {
+    gap: 10px !important;
+    padding: 12px !important;
+    margin-bottom: 16px !important;
+  }
+
+  html .filter-group {
+    flex: 1 1 calc(50% - 10px) !important;
+    min-width: 0 !important;
+  }
+
+  html .filter-select {
+    width: 100% !important;
+    min-height: 44px !important;
+  }
+
+  /* ---------------------------------------------------------------- */
   /* General touch ergonomics                                          */
   /* ---------------------------------------------------------------- */
   html *,
