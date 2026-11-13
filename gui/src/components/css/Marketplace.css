@@ -437,6 +437,24 @@
   filter: brightness(1.15);
 }
 
+.repo-filter-select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: var(--transition);
+}
+
+.repo-filter-select:hover,
+.repo-filter-select:focus {
+  border-color: var(--accent);
+}
+
 .market-card-title-row {
   display: flex;
   align-items: center;

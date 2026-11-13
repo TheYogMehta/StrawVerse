@@ -737,8 +737,10 @@ function validateExtensionSafety(code, repoOwner = "TheYogMehta") {
 }
 
 const DEFAULT_EXTENSION_REPO = {
+  id: "TheYogMehta/extensions",
   owner: "TheYogMehta",
-  name: "Official Extensions",
+  name: "extensions",
+  displayName: "Official Extensions",
   url: "https://github.com/TheYogMehta/extensions",
   marketplaceUrl:
     "https://raw.githubusercontent.com/TheYogMehta/extensions/refs/heads/main/marketplace.json",
@@ -751,11 +753,13 @@ function parseExtensionRepoUrl(inputUrl) {
   if (!inputUrl || typeof inputUrl !== "string") {
     throw new Error("Repository URL cannot be empty.");
   }
-  const cleanUrl = inputUrl.trim();
+  let cleanUrl = inputUrl.trim();
 
-  // Pattern 1: GitHub repository URL (e.g., https://github.com/owner/repo)
-  const ghRepoMatch = cleanUrl.match(
-    /^https?:\/\/github\.com\/([a-zA-Z0-9_\-]+)\/([a-zA-Z0-9_\-]+)(?:\.git|\/tree\/([a-zA-Z0-9_\-]+)|\/)?$/,
+  // Pattern 1: GitHub repository URL (e.g. https://github.com/owner/repo or https://github.com/owner/repo/tree/branch)
+  // Strip trailing slashes and .git
+  const normalizedGh = cleanUrl.replace(/\.git\/?$/i, "").replace(/\/+$/, "");
+  const ghRepoMatch = normalizedGh.match(
+    /^https?:\/\/github\.com\/([a-zA-Z0-9_\-]+)\/([a-zA-Z0-9_\-]+)(?:\/tree\/([a-zA-Z0-9_\-]+))?$/i,
   );
   if (ghRepoMatch) {
     const owner = ghRepoMatch[1];
@@ -763,12 +767,16 @@ function parseExtensionRepoUrl(inputUrl) {
     const branch = ghRepoMatch[3] || "main";
     const rawBaseUrl = `https://raw.githubusercontent.com/${owner}/${repoName}/${branch}`;
     return {
+      id: `${owner}/${repoName}`,
       owner,
       name: repoName,
-      url: cleanUrl,
+      branch,
+      url: normalizedGh,
       rawBaseUrl,
       marketplaceUrl: `${rawBaseUrl}/marketplace.json`,
-      isDefault: owner.toLowerCase() === "theyogmehta",
+      isDefault:
+        owner.toLowerCase() === "theyogmehta" &&
+        repoName.toLowerCase() === "extensions",
     };
   }
 
@@ -779,24 +787,33 @@ function parseExtensionRepoUrl(inputUrl) {
   if (ghRawMatch) {
     const owner = ghRawMatch[1];
     const repoName = ghRawMatch[2];
+    const branch = ghRawMatch[3] || "main";
     const rawBaseUrl = cleanUrl.replace(/\/marketplace\.json$/i, "");
     return {
+      id: `${owner}/${repoName}`,
       owner,
       name: repoName,
-      url: cleanUrl,
+      branch,
+      url: `https://github.com/${owner}/${repoName}`,
       rawBaseUrl,
       marketplaceUrl: cleanUrl,
-      isDefault: owner.toLowerCase() === "theyogmehta",
+      isDefault:
+        owner.toLowerCase() === "theyogmehta" &&
+        repoName.toLowerCase() === "extensions",
     };
   }
 
   // Pattern 3: Generic raw marketplace.json URL
   if (cleanUrl.endsWith("/marketplace.json") || cleanUrl.endsWith(".json")) {
     let owner = "custom";
+    let name = "community-repo";
     try {
       const parsed = new URL(cleanUrl);
       const segs = parsed.pathname.split("/").filter(Boolean);
       if (segs.length >= 2) {
+        owner = segs[0];
+        name = segs[1];
+      } else if (segs.length === 1) {
         owner = segs[0];
       } else {
         owner = parsed.hostname.split(".")[0];
@@ -804,8 +821,9 @@ function parseExtensionRepoUrl(inputUrl) {
     } catch (_) {}
     const rawBaseUrl = cleanUrl.substring(0, cleanUrl.lastIndexOf("/"));
     return {
+      id: `${owner}/${name}`,
       owner,
-      name: "community-repo",
+      name,
       url: cleanUrl,
       rawBaseUrl,
       marketplaceUrl: cleanUrl,
@@ -819,39 +837,95 @@ function parseExtensionRepoUrl(inputUrl) {
 }
 
 function getExtensionRepos() {
-  const customRepos = config?.custom_extension_repos;
-  const list = [DEFAULT_EXTENSION_REPO];
-  if (Array.isArray(customRepos)) {
-    for (const repo of customRepos) {
-      if (
-        repo &&
-        repo.owner &&
-        repo.owner.toLowerCase() !== DEFAULT_EXTENSION_REPO.owner.toLowerCase()
-      ) {
-        list.push(repo);
+  if (Array.isArray(config?.extension_repos)) {
+    return config.extension_repos;
+  }
+
+  // Backward compatibility with config.custom_extension_repos
+  if (Array.isArray(config?.custom_extension_repos)) {
+    const list = [];
+    if (!config?.default_repo_removed) {
+      list.push(DEFAULT_EXTENSION_REPO);
+    }
+    for (const r of config.custom_extension_repos) {
+      if (r && r.owner && r.url) {
+        const repoObj = {
+          id: r.id || `${r.owner}/${r.name || "repo"}`,
+          owner: r.owner,
+          name: r.name || "repo",
+          url: r.url,
+          rawBaseUrl: r.rawBaseUrl,
+          marketplaceUrl: r.marketplaceUrl,
+          isDefault: !!r.isDefault,
+        };
+        if (
+          !list.some(
+            (existing) =>
+              (existing.id || existing.url).toLowerCase() ===
+              (repoObj.id || repoObj.url).toLowerCase(),
+          )
+        ) {
+          list.push(repoObj);
+        }
       }
     }
+    return list;
   }
-  return list;
+
+  return [DEFAULT_EXTENSION_REPO];
 }
 
 async function addExtensionRepo(inputUrl) {
   const parsed = parseExtensionRepoUrl(inputUrl);
 
   const currentRepos = getExtensionRepos();
-  const exists = currentRepos.some(
-    (r) =>
-      r.owner.toLowerCase() === parsed.owner.toLowerCase() ||
-      r.marketplaceUrl.toLowerCase() === parsed.marketplaceUrl.toLowerCase(),
-  );
+  const exists = currentRepos.some((r) => {
+    const rId = (r.id || `${r.owner}/${r.name}`).toLowerCase();
+    const pId = (parsed.id || `${parsed.owner}/${parsed.name}`).toLowerCase();
+    const rMarketplace = (r.marketplaceUrl || "").toLowerCase();
+    const pMarketplace = (parsed.marketplaceUrl || "").toLowerCase();
+    const rUrl = (r.url || "").toLowerCase();
+    const pUrl = (parsed.url || "").toLowerCase();
+    return rId === pId || rMarketplace === pMarketplace || rUrl === pUrl;
+  });
   if (exists) {
     throw new Error(
-      `Repository '@${parsed.owner}' (or this marketplace URL) is already added.`,
+      `Repository '${parsed.id || parsed.name}' is already added.`,
     );
   }
 
   // Validate that marketplace.json exists and is valid
-  const res = await httpGetText(parsed.marketplaceUrl, 10000);
+  let res = null;
+  try {
+    res = await httpGetText(parsed.marketplaceUrl, 10000);
+  } catch (err) {
+    // If branch was main and failed, attempt fallback to master branch
+    if (parsed.branch === "main" && parsed.rawBaseUrl) {
+      const masterRawBase = parsed.rawBaseUrl.replace(/\/main$/, "/master");
+      const masterMarketplace = `${masterRawBase}/marketplace.json`;
+      try {
+        const masterRes = await httpGetText(masterMarketplace, 10000);
+        if (masterRes && !masterRes.includes("404: Not Found")) {
+          res = masterRes;
+          parsed.branch = "master";
+          parsed.rawBaseUrl = masterRawBase;
+          parsed.marketplaceUrl = masterMarketplace;
+        }
+      } catch (_) {}
+    }
+    if (!res) {
+      throw new Error(
+        `Failed to fetch marketplace.json from repository: ${err.message}`,
+      );
+    }
+  }
+
+  if (res && res.includes("404: Not Found")) {
+    throw new Error(
+      "Repository marketplace.json not found (HTTP 404). Please ensure the repository contains a valid marketplace.json.",
+    );
+  }
+
   let json = null;
   try {
     json = JSON.parse(res);
@@ -873,11 +947,9 @@ async function addExtensionRepo(inputUrl) {
     );
   }
 
-  const customList = Array.isArray(config?.custom_extension_repos)
-    ? [...config.custom_extension_repos]
-    : [];
-  customList.push(parsed);
-  config.custom_extension_repos = customList;
+  const updatedRepos = [...currentRepos, parsed];
+  config.extension_repos = updatedRepos;
+  config.custom_extension_repos = updatedRepos.filter((r) => !r.isDefault);
   await settingSave();
 
   const animeCount = json.Anime?.length || 0;
@@ -885,48 +957,85 @@ async function addExtensionRepo(inputUrl) {
   const moviesCount =
     json["movies-tvshows"]?.length || json.Movies?.length || 0;
   logger.info(
-    `[Marketplace] Added custom extension repo: @${parsed.owner} (${animeCount} anime, ${mangaCount} manga, ${moviesCount} movies-tvshows)`,
+    `[Marketplace] Added extension repo: ${parsed.id || parsed.name} (${animeCount} anime, ${mangaCount} manga, ${moviesCount} movies-tvshows)`,
   );
 
   return {
     success: true,
     repo: parsed,
+    repos: updatedRepos,
     stats: { anime: animeCount, manga: mangaCount, movies: moviesCount },
   };
 }
 
-async function removeExtensionRepo(ownerOrUrl) {
-  if (!ownerOrUrl) throw new Error("Repository identifier is required.");
-  if (
-    ownerOrUrl.toLowerCase() === DEFAULT_EXTENSION_REPO.owner.toLowerCase() ||
-    ownerOrUrl.toLowerCase() === DEFAULT_EXTENSION_REPO.url.toLowerCase()
-  ) {
+async function removeExtensionRepo(identifier) {
+  if (!identifier) throw new Error("Repository identifier is required.");
+  const currentRepos = getExtensionRepos();
+  const idLower = String(identifier).toLowerCase().trim();
+
+  const filtered = currentRepos.filter((r) => {
+    const rId = (r.id || `${r.owner}/${r.name}`).toLowerCase();
+    const rUrl = (r.url || "").toLowerCase();
+    const rMarketplace = (r.marketplaceUrl || "").toLowerCase();
+    const rOwner = (r.owner || "").toLowerCase();
+    const rName = (r.name || "").toLowerCase();
+
+    if (rId === idLower || rUrl === idLower || rMarketplace === idLower) {
+      return false;
+    }
+    if (`@${rId}` === idLower || `@${rOwner}/${rName}` === idLower) {
+      return false;
+    }
+    if (`${rOwner}/${rName}` === idLower) {
+      return false;
+    }
+    const sameOwnerRepos = currentRepos.filter(
+      (x) => (x.owner || "").toLowerCase() === idLower,
+    );
+    if (sameOwnerRepos.length === 1 && rOwner === idLower) {
+      return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === currentRepos.length) {
     throw new Error(
-      "Cannot remove the default StrawVerse official repository.",
+      `Repository '${identifier}' not found in active repositories.`,
     );
   }
 
-  const customList = Array.isArray(config?.custom_extension_repos)
-    ? config.custom_extension_repos
-    : [];
-  const initialLen = customList.length;
-  const filtered = customList.filter(
-    (r) =>
-      r.owner.toLowerCase() !== ownerOrUrl.toLowerCase() &&
-      r.url.toLowerCase() !== ownerOrUrl.toLowerCase() &&
-      r.marketplaceUrl.toLowerCase() !== ownerOrUrl.toLowerCase(),
-  );
-
-  if (filtered.length === initialLen) {
-    throw new Error(
-      `Repository '${ownerOrUrl}' not found in custom repositories.`,
-    );
+  config.extension_repos = filtered;
+  config.custom_extension_repos = filtered.filter((r) => !r.isDefault);
+  if (!filtered.some((r) => r.isDefault)) {
+    config.default_repo_removed = true;
+  } else {
+    config.default_repo_removed = false;
   }
-
-  config.custom_extension_repos = filtered;
   await settingSave();
-  logger.info(`[Marketplace] Removed custom extension repo: ${ownerOrUrl}`);
-  return { success: true };
+  logger.info(`[Marketplace] Removed extension repo: ${identifier}`);
+  return { success: true, repos: filtered };
+}
+
+async function restoreDefaultExtensionRepo() {
+  const currentRepos = getExtensionRepos();
+  const hasDefault = currentRepos.some(
+    (r) =>
+      r.isDefault ||
+      (r.id &&
+        r.id.toLowerCase() === DEFAULT_EXTENSION_REPO.id.toLowerCase()) ||
+      (r.url &&
+        r.url.toLowerCase() === DEFAULT_EXTENSION_REPO.url.toLowerCase()),
+  );
+  let updated = currentRepos;
+  if (!hasDefault) {
+    updated = [DEFAULT_EXTENSION_REPO, ...currentRepos];
+    config.extension_repos = updated;
+    config.custom_extension_repos = updated.filter((r) => !r.isDefault);
+    config.default_repo_removed = false;
+    await settingSave();
+    logger.info("[Marketplace] Restored official default extension repository");
+  }
+  return { success: true, repos: updated };
 }
 
 async function fetchAggregatedMarketplace(activeType = "Anime") {
@@ -934,6 +1043,13 @@ async function fetchAggregatedMarketplace(activeType = "Anime") {
   const aggregated = [];
   const norm = String(activeType || "").toLowerCase();
   const isMovies = norm === "movies" || norm === "movies-tvshows";
+
+  if (!repos || repos.length === 0) {
+    return {
+      items: [],
+      repos: [],
+    };
+  }
 
   const results = await Promise.allSettled(
     repos.map(async (repo) => {
@@ -950,19 +1066,21 @@ async function fetchAggregatedMarketplace(activeType = "Anime") {
         } else {
           list = Array.isArray(data[activeType]) ? data[activeType] : [];
         }
+        const repoId = repo.id || `${repo.owner}/${repo.name}`;
         return list.map((item) => ({
           ...item,
           type: isMovies ? "Movies" : activeType,
           category: isMovies ? "movies-tvshows" : activeType,
           repoOwner: repo.owner,
           repoName: repo.name,
+          repoId,
           repoBaseUrl: repo.rawBaseUrl,
           uniqueId: `${repo.owner}/${item.name}`,
           isDefaultRepo: !!repo.isDefault,
         }));
       } catch (err) {
         logger.warn(
-          `[Marketplace] Failed to fetch marketplace for @${repo.owner}: ${err.message}`,
+          `[Marketplace] Failed to fetch marketplace for @${repo.owner}/${repo.name}: ${err.message}`,
         );
         return [];
       }
@@ -2016,6 +2134,7 @@ module.exports = {
   getExtensionRepos,
   addExtensionRepo,
   removeExtensionRepo,
+  restoreDefaultExtensionRepo,
   fetchAggregatedMarketplace,
   parseExtensionRepoUrl,
   getDefaultExtensionRepo: () => DEFAULT_EXTENSION_REPO,

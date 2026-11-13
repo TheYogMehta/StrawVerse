@@ -184,10 +184,49 @@ router.post("/api/marketplace/repos", async (req, res) => {
   }
 });
 
-router.delete("/api/marketplace/repos/:owner", async (req, res) => {
+router.post("/api/marketplace/repos/restore-default", async (req, res) => {
+  try {
+    const { restoreDefaultExtensionRepo } = require("../utils/settings");
+    const result = await restoreDefaultExtensionRepo();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete("/api/marketplace/repos", async (req, res) => {
   try {
     const { removeExtensionRepo } = require("../utils/settings");
-    const result = await removeExtensionRepo(req.params.owner);
+    const target =
+      req.query.id || req.query.url || req.body?.id || req.body?.url;
+    const result = await removeExtensionRepo(target);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete("/api/marketplace/repos/:owner/:repo", async (req, res) => {
+  try {
+    const { removeExtensionRepo } = require("../utils/settings");
+    const target = `${req.params.owner}/${req.params.repo}`;
+    const result = await removeExtensionRepo(target);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete("/api/marketplace/repos/:identifier", async (req, res) => {
+  try {
+    const { removeExtensionRepo } = require("../utils/settings");
+    const target =
+      req.params.identifier ||
+      req.query.id ||
+      req.query.url ||
+      req.body?.id ||
+      req.body?.url;
+    const result = await removeExtensionRepo(target);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });

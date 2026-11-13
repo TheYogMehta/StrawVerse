@@ -9,6 +9,7 @@ import {
   Trash2,
   X,
   ExternalLink,
+  RotateCcw,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
@@ -18,6 +19,7 @@ export default function Marketplace({ initialType }) {
   const [activeType, setActiveType] = useState(initialType || "Anime");
   const [extensions, setExtensions] = useState([]);
   const [repos, setRepos] = useState([]);
+  const [selectedRepoFilter, setSelectedRepoFilter] = useState("all");
   const [installedProviders, setInstalledProviders] = useState({
     Anime: [],
     Manga: [],
@@ -43,6 +45,7 @@ export default function Marketplace({ initialType }) {
     try {
       let extList = [];
       let repoList = [];
+      let fetchedSuccessfully = false;
 
       // 1. Fetch from IPC if Electron
       if (window.sharedStateAPI && window.sharedStateAPI.getMarketplace) {
@@ -51,6 +54,7 @@ export default function Marketplace({ initialType }) {
             await window.sharedStateAPI.getMarketplace(activeType);
           extList = marketData?.items || [];
           repoList = marketData?.repos || [];
+          fetchedSuccessfully = true;
         } catch (ipcErr) {
           console.warn(
             "IPC getMarketplace failed, falling back to HTTP:",
@@ -59,48 +63,18 @@ export default function Marketplace({ initialType }) {
         }
       }
 
-      // 2. HTTP API fallback if running on web/mobile or IPC didn't return items
-      if (extList.length === 0) {
+      // 2. HTTP API fallback if running on web/mobile or IPC didn't fetch
+      if (!fetchedSuccessfully) {
         try {
           const resp = await fetch(`/api/marketplace?type=${activeType}`);
           if (resp.ok) {
             const data = await resp.json();
             extList = data?.items || [];
             repoList = data?.repos || [];
+            fetchedSuccessfully = true;
           }
-        } catch (_) {}
-      }
-
-      // 3. Fallback to direct GitHub raw repository if all else fails
-      if (extList.length === 0) {
-        try {
-          const response = await fetch(
-            "https://raw.githubusercontent.com/TheYogMehta/extensions/refs/heads/main/marketplace.json",
-          );
-          const data = await response.json();
-          const items =
-            data[activeType] ||
-            data[activeType === "Movies" ? "movies-tvshows" : activeType] ||
-            [];
-          extList = items.map((item) => ({
-            ...item,
-            repoOwner: "TheYogMehta",
-            repoName: "Official Extensions",
-            repoBaseUrl:
-              "https://raw.githubusercontent.com/TheYogMehta/extensions/refs/heads/main",
-            uniqueId: `TheYogMehta/${item.name}`,
-            isDefaultRepo: true,
-          }));
-          repoList = [
-            {
-              owner: "TheYogMehta",
-              name: "Official Extensions",
-              url: "https://github.com/TheYogMehta/extensions",
-              isDefault: true,
-            },
-          ];
-        } catch (rawErr) {
-          console.error("Direct GitHub marketplace fetch failed:", rawErr);
+        } catch (httpErr) {
+          console.warn("HTTP getMarketplace failed:", httpErr);
         }
       }
 
@@ -463,17 +437,17 @@ export default function Marketplace({ initialType }) {
   };
 
   const handleRemoveRepository = async (repo) => {
-    if (repo.isDefault) {
-      swalError(
-        "Cannot Remove",
-        "Default StrawVerse repository cannot be removed.",
-      );
-      return;
-    }
+    const repoIdentifier =
+      repo.id ||
+      repo.url ||
+      (repo.name ? `${repo.owner}/${repo.name}` : repo.owner);
+    const repoDisplayName = repo.name
+      ? `${repo.owner}/${repo.name}`
+      : `@${repo.owner}`;
 
     const confirm = await swalConfirm(
       "Remove Repository?",
-      `Do you want to remove the repository from @${repo.owner}? (Installed extensions from this repo will remain on your device).`,
+      `Do you want to remove ${repoDisplayName}? Installed extensions from this repository will remain on your device.`,
       "Remove",
     );
     if (!confirm.isConfirmed) return;
@@ -482,10 +456,10 @@ export default function Marketplace({ initialType }) {
       setLoading(true);
       let res = null;
       if (window.sharedStateAPI && window.sharedStateAPI.removeExtensionRepo) {
-        res = await window.sharedStateAPI.removeExtensionRepo(repo.owner);
+        res = await window.sharedStateAPI.removeExtensionRepo(repoIdentifier);
       } else {
         const resp = await fetch(
-          `/api/marketplace/repos/${encodeURIComponent(repo.owner)}`,
+          `/api/marketplace/repos?id=${encodeURIComponent(repoIdentifier)}`,
           {
             method: "DELETE",
           },
@@ -497,7 +471,7 @@ export default function Marketplace({ initialType }) {
       if (res && res.success) {
         swalSuccess(
           "Repository Removed",
-          `Repository @${repo.owner} was removed from your marketplace.`,
+          `Repository ${repoDisplayName} was removed from your marketplace.`,
         );
         fetchMarketplace();
       }
@@ -508,9 +482,50 @@ export default function Marketplace({ initialType }) {
     }
   };
 
+  const handleRestoreDefaultRepository = async () => {
+    try {
+      setLoading(true);
+      let res = null;
+      if (
+        window.sharedStateAPI &&
+        window.sharedStateAPI.restoreDefaultExtensionRepo
+      ) {
+        res = await window.sharedStateAPI.restoreDefaultExtensionRepo();
+      } else {
+        const resp = await fetch("/api/marketplace/repos/restore-default", {
+          method: "POST",
+        });
+        res = await resp.json();
+        if (res.error) throw new Error(res.error);
+      }
+
+      if (res && res.success) {
+        swalSuccess(
+          "Official Repository Restored",
+          "Official StrawVerse extensions repository has been added back.",
+        );
+        fetchMarketplace();
+      }
+    } catch (err) {
+      swalError("Failed to Restore Repository", err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const visibleExtensions = extensions.filter((provider) => {
     if (provider.disabled) {
       return isInstalled(provider);
+    }
+    if (selectedRepoFilter !== "all") {
+      const pRepo = (
+        provider.repoId || `${provider.repoOwner}/${provider.repoName}`
+      ).toLowerCase();
+      const pOwner = (provider.repoOwner || "").toLowerCase();
+      const filterLower = selectedRepoFilter.toLowerCase();
+      if (pRepo !== filterLower && pOwner !== filterLower) {
+        return false;
+      }
     }
     return true;
   });
@@ -560,6 +575,28 @@ export default function Marketplace({ initialType }) {
               <FolderGit2 size={16} />
               <span>Repos ({repos.length})</span>
             </button>
+
+            {repos.length > 1 && (
+              <select
+                value={selectedRepoFilter}
+                onChange={(e) => setSelectedRepoFilter(e.target.value)}
+                className="repo-filter-select"
+                title="Filter extensions by repository"
+              >
+                <option value="all">All Repositories ({repos.length})</option>
+                {repos.map((r) => {
+                  const val = r.id || `${r.owner}/${r.name}`;
+                  const label = r.name
+                    ? `${r.owner}/${r.name}`
+                    : `@${r.owner}`;
+                  return (
+                    <option key={val} value={val}>
+                      {label} {r.isDefault ? "(Official)" : ""}
+                    </option>
+                  );
+                })}
+              </select>
+            )}
           </div>
         </div>
       </header>
@@ -620,9 +657,11 @@ export default function Marketplace({ initialType }) {
                         <h3 className="market-card-title">{provider.name}</h3>
                         <span
                           className={`market-repo-badge ${isOfficial ? "official" : ""}`}
-                          title={`Repository: @${provider.repoOwner || "TheYogMehta"}`}
+                          title={`Repository: ${provider.repoName ? `${provider.repoOwner}/${provider.repoName}` : `@${provider.repoOwner || "TheYogMehta"}`}`}
                         >
-                          @{provider.repoOwner || "TheYogMehta"}
+                          {provider.repoName
+                            ? `${provider.repoOwner}/${provider.repoName}`
+                            : `@${provider.repoOwner || "TheYogMehta"}`}
                         </span>
                       </div>
                       <span className="market-version">
@@ -781,38 +820,83 @@ export default function Marketplace({ initialType }) {
             </div>
 
             <div className="repo-modal-body">
-              {repos.map((repo) => (
-                <div key={repo.owner} className="repo-item-card">
-                  <div className="repo-item-info">
-                    <div className="repo-item-title-row">
-                      <span className="repo-item-owner">@{repo.owner}</span>
-                      {repo.isDefault ? (
-                        <span className="market-repo-badge official">
-                          Official
-                        </span>
-                      ) : (
-                        <span className="market-repo-badge">Custom</span>
-                      )}
-                    </div>
-                    <span className="repo-item-url" title={repo.url}>
-                      {repo.url}
-                    </span>
-                  </div>
-
-                  {!repo.isDefault && (
-                    <button
-                      onClick={() => handleRemoveRepository(repo)}
-                      className="btn-remove-repo"
-                      title="Remove this custom repository"
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  )}
+              {repos.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "30px 20px",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  <p style={{ fontWeight: 600, fontSize: "14px" }}>
+                    No extension repositories active.
+                  </p>
+                  <p style={{ fontSize: "12px", marginTop: "6px" }}>
+                    Add a custom GitHub repository or restore the official
+                    repository below.
+                  </p>
                 </div>
-              ))}
+              ) : (
+                repos.map((repo) => {
+                  const repoKey =
+                    repo.id || repo.url || `${repo.owner}/${repo.name}`;
+                  const repoLabel = repo.name
+                    ? `${repo.owner}/${repo.name}`
+                    : `@${repo.owner}`;
+                  return (
+                    <div key={repoKey} className="repo-item-card">
+                      <div className="repo-item-info">
+                        <div className="repo-item-title-row">
+                          <span className="repo-item-owner">{repoLabel}</span>
+                          {repo.isDefault ? (
+                            <span className="market-repo-badge official">
+                              Official
+                            </span>
+                          ) : (
+                            <span className="market-repo-badge">Custom</span>
+                          )}
+                        </div>
+                        <span className="repo-item-url" title={repo.url}>
+                          {repo.url}
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => handleRemoveRepository(repo)}
+                        className="btn-remove-repo"
+                        title={`Remove ${repo.isDefault ? "official" : "custom"} repository`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
             </div>
 
-            <div className="repo-modal-footer">
+            <div
+              className="repo-modal-footer"
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "10px",
+              }}
+            >
+              {!repos.some((r) => r.isDefault) ? (
+                <button
+                  onClick={handleRestoreDefaultRepository}
+                  className="btn-header-action"
+                  style={{ borderRadius: 8 }}
+                  title="Add back the official StrawVerse extensions repository"
+                >
+                  <RotateCcw size={14} />
+                  <span>Restore Official Repo</span>
+                </button>
+              ) : (
+                <div />
+              )}
               <button
                 onClick={() => {
                   setShowRepoModal(false);

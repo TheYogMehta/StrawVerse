@@ -71,8 +71,10 @@ contextBridge.exposeInMainWorld("sharedStateAPI", {
     ipcRenderer.invoke("get-marketplace", activeType),
   getExtensionRepos: () => ipcRenderer.invoke("get-extension-repos"),
   addExtensionRepo: (url) => ipcRenderer.invoke("add-extension-repo", url),
-  removeExtensionRepo: (owner) =>
-    ipcRenderer.invoke("remove-extension-repo", owner),
+  removeExtensionRepo: (identifier) =>
+    ipcRenderer.invoke("remove-extension-repo", identifier),
+  restoreDefaultExtensionRepo: () =>
+    ipcRenderer.invoke("restore-default-extension-repo"),
   checkWhatsNew: () => ipcRenderer.invoke("check-whats-new"),
   disableWhatsNew: () => ipcRenderer.invoke("disable-whats-new"),
   ensureCfBypass: (url, referer) =>
