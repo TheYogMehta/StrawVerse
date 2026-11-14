@@ -90,6 +90,32 @@ export default function App() {
     }
   };
 
+  // Bottom-bar taps reset the history stack, so the stack can't tell you
+  // where you were. Remember the last anime browsing screen instead, so the
+  // Downloads header can offer a button back to it.
+  const lastAnimeViewRef = useRef({ view: "discover", params: {} });
+  useEffect(() => {
+    const cur = history[history.length - 1];
+    if (cur && ["home", "discover", "filters", "info"].includes(cur.view)) {
+      lastAnimeViewRef.current = { view: cur.view, params: cur.params };
+    }
+  }, [history]);
+
+  const goBackToAnime = () => {
+    cancelObsoleteNativeRequests();
+    const target = lastAnimeViewRef.current;
+    if (target.view === "info") {
+      // Keep a Discover entry underneath so the detail page's own
+      // "Back to Discover" button still has somewhere to pop to.
+      setHistory([
+        { view: "discover", params: {} },
+        { view: "info", params: target.params },
+      ]);
+    } else {
+      setHistory([{ view: target.view, params: target.params }]);
+    }
+  };
+
   const handleCloseWhatsNew = () => {
     setWhatsNewData(null);
   };
@@ -697,8 +723,17 @@ export default function App() {
             malid={current.params.malid}
           />
         );
-      case "downloads":
-        return <DownloadsTracker />;
+      case "downloads": {
+        const target = lastAnimeViewRef.current;
+        const viewNames = { home: "Home", discover: "Discover", filters: "Filters" };
+        const backLabel =
+          target.view === "info"
+            ? "Back to Anime"
+            : `Back to ${viewNames[target.view] || "Discover"}`;
+        return (
+          <DownloadsTracker onBackToAnime={goBackToAnime} backLabel={backLabel} />
+        );
+      }
       case "logs":
         return <LogsView />;
       case "settings":
@@ -754,13 +789,8 @@ export default function App() {
                 }
               }
               setReloadCounter((prev) => prev + 1);
-              setHistory([{ view, params: {} }]);
-            } else {
-              // Push instead of resetting the stack so Android back returns
-              // to the previous screen (Downloads -> back -> the anime page
-              // the user was on) instead of hitting the exit prompt.
-              setHistory((prev) => [...prev, { view, params: {} }]);
             }
+            setHistory([{ view, params: {} }]);
           }}
           isCollapsed={isSidebarCollapsed}
           toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
