@@ -12,13 +12,13 @@ artifacts:
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/StrawVerse.Setup.11.2.2.exe
     platform: windows
     size: 237.28
-    sha512: D9CDF911F6AE0F6C7175395B99B1F073D40673D95C7B1FBD5747796531EF409CC9FCC74C3C6C83CCE7DC65909A6381501E1ACB6120E442354295409908FDFFF9
+    sha512: 604F66474F35975C2D80FE28A351BED48A35250C2334BC41711AD5194CA3CD531A7ADD5E2D148BB7E24AFAD51D37A6ACEEB70641AEA838EAC92A5BCD88CE60D9
 
   - name: app-release.apk
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/app-release.apk
     platform: android
     size: 135.26
-    sha512: 9593AB63262B3DE733B71B3AEED97A735DEE14134B33FA55110807ED046372F60D16B5A746BAE976ACF0E5A9719460E2DD8C31EAA31F90A93A1AB9C9FC7593F6
+    sha512: 15B0188D5FF65AD8228225C55C6283B124B995763B575F46EA4A896BE8F79089B13AC64EBB04E0391D0B70B57A3BCAE18B0883556FE0DD03F7F9BF7E8D487238
 
   - name: strawverse-11.2.2.AppImage
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/strawverse-11.2.2.AppImage
@@ -49,6 +49,8 @@ changelog:
   - "**Discover keeps your place**: Switching sections (e.g. Downloads to Discover) restores the list, page, scroll position and filters you were last seeing; re-tapping the active nav icon still refreshes"
   - "**Back to Anime button**: The Downloads header now has a Back button (top-right) that returns to the anime page or Discover list you were last viewing"
   - "**Missing SUB/DUB badges fixed**: Discover cards whose AnimeKai id had gone stale (the site rotates its URL slugs) now heal to the fresh id and retry, so language badges load instead of failing with 404 \"detail page unreachable\""
+  - "**Language badges on every card**: Cards with a MAL id no longer lose SUB/DUB when the mapping has no row for your provider — languages now read straight from the card's own provider page (the episode list was always reachable, only the MAL-id lookup failed)"
+  - "**AniList blip tolerance**: A rate-limit (429) from AniList now retries once after 2 s instead of failing the whole status batch, which could leave airing/complete badges missing for the session"
   - "**Log rotation fixed**: Only the 3 newest session logs are kept - older logs are now deleted at startup (previously the folder settled at 4 files)"
   - "**Faster filter badges**: Badge metadata loads after applying filters with a 250 ms debounce, bulk fetch of 48 items, and duplicate-fetch caching"
   - "**Anikoto speed**: Provider metadata cache keys use the provider name (fixes cache misses vs the official anikoto build)"
