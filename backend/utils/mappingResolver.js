@@ -1,5 +1,10 @@
 const { logger } = require("./AppLogger");
-const { mappingQueryAll, mappingQueryOne } = require("./db");
+const {
+  mappingQueryAll,
+  mappingQueryOne,
+  mappingExec,
+  batchRun,
+} = require("./db");
 
 let cachedProviderMetadata = null;
 let lastProviderMetadataFetch = 0;
@@ -220,6 +225,95 @@ async function getMappingProviders(
   }
 
   return list;
+}
+
+// Provider link tables (id -> malid). The mapping server ships none, so the
+// app creates them locally and fills them with learned links.
+async function ensureProviderTable(providerName) {
+  const cleanProv = String(providerName).toLowerCase().trim().split("/").pop();
+  if (!cleanProv) return;
+
+  if (cleanProv === "pahe") {
+    await mappingExec(`
+      CREATE TABLE IF NOT EXISTS pahe (
+        id TEXT PRIMARY KEY,
+        uuid TEXT,
+        malid INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_pahe_malid ON pahe(malid);
+    `);
+  } else {
+    await mappingExec(`
+      CREATE TABLE IF NOT EXISTS "${cleanProv}" (
+        id TEXT PRIMARY KEY,
+        malid INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS "idx_${cleanProv}_malid" ON "${cleanProv}"(malid);
+    `);
+  }
+}
+
+// Remembers provider id -> MAL id links so a MAL id can be resolved back to a
+// provider later (resolveMalIdFromMapping / getBestProviderForMalId).
+// Existing rows are never overwritten: a link the user made always wins.
+async function learnProviderLinks(entries) {
+  if (!entries || entries.length === 0) return;
+
+  const byProvider = new Map();
+  for (const entry of entries) {
+    const provider = String(entry?.provider || "")
+      .toLowerCase()
+      .trim()
+      .split("/")
+      .pop();
+    const id = entry?.id == null ? "" : String(entry.id).trim();
+    const malid = parseInt(entry?.malid);
+    if (!provider || !id || !malid || malid <= 0) continue;
+    if (
+      provider === "pahe" ||
+      provider === "provider" ||
+      provider === "local source"
+    ) {
+      continue;
+    }
+    if (!byProvider.has(provider)) byProvider.set(provider, new Map());
+    byProvider.get(provider).set(id, malid);
+  }
+
+  const ops = [];
+  for (const [provider, links] of byProvider) {
+    const ids = [...links.keys()];
+    let existing = [];
+    try {
+      existing =
+        (await mappingQueryAll(
+          `SELECT id FROM "${provider}" WHERE id IN (${ids.map(() => "?").join(",")})`,
+          ids,
+        )) || [];
+    } catch (_) {
+      try {
+        await ensureProviderTable(provider);
+      } catch (_) {}
+      existing = [];
+    }
+    const known = new Set(existing.map((r) => String(r.id)));
+    for (const [id, malid] of links) {
+      if (known.has(id)) continue;
+      ops.push({
+        sql: `INSERT OR REPLACE INTO "${provider}" (id, malid) VALUES (?, ?)`,
+        params: [id, malid],
+      });
+    }
+  }
+
+  if (ops.length === 0) return;
+  try {
+    await batchRun("mapping", ops);
+  } catch (e) {
+    logger.warn(
+      `[mappingResolver] Could not learn provider links: ${e.message}`,
+    );
+  }
 }
 
 async function resolveMalIdFromMapping({
@@ -461,6 +555,8 @@ async function getBestProviderForMalId(
 
 module.exports = {
   getMappingProviders,
+  ensureProviderTable,
+  learnProviderLinks,
   resolveMalIdFromMapping,
   getLinkedProvidersForMalId,
   getBestProviderForMalId,

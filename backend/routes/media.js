@@ -35,6 +35,7 @@ const {
   resolveMalIdFromMapping,
   getLinkedProvidersForMalId,
   getBestProviderForMalId,
+  learnProviderLinks,
 } = require("../utils/mappingResolver");
 const { sanitizeFolderName, getUserDataPath } = require("../utils/constants");
 const { getDownloadsFolder } = require("../utils/DirectoryMaker");
@@ -100,6 +101,15 @@ function cleanBaseTitle(title) {
       "",
     )
     .trim();
+}
+
+// "@RavenGod1/animekai" -> "animekai"
+function cleanProviderName(provider) {
+  return String(provider || "")
+    .toLowerCase()
+    .trim()
+    .split("/")
+    .pop();
 }
 
 // A status only counts when we actually know it: "Unknown"/empty placeholders
@@ -216,6 +226,7 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
   const malByLocalTitle = new Map();
   const malByListTitle = new Map();
   const malByMapTitle = new Map();
+  const mapTitleStats = new Map();
   const malMeta = new Map();
   const malListImg = new Map();
   const mapImgById = new Map();
@@ -232,7 +243,7 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
     const rows = await runIn(
       global.db,
       (part) =>
-        `SELECT id, MalID, status, image_url FROM ${table} WHERE id IN (${part.map(() => "?").join(",")})`,
+        `SELECT id, MalID, status, image_url, provider FROM ${table} WHERE id IN (${part.map(() => "?").join(",")})`,
       ids,
     );
     for (const r of rows) put(localById, String(r.id), r);
@@ -269,13 +280,26 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
       for (const r of rows2) put(malByListTitle, r.k, r.id);
     }
     if (global.mappingDb) {
+      // The catalogue holds thousands of duplicate titles ("minna no uta" x709),
+      // so the winner is picked deterministically: a title the mapping server
+      // linked (has_mapping) first, then the shortest title, then the lowest
+      // malid. The same title always resolves to the same MAL id.
       const rows3 = await runIn(
         global.mappingDb,
         (part) =>
-          `SELECT LOWER(TRIM(title)) AS k, malid FROM ${malTable} WHERE LOWER(TRIM(title)) IN (${part.map(() => "?").join(",")})`,
+          `SELECT LOWER(TRIM(title)) AS k, malid, has_mapping FROM ${malTable} WHERE LOWER(TRIM(title)) IN (${part.map(() => "?").join(",")}) ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC`,
         candArr,
       );
-      for (const r of rows3) put(malByMapTitle, r.k, r.malid);
+      for (const r of rows3) {
+        put(malByMapTitle, r.k, r.malid);
+        let stat = mapTitleStats.get(r.k);
+        if (!stat) {
+          stat = { mapped: new Set(), all: new Set() };
+          mapTitleStats.set(r.k, stat);
+        }
+        stat.all.add(r.malid);
+        if (r.has_mapping) stat.mapped.add(r.malid);
+      }
     }
   }
 
@@ -325,12 +349,30 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
   // Resolve malid per item using the prefetched maps (same precedence as old).
   const malidByItem = new Map();
   const baseStatusByItem = new Map();
+  // Provider id -> MAL id links worth remembering (the mapping server ships
+  // no provider tables, so these are the only way back to a provider).
+  const learnEntries = [];
   for (const item of items) {
     let malid =
       item.MalID || item.malid ? Number(item.MalID || item.malid) : null;
+    let mapMatchKey = null;
     if (!malid && item.id) {
       const row = localById.get(String(item.id));
-      if (row && row.MalID) malid = parseInt(row.MalID);
+      if (row && row.MalID) {
+        malid = parseInt(row.MalID);
+        // A library row is a confirmed provider id -> MAL id link, but only
+        // when it really came from the same provider (ids are per provider).
+        if (
+          cleanProviderName(row.provider) &&
+          cleanProviderName(row.provider) === cleanProviderName(item.provider)
+        ) {
+          learnEntries.push({
+            provider: item.provider,
+            id: item.id,
+            malid,
+          });
+        }
+      }
     }
     if (!malid && item.id) {
       const pm = providerMalidById.get(String(item.id));
@@ -339,12 +381,13 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
     if (!malid && candByItem.has(item)) {
       for (const cand of candByItem.get(item)) {
         const clean = cand.trim().toLowerCase();
-        const m =
-          malByLocalTitle.get(clean) ||
-          malByListTitle.get(clean) ||
-          malByMapTitle.get(clean);
+        const local = malByLocalTitle.get(clean);
+        const list = malByListTitle.get(clean);
+        const map = malByMapTitle.get(clean);
+        const m = local || list || map;
         if (m) {
           malid = parseInt(m);
+          if (!local && !list) mapMatchKey = clean;
           break;
         }
       }
@@ -352,6 +395,22 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
     // The base-title fallback only runs when nothing above resolved a malid,
     // and its status is only used then too.
     if (malid) malidByItem.set(item, malid);
+    // Learn the link when the title points at exactly one MAL entry and it
+    // is the provider's own title (not a shortened/normalized variant).
+    if (mapMatchKey && item.id && item.title) {
+      const exact = String(item.title).trim().toLowerCase();
+      if (mapMatchKey === exact) {
+        const stat = mapTitleStats.get(mapMatchKey);
+        const candidates = stat?.mapped.size ? stat.mapped : stat?.all;
+        if (candidates && candidates.size === 1) {
+          learnEntries.push({
+            provider: item.provider,
+            id: item.id,
+            malid,
+          });
+        }
+      }
+    }
   }
 
   // Base-title fallback for the leftovers: one scan for every base title that
@@ -555,6 +614,14 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
     if (!item.image && !item.scraper_image) {
       item.image = "/images/image-404.png";
     }
+  }
+
+  // Remember the links after the response is on its way - the write must not
+  // slow the page down.
+  if (learnEntries.length) {
+    setImmediate(() => {
+      learnProviderLinks(learnEntries).catch(() => {});
+    });
   }
 
   return results;
@@ -1376,10 +1443,14 @@ async function getUniqueProviderList(
         const placeholders = titles.map(() => "?").join(",");
         const malRows = await global.mappingDb
           .prepare(
-            `SELECT LOWER(TRIM(title)) as t, image_url FROM ${malTable} WHERE LOWER(TRIM(title)) IN (${placeholders}) AND image_url IS NOT NULL`,
+            `SELECT LOWER(TRIM(title)) as t, image_url FROM ${malTable} WHERE LOWER(TRIM(title)) IN (${placeholders}) AND image_url IS NOT NULL ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC`,
           )
           .all(...titles);
-        const map = new Map(malRows.map((r) => [r.t, r.image_url]));
+        // First row wins - same pick as the Discover card enrichment.
+        const map = new Map();
+        for (const r of malRows) {
+          if (!map.has(r.t)) map.set(r.t, r.image_url);
+        }
         for (const item of results) {
           if (!item.image) {
             const t = (item.title || "").toLowerCase().trim();
@@ -2426,7 +2497,7 @@ router.post(
                   if (checkTitle) {
                     const matchAnime = await global.mappingDb
                       .prepare(
-                        "SELECT malid FROM anime WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1",
+                        "SELECT malid FROM anime WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 1",
                       )
                       .get(checkTitle);
                     if (matchAnime && matchAnime.malid) {
@@ -2732,7 +2803,7 @@ router.post(
                       if (checkTitle) {
                         const matchManga = await global.mappingDb
                           .prepare(
-                            "SELECT malid FROM manga WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1",
+                            "SELECT malid FROM manga WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 1",
                           )
                           .get(checkTitle);
                         if (matchManga && matchManga.malid) {

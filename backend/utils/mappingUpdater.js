@@ -34,6 +34,7 @@ const {
 const {
   getMappingProviders,
   resolveMalIdFromMapping,
+  ensureProviderTable,
 } = require("./mappingResolver");
 
 const userDataPath = getUserDataPath();
@@ -127,6 +128,17 @@ async function ensureMappingTablesExist() {
       `);
     } catch (_) {}
 
+    // Every title lookup used to scan the whole catalogue (30k anime / 87k
+    // manga rows). An expression index turns those scans into index lookups.
+    // Kept in its own statement so an old SQLite without expression index
+    // support only loses the speed-up, not the other indexes.
+    try {
+      await mappingExec(`
+        CREATE INDEX IF NOT EXISTS idx_anime_title_key ON anime(LOWER(TRIM(title)));
+        CREATE INDEX IF NOT EXISTS idx_manga_title_key ON manga(LOWER(TRIM(title)));
+      `);
+    } catch (_) {}
+
     // Ensure all required columns exist if tables were created with an earlier schema
     const coreTableSchemas = {
       anime: {
@@ -207,30 +219,6 @@ async function ensureMappingTablesExist() {
     logger.error(
       `[mappingUpdater] Failed to ensure mapping tables exist: ${e.message}`,
     );
-  }
-}
-
-async function ensureProviderTable(providerName) {
-  const cleanProv = String(providerName).toLowerCase().trim().split("/").pop();
-  if (!cleanProv) return;
-
-  if (cleanProv === "pahe") {
-    await mappingExec(`
-      CREATE TABLE IF NOT EXISTS pahe (
-        id TEXT PRIMARY KEY,
-        uuid TEXT,
-        malid INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS idx_pahe_malid ON pahe(malid);
-    `);
-  } else {
-    await mappingExec(`
-      CREATE TABLE IF NOT EXISTS "${cleanProv}" (
-        id TEXT PRIMARY KEY,
-        malid INTEGER
-      );
-      CREATE INDEX IF NOT EXISTS "idx_${cleanProv}_malid" ON "${cleanProv}"(malid);
-    `);
   }
 }
 
