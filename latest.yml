@@ -12,13 +12,13 @@ artifacts:
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/StrawVerse.Setup.11.2.2.exe
     platform: windows
     size: 237.28
-    sha512: 604F66474F35975C2D80FE28A351BED48A35250C2334BC41711AD5194CA3CD531A7ADD5E2D148BB7E24AFAD51D37A6ACEEB70641AEA838EAC92A5BCD88CE60D9
+    sha512: 50276B25F46F5754AF3F35DDB6541074743B42918E277E62422E9D54A3CFD71EB198AC72B08E7C6ED5397DFD95F7D52CFE5FC3049CC153379B06D1D64E5A0DB6
 
   - name: app-release.apk
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/app-release.apk
     platform: android
-    size: 135.26
-    sha512: 15B0188D5FF65AD8228225C55C6283B124B995763B575F46EA4A896BE8F79089B13AC64EBB04E0391D0B70B57A3BCAE18B0883556FE0DD03F7F9BF7E8D487238
+    size: 135.27
+    sha512: D546AB72CA1B921D1DB913FA220DFD3F92A5930E77C5B921F5748618206CFE078A78C451E66EA77AA1F52FADE1C0B5FE03A304CAB99BB52C3C3B22BCD65A2171
 
   - name: strawverse-11.2.2.AppImage
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/strawverse-11.2.2.AppImage
@@ -42,6 +42,8 @@ artifacts:
 
 changelog:
   - "[11.2.2]"
+  - "**Much faster Discover on Android**: The Discover list no longer asks the database once per card — a page of 24 cards used to run ~200 separate lookups, each one a slow Java-bridge round trip on Android. The lookups are now batched, so a page loads in a fraction of the time (Anime page 1: ~206 calls → 17; Manga: ~198 → 19) with identical results"
+  - "**Discover cards keep their badges**: The batched lookup preserves the old per-card behaviour exactly (same MAL id, image, genres and airing status on every card)"
   - "**Download resilience**: If a subtitle/dub category has no working servers (hardsub-only episodes), the downloader falls back to the opposite category, then to unfiltered servers, instead of failing after 3 retries"
   - "**Soft subtitles on download**: Downloads prefer soft-sub servers over hardsub (burned-in) sources when you pick \"sub\", so subtitles are never painted into the video frames"
   - "**Filter panel collapse**: Caret arrow (^) on the filter panel header collapses/expands the filter grid"
