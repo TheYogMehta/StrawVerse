@@ -39,6 +39,7 @@ router.post("/api/download/:AnimeManga/:singleMulti", async (req, res) => {
         provider,
         malid = null,
         subdub = null,
+        season = null,
         quality = null,
       } = req.body;
       const targetEpId = ep && typeof ep === "object" ? ep.id : ep;
@@ -55,6 +56,7 @@ router.post("/api/download/:AnimeManga/:singleMulti", async (req, res) => {
           false,
           malid,
           subdub,
+          season,
           quality,
         );
       } else if (isAnime) {
@@ -162,10 +164,24 @@ router.post("/downloads", async (req, res) => {
       EpNum: task.EpNum,
       Title: task.Title,
       Type: task.Type,
+      season:
+        task.season !== undefined && task.season !== null
+          ? task.season
+          : task.config?.season !== undefined
+            ? task.config.season
+            : null,
       concurrency: task.concurrency,
       lastTestedConcurrency: task.lastTestedConcurrency,
     })),
-    queue: upcomingQueue,
+    queue: upcomingQueue.map((item) => ({
+      ...item,
+      season:
+        item.season !== undefined && item.season !== null
+          ? item.season
+          : item.config?.season !== undefined
+            ? item.config.season
+            : null,
+    })),
     isPaused: isQueuePaused(),
   };
 
@@ -179,6 +195,12 @@ router.post("/downloads", async (req, res) => {
     Response.EpNum = first.EpNum;
     Response.Title = first.Title;
     Response.Type = first.Type;
+    Response.season =
+      first.season !== undefined && first.season !== null
+        ? first.season
+        : first.config?.season !== undefined
+          ? first.config.season
+          : null;
   }
 
   return res.json(Response);
@@ -187,7 +209,7 @@ router.post("/downloads", async (req, res) => {
 // Pause queue
 router.post("/api/download/pause", async (req, res) => {
   try {
-    const paused = await pauseQueue();
+    await pauseQueue();
     const queue = (await getQueue()) ?? [];
     global.sendToRenderer("download-logger", {
       queue,
@@ -203,7 +225,7 @@ router.post("/api/download/pause", async (req, res) => {
 // Resume queue
 router.post("/api/download/resume", async (req, res) => {
   try {
-    const paused = await resumeQueue();
+    await resumeQueue();
     const queue = (await getQueue()) ?? [];
     global.sendToRenderer("download-logger", {
       queue,
@@ -248,7 +270,10 @@ router.post("/api/download/remove", async (req, res) => {
           const qualStr = itemWithSegments.config?.quality
             ? ` ( ${itemWithSegments.config.quality} )`
             : "";
-          if (itemWithSegments.Type === "Anime") {
+          if (
+            itemWithSegments.Type === "Anime" ||
+            itemWithSegments.Type === "Movies"
+          ) {
             caption = `Downloading EP ${itemWithSegments.EpNum} ${itemWithSegments.Title}${qualStr}`;
           } else if (itemWithSegments.Type === "Manga") {
             caption = `Downloading CHP ${itemWithSegments.EpNum || itemWithSegments.ChapterTitle} ${itemWithSegments.Title}${qualStr}`;

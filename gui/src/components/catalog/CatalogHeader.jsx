@@ -1,17 +1,20 @@
-import { Search } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
 
 export default function CatalogHeader({
   provider,
   type,
   discoverTab,
   onSubTabChange,
-  linkingMalItem,
   searchQuery,
   onSearchQueryChange,
   onSearchSubmit,
   onTypeChange,
   showTypeToggle = true,
   catalogSource = "mal",
+  isFilterOpen,
+  onToggleFilter,
+  activeFilterCount = 0,
+  showFilterToggle = false,
 }) {
   return (
     <header className="catalog-header">
@@ -57,6 +60,20 @@ export default function CatalogHeader({
               <Search size={18} />
             </button>
           </form>
+          {showFilterToggle && onToggleFilter && (
+            <button
+              type="button"
+              onClick={onToggleFilter}
+              className={`catalog-filter-btn ${isFilterOpen ? "active" : ""} ${activeFilterCount > 0 ? "has-filters" : ""}`}
+              title="Toggle filters panel"
+            >
+              <SlidersHorizontal size={16} />
+              <span>Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="filter-badge">{activeFilterCount}</span>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -76,13 +93,15 @@ export default function CatalogHeader({
           >
             Manga
           </button>
-          <button
-            type="button"
-            onClick={() => onTypeChange && onTypeChange("Movies")}
-            className={`market-tab-btn ${type === "Movies" ? "active" : ""}`}
-          >
-            Movies & Series
-          </button>
+          {provider !== "mal" && (
+            <button
+              type="button"
+              onClick={() => onTypeChange && onTypeChange("Movies")}
+              className={`market-tab-btn ${type === "Movies" ? "active" : ""}`}
+            >
+              Movies & Series
+            </button>
+          )}
         </div>
       )}
     </header>

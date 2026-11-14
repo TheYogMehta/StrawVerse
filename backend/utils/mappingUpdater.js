@@ -1,22 +1,15 @@
 const axios = require("axios");
 const http = require("http");
 const https = require("https");
-const path = require("path");
 
 const mappingClient = axios.create({
   httpAgent: new http.Agent({ family: 4, keepAlive: true }),
   httpsAgent: new https.Agent({ family: 4, keepAlive: true }),
   timeout: 60000,
 });
-let app = null;
-try {
-  app = require("electron").app;
-} catch (e) {}
 const { logger } = require("./AppLogger");
 const { syncDomainConcurrencyFromMappingDb } = require("./domainConcurrency");
 const {
-  getKeyValue,
-  setKeyValue,
   mappingQueryAll,
   mappingQueryOne,
   mappingRun,
@@ -26,17 +19,12 @@ const {
   queryOne,
   run,
 } = require("./db");
-const {
-  getUserDataPath,
-  getOSName,
-  sanitizeFolderName,
-} = require("./constants");
+const { getOSName, sanitizeFolderName } = require("./constants");
 const {
   getMappingProviders,
   resolveMalIdFromMapping,
 } = require("./mappingResolver");
 
-const userDataPath = getUserDataPath();
 const MAPPING_API_BASE =
   process.env.MAPPING_API_URL || "https://strawverse.theyogmehta.online";
 
@@ -830,7 +818,7 @@ async function cleanupExtensionMapping(extensionName) {
   }
 }
 
-async function applyDeltaUpdates(updates, latestVersion, storedTag) {
+async function applyDeltaUpdates(updates, _latestVersion, _storedTag) {
   // Legacy compatibility stub
   if (!updates || updates.length === 0) return;
   logger.info(
@@ -1249,10 +1237,6 @@ async function syncLibraryIdsWithMapping() {
           } catch (_) {}
         }
         if (malid) {
-          const isUuid =
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i.test(
-              item.anime_id,
-            );
           const targetTable = "pahe";
           const targetRow = await mappingQueryOne(
             `SELECT id, uuid, malid FROM "${targetTable}" WHERE malid = ? LIMIT 1`,

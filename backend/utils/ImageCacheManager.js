@@ -1,7 +1,6 @@
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
-const axios = require("axios");
 
 const { logger } = require("./AppLogger");
 const { getKeyValue, queryOne, queryAll, run, exec } = require("./db");
@@ -263,14 +262,12 @@ async function migrateDatabaseBase64Images() {
 
       for (const row of rows) {
         let buffer = null;
-        let ext = "jpg";
 
         if (typeof row.image === "string") {
           const match = row.image.match(
             /^data:image\/([a-zA-Z+]+);base64,(.+)$/,
           );
           if (match) {
-            ext = match[1];
             buffer = Buffer.from(match[2], "base64");
           } else {
             if (
@@ -290,7 +287,6 @@ async function migrateDatabaseBase64Images() {
           row.image instanceof Uint8Array
         ) {
           buffer = Buffer.from(row.image);
-          ext = "jpg";
         }
 
         if (buffer) {

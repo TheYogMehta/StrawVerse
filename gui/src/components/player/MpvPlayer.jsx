@@ -6,6 +6,7 @@ import { Loader2 } from "lucide-react";
 export default function VideoPlayer({
   id,
   episodeNumOrId,
+  season = 1,
   isDownloaded,
   episodes = [],
   episodesList = [],
@@ -21,10 +22,14 @@ export default function VideoPlayer({
   const [loading, setLoading] = useState(true);
   const [statusMsg, setStatusMsg] = useState("Initializing MPV player...");
   const [currentEpNumOrId, setCurrentEpNumOrId] = useState(episodeNumOrId);
+  const [currentSeason, setCurrentSeason] = useState(season);
 
   useEffect(() => {
     setCurrentEpNumOrId(episodeNumOrId);
-  }, [episodeNumOrId]);
+    if (season !== undefined && season !== null) {
+      setCurrentSeason(season);
+    }
+  }, [episodeNumOrId, season]);
 
   useEffect(() => {
     const isElectronMpvAvailable =
@@ -36,17 +41,42 @@ export default function VideoPlayer({
 
     const allEpisodes = episodes.length > 0 ? episodes : episodesList;
     const sortedEpisodes = [...allEpisodes].sort((a, b) => {
+      const seasonA = Number(a.season) || 1;
+      const seasonB = Number(b.season) || 1;
+      if (seasonA !== seasonB) return seasonA - seasonB;
       const numA = Number(a.number !== undefined ? a.number : a.id);
       const numB = Number(b.number !== undefined ? b.number : b.id);
       if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
       return 0;
     });
 
-    const currentEpisodeObj = sortedEpisodes.find(
+    const activeSeason = currentSeason || season || 1;
+
+    let currentEpisodeObj = sortedEpisodes.find(
       (item) =>
-        String(item.id) === String(currentEpNumOrId) ||
-        Number(item.number) === Number(currentEpNumOrId),
+        String(item.id) === String(currentEpNumOrId) &&
+        Number(item.season || 1) === Number(activeSeason),
     );
+
+    if (!currentEpisodeObj) {
+      currentEpisodeObj = sortedEpisodes.find(
+        (item) => String(item.id) === String(currentEpNumOrId),
+      );
+    }
+
+    if (!currentEpisodeObj) {
+      currentEpisodeObj = sortedEpisodes.find(
+        (item) =>
+          Number(item.number) === Number(currentEpNumOrId) &&
+          Number(item.season || 1) === Number(activeSeason),
+      );
+    }
+
+    if (!currentEpisodeObj) {
+      currentEpisodeObj = sortedEpisodes.find(
+        (item) => Number(item.number) === Number(currentEpNumOrId),
+      );
+    }
 
     const targetEpId = currentEpisodeObj
       ? currentEpisodeObj.id
@@ -58,29 +88,45 @@ export default function VideoPlayer({
             !String(currentEpNumOrId).includes("|"))
         ? Number(currentEpNumOrId)
         : 1;
+    const targetSeason =
+      currentEpisodeObj?.season !== undefined &&
+      currentEpisodeObj?.season !== null
+        ? Number(currentEpisodeObj.season)
+        : Number(activeSeason) || 1;
 
     const currentIdx = sortedEpisodes.findIndex(
       (item) =>
-        String(item.id) === String(currentEpNumOrId) ||
-        Number(item.number) === Number(targetEpNum),
+        (String(item.id) === String(targetEpId) ||
+          (Number(item.number) === Number(targetEpNum) &&
+            Number(item.season || 1) === Number(targetSeason))) &&
+        Number(item.season || 1) === Number(targetSeason),
     );
     const hasNext =
       currentIdx !== -1
         ? currentIdx < sortedEpisodes.length - 1
-        : sortedEpisodes.some((e) => Number(e.number) > Number(targetEpNum));
+        : sortedEpisodes.some(
+            (e) =>
+              Number(e.season || 1) === Number(targetSeason) &&
+              Number(e.number) > Number(targetEpNum),
+          );
     const hasPrev =
-      currentIdx !== -1
-        ? currentIdx > 0
-        : Number(targetEpNum) > 1;
+      currentIdx !== -1 ? currentIdx > 0 : Number(targetEpNum) > 1;
+
+    const isMovieType = type === "Movies";
+    const epLabel =
+      isMovieType && targetSeason > 1
+        ? `Season ${targetSeason} Episode ${targetEpNum}`
+        : `Episode ${targetEpNum}`;
 
     setLoading(true);
-    setStatusMsg(`Opening MPV player for Episode ${targetEpNum}...`);
+    setStatusMsg(`Opening MPV player for ${epLabel}...`);
 
     window.sharedStateAPI
       .playInMpv({
         mediaId: id,
         episodeId: targetEpId,
         episode: targetEpNum,
+        season: targetSeason,
         isDownloaded: !!isDownloaded,
         title: animeTitle,
         image: image,
@@ -129,18 +175,26 @@ export default function VideoPlayer({
       });
 
     const handleNextEpisode = () => {
-      let nextEp = null;
+      let nextEp;
       if (currentIdx !== -1 && currentIdx < sortedEpisodes.length - 1) {
         nextEp = sortedEpisodes[currentIdx + 1];
       } else {
         nextEp = sortedEpisodes.find(
-          (e) => Number(e.number) > Number(targetEpNum),
+          (e) =>
+            Number(e.season || 1) === Number(targetSeason) &&
+            Number(e.number) > Number(targetEpNum),
         );
       }
       if (nextEp) {
         setLoading(true);
-        setStatusMsg(`Loading Episode ${nextEp.number || nextEp.id}...`);
-        setCurrentEpNumOrId(nextEp.number || nextEp.id);
+        const nextSeason = Number(nextEp.season || targetSeason || 1);
+        const nextEpLabel =
+          type === "Movies" && nextSeason > 1
+            ? `Season ${nextSeason} Episode ${nextEp.number || nextEp.id}`
+            : `Episode ${nextEp.number || nextEp.id}`;
+        setStatusMsg(`Loading ${nextEpLabel}...`);
+        setCurrentSeason(nextSeason);
+        setCurrentEpNumOrId(nextEp.id || nextEp.number);
       } else if (onBack) {
         onBack();
       }
@@ -152,7 +206,9 @@ export default function VideoPlayer({
         prevEp = sortedEpisodes[currentIdx - 1];
       } else {
         const prevCandidates = sortedEpisodes.filter(
-          (e) => Number(e.number) < Number(targetEpNum),
+          (e) =>
+            Number(e.season || 1) === Number(targetSeason) &&
+            Number(e.number) < Number(targetEpNum),
         );
         if (prevCandidates.length > 0) {
           prevEp = prevCandidates[prevCandidates.length - 1];
@@ -160,8 +216,14 @@ export default function VideoPlayer({
       }
       if (prevEp) {
         setLoading(true);
-        setStatusMsg(`Loading Episode ${prevEp.number || prevEp.id}...`);
-        setCurrentEpNumOrId(prevEp.number || prevEp.id);
+        const prevSeason = Number(prevEp.season || targetSeason || 1);
+        const prevEpLabel =
+          type === "Movies" && prevSeason > 1
+            ? `Season ${prevSeason} Episode ${prevEp.number || prevEp.id}`
+            : `Episode ${prevEp.number || prevEp.id}`;
+        setStatusMsg(`Loading ${prevEpLabel}...`);
+        setCurrentSeason(prevSeason);
+        setCurrentEpNumOrId(prevEp.id || prevEp.number);
       }
     };
 
@@ -234,7 +296,7 @@ export default function VideoPlayer({
       removeMpvCloseListener();
       removeMpvErrorListener();
     };
-  }, [id, currentEpNumOrId, playerSubDub, provider]);
+  }, [id, currentEpNumOrId, currentSeason, playerSubDub, provider]);
 
   if (!loading) return null;
 

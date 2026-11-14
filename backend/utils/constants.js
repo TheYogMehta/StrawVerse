@@ -217,7 +217,12 @@ function parseTags(val) {
 const SYSTEM_TAGS = Object.freeze({
   Anime: Object.freeze(["Watching", "Plan to Watch", "Completed", "Downloads"]),
   Manga: Object.freeze(["Reading", "Plan to Read", "Completed", "Downloads"]),
-  Movies: Object.freeze(["Watching", "Plan to Watch", "Completed", "Downloads"]),
+  Movies: Object.freeze([
+    "Watching",
+    "Plan to Watch",
+    "Completed",
+    "Downloads",
+  ]),
 });
 
 const RESERVED_TAGS = Object.freeze({
@@ -376,12 +381,7 @@ function formatEpisodeFilename(
   totalEpisodesArg,
   seasonArg,
 ) {
-  let title = "";
-  let epNum = 1;
-  let season = 1;
-  let totalEpisodes = null;
-  let namingScheme = "default";
-  let ext = ".mp4";
+  let title, epNum, season, totalEpisodes, namingScheme, ext;
 
   if (typeof optsOrTitle === "object" && optsOrTitle !== null) {
     title = optsOrTitle.title || "";
@@ -409,7 +409,7 @@ function formatEpisodeFilename(
   const paddedSeason = String(season).padStart(2, "0");
   const cleanTitle = sanitizeFolderName(title || "Anime");
 
-  let baseName = "";
+  let baseName;
   if (namingScheme === "plex_jellyfin") {
     baseName = `${cleanTitle} - S${paddedSeason}E${paddedEp}`;
   } else if (namingScheme === "series_s_ep") {
@@ -429,10 +429,7 @@ function formatChapterFilename(
   namingSchemeArg,
   extArg,
 ) {
-  let title = "";
-  let chapterNum = 1;
-  let namingScheme = "default";
-  let ext = ".cbz";
+  let title, chapterNum, namingScheme, ext;
 
   if (typeof optsOrTitle === "object" && optsOrTitle !== null) {
     title = optsOrTitle.title || "";
@@ -449,7 +446,7 @@ function formatChapterFilename(
 
   const num = chapterNum;
   const cleanTitle = sanitizeFolderName(title || "Manga");
-  let baseName = "";
+  let baseName;
 
   if (namingScheme === "series_chapter") {
     baseName = `${cleanTitle} - Chapter ${num}`;

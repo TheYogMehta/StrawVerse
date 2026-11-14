@@ -857,7 +857,7 @@ async function addExtensionRepo(inputUrl) {
 
   // Validate that marketplace.json exists and is valid
   const res = await httpGetText(parsed.marketplaceUrl, 10000);
-  let json = null;
+  let json;
   try {
     json = JSON.parse(res);
   } catch (parseErr) {
@@ -1421,7 +1421,9 @@ async function loadSingleScraper(
         `Loaded/Reloaded ${AnimeManga.toLowerCase()} scraper: ${scraper.name} (@${RepoOwner})`,
       );
       notifyScrapersUpdated();
-      await reconcileActiveProvider(norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies");
+      await reconcileActiveProvider(
+        norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies",
+      );
       return { success: true, scraper };
     } else {
       logger.warn(`Scraper missing 'name' export: ${fullPath}`);
@@ -1471,7 +1473,9 @@ async function unloadSingleScraper(
     logger.info(
       `Unloaded ${AnimeManga.toLowerCase()} scraper: ${ExtensionName} (@${RepoOwner})`,
     );
-    await reconcileActiveProvider(norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies");
+    await reconcileActiveProvider(
+      norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies",
+    );
     notifyScrapersUpdated();
   } catch (err) {
     logger.error(`Failed to unload scraper ${ExtensionName}: ${err.message}`);
@@ -1899,7 +1903,7 @@ async function renameExistingMangaChapters(targetScheme) {
       if (processedDirs.has(resolvedPath)) return;
       processedDirs.add(resolvedPath);
 
-      let entries = [];
+      let entries;
       try {
         entries = await fs.promises.readdir(resolvedPath, {
           withFileTypes: true,

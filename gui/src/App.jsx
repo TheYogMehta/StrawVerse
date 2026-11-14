@@ -482,7 +482,14 @@ export default function App() {
             type={contentType}
             provider="local"
             onTypeChange={setContentType}
-            onSelectMedia={(id, prov, backText, autoPlay, targetNum) =>
+            onSelectMedia={(
+              id,
+              _prov,
+              backText,
+              autoPlay,
+              targetNum,
+              targetSeason,
+            ) =>
               navigateTo("info", {
                 id,
                 type: contentType,
@@ -490,6 +497,7 @@ export default function App() {
                 backText,
                 autoPlay,
                 targetNum,
+                targetSeason,
               })
             }
           />
@@ -515,11 +523,12 @@ export default function App() {
           />
         );
 
-      case "filters":
+      case "filters": {
+        const filterType = contentType === "Movies" ? "Anime" : contentType;
         return (
           <Catalog
-            key={`filters-${contentType}-${reloadCounter}`}
-            type={contentType}
+            key={`filters-${filterType}-${reloadCounter}`}
+            type={filterType}
             provider="mal"
             onTypeChange={setContentType}
             initialSearchQuery={current.params?.searchQuery || ""}
@@ -528,7 +537,7 @@ export default function App() {
             onSelectMedia={(id, prov, backText, autoPlay) =>
               navigateTo("info", {
                 id,
-                type: contentType,
+                type: filterType,
                 provider: prov,
                 backText,
                 autoPlay,
@@ -536,6 +545,7 @@ export default function App() {
             }
           />
         );
+      }
       case "info":
         return (
           <InfoView
@@ -546,6 +556,7 @@ export default function App() {
             backText={current.params.backText}
             autoPlay={current.params.autoPlay}
             targetNum={current.params.targetNum}
+            targetSeason={current.params.targetSeason}
             sortOrder={infoSortOrder}
             setSortOrder={setInfoSortOrder}
             onBack={navigateBack}
@@ -592,6 +603,7 @@ export default function App() {
               provider,
               image,
               malid,
+              season,
             ) => {
               setHistory((prev) =>
                 prev.map((item, idx) => {
@@ -625,6 +637,7 @@ export default function App() {
                 image,
                 malid,
                 type: current.params.type,
+                season: season || 1,
               });
             }}
             onRead={(
@@ -758,6 +771,7 @@ export default function App() {
             id={activePlayerParams.id}
             type={activePlayerParams.type}
             episodeNumOrId={activePlayerParams.ep}
+            season={activePlayerParams.season}
             isDownloaded={activePlayerParams.isDownloaded}
             subdub={activePlayerParams.subdub}
             episodesList={activePlayerParams.episodesList || []}

@@ -227,14 +227,19 @@ async function resolveMalIdFromMapping({
   provider = null,
   mediaType = null,
   installedOnly = false,
+  title = null,
+  year = null,
 }) {
-  if (!id || !global.mappingDb || mediaType === "Movies") return null;
-  const cleanId = String(id).trim();
-  if (!cleanId) return null;
+  if ((!id && !title) || !global.mappingDb || mediaType === "Movies")
+    return null;
+  const cleanId = id ? String(id).trim() : null;
 
   try {
     const providers = await getMappingProviders(mediaType, { installedOnly });
-    if (!providers || providers.length === 0) return null;
+    const isManga = mediaType === "Manga";
+    const metaTable = isManga ? "manga" : "anime";
+
+    let matchedProviderTable = null;
 
     if (provider && provider !== "provider" && provider !== "local source") {
       const cleanProv = String(provider)
@@ -246,7 +251,7 @@ async function resolveMalIdFromMapping({
         .pop()
         .replace(/[^a-z0-9]/g, "");
 
-      const matchedList = providers.filter((p) => {
+      const matchedList = (providers || []).filter((p) => {
         const tbl = (p.table_name || "")
           .toLowerCase()
           .replace(/[^a-z0-9]/g, "");
@@ -272,30 +277,158 @@ async function resolveMalIdFromMapping({
         );
       });
 
-      for (const matched of matchedList) {
+      if (matchedList.length > 0) {
+        matchedProviderTable = matchedList[0].table_name;
+      }
+
+      if (cleanId) {
+        for (const matched of matchedList) {
+          try {
+            const tbl = matched.table_name;
+            const sql =
+              tbl === "pahe"
+                ? `SELECT malid FROM "${tbl}" WHERE id = ? OR uuid = ? LIMIT 1`
+                : `SELECT malid FROM "${tbl}" WHERE id = ? LIMIT 1`;
+            const params = tbl === "pahe" ? [cleanId, cleanId] : [cleanId];
+            const row = await mappingQueryOne(sql, params);
+            if (row?.malid) return Number(row.malid);
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (cleanId && providers && providers.length > 0) {
+      for (const p of providers) {
         try {
-          const tbl = matched.table_name;
           const sql =
-            tbl === "pahe"
-              ? `SELECT malid FROM "${tbl}" WHERE id = ? OR uuid = ? LIMIT 1`
-              : `SELECT malid FROM "${tbl}" WHERE id = ? LIMIT 1`;
-          const params = tbl === "pahe" ? [cleanId, cleanId] : [cleanId];
+            p.table_name === "pahe"
+              ? `SELECT malid FROM "${p.table_name}" WHERE id = ? OR uuid = ? LIMIT 1`
+              : `SELECT malid FROM "${p.table_name}" WHERE id = ? LIMIT 1`;
+          const params =
+            p.table_name === "pahe" ? [cleanId, cleanId] : [cleanId];
           const row = await mappingQueryOne(sql, params);
           if (row?.malid) return Number(row.malid);
         } catch (_) {}
       }
     }
 
-    for (const p of providers) {
+    if (title && typeof title === "string" && title.trim()) {
+      const cleanTitle = title.trim();
+      const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const normQuery = norm(cleanTitle);
+
+      let parsedYear = year ? parseInt(year, 10) : null;
+      if (!parsedYear) {
+        const yMatch = cleanTitle.match(/\b(19\d\d|20\d\d)\b/);
+        if (yMatch) parsedYear = parseInt(yMatch[1], 10);
+      }
+
       try {
-        const sql =
-          p.table_name === "pahe"
-            ? `SELECT malid FROM "${p.table_name}" WHERE id = ? OR uuid = ? LIMIT 1`
-            : `SELECT malid FROM "${p.table_name}" WHERE id = ? LIMIT 1`;
-        const params = p.table_name === "pahe" ? [cleanId, cleanId] : [cleanId];
-        const row = await mappingQueryOne(sql, params);
-        if (row?.malid) return Number(row.malid);
+        const exactRows = await mappingQueryAll(
+          `SELECT malid, title ${!isManga ? ", year" : ""} FROM "${metaTable}" WHERE LOWER(title) = LOWER(?)`,
+          [cleanTitle],
+        );
+        if (exactRows && exactRows.length > 0) {
+          let chosen = exactRows[0];
+          if (exactRows.length > 1 && parsedYear && !isManga) {
+            const byYear = exactRows.find(
+              (r) => r.year && parseInt(r.year, 10) === parsedYear,
+            );
+            if (byYear) chosen = byYear;
+          }
+          if (chosen?.malid) {
+            const resolvedMalId = Number(chosen.malid);
+            if (matchedProviderTable && cleanId) {
+              try {
+                global.mappingDb
+                  .prepare(
+                    `INSERT OR REPLACE INTO "${matchedProviderTable}" (id, malid) VALUES (?, ?)`,
+                  )
+                  .run(cleanId, resolvedMalId);
+              } catch (_) {}
+            }
+            return resolvedMalId;
+          }
+        }
+
+        const firstWord = cleanTitle
+          .replace(/[^a-zA-Z0-9 ]/g, " ")
+          .trim()
+          .split(" ")[0];
+        if (firstWord && firstWord.length >= 3) {
+          const allCandidates = await mappingQueryAll(
+            `SELECT malid, title ${!isManga ? ", year" : ""} FROM "${metaTable}" WHERE LOWER(title) LIKE ? LIMIT 50`,
+            [`%${firstWord}%`],
+          );
+          const normMatches = (allCandidates || []).filter(
+            (c) => norm(c.title) === normQuery,
+          );
+          if (normMatches.length > 0) {
+            let chosen = normMatches[0];
+            if (normMatches.length > 1 && parsedYear && !isManga) {
+              const byYear = normMatches.find(
+                (r) => r.year && parseInt(r.year, 10) === parsedYear,
+              );
+              if (byYear) chosen = byYear;
+            }
+            if (chosen?.malid) {
+              const resolvedMalId = Number(chosen.malid);
+              if (matchedProviderTable && cleanId) {
+                try {
+                  global.mappingDb
+                    .prepare(
+                      `INSERT OR REPLACE INTO "${matchedProviderTable}" (id, malid) VALUES (?, ?)`,
+                    )
+                    .run(cleanId, resolvedMalId);
+                } catch (_) {}
+              }
+              return resolvedMalId;
+            }
+          }
+        }
       } catch (_) {}
+
+      const targetProviders = installedOnly
+        ? providers
+        : await getMappingProviders(mediaType, { installedOnly: true });
+
+      const siblingTables = [
+        ...new Set(
+          (targetProviders && targetProviders.length > 0
+            ? targetProviders
+            : providers || []
+          )
+            .map((p) => p.table_name)
+            .filter((tbl) => Boolean(tbl) && tbl !== matchedProviderTable),
+        ),
+      ];
+
+      for (const sib of siblingTables) {
+        if (sib === matchedProviderTable) continue;
+        try {
+          const slug = cleanTitle
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-|-$/g, "");
+          const rows = await mappingQueryAll(
+            `SELECT malid FROM "${sib}" WHERE id LIKE ? OR id LIKE ? LIMIT 1`,
+            [`%${slug}%`, `%${cleanId || slug}%`],
+          );
+          if (rows && rows.length > 0 && rows[0].malid) {
+            const resolvedMalId = Number(rows[0].malid);
+            if (matchedProviderTable && cleanId) {
+              try {
+                global.mappingDb
+                  .prepare(
+                    `INSERT OR REPLACE INTO "${matchedProviderTable}" (id, malid) VALUES (?, ?)`,
+                  )
+                  .run(cleanId, resolvedMalId);
+              } catch (_) {}
+            }
+            return resolvedMalId;
+          }
+        } catch (_) {}
+      }
     }
   } catch (err) {
     logger.error(`[mappingResolver] Error resolving MAL ID: ${err.message}`);

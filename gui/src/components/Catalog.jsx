@@ -87,12 +87,6 @@ const YEARS_LIST = [
   "Older",
 ];
 
-const MAPPING_OPTIONS = [
-  { label: "All", value: "" },
-  { label: "Mapped (MAL Linked)", value: "mapped" },
-  { label: "Unmapped (Unique to Extension)", value: "unmapped" },
-];
-
 const getMalStatusOptions = (type) => {
   const isManga = type === "Manga";
   return [
@@ -194,6 +188,36 @@ function matchItemFilters(item, filters) {
         (t) => t && String(t).toLowerCase().trim() === targetTag,
       );
       if (!hasTag) return false;
+    }
+  }
+
+  if (
+    filters.downloadStatus &&
+    filters.downloadStatus !== "all" &&
+    filters.downloadStatus !== "" &&
+    filters.downloadStatus !== "All"
+  ) {
+    const isDownloaded =
+      (Array.isArray(item.Downloaded) && item.Downloaded.length > 0) ||
+      (Array.isArray(item.DownloadedChapters) &&
+        item.DownloadedChapters.length > 0) ||
+      (Array.isArray(item.DownloadedEpisodes) &&
+        item.DownloadedEpisodes.length > 0) ||
+      (item.DownloadedEpisodes?.sub?.length || 0) +
+        (item.DownloadedEpisodes?.dub?.length || 0) >
+        0;
+
+    const targetDl = String(filters.downloadStatus).toLowerCase().trim();
+    if (targetDl === "downloaded" && !isDownloaded) {
+      return false;
+    }
+    if (
+      (targetDl === "not_downloaded" ||
+        targetDl === "nondownloaded" ||
+        targetDl === "not downloaded") &&
+      isDownloaded
+    ) {
+      return false;
     }
   }
 
@@ -361,9 +385,8 @@ export default function Catalog({
   const [localTags, setLocalTags] = useState([]);
   const [tagModalMedia, setTagModalMedia] = useState(null);
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(
-    () => provider === "mal",
+    () => provider === "mal" && type !== "Movies",
   );
-  const [installedProvidersList, setInstalledProvidersList] = useState([]);
   const [providerMetadataList, setProviderMetadataList] = useState([]);
   const [catalogSource, setCatalogSource] = useState(() => {
     return sessionStorage.getItem(`catalog_source_${type}`) || "mal";
@@ -402,42 +425,10 @@ export default function Catalog({
     fetchProviderMetadata();
   }, [type]);
 
-  useEffect(() => {
-    const fetchInstalledProviders = async () => {
-      try {
-        if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
-          const res = await window.sharedStateAPI.getSettings([
-            "providers",
-            "installedExtensions",
-          ]);
-          const pList = res?.settings?.providers?.[type] || [];
-          setInstalledProvidersList(pList);
-        }
-      } catch (_) {}
-    };
-    fetchInstalledProviders();
-  }, [type]);
-
-  const allAvailableProviders = useMemo(() => {
-    const set = new Set(installedProvidersList);
-    if (data?.results && Array.isArray(data.results)) {
-      data.results.forEach((i) => {
-        if (
-          i.provider &&
-          i.provider !== "local source" &&
-          i.provider !== "provider"
-        ) {
-          set.add(i.provider);
-        }
-      });
-    }
-    return Array.from(set).sort();
-  }, [installedProvidersList, data?.results]);
-
   const activeFilterCount = useMemo(() => {
     return Object.entries(activeFilters).filter(([k, v]) => {
       if (k === "page") return false;
-      if (v === "" || v === "All" || v == null) return false;
+      if (v === "" || v === "All" || v === "all" || v == null) return false;
       return true;
     }).length;
   }, [activeFilters]);
@@ -741,6 +732,7 @@ export default function Catalog({
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [scheduleUpdating, setScheduleUpdating] = useState(false);
   const [timeTicker, setTimeTicker] = useState(Date.now());
+
   const lastLoadedKeyRef = useRef(`${type}_${provider}`);
   const scrollDebounceRef = useRef(null);
 
@@ -958,7 +950,7 @@ export default function Catalog({
     return `${type}_local_${currentTag || "all"}`;
   };
 
-  const applyCustomOrder = (resultsList, currentFilters = activeFilters) => {
+  const applyCustomOrder = (resultsList) => {
     if (!resultsList || resultsList.length === 0) return resultsList;
     return resultsList;
   };
@@ -979,7 +971,7 @@ export default function Catalog({
     }
   };
 
-  const handleDragLeave = (e, index) => {
+  const handleDragLeave = (_e, index) => {
     if (!canReorder) return;
     if (dragOverIndex === index) {
       setDragOverIndex(null);
@@ -1032,7 +1024,7 @@ export default function Catalog({
     setDragOverIndex(null);
   };
 
-  const handleTouchStart = (e, index) => {
+  const handleTouchStart = (_e, index) => {
     if (!canReorder) return;
     setDraggedIndex(index);
   };
@@ -1054,7 +1046,7 @@ export default function Catalog({
     }
   };
 
-  const handleTouchEnd = async (e) => {
+  const handleTouchEnd = async () => {
     if (!canReorder || draggedIndex === null) return;
     const dropIndex = dragOverIndex;
     if (dropIndex !== null && draggedIndex !== dropIndex && data?.results) {
@@ -1222,10 +1214,7 @@ export default function Catalog({
     },
   };
 
-  const getApiEndpoint = (
-    currentTag = activeFilters.tag,
-    source = catalogSource,
-  ) => {
+  const getApiEndpoint = (source = catalogSource) => {
     if (provider === "local") {
       return `/api/list/${type}/local`;
     }
@@ -1242,7 +1231,7 @@ export default function Catalog({
   const preloadPagesAround = async (targetPage, currentFilters) => {
     const startP = Math.max(1, targetPage - 1);
     const endP = targetPage + 1;
-    const endpoint = getApiEndpoint(currentFilters.tag, catalogSource);
+    const endpoint = getApiEndpoint(catalogSource);
 
     let updatedPages = {};
     setFetchedPages((prev) => {
@@ -1345,7 +1334,7 @@ export default function Catalog({
       if (isLinking) {
         endpoint = `/api/list/${type}/search?query=${encodeURIComponent(activeSearch)}`;
       } else {
-        endpoint = getApiEndpoint(currentFilters.tag, activeSource);
+        endpoint = getApiEndpoint(activeSource);
       }
 
       if (provider === "mal" && !isAppend && page === 1) {
@@ -1552,12 +1541,14 @@ export default function Catalog({
         const grouped = {};
         for (const item of filtered) {
           const key = getGroupKey(item);
-          const currentNum = Number(item.number) || 0;
-          if (
-            !grouped[key] ||
-            currentNum > (Number(grouped[key].number) || 0)
-          ) {
+          if (!grouped[key]) {
             grouped[key] = item;
+          } else {
+            const curTime = new Date(item.date).getTime() || 0;
+            const existingTime = new Date(grouped[key].date).getTime() || 0;
+            if (curTime > existingTime) {
+              grouped[key] = item;
+            }
           }
         }
         const unique = [];
@@ -1881,7 +1872,7 @@ export default function Catalog({
       confirmButtonText,
     );
 
-    if (confirmed) {
+    if (confirmed?.isConfirmed) {
       setData((prev) => ({
         ...prev,
         results: (prev?.results || []).filter((x) => x.id !== item.id),
@@ -1988,10 +1979,7 @@ export default function Catalog({
       return;
     }
 
-    const isMalActive =
-      provider === "mal" ||
-      (!catalogSource?.startsWith("unique:") && provider !== "local");
-    let backText = "Back to Collection";
+    let backText;
     if (searchQuery.trim().length > 0) {
       backText = "Back to Search";
     } else if (provider === "local") {
@@ -2027,6 +2015,7 @@ export default function Catalog({
     backText,
     autoPlay,
     targetNum,
+    targetSeason,
   ) => {
     const cacheKey = `${type}_${provider}`;
     if (!window.catalogCache) {
@@ -2049,7 +2038,7 @@ export default function Catalog({
       scrollPosition: currentScroll,
       lastActivePage: currentPage,
     };
-    onSelectMedia(id, prov, backText, autoPlay, targetNum);
+    onSelectMedia(id, prov, backText, autoPlay, targetNum, targetSeason);
   };
 
   const handleSearchSubmit = (e) => {
@@ -2079,7 +2068,11 @@ export default function Catalog({
 
   const handlePageChange = (page) => {
     if (page < 1) return;
+    if (data?.totalPages && page > data.totalPages) return;
     setCurrentPage(page);
+    if (wrapperRef.current) {
+      wrapperRef.current.scrollTop = 0;
+    }
     fetchData(page);
   };
 
@@ -2128,8 +2121,7 @@ export default function Catalog({
     }
     setInfiniteLoading(true);
     try {
-      const activeSearch = searchQuery;
-      let endpoint = getApiEndpoint(activeFilters.tag);
+      let endpoint = getApiEndpoint();
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2287,6 +2279,11 @@ export default function Catalog({
         isFilterOpen={isFilterPanelOpen}
         onToggleFilter={() => setIsFilterPanelOpen((prev) => !prev)}
         activeFilterCount={activeFilterCount}
+        showFilterToggle={
+          type !== "Movies" &&
+          (provider === "mal" ||
+            (provider === "provider" && Boolean(availableFilters)))
+        }
         catalogSource={catalogSource}
         onCatalogSourceChange={handleCatalogSourceChange}
         availableProviders={providerMetadataList}
@@ -2309,7 +2306,7 @@ export default function Catalog({
       />
 
       {/* Universal Filter panel */}
-      {provider === "mal" && (
+      {provider === "mal" && type !== "Movies" && (
         <div className="filter-panel">
           <div className="filter-panel-header">
             <div className="filter-panel-left">
@@ -2505,21 +2502,31 @@ export default function Catalog({
       )}
 
       {/* Discover Provider-native Filter panel */}
-      {provider === "provider" && availableFilters && (
+      {provider === "provider" && type !== "Movies" && availableFilters && (
         <div className="filter-panel">
           <div className="filter-panel-header">
             <div className="filter-panel-left">
               <div className="filter-panel-title">
                 <SlidersHorizontal size={15} />
                 <span>Filters</span>
-                {Object.keys(activeFilters).filter((k) => k !== "page" && activeFilters[k]).length > 0 && (
+                {Object.keys(activeFilters).filter(
+                  (k) => k !== "page" && activeFilters[k],
+                ).length > 0 && (
                   <span className="filter-count-label">
-                    ({Object.keys(activeFilters).filter((k) => k !== "page" && activeFilters[k]).length} active)
+                    (
+                    {
+                      Object.keys(activeFilters).filter(
+                        (k) => k !== "page" && activeFilters[k],
+                      ).length
+                    }{" "}
+                    active)
                   </span>
                 )}
               </div>
             </div>
-            {Object.keys(activeFilters).filter((k) => k !== "page" && activeFilters[k]).length > 0 && (
+            {Object.keys(activeFilters).filter(
+              (k) => k !== "page" && activeFilters[k],
+            ).length > 0 && (
               <button
                 type="button"
                 onClick={handleResetFilters}
@@ -2532,6 +2539,20 @@ export default function Catalog({
             )}
           </div>
           <div className="filter-grid">
+            <div className="filter-group">
+              <label className="filter-label">Downloads</label>
+              <select
+                value={activeFilters.downloadStatus || ""}
+                onChange={(e) =>
+                  handleFilterChange("downloadStatus", e.target.value)
+                }
+                className={`filter-select ${activeFilters.downloadStatus ? "is-active" : ""}`}
+              >
+                <option value="">All</option>
+                <option value="downloaded">Downloaded Only</option>
+                <option value="not_downloaded">Not Downloaded</option>
+              </select>
+            </div>
             {Object.entries(availableFilters).map(([key, filter]) => (
               <div key={key} className="filter-group">
                 <label className="filter-label">{filter.label}</label>

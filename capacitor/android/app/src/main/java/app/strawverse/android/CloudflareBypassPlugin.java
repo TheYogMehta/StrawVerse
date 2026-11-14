@@ -948,7 +948,8 @@ public class CloudflareBypassPlugin extends Plugin {
         boolean isDownloadServiceRunning = DownloadForegroundService.isRunning();
         if (url != null) {
             String lowerUrl = url.toLowerCase();
-            isMedia = lowerUrl.contains(".m3u8") || lowerUrl.contains(".ts") || lowerUrl.contains("owocdn.top") || lowerUrl.contains("uwucdn.top") || lowerUrl.contains("kotocdn.site") || lowerUrl.contains("megaplay.buzz");
+            isMedia = lowerUrl.contains(".m3u8") || lowerUrl.contains(".ts") || lowerUrl.contains("owocdn.top") || lowerUrl.contains("uwucdn.top") || lowerUrl.contains("kotocdn.site") || lowerUrl.contains("megaplay.buzz")
+                || lowerUrl.contains(".webp") || lowerUrl.contains(".jpg") || lowerUrl.contains(".jpeg") || lowerUrl.contains(".png") || lowerUrl.contains(".gif") || lowerUrl.contains(".svg");
         }
 
         if (!isMedia && !isDownloadServiceRunning) {

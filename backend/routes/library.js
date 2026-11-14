@@ -27,6 +27,7 @@ const {
   parseTags,
   isReservedTag,
   getReservedTags,
+  SEASON_FOLDER_RE,
 } = require("../utils/constants");
 const { updateHistory } = require("../utils/history");
 const {
@@ -37,7 +38,7 @@ const {
   run,
 } = require("../utils/db");
 const { exec } = require("child_process");
-const { sanitizeFolderName, GetDir } = require("../utils/DirectoryMaker");
+const { GetDir } = require("../utils/DirectoryMaker");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { resolveMalIdFromMapping } = require("../utils/mappingResolver");
 
@@ -340,9 +341,7 @@ router.post("/api/local/tags/add", async (req, res) => {
     const targetTable =
       type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
     const existing = await global.db
-      .prepare(
-        `SELECT * FROM ${targetTable} WHERE id = ? OR folder_name = ?`,
-      )
+      .prepare(`SELECT * FROM ${targetTable} WHERE id = ? OR folder_name = ?`)
       .get(id, id);
 
     if (existing) {
@@ -372,7 +371,12 @@ router.post("/api/local/tags/add", async (req, res) => {
           .run(...params);
 
         const targetMalID = resolvedMalID || existing.MalID;
-        if (CustomTag !== undefined && targetMalID && targetMalID !== "") {
+        if (
+          type !== "Movies" &&
+          CustomTag !== undefined &&
+          targetMalID &&
+          targetMalID !== ""
+        ) {
           await global.db
             .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
             .run(tagValue, targetMalID);
@@ -475,24 +479,27 @@ router.post("/api/local/tags/add", async (req, res) => {
       }
 
       await MetadataAdd(type, values);
-      await global.db
-        .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
-        .run(resolvedMalID, tagValue, id);
-
-      if (type !== "Movies" && resolvedMalID && resolvedMalID !== "") {
+      if (type === "Movies") {
         await global.db
-          .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
-          .run(tagValue, resolvedMalID);
+          .prepare(`UPDATE Movies SET CustomTag = ? WHERE id = ?`)
+          .run(tagValue, id);
+      } else {
+        await global.db
+          .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
+          .run(resolvedMalID, tagValue, id);
+
+        if (resolvedMalID && resolvedMalID !== "") {
+          await global.db
+            .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
+            .run(tagValue, resolvedMalID);
+        }
       }
     }
 
     const targetMalID =
-      type !== "Movies"
-        ? MalID
-          ? String(MalID)
-          : existing?.MalID
-        : null;
+      type !== "Movies" ? (MalID ? String(MalID) : existing?.MalID) : null;
     if (
+      type !== "Movies" &&
       CustomTag !== undefined &&
       (tagValue === "" || tagValue === "[]") &&
       targetMalID &&
@@ -844,6 +851,7 @@ router.post("/api/local/open", async (req, res) => {
       subdub,
       action = "open_folder",
       customPath,
+      season = null,
     } = req.body;
     let targetPath = customPath || "";
 
@@ -853,8 +861,36 @@ router.post("/api/local/open", async (req, res) => {
         targetPath = baseDir;
       } else {
         targetPath = await resolveDownloadFolder(type, id, subdub, baseDir);
-        if (number != null && fs.existsSync(targetPath)) {
-          const files = await fs.promises.readdir(targetPath);
+        let searchDir = targetPath;
+        if (season) {
+          const sPad = String(season).padStart(2, "0");
+          const cand1 = path.join(targetPath, `Season ${sPad}`);
+          const cand2 = path.join(targetPath, `Season ${season}`);
+          if (fs.existsSync(cand1)) {
+            searchDir = cand1;
+            targetPath = cand1;
+          } else if (fs.existsSync(cand2)) {
+            searchDir = cand2;
+            targetPath = cand2;
+          } else if (fs.existsSync(targetPath)) {
+            try {
+              const subs = fs.readdirSync(targetPath, { withFileTypes: true });
+              const found = subs.find((d) => {
+                if (!d.isDirectory() || !SEASON_FOLDER_RE.test(d.name))
+                  return false;
+                const m = d.name.match(/\d+/);
+                return m && parseInt(m[0], 10) === Number(season);
+              });
+              if (found) {
+                const sFound = path.join(targetPath, found.name);
+                searchDir = sFound;
+                targetPath = sFound;
+              }
+            } catch (_) {}
+          }
+        }
+        if (number != null && fs.existsSync(searchDir)) {
+          const files = await fs.promises.readdir(searchDir);
           const targetNum = parseFloat(number);
           if (!isNaN(targetNum)) {
             const matchedFile = files.find((file) => {
@@ -865,7 +901,7 @@ router.post("/api/local/open", async (req, res) => {
               }
             });
             if (matchedFile) {
-              targetPath = path.join(targetPath, matchedFile);
+              targetPath = path.join(searchDir, matchedFile);
             }
           }
         }
@@ -911,6 +947,8 @@ router.post("/api/history/mark-read", async (req, res) => {
       mediaId,
       type,
       numbers,
+      items,
+      season,
       isCompleted,
       title,
       provider,
@@ -918,7 +956,19 @@ router.post("/api/history/mark-read", async (req, res) => {
       malid,
       timestamp,
     } = req.body;
-    if (!mediaId || !type || !Array.isArray(numbers) || numbers.length === 0) {
+
+    const targetItems =
+      Array.isArray(items) && items.length > 0
+        ? items
+        : Array.isArray(numbers)
+          ? numbers.map((n) =>
+              typeof n === "object" && n !== null
+                ? n
+                : { number: n, season: season || 1 },
+            )
+          : [];
+
+    if (!mediaId || !type || targetItems.length === 0) {
       throw new Error("Missing parameters for bulk history update");
     }
 
@@ -926,11 +976,12 @@ router.post("/api/history/mark-read", async (req, res) => {
       ? new Date(timestamp).toISOString()
       : new Date().toISOString();
 
-    for (const num of numbers) {
+    for (const it of targetItems) {
       await updateHistory({
         mediaId,
         type,
-        number: num,
+        number: it.number,
+        season: it.season !== undefined ? it.season : season || 1,
         title,
         provider,
         image,
@@ -943,7 +994,7 @@ router.post("/api/history/mark-read", async (req, res) => {
       });
     }
 
-    res.json({ success: true, count: numbers.length });
+    res.json({ success: true, count: targetItems.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -970,8 +1021,13 @@ router.post("/api/history/edit-entry", async (req, res) => {
     }
 
     const isVideo = type === "Anime" || type === "Movies";
-    const historyTable = isVideo ? "WatchHistory" : "ReadHistory";
-    const idField = isVideo ? "anime_id" : "manga_id";
+    const isMovies = type === "Movies";
+    const historyTable = isMovies
+      ? "SeriesMovieWatchHistory"
+      : isVideo
+        ? "WatchHistory"
+        : "ReadHistory";
+    const idField = isMovies ? "movie_id" : isVideo ? "anime_id" : "manga_id";
     const numberField = isVideo ? "episode_number" : "chapter_number";
     const currentField = isVideo ? "current_time" : "current_page";
     const totalField = isVideo ? "duration" : "total_pages";
@@ -985,9 +1041,19 @@ router.post("/api/history/edit-entry", async (req, res) => {
       : new Date().toISOString();
     const compAt = isCompleted ? timeIso : null;
 
+    const parsedSeason = isMovies
+      ? req.body.season
+        ? parseInt(req.body.season, 10)
+        : 1
+      : null;
+    const seasonClause = isMovies
+      ? ` AND (season = ? OR (? = 1 AND season IS NULL))`
+      : ``;
+    const seasonParams = isMovies ? [parsedSeason, parsedSeason] : [];
+
     const existing = await queryOne(
-      `SELECT id FROM ${historyTable} WHERE ${idField} = ? AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ?) LIMIT 1`,
-      [mediaId, number, number],
+      `SELECT id FROM ${historyTable} WHERE ${idField} = ? AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ?)${seasonClause} LIMIT 1`,
+      [mediaId, number, number, ...seasonParams],
     );
 
     if (existing) {
@@ -1011,6 +1077,7 @@ router.post("/api/history/edit-entry", async (req, res) => {
         duration: tot,
         timeSpent: isCompleted ? 10 : 0,
         timestamp: timeIso,
+        season: parsedSeason,
       });
     }
 
@@ -1023,8 +1090,18 @@ router.post("/api/history/edit-entry", async (req, res) => {
 // Clear all history records
 router.post("/api/history/clear", async (req, res) => {
   try {
-    await run(`DELETE FROM WatchHistory`);
-    await run(`DELETE FROM ReadHistory`);
+    const { type } = req.body || {};
+    if (type === "Movies") {
+      await run(`DELETE FROM SeriesMovieWatchHistory`);
+    } else if (type === "Anime") {
+      await run(`DELETE FROM WatchHistory`);
+    } else if (type === "Manga") {
+      await run(`DELETE FROM ReadHistory`);
+    } else {
+      await run(`DELETE FROM WatchHistory`);
+      await run(`DELETE FROM ReadHistory`);
+      await run(`DELETE FROM SeriesMovieWatchHistory`);
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1036,7 +1113,11 @@ router.delete("/api/history/:type/:id", async (req, res) => {
   try {
     const { type, id } = req.params;
     const historyTable =
-      type === "Anime" || type === "Movies" ? "WatchHistory" : "ReadHistory";
+      type === "Movies"
+        ? "SeriesMovieWatchHistory"
+        : type === "Anime"
+          ? "WatchHistory"
+          : "ReadHistory";
     await run(`DELETE FROM ${historyTable} WHERE id = ?`, [id]);
     res.json({ success: true });
   } catch (err) {
@@ -1053,11 +1134,20 @@ router.post("/api/history/hide", async (req, res) => {
     }
 
     const isVideo = type === "Anime" || type === "Movies";
-    const historyTable = isVideo ? "WatchHistory" : "ReadHistory";
-    const idField = isVideo ? "anime_id" : "manga_id";
-    const titleField = isVideo ? "anime_title" : "manga_title";
+    const isMovies = type === "Movies";
+    const historyTable = isMovies
+      ? "SeriesMovieWatchHistory"
+      : isVideo
+        ? "WatchHistory"
+        : "ReadHistory";
+    const idField = isMovies ? "movie_id" : isVideo ? "anime_id" : "manga_id";
+    const titleField = isMovies
+      ? "title"
+      : isVideo
+        ? "anime_title"
+        : "manga_title";
     const mainTable =
-      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
+      type === "Anime" ? "Anime" : isMovies ? "Movies" : "Manga";
     const hiddenVal = unhide ? 0 : 1;
 
     let queryIds = [mediaId];
@@ -1109,14 +1199,22 @@ router.get("/api/history/progress", async (req, res) => {
     if (!mediaId || !type) throw new Error("Missing parameters");
 
     const isVideo = type === "Anime" || type === "Movies";
+    const isMovies = type === "Movies";
     const mainTable =
-      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
-    const historyTable = isVideo ? "WatchHistory" : "ReadHistory";
-    const idCol = isVideo ? "anime_id" : "manga_id";
-    const titleCol = isVideo ? "anime_title" : "manga_title";
+      type === "Anime" ? "Anime" : isMovies ? "Movies" : "Manga";
+    const historyTable = isMovies
+      ? "SeriesMovieWatchHistory"
+      : isVideo
+        ? "WatchHistory"
+        : "ReadHistory";
+    const idCol = isMovies ? "movie_id" : isVideo ? "anime_id" : "manga_id";
+    const titleCol = isMovies
+      ? "title"
+      : isVideo
+        ? "anime_title"
+        : "manga_title";
     const numCol = isVideo ? "episode_number" : "chapter_number";
     const currentCol = isVideo ? "current_time" : "current_page";
-    const totalCol = isVideo ? "duration" : "total_pages";
     const dateCol = isVideo ? "last_watched" : "last_read";
 
     let suggestedNumber = null;
@@ -1128,10 +1226,13 @@ router.get("/api/history/progress", async (req, res) => {
     let queryIds = [mediaId];
     let resolvedTitle = null;
     try {
-      const localRec = await queryOne(
-        `SELECT MalID, title FROM ${mainTable} WHERE id = ?`,
-        [mediaId],
-      );
+      const localRec =
+        type === "Movies"
+          ? await queryOne(`SELECT title FROM Movies WHERE id = ?`, [mediaId])
+          : await queryOne(
+              `SELECT MalID, title FROM ${mainTable} WHERE id = ?`,
+              [mediaId],
+            );
       if (localRec) {
         if (localRec.MalID) {
           const siblings = await queryAll(
@@ -1167,15 +1268,17 @@ router.get("/api/history/progress", async (req, res) => {
       for (const h of history) {
         const num = Number(h[numCol]);
         if (!isNaN(num)) {
-          if (!numMap.has(num)) {
-            numMap.set(num, h);
+          const key =
+            isVideo && type === "Movies" ? `s${h.season || 1}_e${num}` : num;
+          if (!numMap.has(key)) {
+            numMap.set(key, h);
           } else {
-            const existing = numMap.get(num);
+            const existing = numMap.get(key);
             if (
               new Date(h[dateCol]).getTime() >
               new Date(existing[dateCol]).getTime()
             ) {
-              numMap.set(num, h);
+              numMap.set(key, h);
             }
           }
         }
@@ -1253,6 +1356,10 @@ router.get("/api/history/progress", async (req, res) => {
       lastProgress = isVideo
         ? {
             number: latest.episode_number,
+            season:
+              latest.season !== undefined && latest.season !== null
+                ? Number(latest.season)
+                : 1,
             currentTime: latest.current_time,
             duration: latest.duration,
             isCompleted: latest.is_completed === 1,
@@ -1278,6 +1385,10 @@ router.get("/api/history/progress", async (req, res) => {
         ? {
             id: h.id,
             number: h.episode_number,
+            season:
+              h.season !== undefined && h.season !== null
+                ? Number(h.season)
+                : 1,
             isCompleted: h.is_completed === 1,
             currentTime: h.current_time,
             duration: h.duration,
@@ -1320,19 +1431,39 @@ router.get("/api/history/progress", async (req, res) => {
 // Fetch history statistics
 router.get("/api/history/stats", async (req, res) => {
   try {
-    const watchStats = await global.db
+    const watchStats = (await global.db
       .prepare(
         `
       SELECT 
         COALESCE(SUM(time_spent), 0) AS total_seconds,
         COUNT(DISTINCT anime_id) AS distinct_anime,
-        COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_episodes
+        COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_anime_episodes
       FROM WatchHistory
     `,
       )
-      .get();
+      .get()) || {
+      total_seconds: 0,
+      distinct_anime: 0,
+      completed_anime_episodes: 0,
+    };
 
-    const readStats = await global.db
+    const movieStats = (await global.db
+      .prepare(
+        `
+      SELECT 
+        COALESCE(SUM(time_spent), 0) AS total_seconds,
+        COUNT(DISTINCT movie_id) AS distinct_movies_watched,
+        COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_movie_episodes
+      FROM SeriesMovieWatchHistory
+    `,
+      )
+      .get()) || {
+      total_seconds: 0,
+      distinct_movies_watched: 0,
+      completed_movie_episodes: 0,
+    };
+
+    const readStats = (await global.db
       .prepare(
         `
       SELECT 
@@ -1342,24 +1473,36 @@ router.get("/api/history/stats", async (req, res) => {
       FROM ReadHistory
     `,
       )
-      .get();
+      .get()) || { total_seconds: 0, distinct_manga: 0, completed_chapters: 0 };
 
     let distinctMovies = 0;
     try {
-      const movieStats = await global.db
+      const movieStatsRow = await global.db
         .prepare(`SELECT COUNT(DISTINCT id) AS distinct_movies FROM Movies`)
         .get();
-      distinctMovies = movieStats?.distinct_movies || 0;
+      distinctMovies = movieStatsRow?.distinct_movies || 0;
     } catch (_) {}
 
+    const animeSeconds = watchStats?.total_seconds || 0;
+    const movieSeconds = movieStats?.total_seconds || 0;
+    const completedAnime = watchStats?.completed_anime_episodes || 0;
+    const completedMovie = movieStats?.completed_movie_episodes || 0;
+
     res.json({
-      watchHours: parseFloat((watchStats.total_seconds / 3600).toFixed(2)),
-      readHours: parseFloat((readStats.total_seconds / 3600).toFixed(2)),
-      completedEpisodes: watchStats.completed_episodes,
-      completedChapters: readStats.completed_chapters,
-      distinctAnime: watchStats.distinct_anime,
-      distinctManga: readStats.distinct_manga,
-      distinctMovies,
+      watchHours: parseFloat(((animeSeconds + movieSeconds) / 3600).toFixed(2)),
+      animeWatchHours: parseFloat((animeSeconds / 3600).toFixed(2)),
+      movieWatchHours: parseFloat((movieSeconds / 3600).toFixed(2)),
+      readHours: parseFloat(
+        ((readStats?.total_seconds || 0) / 3600).toFixed(2),
+      ),
+      completedEpisodes: completedAnime + completedMovie,
+      completedAnimeEpisodes: completedAnime,
+      completedMovieEpisodes: completedMovie,
+      completedChapters: readStats?.completed_chapters || 0,
+      distinctAnime: watchStats?.distinct_anime || 0,
+      distinctManga: readStats?.distinct_manga || 0,
+      distinctMovies:
+        distinctMovies || movieStats?.distinct_movies_watched || 0,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1370,7 +1513,7 @@ async function resolveHistoryCoverImage(
   mediaId,
   title,
   type = "Anime",
-  malId = null,
+  _malId = null,
   rawScraperImg = null,
   rawMalImg = null,
 ) {
@@ -1436,6 +1579,9 @@ router.get("/api/history/list", async (req, res) => {
     const watchWhereClause = shelfOnly
       ? "WHERE (w.hidden IS NULL OR w.hidden = 0)"
       : "";
+    const movieWhereClause = shelfOnly
+      ? "WHERE (m.hidden IS NULL OR m.hidden = 0)"
+      : "";
     const readWhereClause = shelfOnly
       ? "WHERE (r.hidden IS NULL OR r.hidden = 0)"
       : "";
@@ -1446,10 +1592,11 @@ router.get("/api/history/list", async (req, res) => {
           `
         SELECT 
           w.id,
-          CASE WHEN mov.id IS NOT NULL THEN 'Movies' ELSE 'Anime' END AS type,
+          'Anime' AS type,
           w.anime_id AS media_id,
           w.anime_title AS title,
           w.episode_number AS number,
+          1 AS season,
           w.current_time,
           w.duration,
           w.time_spent,
@@ -1457,18 +1604,52 @@ router.get("/api/history/list", async (req, res) => {
           w.last_watched AS date,
           w.sub_dub AS subdub,
           COALESCE(w.hidden, 0) AS hidden,
-          COALESCE(mov.image_url, a.image_url) AS image_url,
-          COALESCE(mov.provider, a.provider) AS provider,
-          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE a.MalID END AS mal_id,
-          CASE WHEN a.id IS NOT NULL OR mov.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
-          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE mal.totalEpisodes END AS total_count,
-          CASE WHEN mov.id IS NOT NULL THEN NULL ELSE mal.image END AS mal_image
+          a.image_url,
+          a.provider,
+          NULL AS episodes_json,
+          a.MalID AS mal_id,
+          CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
+          mal.totalEpisodes AS total_count,
+          mal.image AS mal_image
         FROM WatchHistory w
         LEFT JOIN Anime a ON a.id = w.anime_id
-        LEFT JOIN Movies mov ON mov.id = w.anime_id
         LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
         ${watchWhereClause}
         ORDER BY w.last_watched DESC
+        LIMIT ?
+      `,
+        )
+        .all(limit)) || [];
+
+    const movieLogs =
+      (await global.db
+        .prepare(
+          `
+        SELECT 
+          m.id,
+          'Movies' AS type,
+          m.movie_id AS media_id,
+          m.title AS title,
+          m.episode_number AS number,
+          COALESCE(m.season, 1) AS season,
+          m.current_time,
+          m.duration,
+          m.time_spent,
+          m.is_completed,
+          m.last_watched AS date,
+          m.sub_dub AS subdub,
+          COALESCE(m.hidden, 0) AS hidden,
+          mov.image_url,
+          mov.provider,
+          mov.episodes_json,
+          NULL AS mal_id,
+          CASE WHEN mov.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
+          NULL AS total_count,
+          NULL AS mal_image
+        FROM SeriesMovieWatchHistory m
+        LEFT JOIN Movies mov ON mov.id = m.movie_id
+        ${movieWhereClause}
+        ORDER BY m.last_watched DESC
         LIMIT ?
       `,
         )
@@ -1484,14 +1665,17 @@ router.get("/api/history/list", async (req, res) => {
           r.manga_id AS media_id,
           r.manga_title AS title,
           r.chapter_number AS number,
+          1 AS season,
           r.current_page AS current_time,
           r.total_pages AS duration,
           r.time_spent,
           r.is_completed,
           r.last_read AS date,
+          NULL AS subdub,
           COALESCE(r.hidden, 0) AS hidden,
           m.image_url,
           m.provider,
+          NULL AS episodes_json,
           m.MalID AS mal_id,
           CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
           mml.totalChapters AS total_count,
@@ -1506,7 +1690,11 @@ router.get("/api/history/list", async (req, res) => {
         )
         .all(limit)) || [];
 
-    for (const log of [...watchLogs, ...readLogs]) {
+    const combined = [...watchLogs, ...movieLogs, ...readLogs]
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, limit);
+
+    for (const log of combined) {
       const coverRes = await resolveHistoryCoverImage(
         log.media_id,
         log.title,
@@ -1517,11 +1705,57 @@ router.get("/api/history/list", async (req, res) => {
       );
       delete log.image_url;
       Object.assign(log, coverRes);
-    }
 
-    const combined = [...watchLogs, ...readLogs]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, limit);
+      if (log.type === "Movies") {
+        let episodes = null;
+        if (log.episodes_json) {
+          try {
+            episodes = JSON.parse(log.episodes_json);
+          } catch (_) {}
+        }
+
+        if (
+          episodes &&
+          typeof episodes === "object" &&
+          !Array.isArray(episodes)
+        ) {
+          const currentSeason = log.season ? Number(log.season) : 1;
+          const currentNum = Number(log.number) || 1;
+
+          // Season count map: { "1": 22, "2": 22 }
+          const seasons = Object.keys(episodes)
+            .map(Number)
+            .filter((n) => !isNaN(n))
+            .sort((a, b) => a - b);
+          const totalForCurrentSeason = Number(episodes[currentSeason]) || 0;
+
+          if (log.is_completed === 1) {
+            if (
+              totalForCurrentSeason > 0 &&
+              currentNum < totalForCurrentSeason
+            ) {
+              log.next_season = currentSeason;
+              log.next_number = currentNum + 1;
+              log.has_next = true;
+            } else {
+              const nextS = seasons.find((s) => s > currentSeason);
+              if (nextS) {
+                log.next_season = nextS;
+                log.next_number = 1;
+                log.has_next = true;
+              } else {
+                log.has_next = false;
+              }
+            }
+          } else {
+            log.next_season = currentSeason;
+            log.next_number = currentNum;
+            log.has_next = true;
+          }
+        }
+      }
+      delete log.episodes_json;
+    }
 
     res.json(combined);
   } catch (err) {

@@ -14,7 +14,6 @@ async function clearMalSession() {
   global.malUsername = null;
   MalAcount = null;
   try {
-    const config = (await getKeyValue("Settings", "config")) || {};
     await setKeyValue("Settings", "malToken", null);
     await setKeyValue("Settings", "malUsername", null);
     await setKeyValue("Settings", "malLastSync", null);

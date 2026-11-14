@@ -89,6 +89,10 @@ async function resumeQueue() {
 // Add to Queue
 async function addToQueue(item) {
   try {
+    const cfg = { ...(item.config || {}) };
+    if (item.season !== undefined && item.season !== null) {
+      cfg.season = item.season;
+    }
     await run(
       `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -105,7 +109,7 @@ async function addToQueue(item) {
         item.currentSegments || 0,
         item.caption || "",
         item.added_at || Date.now(),
-        JSON.stringify(item.config || {}),
+        JSON.stringify(cfg),
       ],
     );
   } catch (err) {
@@ -144,6 +148,12 @@ async function loadQueue() {
         } catch (e) {
           item.config = {};
         }
+      }
+      if (item.config?.season !== undefined && item.config?.season !== null) {
+        item.season = item.config.season;
+      } else if (item.epid) {
+        const sMatch = String(item.epid).match(/tv:[^:]+:(\d+):\d+/);
+        if (sMatch) item.season = parseInt(sMatch[1], 10);
       }
       item.progress = 0;
       return item;
@@ -207,6 +217,10 @@ async function removeQueue(AnimeEpId, isSuccess = false) {
       EpNum: removedItem.EpNum,
       SubDub: removedItem.SubDub,
       epid: removedItem.epid,
+      season:
+        removedItem.season !== undefined && removedItem.season !== null
+          ? removedItem.season
+          : removedItem.config?.season,
     });
 
     if (!isAndroid && removedItem.Type === "Anime") {
@@ -305,25 +319,31 @@ async function SaveQueueData(QueueData) {
   AnimeQueue = QueueData;
   try {
     await run("DELETE FROM DownloadQueue");
-    const operations = QueueData.map((item) => ({
-      sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [
-        item.epid,
-        item.Type,
-        item.Title,
-        item.EpNum || "",
-        item.SubDub || "",
-        item.malid || "",
-        item.id || "",
-        item.ChapterTitle || "",
-        item.status || "Pending",
-        item.totalSegments || 0,
-        item.currentSegments || 0,
-        item.caption || "",
-        item.added_at || Date.now(),
-        JSON.stringify(item.config || {}),
-      ],
-    }));
+    const operations = QueueData.map((item) => {
+      const cfg = { ...(item.config || {}) };
+      if (item.season !== undefined && item.season !== null) {
+        cfg.season = item.season;
+      }
+      return {
+        sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          item.epid,
+          item.Type,
+          item.Title,
+          item.EpNum || "",
+          item.SubDub || "",
+          item.malid || "",
+          item.id || "",
+          item.ChapterTitle || "",
+          item.status || "Pending",
+          item.totalSegments || 0,
+          item.currentSegments || 0,
+          item.caption || "",
+          item.added_at || Date.now(),
+          JSON.stringify(cfg),
+        ],
+      };
+    });
     if (operations.length > 0) {
       await batchRun("main", operations);
     }
@@ -405,25 +425,31 @@ async function checkEpisodeDownload(epid) {
 async function addMultipleToQueue(items) {
   if (items && items.length > 0) {
     try {
-      const operations = items.map((item) => ({
-        sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [
-          item.epid,
-          item.Type,
-          item.Title,
-          item.EpNum || "",
-          item.SubDub || "",
-          item.malid || "",
-          item.id || "",
-          item.ChapterTitle || "",
-          item.status || "Pending",
-          item.totalSegments || 0,
-          item.currentSegments || 0,
-          item.caption || "",
-          item.added_at || Date.now(),
-          JSON.stringify(item.config || {}),
-        ],
-      }));
+      const operations = items.map((item) => {
+        const cfg = { ...(item.config || {}) };
+        if (item.season !== undefined && item.season !== null) {
+          cfg.season = item.season;
+        }
+        return {
+          sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          params: [
+            item.epid,
+            item.Type,
+            item.Title,
+            item.EpNum || "",
+            item.SubDub || "",
+            item.malid || "",
+            item.id || "",
+            item.ChapterTitle || "",
+            item.status || "Pending",
+            item.totalSegments || 0,
+            item.currentSegments || 0,
+            item.caption || "",
+            item.added_at || Date.now(),
+            JSON.stringify(cfg),
+          ],
+        };
+      });
       await batchRun("main", operations);
     } catch (err) {
       logger.error(
@@ -553,8 +579,6 @@ async function continuousExecution() {
       }
     } catch (_) {}
 
-    let startedNewTask = false;
-
     for (const currentTask of currentQueue) {
       if (isQueuePausedState) break;
 
@@ -580,14 +604,10 @@ async function continuousExecution() {
 
       activeProcessingEpids.add(currentTask.epid);
       activeEpidSince.set(currentTask.epid, Date.now());
-      startedNewTask = true;
 
       (async () => {
         try {
-          if (
-            currentTask?.Type === "Anime" ||
-            currentTask?.Type === "Movies"
-          ) {
+          if (currentTask?.Type === "Anime" || currentTask?.Type === "Movies") {
             let {
               config,
               Title,
@@ -600,7 +620,7 @@ async function continuousExecution() {
             } = currentTask;
             if (config && Title && EpNum && epid && SubDub) {
               await downloadep(
-                { ...config, Type },
+                { ...config, Type, season: currentTask.season },
                 Title,
                 EpNum,
                 epid,
@@ -729,8 +749,16 @@ async function continuousExecution() {
               const qualStr = currentTask.config?.quality
                 ? ` ( ${currentTask.config.quality} )`
                 : "";
+              const taskSeason =
+                currentTask.season !== undefined && currentTask.season !== null
+                  ? currentTask.season
+                  : currentTask.config?.season;
+              const seasonPrefix =
+                taskSeason !== undefined && taskSeason !== null
+                  ? `S${taskSeason} `
+                  : "";
               const prefix = currentTask.Type === "Manga" ? "CHP" : "EP";
-              const retryCaption = `Downloading ${prefix} ${cleanEp} ${currentTask.Title || ""}${qualStr} Retrying in ${Math.round(backoffMs / 1000)}s...`;
+              const retryCaption = `Downloading ${seasonPrefix}${prefix} ${cleanEp} ${currentTask.Title || ""}${qualStr} Retrying in ${Math.round(backoffMs / 1000)}s...`;
               await updateQueue(currentTask.epid, 0, 0, retryCaption);
               try {
                 global.sendToRenderer("download-logger", {
@@ -805,32 +833,38 @@ async function downloadep(
     Videoconfig?.Type === "Movies" || !!Videoconfig?.Moviesprovider;
   const dlLoc =
     (isMovie
-      ? Videoconfig?.CustomDownloadLocationMovies
-      : Videoconfig?.CustomDownloadLocationAnime) ||
+      ? liveSettings?.CustomDownloadLocationMovies ||
+        Videoconfig?.CustomDownloadLocationMovies
+      : liveSettings?.CustomDownloadLocationAnime ||
+        Videoconfig?.CustomDownloadLocationAnime) ||
     Videoconfig?.CustomDownloadLocation;
 
   if (liveSettings.mediaServerNaming === true) {
     // Season and show folder picked on the show's page (default: S1, title)
     const show = liveSettings.mediaServerShows?.[String(animeId)] || {};
-    const season = parseInt(show.season, 10);
+    const taskSeason =
+      Videoconfig?.season !== undefined && Videoconfig?.season !== null
+        ? parseInt(Videoconfig.season, 10)
+        : parseInt(show.season, 10);
+    const resolvedSeason =
+      Number.isInteger(taskSeason) && taskSeason >= 0 ? taskSeason : 1;
     directoryPath = await mediaServerDir(
       String(show.series || "").trim() || Title,
-      Number.isInteger(season) && season >= 0 ? season : 1,
+      resolvedSeason,
       dlLoc,
       animeId || AnimeEpId,
+      isMovie ? "MoviesSeries" : "Anime",
     );
     if (!isMovie) {
       try {
         const { generateNfoAndPosterForAnime } = require("./mediaServer");
-        generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(() => {});
+        generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(
+          () => {},
+        );
       } catch (_) {}
     }
   } else if (isMovie) {
-    directoryPath = await MovieDir(
-      Title,
-      dlLoc,
-      animeId || AnimeEpId,
-    );
+    directoryPath = await MovieDir(Title, dlLoc, animeId || AnimeEpId);
   } else {
     directoryPath = await directoryMaker(
       Title,
@@ -847,7 +881,13 @@ async function downloadep(
       EpNum !== undefined && EpNum !== null && !isNaN(Number(EpNum))
         ? String(Number(EpNum))
         : EpNum;
-    const initialCaption = `Resolving EP ${cleanEp} ${Title}${qualStr}...`;
+    const taskSeason =
+      Videoconfig?.season !== undefined && Videoconfig?.season !== null
+        ? Videoconfig.season
+        : null;
+    const seasonPrefix =
+      taskSeason !== undefined && taskSeason !== null ? `S${taskSeason} ` : "";
+    const initialCaption = `Resolving ${seasonPrefix}EP ${cleanEp} ${Title}${qualStr}...`;
     await updateQueue(AnimeEpId, 0, 0, initialCaption);
     global.sendToRenderer("request-battery-optimization", {});
     global.sendToRenderer("download-logger", {
@@ -949,16 +989,8 @@ async function downloadEpisodeByQuality(
       fetchAttempt++;
       try {
         sourcesArray = isMovie
-          ? await fetchMovieSources(
-              provider,
-              resolvedEpid,
-              subdub,
-            )
-          : await fetchEpisodeSources(
-              provider,
-              resolvedEpid,
-              subdub,
-            );
+          ? await fetchMovieSources(provider, resolvedEpid, subdub)
+          : await fetchEpisodeSources(provider, resolvedEpid, subdub);
       } catch (err) {
         lastFetchErr = err;
         logger.warn(
@@ -1320,6 +1352,7 @@ async function downloadEpisodeByQuality(
       currentSettings.mediaServerNaming === true
         ? mediaServerFileBase(directoryName, episodeNumber, dlQuality)
         : null,
+      config?.season,
       config?.permissiveMode
         ? "0"
         : currentSettings.minDownloadSpeed || "300 KB/s",
@@ -1401,6 +1434,7 @@ async function downloadVideo(
   headers = {},
   isM3U8 = true,
   fileBase = null,
+  season = null,
   minDownloadSpeed = null,
 ) {
   try {
@@ -1411,13 +1445,15 @@ async function downloadVideo(
       !isNaN(Number(episodeNumber))
         ? String(Number(episodeNumber))
         : episodeNumber;
+    const seasonPrefix =
+      season !== undefined && season !== null ? `S${season} ` : "";
 
     await download({
       directory: directoryPath,
       Epnum: episodeNumber,
       streamUrl: Url,
       quality: quality,
-      caption: `Downloading EP ${cleanEp} ${Title}${qualStr}`,
+      caption: `Downloading ${seasonPrefix}EP ${cleanEp} ${Title}${qualStr}`,
       EpID: epid,
       subtitles: subtitles,
       MergeSubtitles: MergeSubtitles,
@@ -1481,16 +1517,10 @@ async function downloadMangaChapters(
       config?.CustomDownloadLocationManga ||
       config?.CustomDownloadLocation;
 
-    const directoryPath = await MangaDir(
-      Title,
-      customLoc,
-      mediaId,
-    );
+    const directoryPath = await MangaDir(Title, customLoc, mediaId);
 
     const mangaScheme =
-      liveSettings?.mangaNamingScheme ||
-      config?.mangaNamingScheme ||
-      "default";
+      liveSettings?.mangaNamingScheme || config?.mangaNamingScheme || "default";
     const cbzFilename = formatChapterFilename({
       title: Title,
       chapterNum: EpNum,
