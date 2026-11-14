@@ -62,17 +62,28 @@ const ANILIST_SEED_QUERY = `
 
 async function anilistPost(query, variables = {}) {
   const axiosClient = global.axios || require("axios");
-  const resp = await axiosClient.post(
-    ANILIST_GRAPHQL,
-    { query, variables },
-    {
-      timeout: 15000,
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
+  const post = () =>
+    axiosClient.post(
+      ANILIST_GRAPHQL,
+      { query, variables },
+      {
+        timeout: 15000,
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
       },
-    },
-  );
+    );
+  let resp;
+  try {
+    resp = await post();
+  } catch (err) {
+    // Rate-limit bursts clear within seconds — one retry keeps a blip from
+    // failing the whole batch (which would strip every status badge).
+    if (err?.response?.status !== 429) throw err;
+    await new Promise((r) => setTimeout(r, 2000));
+    resp = await post();
+  }
   const body = resp.data || {};
   if (Array.isArray(body.errors) && body.errors.length) {
     throw new Error(body.errors[0]?.message || "AniList query failed");

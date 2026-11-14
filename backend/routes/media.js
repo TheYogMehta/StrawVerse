@@ -3396,13 +3396,18 @@ router.post("/api/info/bulk-meta", async (req, res) => {
 
   if (wantLangs) {
     await runPool(entries, BULK_META_CONCURRENCY, async (e) => {
-      meta[e.key].langs =
-        e.malid !== null
-          ? await resolveBulkLangs(e.malid, e.title)
-          : await resolveProviderLangs(e.provider, e.id, {
-              title: e.title,
-              malid: e.malid,
-            });
+      let langs =
+        e.malid !== null ? await resolveBulkLangs(e.malid, e.title) : null;
+      // The mapping's malid→id lookup often has no row for the card's own
+      // provider, but the card already carries a working provider id — read
+      // the episode languages straight from it instead of giving up.
+      if (!langs && e.provider && e.id) {
+        langs = await resolveProviderLangs(e.provider, e.id, {
+          title: e.title,
+          malid: e.malid,
+        });
+      }
+      meta[e.key].langs = langs;
     });
   }
 
