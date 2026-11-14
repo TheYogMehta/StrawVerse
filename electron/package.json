@@ -10,7 +10,7 @@
     "prepackage": "node scripts/download-binaries.js",
     "package": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --win --linux",
     "prepackage:mac": "node scripts/download-binaries.js",
-    "package:mac": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --mac --arm64",
+    "package:mac": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --mac dmg zip --arm64",
     "prepackage:all": "node scripts/download-binaries.js",
     "package:all": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\" && electron-builder --win --linux --mac",
     "release": "bash release.sh",
@@ -95,6 +95,12 @@
     "mac": {
       "target": [
         {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
           "target": "zip",
           "arch": [
             "arm64"
@@ -105,6 +111,20 @@
       "icon": "assets/luffy.icns",
       "identity": null,
       "artifactName": "StrawVerse-${version}-mac-arm64.${ext}"
+    },
+    "dmg": {
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
     },
     "npmRebuild": false,
     "icon": "assets/luffy.png",

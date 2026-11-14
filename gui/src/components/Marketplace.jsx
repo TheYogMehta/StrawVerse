@@ -8,7 +8,6 @@ import {
   FolderGit2,
   Trash2,
   X,
-  ExternalLink,
   RotateCcw,
 } from "lucide-react";
 import Swal from "sweetalert2";
@@ -288,7 +287,9 @@ export default function Marketplace({ initialType }) {
       .trim()
       .toLowerCase()
       .replace(/^@/, "");
-    const pName = String(provider.name || "").trim().toLowerCase();
+    const pName = String(provider.name || "")
+      .trim()
+      .toLowerCase();
 
     return activeOwner === pOwner && activeName === pName;
   };

@@ -11,6 +11,7 @@ export default function RecentHistory({
   if (provider !== "local" || linkingMalItem) return null;
 
   const displayable = (recentHistory || []).filter((item) => {
+    if (item.has_next === false) return false;
     if (item.is_completed === 0) return true;
     if (
       item.total_count === null ||
@@ -32,7 +33,18 @@ export default function RecentHistory({
       <div className="continue-shelf-scroll">
         {displayable.slice(0, 4).map((item) => {
           const isItemCompleted = item.is_completed === 1;
-          const nextNum = isItemCompleted ? item.number + 1 : item.number;
+          const nextSeason =
+            item.next_season !== undefined && item.next_season !== null
+              ? Number(item.next_season)
+              : item.season !== undefined && item.season !== null
+                ? Number(item.season)
+                : 1;
+          const nextNum =
+            item.next_number !== undefined && item.next_number !== null
+              ? Number(item.next_number)
+              : isItemCompleted
+                ? item.number + 1
+                : item.number;
           const progress = isItemCompleted
             ? 0
             : item.duration > 0
@@ -47,7 +59,7 @@ export default function RecentHistory({
 
           return (
             <div
-              key={`${item.media_id}-${item.number}`}
+              key={`${item.media_id}-${item.season || 1}-${item.number}`}
               className="continue-card glass-panel"
               onClick={() =>
                 onSelectMedia(
@@ -56,6 +68,7 @@ export default function RecentHistory({
                   "Back to Collection",
                   true,
                   nextNum,
+                  nextSeason,
                 )
               }
             >
@@ -128,7 +141,9 @@ export default function RecentHistory({
                 <span className="continue-number">
                   {type === "Manga"
                     ? `Chapter ${nextNum}`
-                    : `Episode ${nextNum}`}
+                    : (type === "Movies" || item.type === "Movies" || (item.season && item.season > 1))
+                      ? `Season ${nextSeason} Ep ${nextNum}`
+                      : `Episode ${nextNum}`}
                 </span>
                 <h4 className="continue-title" title={item.title}>
                   {item.title}

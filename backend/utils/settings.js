@@ -365,6 +365,7 @@ async function SettingsLoad() {
             jellyfinCompatibility: false,
             animeNamingScheme: "default",
             mangaNamingScheme: "default",
+            minDownloadSpeed: "300 KB/s",
           };
 
     if (config && !config.hasOwnProperty("subFontSize")) {
@@ -432,6 +433,10 @@ async function SettingsLoad() {
 
     if (config && !config.hasOwnProperty("mangaNamingScheme")) {
       config.mangaNamingScheme = "default";
+    }
+
+    if (config && !config.hasOwnProperty("minDownloadSpeed")) {
+      config.minDownloadSpeed = "300 KB/s";
     }
 
     let currentVersion = "1.0.0";
@@ -1566,7 +1571,9 @@ async function loadSingleScraper(
         `Loaded/Reloaded ${AnimeManga.toLowerCase()} scraper: ${scraper.name} (@${RepoOwner})`,
       );
       notifyScrapersUpdated();
-      await reconcileActiveProvider(norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies");
+      await reconcileActiveProvider(
+        norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies",
+      );
       return { success: true, scraper };
     } else {
       logger.warn(`Scraper missing 'name' export: ${fullPath}`);
@@ -1616,7 +1623,9 @@ async function unloadSingleScraper(
     logger.info(
       `Unloaded ${AnimeManga.toLowerCase()} scraper: ${ExtensionName} (@${RepoOwner})`,
     );
-    await reconcileActiveProvider(norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies");
+    await reconcileActiveProvider(
+      norm === "anime" ? "Anime" : norm === "manga" ? "Manga" : "Movies",
+    );
     notifyScrapersUpdated();
   } catch (err) {
     logger.error(`Failed to unload scraper ${ExtensionName}: ${err.message}`);
@@ -2044,7 +2053,7 @@ async function renameExistingMangaChapters(targetScheme) {
       if (processedDirs.has(resolvedPath)) return;
       processedDirs.add(resolvedPath);
 
-      let entries = [];
+      let entries;
       try {
         entries = await fs.promises.readdir(resolvedPath, {
           withFileTypes: true,

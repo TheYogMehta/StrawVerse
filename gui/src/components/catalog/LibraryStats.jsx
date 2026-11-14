@@ -21,7 +21,9 @@ export default function LibraryStats({
           <span className="stat-value">
             {type === "Manga"
               ? `${stats.readHours || 0} hrs`
-              : `${stats.watchHours || 0} hrs`}
+              : type === "Movies"
+                ? `${stats.movieWatchHours ?? 0} hrs`
+                : `${stats.animeWatchHours ?? stats.watchHours ?? 0} hrs`}
           </span>
         </div>
       </div>
@@ -32,12 +34,18 @@ export default function LibraryStats({
         </div>
         <div className="stat-content">
           <span className="stat-label">
-            {type === "Manga" ? "Chapters" : "Episodes / Movies"}
+            {type === "Manga"
+              ? "Chapters"
+              : type === "Movies"
+                ? "Episodes / Movies"
+                : "Episodes"}
           </span>
           <span className="stat-value">
             {type === "Manga"
               ? `${stats.completedChapters || 0} chs`
-              : `${stats.completedEpisodes || 0} eps`}
+              : type === "Movies"
+                ? `${stats.completedMovieEpisodes ?? 0} eps`
+                : `${stats.completedAnimeEpisodes ?? stats.completedEpisodes ?? 0} eps`}
           </span>
         </div>
       </div>

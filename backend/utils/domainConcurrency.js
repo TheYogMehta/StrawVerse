@@ -61,7 +61,7 @@ function getCooldownRemaining(key) {
   return 0;
 }
 
-function isCircuitOpen(domain) {
+function isCircuitOpen(_domain) {
   return false;
 }
 
@@ -232,7 +232,7 @@ function setRecoveryCap(domain) {
   } catch (e) {}
 }
 
-function recordDomainFailure(domain, currentVal, statusCode = null) {
+function recordDomainFailure(domain, currentVal, _statusCode = null) {
   if (!domain) return;
   const current = currentVal || cache[domain] || 2;
   const newConcurrency = Math.max(1, current - 1);
@@ -299,8 +299,12 @@ function recordDomainBatchSuccess(domain, batchThroughput = null) {
             `[DomainConcurrency] '${domain}' good speed (+${(speedDiffRatio * 100).toFixed(1)}%, ${mbps}), concurrency ${current} -> ${newConcurrency}`,
           );
         }
-      } else if (speedDiffRatio < -0.05 && current > 1) {
-        newConcurrency = Math.max(1, current - 1);
+      } else if (
+        speedDiffRatio < -0.15 &&
+        current > 4 &&
+        batchThroughput > 1024 * 1024
+      ) {
+        newConcurrency = Math.max(4, current - 1);
         logTuning(
           domain,
           "warn",

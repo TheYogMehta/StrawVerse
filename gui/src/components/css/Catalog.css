@@ -540,7 +540,10 @@
 
 :root[style*="--catalog-columns"] .content-grid,
 html[style*="--catalog-columns"] .content-grid {
-  grid-template-columns: repeat(var(--catalog-columns), minmax(0, 1fr)) !important;
+  grid-template-columns: repeat(
+    var(--catalog-columns),
+    minmax(0, 1fr)
+  ) !important;
 }
 
 :root[style*="--catalog-card-max-height"] .img-container,
@@ -824,22 +827,25 @@ html[style*="--catalog-columns: 12"] .img-container {
 .pagination-container {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 16px 0;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 0 16px 0;
+  flex-wrap: wrap;
 }
 
 .btn-page {
   background: var(--bg-tertiary);
   border: 1px solid var(--border);
   color: white;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
   transition: var(--transition);
+  flex-shrink: 0;
 }
 
 .btn-page:hover:not(:disabled) {
@@ -853,9 +859,121 @@ html[style*="--catalog-columns: 12"] .img-container {
   cursor: not-allowed;
 }
 
-.page-info {
-  font-size: 14px;
+.pagination-jump-form {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  padding: 4px 10px;
+  border-radius: 8px;
+  height: 38px;
+}
+
+.pagination-label {
+  font-size: 13px;
   font-weight: 600;
+  color: var(--text-muted);
+}
+
+.pagination-jump-input {
+  width: 58px;
+  height: 28px;
+  background-color: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  padding: 0 4px;
+  outline: none;
+  -moz-appearance: textfield;
+}
+
+.pagination-jump-input::-webkit-outer-spin-button,
+.pagination-jump-input::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.pagination-jump-input:focus {
+  border-color: var(--accent);
+}
+
+.pagination-total {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.btn-page-go {
+  background: var(--accent, #e50914);
+  border: none;
+  color: #ffffff;
+  padding: 4px 10px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.btn-page-go:hover {
+  opacity: 0.9;
+}
+
+/* Discover Toolbar */
+.discover-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.discover-toolbar.discover-toolbar-right {
+  justify-content: flex-end;
+}
+
+.discover-filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.discover-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 20px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: var(--transition);
+  outline: none;
+}
+
+.discover-filter-chip .chip-icon {
+  flex-shrink: 0;
+}
+
+.discover-filter-chip:hover {
+  border-color: rgba(255, 255, 255, 0.25);
+  color: var(--text-main);
+}
+
+.discover-filter-chip.active {
+  background-color: rgba(124, 58, 237, 0.18);
+  border-color: var(--accent);
+  color: #c084fc;
 }
 
 .loading-center-panel {

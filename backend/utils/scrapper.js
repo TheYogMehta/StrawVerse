@@ -13,7 +13,6 @@ try {
 
 const isElectron = Boolean(process.versions?.electron && net && session);
 const axios = require("axios");
-const path = require("path");
 const { Readable } = require("stream");
 const { getHeaders } = require("./proxyHeaders");
 const { run, queryAll, queryOne } = require("./db");
@@ -28,9 +27,6 @@ let activeBypasses = {};
 let bypassCooldowns = {};
 let bypassQueue = [];
 let bypassBusy = false;
-
-const CF_CLEARANCE_UPSERT = `INSERT OR REPLACE INTO cookie (id, value, name, domain, url, path, secure, httpOnly, expirationDate, local_saved_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 if (app && typeof app.on === "function") {
   app.on("before-quit", () => {
@@ -88,18 +84,6 @@ function takeHeaderCaseInsensitive(headers, name) {
   const value = headers[key];
   delete headers[key];
   return value;
-}
-
-function isSameOriginReferer(targetUrl, referer) {
-  if (!referer) return false;
-  try {
-    return (
-      normalizeHostname(new URL(targetUrl).hostname) ===
-      normalizeHostname(new URL(referer).hostname)
-    );
-  } catch (e) {
-    return false;
-  }
 }
 
 function setRefererHeaders(headers, referer, includeOrigin = false) {
@@ -161,38 +145,6 @@ function isCloudflareCookie(name) {
   if (!name || typeof name !== "string") return false;
   const n = name.toLowerCase();
   return n === "cf_clearance" || n.startsWith("__cf") || n.startsWith("cf_");
-}
-
-async function saveClearanceCookie(cookie) {
-  if (cookie.name !== "cf_clearance") return;
-  const cookieDomain = normalizeHostname(cookie.domain);
-  const key = `${cookieDomain}-cf_clearance`;
-
-  try {
-    const existing = await queryOne(
-      "SELECT value FROM cookie WHERE id = ? LIMIT 1",
-      [key],
-    );
-    if (existing && existing.value === cookie.value) {
-      return;
-    }
-  } catch (err) {}
-
-  const expiry = cookie.expirationDate
-    ? cookie.expirationDate * 1000
-    : Date.now() + 1000 * 60 * 10;
-  await run(CF_CLEARANCE_UPSERT, [
-    key,
-    cookie.value,
-    "cf_clearance",
-    cookieDomain,
-    "",
-    "",
-    "",
-    "",
-    expiry,
-    Date.now(),
-  ]);
 }
 
 const COOKIE_UPSERT = `
@@ -595,7 +547,6 @@ function createScrapperWindow() {
         const rawReferer =
           getHeaderCaseInsensitive(details.requestHeaders, "referer") ||
           proxyReferer;
-        const isSameOrigin = isSameOriginReferer(details.url, rawReferer);
 
         const {
           Referer: referer,
@@ -878,7 +829,6 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
       global.LastScrapperResponseCode = 200;
 
       let navUrl = targetUrl;
-      let navFailed = false;
 
       if (force) {
         showScrapperWindow();

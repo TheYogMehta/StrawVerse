@@ -287,8 +287,11 @@ const getIpcPath = () => {
   }
 };
 
-const connectIpc = (ipcPath, retryCount = 0) => {
+const connectIpc = (ipcPath, retryCount = 0, requestId = null) => {
   return new Promise((resolve, reject) => {
+    if (requestId !== null && global.activePlayRequestId !== requestId) {
+      return reject(new Error("Request superseded before IPC connected"));
+    }
     const client = net.connect(ipcPath);
 
     client.on("connect", () => {
@@ -296,9 +299,12 @@ const connectIpc = (ipcPath, retryCount = 0) => {
     });
 
     client.on("error", (err) => {
+      if (requestId !== null && global.activePlayRequestId !== requestId) {
+        return reject(new Error("Request superseded during IPC connection"));
+      }
       if (retryCount < 20) {
         setTimeout(() => {
-          connectIpc(ipcPath, retryCount + 1)
+          connectIpc(ipcPath, retryCount + 1, requestId)
             .then(resolve)
             .catch(reject);
         }, 150);
@@ -400,7 +406,11 @@ async function playInMpv(window, options) {
     }
   }
   let mediaType = options.type === "Movies" ? "Movies" : "Anime";
-  let malid = mediaType === "Movies" ? null : (options.malid || "");
+  let season =
+    options.season !== undefined && options.season !== null
+      ? parseInt(options.season, 10) || 1
+      : 1;
+  let malid = mediaType === "Movies" ? null : options.malid || "";
   let episodeId = options.episodeId || options.episode || episode;
   let title = options.title || (mediaType === "Movies" ? "Movie" : "Anime");
   let mediaId = options.mediaId;
@@ -500,8 +510,10 @@ async function playInMpv(window, options) {
     logger.error("Failed to load settings in mpvPlayer: " + e.message);
   }
 
+  const seasonLogPart =
+    mediaType === "Movies" && season > 1 ? `, Season ${season}` : "";
   logger.info(
-    `[MPV] Launch request #${currentRequestId} for anime "${title}" (Ep ${episode}), provider=${provider}, subdub=${subdub}`,
+    `[MPV] Launch request #${currentRequestId} for ${mediaType === "Movies" ? "movie/series" : "anime"} "${title}" (Ep ${episode}${seasonLogPart}), provider=${provider}, subdub=${subdub}`,
   );
 
   if (
@@ -514,12 +526,16 @@ async function playInMpv(window, options) {
       global.activeMpvClient.write(
         JSON.stringify({ command: ["set_property", "pause", true] }) + "\n",
       );
+      const loadingLabel =
+        mediaType === "Movies" && season > 1
+          ? `Loading Season ${season} Episode ${episode}...`
+          : `Loading Episode ${episode}...`;
       global.activeMpvClient.write(
         JSON.stringify({
           command: [
             "set_property",
             "user-data/strawverse-loading",
-            `Loading Episode ${episode}...`,
+            loadingLabel,
           ],
         }) + "\n",
       );
@@ -536,26 +552,61 @@ async function playInMpv(window, options) {
   const isLocalExplicit = options.isDownloaded || provider === "local source";
 
   const tryCheckLocalFile = async () => {
-    if (!mediaId) return false;
+    if (!mediaId && !title) return false;
     try {
       const config = await settingfetch();
       const customDir =
         mediaType === "Movies"
           ? config?.CustomDownloadLocationMovies
           : config?.CustomDownloadLocationAnime;
-      const localData = await getSourceById(
-        mediaType,
-        customDir,
-        mediaId,
-        episode,
-        subdub,
-        true,
-      );
+      let localData = null;
+      if (mediaId) {
+        localData = await getSourceById(
+          mediaType,
+          customDir,
+          mediaId,
+          episode,
+          subdub,
+          season,
+        );
+      }
+      if (
+        (!localData ||
+          !localData.filepath ||
+          !fs.existsSync(localData.filepath)) &&
+        title
+      ) {
+        const localDataByTitle = await getSourceById(
+          mediaType,
+          customDir,
+          title,
+          episode,
+          subdub,
+          season,
+        );
+        if (
+          localDataByTitle &&
+          localDataByTitle.filepath &&
+          fs.existsSync(localDataByTitle.filepath)
+        ) {
+          localData = localDataByTitle;
+        }
+      }
       if (
         localData &&
         localData.filepath &&
         fs.existsSync(localData.filepath)
       ) {
+        try {
+          const fStat = fs.statSync(localData.filepath);
+          if (fStat.size < 500 * 1024) {
+            logger.warn(
+              `[MPV] Ignoring local file for Ep ${episode} because size is too small (${fStat.size} bytes): ${localData.filepath}`,
+            );
+            return false;
+          }
+        } catch (_) {}
+
         logger.info(
           `[MPV] Found local downloaded file for Ep ${episode}: ${localData.filepath}`,
         );
@@ -584,7 +635,11 @@ async function playInMpv(window, options) {
   if (isLocalExplicit && activeSources.length === 0) {
     const foundLocal = await tryCheckLocalFile();
     if (!foundLocal) {
-      const errMsg = `Downloaded local video file for Episode ${episode} was not found on disk.`;
+      const epLabel =
+        mediaType === "Movies" && season > 1
+          ? `Season ${season} Episode ${episode}`
+          : `Episode ${episode}`;
+      const errMsg = `Downloaded local video file for ${epLabel} was not found on disk.`;
       logger.error(`[MPV Error] ${errMsg}`);
       if (window && window.webContents) {
         window.webContents.send("mpv-error", { message: errMsg });
@@ -621,6 +676,16 @@ async function playInMpv(window, options) {
       } catch (e) {}
       queryIds = Array.from(new Set(queryIds));
 
+      const isMovies = mediaType === "Movies";
+      const histTable = isMovies ? "SeriesMovieWatchHistory" : "WatchHistory";
+      const idCol = isMovies ? "movie_id" : "anime_id";
+      const titleCol = isMovies ? "title" : "anime_title";
+      const parsedSeason = isMovies && season ? parseInt(season, 10) || 1 : 1;
+      const seasonClause = isMovies
+        ? ` AND (season = ? OR (? = 1 AND season IS NULL))`
+        : ``;
+      const seasonParams = isMovies ? [parsedSeason, parsedSeason] : [];
+
       let historyRec = null;
       const parsedEp = parseFloat(episode || 1);
       const strEp = String(episode);
@@ -630,22 +695,29 @@ async function playInMpv(window, options) {
         if (title && title !== "Anime") {
           historyRec = global.db
             .prepare(
-              `SELECT id, WatchHistory.current_time AS current_time, duration, is_completed, episode_number, sub_dub FROM WatchHistory WHERE (anime_id IN (${placeholders}) OR LOWER(anime_title) = LOWER(?)) AND (episode_number = ? OR CAST(episode_number AS REAL) = ? OR episode_number = ?) ORDER BY last_watched DESC, id DESC LIMIT 1`,
+              `SELECT id, current_time, duration, is_completed, episode_number, sub_dub FROM ${histTable} WHERE (${idCol} IN (${placeholders}) OR LOWER(${titleCol}) = LOWER(?)) AND (episode_number = ? OR CAST(episode_number AS REAL) = ? OR episode_number = ?)${seasonClause} ORDER BY last_watched DESC, id DESC LIMIT 1`,
             )
-            .get(...queryIds, title, parsedEp, parsedEp, strEp);
+            .get(
+              ...queryIds,
+              title,
+              parsedEp,
+              parsedEp,
+              strEp,
+              ...seasonParams,
+            );
         } else {
           historyRec = global.db
             .prepare(
-              `SELECT id, WatchHistory.current_time AS current_time, duration, is_completed, episode_number, sub_dub FROM WatchHistory WHERE anime_id IN (${placeholders}) AND (episode_number = ? OR CAST(episode_number AS REAL) = ? OR episode_number = ?) ORDER BY last_watched DESC, id DESC LIMIT 1`,
+              `SELECT id, current_time, duration, is_completed, episode_number, sub_dub FROM ${histTable} WHERE ${idCol} IN (${placeholders}) AND (episode_number = ? OR CAST(episode_number AS REAL) = ? OR episode_number = ?)${seasonClause} ORDER BY last_watched DESC, id DESC LIMIT 1`,
             )
-            .get(...queryIds, parsedEp, parsedEp, strEp);
+            .get(...queryIds, parsedEp, parsedEp, strEp, ...seasonParams);
         }
       } else if (title && title !== "Anime") {
         historyRec = global.db
           .prepare(
-            `SELECT id, WatchHistory.current_time AS current_time, duration, is_completed, episode_number, sub_dub FROM WatchHistory WHERE LOWER(anime_title) = LOWER(?) AND (episode_number = ? OR CAST(episode_number AS REAL) = ? OR episode_number = ?) ORDER BY last_watched DESC, id DESC LIMIT 1`,
+            `SELECT id, current_time, duration, is_completed, episode_number, sub_dub FROM ${histTable} WHERE LOWER(${titleCol}) = LOWER(?) AND (episode_number = ? OR CAST(episode_number AS REAL) = ? OR episode_number = ?)${seasonClause} ORDER BY last_watched DESC, id DESC LIMIT 1`,
           )
-          .get(title, parsedEp, parsedEp, strEp);
+          .get(title, parsedEp, parsedEp, strEp, ...seasonParams);
       }
 
       let fallbackRec = null;
@@ -654,20 +726,20 @@ async function playInMpv(window, options) {
         if (title && title !== "Anime") {
           fallbackRec = global.db
             .prepare(
-              `SELECT id, WatchHistory.current_time AS current_time, duration, is_completed, episode_number, sub_dub FROM WatchHistory WHERE (anime_id IN (${placeholders}) OR LOWER(anime_title) = LOWER(?)) ORDER BY last_watched DESC, id DESC LIMIT 1`,
+              `SELECT id, current_time, duration, is_completed, episode_number, sub_dub FROM ${histTable} WHERE (${idCol} IN (${placeholders}) OR LOWER(${titleCol}) = LOWER(?)) ORDER BY last_watched DESC, id DESC LIMIT 1`,
             )
             .get(...queryIds, title);
         } else {
           fallbackRec = global.db
             .prepare(
-              `SELECT id, WatchHistory.current_time AS current_time, duration, is_completed, episode_number, sub_dub FROM WatchHistory WHERE anime_id IN (${placeholders}) ORDER BY last_watched DESC, id DESC LIMIT 1`,
+              `SELECT id, current_time, duration, is_completed, episode_number, sub_dub FROM ${histTable} WHERE ${idCol} IN (${placeholders}) ORDER BY last_watched DESC, id DESC LIMIT 1`,
             )
             .get(...queryIds);
         }
       } else if (title && title !== "Anime") {
         fallbackRec = global.db
           .prepare(
-            `SELECT id, WatchHistory.current_time AS current_time, duration, is_completed, episode_number, sub_dub FROM WatchHistory WHERE LOWER(anime_title) = LOWER(?) ORDER BY last_watched DESC, id DESC LIMIT 1`,
+            `SELECT id, current_time, duration, is_completed, episode_number, sub_dub FROM ${histTable} WHERE LOWER(${titleCol}) = LOWER(?) ORDER BY last_watched DESC, id DESC LIMIT 1`,
           )
           .get(title);
       }
@@ -694,7 +766,7 @@ async function playInMpv(window, options) {
             try {
               global.db
                 .prepare(
-                  "UPDATE WatchHistory SET current_time = ? WHERE id = ?",
+                  `UPDATE ${histTable} SET current_time = ? WHERE id = ?`,
                 )
                 .run(rawSec, activeRec.id);
             } catch (_) {}
@@ -725,14 +797,18 @@ async function playInMpv(window, options) {
       ) {
         subdub = activeRec.sub_dub;
         logger.info(
-          `[MPV] Restored subdub preference "${subdub}" from WatchHistory for ${title}`,
+          `[MPV] Restored subdub preference "${subdub}" from ${histTable} for ${title}`,
         );
       }
     } catch (e) {
       logger.error(
-        `[MPV] Error loading WatchHistory seek/subdub: ${e.message}`,
+        `[MPV] Error loading ${histTable || "history"} seek/subdub: ${e.message}`,
       );
     }
+  }
+
+  if (activeSources.length === 0 && (mediaId || title)) {
+    await tryCheckLocalFile();
   }
 
   if (activeSources.length === 0 && (episodeId || episode)) {
@@ -1007,18 +1083,27 @@ async function playInMpv(window, options) {
       : resolvedUrl;
   const ipcPath = getIpcPath();
   const configDir = getMpvConfigDir();
-  let shortTitle = title || "Anime";
+  let shortTitle = title || (mediaType === "Movies" ? "Movie" : "Anime");
   if (shortTitle.length > 40) {
     shortTitle = shortTitle.substring(0, 40) + "...";
   }
-  const displayTitle = `Ep ${episode || 1} - ${shortTitle}`;
+  const epLabel =
+    mediaType === "Movies" && season > 1
+      ? `S${season} Ep ${episode || 1}`
+      : `Ep ${episode || 1}`;
+  const displayTitle = `${epLabel} - ${shortTitle}`;
+
+  const windowTitle =
+    mediaType === "Movies"
+      ? `StrawVerse - ${title || "Movie"}${season > 1 ? ` - Season ${season}` : ""} - Episode ${episode || 1}`
+      : `StrawVerse - ${title || "Anime"} - Episode ${episode || 1}`;
 
   const hasSubBg =
     subBgColor && subBgColor !== "transparent" && subBgColor !== "none";
 
   const args = [
     `--input-ipc-server=${ipcPath}`,
-    `--title=StrawVerse - ${title || "Player"} - Episode ${episode || 1}`,
+    `--title=${windowTitle}`,
     `--force-media-title=${displayTitle}`,
     `--config-dir=${configDir}`,
     "--sub-ass-override=force",
@@ -1034,21 +1119,26 @@ async function playInMpv(window, options) {
     "--sub-shadow-offset=0",
     "--sub-margin-y=36",
     "--profile=fast",
-    "--hwdec=auto",
+    "--hwdec=auto-safe",
     "--video-sync=audio",
+    "--hr-seek-framedrop=yes",
     "--audio-pitch-correction=yes",
+    "--audio-buffer=0.2",
     "--force-window=yes",
     "--idle=yes",
     "--keep-open=yes",
     "--fullscreen",
     "--no-ytdl",
     "--hls-bitrate=max",
+    "--network-timeout=30",
     "--demuxer-lavf-analyzeduration=1",
     "--demuxer-lavf-probesize=1000000",
-    "--demuxer-max-bytes=100M",
-    "--demuxer-max-back-bytes=30M",
-    "--demuxer-lavf-o=timeout=10000000,allowed_extensions=ALL,allowed_segment_extensions=ALL",
+    "--demuxer-max-bytes=150M",
+    "--demuxer-max-back-bytes=50M",
+    "--demuxer-lavf-o=timeout=30000000,allowed_extensions=ALL,allowed_segment_extensions=ALL",
+    "--stream-lavf-o=timeout=30000000",
     "--osd-on-seek=msg",
+    "--term-status-msg=",
     `--volume=${options.volume !== undefined ? Math.floor(options.volume) : 100}`,
     `--speed=${options.speed || 1.0}`,
     `--sub-visibility=${options.subsEnabled === false ? "no" : "yes"}`,
@@ -1264,6 +1354,13 @@ async function playInMpv(window, options) {
 
   args.push(playUrl);
 
+  if (global.activePlayRequestId !== currentRequestId) {
+    logger.info(
+      `[MPV] Launch request #${currentRequestId} superseded by #${global.activePlayRequestId}, aborting.`,
+    );
+    return { success: false, aborted: true };
+  }
+
   const isProcessAlive =
     global.activeMpvProcess &&
     !global.activeMpvProcess.killed &&
@@ -1279,9 +1376,11 @@ async function playInMpv(window, options) {
 
     if (global.activeMpvSession) {
       global.activeMpvSession.mediaId = mediaId;
+      global.activeMpvSession.type = mediaType;
       global.activeMpvSession.title = title;
       global.activeMpvSession.episode = episode;
       global.activeMpvSession.episodeId = episodeId;
+      global.activeMpvSession.season = season;
       global.activeMpvSession.image = image;
       global.activeMpvSession.provider = provider;
       global.activeMpvSession.malid = malid;
@@ -1628,6 +1727,7 @@ async function playInMpv(window, options) {
     title,
     episode,
     episodeId,
+    season,
     image,
     provider,
     malid,
@@ -1644,6 +1744,13 @@ async function playInMpv(window, options) {
     hasTriggeredAutoNext: false,
     options,
   };
+
+  if (global.activePlayRequestId !== currentRequestId) {
+    logger.info(
+      `[MPV] Launch request #${currentRequestId} superseded by #${global.activePlayRequestId} before process spawn, aborting.`,
+    );
+    return { success: false, aborted: true };
+  }
 
   const mpvExe = getMpvPath();
   const mpvExists =
@@ -1676,12 +1783,33 @@ async function playInMpv(window, options) {
       if (!msg) return true;
       const m = msg.toLowerCase();
       if (
+        /^(\(paused\)\s*)?[va]{1,2}:\s*\d{2}:\d{2}/i.test(msg) ||
+        /^\s*[va]{1,2}:\s*\d{2}:\d{2}/i.test(msg) ||
+        /^\s*\d{2}:\d{2}:\d{2}/.test(msg) ||
+        /^\s*av:\s*/i.test(msg)
+      ) {
+        return true;
+      }
+      if (
+        m.includes("dropped:") ||
+        m.includes("fps)") ||
+        m.startsWith("v:") ||
+        m.startsWith("a:")
+      ) {
+        return true;
+      }
+      if (
         m.includes("av:") ||
         m.includes("a-v:") ||
         m.includes("parametric stereo")
       )
         return true;
-      if (m.includes("ffmpeg/audio") || m.includes("ffmpeg/video")) return true;
+      if (
+        m.includes("ffmpeg/audio") ||
+        m.includes("ffmpeg/video") ||
+        m.includes("ffmpeg/demuxer")
+      )
+        return true;
       if (
         m.includes("aac:") ||
         m.includes("h264:") ||
@@ -1689,15 +1817,27 @@ async function playInMpv(window, options) {
         m.includes("mp3:")
       )
         return true;
-      if (m.includes("mpv is up to date") || m.includes("mpv up to date"))
+      if (
+        m.includes("mpv is up to date") ||
+        m.includes("mpv up to date") ||
+        m.includes("self updates disabled")
+      )
         return true;
       if (
         m.includes("script-opts") ||
         m.includes("unknown key") ||
-        m.includes("modernx")
+        m.includes("modernx") ||
+        m.includes("fontselect:") ||
+        m.includes("[vaapi]") ||
+        m.includes("udta parsing failed") ||
+        m.includes("audio device underrun") ||
+        m.includes("audio-stream-silence") ||
+        m.includes("error reading http response") ||
+        m.includes("connection timed out") ||
+        m.includes("using hardware decoding") ||
+        m.startsWith("ao: [") ||
+        m.startsWith("vo: [")
       )
-        return true;
-      if (/^\s*\d{2}:\d{2}:\d{2}/.test(msg) || /^\s*av:\s*/i.test(msg))
         return true;
       return false;
     };
@@ -1763,7 +1903,7 @@ async function playInMpv(window, options) {
   setTimeout(sendStarted, 500);
 
   try {
-    client = await connectIpc(ipcPath);
+    client = await connectIpc(ipcPath, 0, currentRequestId);
     global.activeMpvClient = client;
     logger.info(`[MPV IPC] Successfully connected to IPC socket: ${ipcPath}`);
     client.write(
@@ -1949,6 +2089,7 @@ async function playInMpv(window, options) {
         type: sess?.type || mediaType,
         title: curTitle,
         number: curEpisode,
+        season: sess?.season || season || 1,
         currentTime: currT,
         duration: curDuration,
         timeSpent: deltaSpent,
@@ -2249,6 +2390,7 @@ async function playInMpv(window, options) {
               type: mediaType,
               title: title,
               number: episode,
+              season: season || 1,
               currentTime: currentTime,
               duration: duration || options.duration || 0,
               timeSpent: actionTimeSpent,
@@ -2401,9 +2543,15 @@ async function playInMpv(window, options) {
       }
     });
   } catch (err) {
-    logger.error(
-      `[MPV] IPC connection warning (playing without direct sync): ${err.message}`,
-    );
+    if (global.activePlayRequestId !== currentRequestId) {
+      logger.info(
+        `[MPV] Request #${currentRequestId} superseded by #${global.activePlayRequestId}, suppressing IPC error: ${err.message}`,
+      );
+    } else {
+      logger.error(
+        `[MPV] IPC connection warning (playing without direct sync): ${err.message}`,
+      );
+    }
   }
 
   let terminated = false;
@@ -2434,6 +2582,7 @@ async function playInMpv(window, options) {
         type: mediaType,
         title: title,
         number: episode,
+        season: season || 1,
         currentTime: currentTime,
         duration: duration || options.duration || 0,
         timeSpent: closeTimeSpent,

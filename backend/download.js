@@ -30,7 +30,8 @@ async function downloadMediaMulti({
   malid = null,
   singleDownloadFn,
   fetchAllItemsFn,
-  unitName = type === "Anime" ? "Episodes" : "Chapters",
+  unitName = type === "Anime" || type === "Movies" ? "Episodes" : "Chapters",
+  quality = null,
 }) {
   if (!items || items.length <= 0) {
     return {
@@ -59,7 +60,14 @@ async function downloadMediaMulti({
       items.forEach((it) => {
         if (!it.id) {
           const matched = allItems.find(
-            (x) => Number(x.number) === Number(it.number),
+            (x) =>
+              Number(x.number) === Number(it.number) &&
+              (it.season !== undefined &&
+              it.season !== null &&
+              x.season !== undefined &&
+              x.season !== null
+                ? Number(x.season) === Number(it.season)
+                : true),
           );
           if (matched) {
             it.id = matched.id;
@@ -89,19 +97,37 @@ async function downloadMediaMulti({
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const data = await singleDownloadFn(
-      provider,
-      mediaId,
-      item.id,
-      item.number,
-      title,
-      i === 0,
-      config,
-      mediaProvider,
-      true,
-      malid,
-      subDub,
-    );
+    const data =
+      type === "Movies"
+        ? await singleDownloadFn(
+            provider,
+            mediaId,
+            item.id,
+            item.number,
+            title,
+            i === 0,
+            config,
+            mediaProvider,
+            true,
+            malid,
+            subDub,
+            item.season,
+            quality,
+          )
+        : await singleDownloadFn(
+            provider,
+            mediaId,
+            item.id,
+            item.number,
+            title,
+            i === 0,
+            config,
+            mediaProvider,
+            true,
+            malid,
+            subDub,
+            quality,
+          );
 
     if (data?.error) {
       if (data?.message !== "Already downloaded") {
@@ -132,6 +158,7 @@ async function downloadAnimeMulti(
   Title,
   SubDub,
   malid = null,
+  quality = null,
 ) {
   return downloadMediaMulti({
     type: "Anime",
@@ -141,6 +168,7 @@ async function downloadAnimeMulti(
     title: Title,
     subDub: SubDub,
     malid,
+    quality,
     singleDownloadFn: downloadAnimeSingle,
     fetchAllItemsFn: fetchAllEpisodes,
   });
@@ -159,6 +187,7 @@ async function downloadAnimeSingle(
   returnItemOnly = false,
   malid = null,
   subdub = null,
+  quality = null,
 ) {
   if (!episodeid) {
     return {
@@ -255,7 +284,7 @@ async function downloadAnimeSingle(
       malid: targetMalid ? String(targetMalid) : null,
       config: {
         Animeprovider: Animeprovider?.provider_name,
-        quality: config?.quality,
+        quality: quality || config?.quality || "1080p",
         mergeSubtitles: config?.mergeSubtitles,
         subtitleFormat: config?.subtitleFormat,
         CustomDownloadLocation: config?.CustomDownloadLocationAnime,
@@ -295,6 +324,7 @@ async function downloadMovieMulti(
   Title,
   SubDub,
   malid = null,
+  quality = null,
 ) {
   return downloadMediaMulti({
     type: "Movies",
@@ -304,11 +334,13 @@ async function downloadMovieMulti(
     title: Title,
     subDub: SubDub,
     malid,
+    quality,
     singleDownloadFn: downloadMovieSingle,
     fetchAllItemsFn: async (prov, mId) => {
       const data = await movieInfo(prov, null, mId);
       return data?.episodes || [];
     },
+    unitName: "Episodes",
   });
 }
 
@@ -323,8 +355,10 @@ async function downloadMovieSingle(
   preFetchedConfig = null,
   preFetchedProvider = null,
   returnItemOnly = false,
-  malid = null,
+  _malid = null,
   subdub = null,
+  season = null,
+  quality = null,
 ) {
   if (!episodeid) {
     return {
@@ -339,6 +373,13 @@ async function downloadMovieSingle(
       preFetchedProvider || (await providerFetch("Movies", provider));
 
     let resolvedSubDub = subdub || "sub";
+    let resolvedSeason = season;
+    if (resolvedSeason === null || resolvedSeason === undefined) {
+      const sMatch = String(episodeid).match(/tv:[^:]+:(\d+):\d+/);
+      if (sMatch) {
+        resolvedSeason = parseInt(sMatch[1], 10);
+      }
+    }
 
     if (saveinfo) {
       const existing = await queryOne("SELECT id FROM Movies WHERE id = ?", [
@@ -394,7 +435,17 @@ async function downloadMovieSingle(
         const downloadedList = Array.isArray(movieMapping.DownloadedEpisodes)
           ? movieMapping.DownloadedEpisodes
           : [];
-        if (downloadedList.map(Number).includes(num)) {
+        const hasSeasonKey =
+          resolvedSeason !== null && resolvedSeason !== undefined
+            ? downloadedList.includes(`s${resolvedSeason}_e${num}`)
+            : false;
+        const hasSeasonTags = downloadedList.some(
+          (x) => typeof x === "string" && x.startsWith("s"),
+        );
+        if (
+          hasSeasonKey ||
+          (!hasSeasonTags && downloadedList.map(Number).includes(num))
+        ) {
           return {
             error: true,
             message: "Already downloaded",
@@ -412,10 +463,11 @@ async function downloadMovieSingle(
       Title: Title,
       SubDub: resolvedSubDub,
       malid: null,
+      season: resolvedSeason,
       config: {
         Animeprovider: Moviesprovider?.provider_name,
         Moviesprovider: Moviesprovider?.provider_name,
-        quality: config?.quality,
+        quality: quality || config?.quality || "1080p",
         mergeSubtitles: config?.mergeSubtitles,
         subtitleFormat: config?.subtitleFormat,
         CustomDownloadLocation: config?.CustomDownloadLocationMovies,
@@ -460,7 +512,7 @@ async function downloadMangaMulti(
   if (Chapters?.length <= 0)
     return {
       error: false,
-      message: `No Episode Provided To Download!`,
+      message: `No Chapters Provided To Download!`,
     };
 
   Chapters.sort((a, b) => {
@@ -683,7 +735,9 @@ async function getBaseDownloadDir(type) {
     return setting?.CustomDownloadLocationManga || (await getDownloadsFolder());
   }
   if (type === "Movies") {
-    return setting?.CustomDownloadLocationMovies || (await getDownloadsFolder());
+    return (
+      setting?.CustomDownloadLocationMovies || (await getDownloadsFolder())
+    );
   }
   return await getDownloadsFolder();
 }

@@ -2,7 +2,6 @@ const NodeCache = require("node-cache");
 const path = require("path");
 const crypto = require("crypto");
 const JSZip = require("jszip");
-const axios = require("axios");
 const fs = require("fs");
 
 const HLSLogger = require("./logger");
@@ -27,11 +26,7 @@ async function enrichWithLibraryTags(type, items) {
     const normType = String(type || "").toLowerCase();
     const isMovieType = normType === "movies";
     const table =
-      normType === "manga"
-        ? "Manga"
-        : isMovieType
-          ? "Movies"
-          : "Anime";
+      normType === "manga" ? "Manga" : isMovieType ? "Movies" : "Anime";
     const ids = items.map((i) => i.id).filter(Boolean);
     const malIds = isMovieType
       ? []
@@ -960,6 +955,10 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
       : getDownloadsFolder();
 
   let typeDir = path.join(baseDir, type, id || "");
+  if (type === "Movies" && (!id || !fs.existsSync(typeDir))) {
+    const msDir = path.join(baseDir, "MoviesSeries", id || "");
+    if (fs.existsSync(msDir)) typeDir = msDir;
+  }
   if (id && fs.existsSync(typeDir)) return typeDir;
   if (id && fs.existsSync(path.join(baseDir, id || "")))
     return path.join(baseDir, id || "");
@@ -990,9 +989,22 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
 
   if (!record && id) {
     try {
-      const histTable = type === "Anime" ? "WatchHistory" : "ReadHistory";
-      const colId = type === "Anime" ? "anime_id" : "manga_id";
-      const colTitle = type === "Anime" ? "anime_title" : "manga_title";
+      const isMovies = type === "Movies";
+      const histTable = isMovies
+        ? "SeriesMovieWatchHistory"
+        : type === "Anime"
+          ? "WatchHistory"
+          : "ReadHistory";
+      const colId = isMovies
+        ? "movie_id"
+        : type === "Anime"
+          ? "anime_id"
+          : "manga_id";
+      const colTitle = isMovies
+        ? "title"
+        : type === "Anime"
+          ? "anime_title"
+          : "manga_title";
       const hRecord = await queryOne(
         `SELECT * FROM ${histTable} WHERE ${colId} = ? ORDER BY id DESC LIMIT 1`,
         [id],
@@ -1011,7 +1023,11 @@ async function resolveDownloadFolder(type, id, subdub, baseDir) {
     const folderName =
       record.folder_name ||
       (record.title ? sanitizeFolderName(record.title) : id);
-    const resolvedPath = path.join(baseDir, type, folderName);
+    let resolvedPath = path.join(baseDir, type, folderName);
+    if (type === "Movies" && !fs.existsSync(resolvedPath)) {
+      const msPath = path.join(baseDir, "MoviesSeries", folderName);
+      if (fs.existsSync(msPath)) resolvedPath = msPath;
+    }
     if (fs.existsSync(resolvedPath)) return resolvedPath;
     if (fs.existsSync(path.join(baseDir, folderName))) {
       return path.join(baseDir, folderName);
@@ -1147,7 +1163,7 @@ async function processServer(provider, server) {
     ),
   );
 
-  let resolved = null;
+  let resolved;
   try {
     resolved = await Promise.race([resolvePromise, timeoutPromise]);
   } catch (e) {
