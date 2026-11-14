@@ -1,5 +1,12 @@
 # Changelog
 
+# [12.0.0] - 2026-11-15
+
+### UI & Cleanup
+
+- **Mobile Optimization:** Optimize mobile catalog layouts, header filters, and separate Anime vs Movies stats.
+- **Refactoring & Cleanups:** Remove deprecated `apiAdapter.js` and clean up unused variables across components.
+
 # [11.2.1] - 2026-11-09
 
 ### Android & Database Stability Fixes
