@@ -12,13 +12,13 @@ artifacts:
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/StrawVerse.Setup.11.2.2.exe
     platform: windows
     size: 237.28
-    sha512: BF4AA1CF65294D0FC5768B1AAF23BBFEC6812E6815B7CC2DE179497BF80EC617D087D8C2A13B03F173A7986EF21D9C096A2660891186555916C6E43736C97669
+    sha512: D9CDF911F6AE0F6C7175395B99B1F073D40673D95C7B1FBD5747796531EF409CC9FCC74C3C6C83CCE7DC65909A6381501E1ACB6120E442354295409908FDFFF9
 
   - name: app-release.apk
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/app-release.apk
     platform: android
     size: 135.26
-    sha512: EC20779886F4980B42CC939C09BA3BDCF8AE822D7E8CD5260E36D90A017F3E63550B824BC53854D42FEF6305673A25B44683C3A33D1CBC65F04D541389E20E5A
+    sha512: 9593AB63262B3DE733B71B3AEED97A735DEE14134B33FA55110807ED046372F60D16B5A746BAE976ACF0E5A9719460E2DD8C31EAA31F90A93A1AB9C9FC7593F6
 
   - name: strawverse-11.2.2.AppImage
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/strawverse-11.2.2.AppImage
@@ -48,6 +48,7 @@ changelog:
   - "**Filters start collapsed**: The Discover/Filters panel now opens collapsed by default; the caret expands it"
   - "**Discover keeps your place**: Switching sections (e.g. Downloads to Discover) restores the list, page, scroll position and filters you were last seeing; re-tapping the active nav icon still refreshes"
   - "**Back to Anime button**: The Downloads header now has a Back button (top-right) that returns to the anime page or Discover list you were last viewing"
+  - "**Missing SUB/DUB badges fixed**: Discover cards whose AnimeKai id had gone stale (the site rotates its URL slugs) now heal to the fresh id and retry, so language badges load instead of failing with 404 \"detail page unreachable\""
   - "**Log rotation fixed**: Only the 3 newest session logs are kept - older logs are now deleted at startup (previously the folder settled at 4 files)"
   - "**Faster filter badges**: Badge metadata loads after applying filters with a 250 ms debounce, bulk fetch of 48 items, and duplicate-fetch caching"
   - "**Anikoto speed**: Provider metadata cache keys use the provider name (fixes cache misses vs the official anikoto build)"
