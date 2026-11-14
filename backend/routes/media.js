@@ -1702,6 +1702,10 @@ async function healProviderId(
     }
   }
 
+  // Extensions may return { id, title } — normalize to the id string or the
+  // SQLite bind below throws and the healed id is lost.
+  if (newId && typeof newId === "object") newId = newId.id || null;
+
   if (newId && newId !== cleanOldId) {
     try {
       if (global.db) {
@@ -3235,7 +3239,7 @@ function cacheBulkLangs(key, langs) {
   bulkLangsCache.set(key, { expires: Date.now() + BULK_META_TTL, langs });
 }
 
-async function resolveBulkLangs(malid) {
+async function resolveBulkLangs(malid, title = null) {
   const key = `Anime:${malid}`;
   const hit = bulkLangsCache.get(key);
   if (hit && hit.expires > Date.now()) return hit.langs;
@@ -3247,7 +3251,19 @@ async function resolveBulkLangs(malid) {
     const best = await getBestProviderForMalId(malid, "Anime", preferred);
     if (best?.id && best?.provider) {
       const providerObj = await providerFetch("Anime", best.provider);
-      const data = await fetchEpisode(providerObj, best.id, 1);
+      let data = await fetchEpisode(providerObj, best.id, 1);
+      if (!data?.episodes?.length) {
+        // Mapping ids rot when the site rotates its slugs — heal and retry
+        // once, the same repair the episode route already uses.
+        const healed = await healProviderId(providerObj, {
+          oldId: best.id,
+          malid,
+          title: title || best.title || null,
+        });
+        if (healed && healed !== String(best.id)) {
+          data = await fetchEpisode(providerObj, healed, 1);
+        }
+      }
       langs = langsFromEpisodes(data?.episodes);
     }
   } catch (_) {
@@ -3261,7 +3277,11 @@ async function resolveBulkLangs(malid) {
 // Extension-side variant: the card already carries the provider name + provider
 // id it came from, so its episode list can be read straight from the extension
 // even when there is no MAL id to resolve.
-async function resolveProviderLangs(providerName, itemId) {
+async function resolveProviderLangs(
+  providerName,
+  itemId,
+  { title = null, malid = null } = {},
+) {
   const key = `P:${String(providerName || "").toLowerCase()}:${itemId}`;
   const hit = bulkLangsCache.get(key);
   if (hit && hit.expires > Date.now()) return hit.langs;
@@ -3269,7 +3289,18 @@ async function resolveProviderLangs(providerName, itemId) {
   let langs = null;
   try {
     const providerObj = await providerFetch("Anime", providerName);
-    const data = await fetchEpisode(providerObj, itemId, 1);
+    let data = await fetchEpisode(providerObj, itemId, 1);
+    if (!data?.episodes?.length) {
+      // Stale provider id (site rotated its slugs) — heal and retry once.
+      const healed = await healProviderId(providerObj, {
+        oldId: itemId,
+        malid,
+        title,
+      });
+      if (healed && healed !== String(itemId)) {
+        data = await fetchEpisode(providerObj, healed, 1);
+      }
+    }
     langs = langsFromEpisodes(data?.episodes);
   } catch (_) {
     langs = null;
@@ -3367,8 +3398,11 @@ router.post("/api/info/bulk-meta", async (req, res) => {
     await runPool(entries, BULK_META_CONCURRENCY, async (e) => {
       meta[e.key].langs =
         e.malid !== null
-          ? await resolveBulkLangs(e.malid)
-          : await resolveProviderLangs(e.provider, e.id);
+          ? await resolveBulkLangs(e.malid, e.title)
+          : await resolveProviderLangs(e.provider, e.id, {
+              title: e.title,
+              malid: e.malid,
+            });
     });
   }
 
