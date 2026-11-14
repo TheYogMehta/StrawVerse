@@ -173,153 +173,343 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
   }
 
   const isAnime = AnimeManga === "Anime";
+  const table = isAnime ? "Anime" : "Manga";
+  const listTable = isAnime ? "MyAnimeList" : "MyMangaList";
+  const malTable = isAnime ? "anime" : "manga";
+  const items = results.filter(Boolean);
+  if (items.length === 0) return results;
 
-  for (const item of results) {
-    if (!item) continue;
-
-    item.scraper_image = item.image || null;
-
-    let malid =
-      item.MalID || item.malid ? Number(item.MalID || item.malid) : null;
-
-    if (!malid && item.id && global.db) {
-      try {
-        const table = isAnime ? "Anime" : "Manga";
-        const row = await global.db
-          .prepare(`SELECT MalID, status FROM ${table} WHERE id = ?`)
-          .get(String(item.id));
-        if (row && row.MalID) {
-          malid = parseInt(row.MalID);
-        }
-        if (!hasKnownStatus(item.status) && hasKnownStatus(row?.status)) {
-          item.status = row.status;
-        }
-      } catch (_) {}
+  // Batched so Android doesn't pay one Java-bridge round trip per query per
+  // card: a page of 24 used to make ~200 sequential lookups, now ~12.
+  // Same semantics as the old per-item loop — every lookup is prefetched with
+  // IN(...) and applied in the same order with the same precedence.
+  const runAll = async (adapter, sql, params) => {
+    if (!adapter) return [];
+    try {
+      return (await adapter.prepare(sql).all(...params)) || [];
+    } catch (_) {
+      return [];
     }
-
-    if (!malid && item.id && global.mappingDb) {
-      try {
-        const resolved = await resolveMalIdFromMapping({
-          id: item.id,
-          mediaType: isAnime ? "Anime" : "Manga",
-        });
-        if (resolved) malid = resolved;
-      } catch (_) {}
+  };
+  // IN(...) lists are chunked so a big page can't exceed SQLite's bound
+  // parameter limit (999 on older Android SQLite).
+  const runIn = async (adapter, sqlFor, values) => {
+    const out = [];
+    for (let i = 0; i < values.length; i += 400) {
+      const part = values.slice(i, i + 400);
+      out.push(...(await runAll(adapter, sqlFor(part), part)));
     }
+    return out;
+  };
 
-    if (!malid && item.title) {
-      const candidates = generateNormalizedTitleCandidates(item.title);
-      for (const cand of candidates) {
-        const cleanTitle = cand.trim().toLowerCase();
-        if (!malid && global.db) {
-          try {
-            const table = isAnime ? "Anime" : "Manga";
-            const row = await global.db
-              .prepare(
-                `SELECT MalID FROM ${table} WHERE LOWER(TRIM(title)) = ? LIMIT 1`,
-              )
-              .get(cleanTitle);
-            if (row && row.MalID) {
-              malid = parseInt(row.MalID);
-            }
-          } catch (_) {}
-        }
-        if (!malid && global.db) {
-          try {
-            const listTable = isAnime ? "MyAnimeList" : "MyMangaList";
-            const row = await global.db
-              .prepare(
-                `SELECT id FROM ${listTable} WHERE LOWER(TRIM(title)) = ? LIMIT 1`,
-              )
-              .get(cleanTitle);
-            if (row && row.id) {
-              malid = parseInt(row.id);
-            }
-          } catch (_) {}
-        }
-        if (!malid && global.mappingDb) {
-          try {
-            const malTable = isAnime ? "anime" : "manga";
-            const row = await global.mappingDb
-              .prepare(
-                `SELECT malid, image_url FROM ${malTable} WHERE LOWER(TRIM(title)) = ? LIMIT 1`,
-              )
-              .get(cleanTitle);
-            if (row && row.malid) {
-              malid = parseInt(row.malid);
-            }
-          } catch (_) {}
-        }
-        if (malid) break;
-      }
+  const ids = [...new Set(items.filter((i) => i.id).map((i) => String(i.id)))];
+  const titles = [
+    ...new Set(items.filter((i) => i.title).map((i) => String(i.title).trim())),
+  ];
+  // LIMIT 1 semantics: the first matching row wins.
+  const put = (map, key, value) => {
+    if (key != null && value != null && !map.has(key)) map.set(key, value);
+  };
 
-      if (!malid && global.mappingDb) {
+  // Prefetch maps.
+  const localById = new Map();
+  const malByLocalTitle = new Map();
+  const malByListTitle = new Map();
+  const malByMapTitle = new Map();
+  const malMeta = new Map();
+  const malListImg = new Map();
+  const mapImgById = new Map();
+  const mapImgByName = new Map();
+  const unmappedStatusById = new Map();
+  const unmappedStatusByName = new Map();
+  const unmappedStatusByProviderId = new Map();
+  const baseByItem = new Map();
+  const baseTitleRow = new Map();
+  const providerMalidById = new Map();
+
+  // 1. Local library rows by id (malid + status).
+  if (global.db && ids.length) {
+    const rows = await runIn(
+      global.db,
+      (part) =>
+        `SELECT id, MalID, status, image_url FROM ${table} WHERE id IN (${part.map(() => "?").join(",")})`,
+      ids,
+    );
+    for (const r of rows) put(localById, String(r.id), r);
+  }
+  // 2. Title-candidate resolution — per candidate: local table, then list
+  //    table, then mapping table (same order/precedence as the old loop).
+  const candByItem = new Map();
+  const allCands = new Set();
+  for (const item of items) {
+    if (!item.title || item.MalID || item.malid) continue;
+    const cands = generateNormalizedTitleCandidates(item.title);
+    candByItem.set(item, cands);
+    for (const c of cands) {
+      const clean = c.trim().toLowerCase();
+      if (clean) allCands.add(clean);
+    }
+  }
+  const candArr = [...allCands];
+  if (candArr.length) {
+    if (global.db) {
+      const rows = await runIn(
+        global.db,
+        (part) =>
+          `SELECT LOWER(TRIM(title)) AS k, MalID FROM ${table} WHERE LOWER(TRIM(title)) IN (${part.map(() => "?").join(",")})`,
+        candArr,
+      );
+      for (const r of rows) put(malByLocalTitle, r.k, r.MalID);
+      const rows2 = await runIn(
+        global.db,
+        (part) =>
+          `SELECT LOWER(TRIM(title)) AS k, id FROM ${listTable} WHERE LOWER(TRIM(title)) IN (${part.map(() => "?").join(",")})`,
+        candArr,
+      );
+      for (const r of rows2) put(malByListTitle, r.k, r.id);
+    }
+    if (global.mappingDb) {
+      const rows3 = await runIn(
+        global.mappingDb,
+        (part) =>
+          `SELECT LOWER(TRIM(title)) AS k, malid FROM ${malTable} WHERE LOWER(TRIM(title)) IN (${part.map(() => "?").join(",")})`,
+        candArr,
+      );
+      for (const r of rows3) put(malByMapTitle, r.k, r.malid);
+    }
+  }
+
+  // 3. Provider mapping tables by id (resolveMalIdFromMapping, batched).
+  if (global.mappingDb && ids.length) {
+    try {
+      const { getMappingProviders } = require("../utils/mappingResolver");
+      const providers =
+        (await getMappingProviders(isAnime ? "Anime" : "Manga", {
+          installedOnly: false,
+        })) || [];
+      for (const p of providers) {
         try {
-          const malTable = isAnime ? "anime" : "manga";
-          const baseClean = cleanBaseTitle(item.title);
-          if (baseClean && baseClean.length >= 4) {
-            let orderSql = "ORDER BY LENGTH(title) ASC";
-            if (/\b(?:season\s*2|2nd\s*season)\b/i.test(item.title)) {
-              orderSql =
-                "ORDER BY CASE WHEN title LIKE '%2%' OR title LIKE '%Season 2%' THEN 0 ELSE 1 END, LENGTH(title) ASC";
-            }
-            const row = await global.mappingDb
-              .prepare(
-                `SELECT malid, image_url, status FROM ${malTable} WHERE title LIKE ? ${orderSql} LIMIT 1`,
-              )
-              .get(`${baseClean}%`);
-            if (row && row.malid) {
-              malid = parseInt(row.malid);
-            }
-            if (!hasKnownStatus(item.status) && hasKnownStatus(row?.status)) {
-              item.status = row.status;
-            }
+          const tbl = p.table_name;
+          const rows = [];
+          for (let i = 0; i < ids.length; i += 400) {
+            const part = ids.slice(i, i + 400);
+            const ph = part.map(() => "?").join(",");
+            const sql =
+              tbl === "pahe"
+                ? `SELECT id, malid FROM "${tbl}" WHERE id IN (${ph}) OR uuid IN (${ph})`
+                : `SELECT id, malid FROM "${tbl}" WHERE id IN (${ph})`;
+            const params = tbl === "pahe" ? [...part, ...part] : part;
+            rows.push(...(await runAll(global.mappingDb, sql, params)));
+          }
+          for (const r of rows) {
+            put(providerMalidById, String(r.id), r.malid);
           }
         } catch (_) {}
       }
+    } catch (_) {}
+  }
+
+  // 4. Base-title fallback (only for items whose earlier lookups missed).
+  //    One table scan for all needed base titles, then the same
+  //    "shortest title wins" pick the old per-item query did.
+  const allBase = new Set();
+  for (const item of items) {
+    if (!item.title || item.MalID || item.malid) continue;
+    const base = cleanBaseTitle(item.title);
+    if (base && base.length >= 4) {
+      baseByItem.set(item, base);
+      allBase.add(base);
+    }
+  }
+
+  // Resolve malid per item using the prefetched maps (same precedence as old).
+  const malidByItem = new Map();
+  const baseStatusByItem = new Map();
+  for (const item of items) {
+    let malid =
+      item.MalID || item.malid ? Number(item.MalID || item.malid) : null;
+    if (!malid && item.id) {
+      const row = localById.get(String(item.id));
+      if (row && row.MalID) malid = parseInt(row.MalID);
+    }
+    if (!malid && item.id) {
+      const pm = providerMalidById.get(String(item.id));
+      if (pm) malid = parseInt(pm);
+    }
+    if (!malid && candByItem.has(item)) {
+      for (const cand of candByItem.get(item)) {
+        const clean = cand.trim().toLowerCase();
+        const m =
+          malByLocalTitle.get(clean) ||
+          malByListTitle.get(clean) ||
+          malByMapTitle.get(clean);
+        if (m) {
+          malid = parseInt(m);
+          break;
+        }
+      }
+    }
+    // The base-title fallback only runs when nothing above resolved a malid,
+    // and its status is only used then too.
+    if (malid) malidByItem.set(item, malid);
+  }
+
+  // Base-title fallback for the leftovers: one scan for every base title that
+  // is actually needed, then pick the shortest matching title (same order as
+  // the old ORDER BY LENGTH(title) ASC LIMIT 1).
+  const needBases = [
+    ...new Set(
+      items
+        .filter((i) => !malidByItem.has(i) && baseByItem.has(i))
+        .map((i) => baseByItem.get(i)),
+    ),
+  ];
+  if (global.mappingDb && needBases.length) {
+    const patterns = needBases.map((b) => `${b}%`);
+    const rows = await runIn(
+      global.mappingDb,
+      (part) =>
+        `SELECT malid, title, image_url, status FROM ${malTable} WHERE ${part
+          .map(() => "title LIKE ?")
+          .join(" OR ")}`,
+      patterns,
+    );
+    for (const base of needBases) {
+      const isS2 = /\b(?:season\s*2|2nd\s*season)\b/i.test(base);
+      const baseLower = base.toLowerCase();
+      let best = null;
+      for (const r of rows) {
+        const title = String(r.title || "");
+        if (!title.toLowerCase().startsWith(baseLower)) continue;
+        const rank = isS2 ? (title.includes("2") ? 0 : 1) : 0;
+        const key = [rank, title.length];
+        if (!best || key[0] < best.key[0] || (key[0] === best.key[0] && key[1] < best.key[1])) {
+          best = { key, row: r };
+        }
+      }
+      if (best) put(baseTitleRow, base, best.row);
+    }
+  }
+  for (const item of items) {
+    if (malidByItem.has(item)) continue;
+    const row = baseTitleRow.get(baseByItem.get(item));
+    if (!row) continue;
+    if (row.malid) malidByItem.set(item, parseInt(row.malid));
+    if (hasKnownStatus(row.status)) baseStatusByItem.set(item, row.status);
+  }
+
+  // 5. Malid metadata + MyAnimeList images.
+  const malids = [...new Set([...malidByItem.values()].map(String))];
+  if (global.mappingDb && malids.length) {
+    const rows = await runIn(
+      global.mappingDb,
+      (part) =>
+        `SELECT malid, image_url, genres, status FROM ${malTable} WHERE malid IN (${part.map(() => "?").join(",")})`,
+      malids,
+    );
+    for (const r of rows) put(malMeta, String(r.malid), r);
+  }
+  if (global.db && malids.length) {
+    const rows = await runIn(
+      global.db,
+      (part) =>
+        `SELECT id, image FROM ${listTable} WHERE id IN (${part.map(() => "?").join(",")})`,
+      malids,
+    );
+    for (const r of rows) put(malListImg, String(r.id), r.image);
+  }
+
+  // 6. Unmapped items (image + status) by id, name and provider id.
+  if (global.mappingDb) {
+    if (ids.length) {
+      const rows = await runIn(
+        global.mappingDb,
+        (part) =>
+          `SELECT id, image_url, status FROM unmapped_items WHERE id IN (${part.map(() => "?").join(",")})`,
+        ids,
+      );
+      for (const r of rows) {
+        const k = String(r.id);
+        put(mapImgById, k, r.image_url);
+        if (hasKnownStatus(r.status)) put(unmappedStatusById, k, r.status);
+      }
+    }
+    if (titles.length) {
+      const rows = await runIn(
+        global.mappingDb,
+        (part) =>
+          `SELECT LOWER(TRIM(name)) AS k, image_url, status FROM unmapped_items WHERE LOWER(TRIM(name)) IN (${part.map(() => "?").join(",")})`,
+        titles.map((t) => t.toLowerCase()),
+      );
+      for (const r of rows) {
+        put(mapImgByName, r.k, r.image_url);
+        if (hasKnownStatus(r.status)) put(unmappedStatusByName, r.k, r.status);
+      }
+    }
+    const segs = [
+      ...new Set(
+        items
+          .map((i) => String(i.provider || "").toLowerCase().split("/").pop())
+          .filter(Boolean),
+      ),
+    ];
+    if (segs.length && ids.length) {
+      const rows = await runIn(
+        global.mappingDb,
+        (part) =>
+          `SELECT provider, id, status FROM unmapped_items WHERE (provider IN (${segs.map(() => "?").join(",")}) OR provider LIKE ?) AND id IN (${part.map(() => "?").join(",")}) AND media_type = ?`,
+        [...segs, `@%/${segs[0]}`, ...ids, isAnime ? "Anime" : "Manga"],
+      );
+      for (const r of rows) {
+        if (hasKnownStatus(r.status)) {
+          const seg = String(r.provider || "").toLowerCase().split("/").pop();
+          unmappedStatusByProviderId.set(`${seg}:${String(r.id)}`, r.status);
+        }
+      }
+    }
+  }
+
+  // Apply per item — no DB calls, all lookups pre-fetched.
+  for (const item of items) {
+    item.scraper_image = item.image || null;
+
+    const malid = malidByItem.get(item) || null;
+
+    // Local-row status (old step 1).
+    if (!hasKnownStatus(item.status) && item.id) {
+      const row = localById.get(String(item.id));
+      if (row && hasKnownStatus(row.status)) item.status = row.status;
+    }
+
+    // Base-title status (old step 4: only when no malid was resolved above).
+    if (!hasKnownStatus(item.status) && baseStatusByItem.has(item)) {
+      item.status = baseStatusByItem.get(item);
     }
 
     if (malid) {
       item.malid = malid;
       let remoteImg = null;
-      if (global.mappingDb) {
-        try {
-          const imgRow = await global.mappingDb
-            .prepare(
-              isAnime
-                ? "SELECT image_url, genres, status FROM anime WHERE malid = ? LIMIT 1"
-                : "SELECT image_url, genres, status FROM manga WHERE malid = ? LIMIT 1",
-            )
-            .get(malid);
-          if (imgRow && imgRow.image_url) {
-            remoteImg = imgRow.image_url;
-          }
-          if (imgRow && imgRow.genres && !item.genres) {
-            item.genres = imgRow.genres;
-          }
-          if (!hasKnownStatus(item.status) && hasKnownStatus(imgRow?.status)) {
-            item.status = imgRow.status;
-          }
-        } catch (_) {}
+      const meta = malMeta.get(String(malid));
+      if (meta) {
+        if (meta.image_url) remoteImg = meta.image_url;
+        if (meta.genres && !item.genres) item.genres = meta.genres;
+        if (!hasKnownStatus(item.status) && hasKnownStatus(meta.status)) {
+          item.status = meta.status;
+        }
       }
-      if (!remoteImg && global.db) {
-        try {
-          const listTable = isAnime ? "MyAnimeList" : "MyMangaList";
-          const malRow = await global.db
-            .prepare(`SELECT image FROM ${listTable} WHERE id = ? LIMIT 1`)
-            .get(String(malid));
-          if (malRow && malRow.image) {
-            remoteImg = malRow.image;
-          }
-        } catch (_) {}
+      if (!remoteImg) {
+        const img = malListImg.get(String(malid));
+        if (img) remoteImg = img;
       }
       if (remoteImg) {
         item.mal_image = remoteImg;
         item.image_url = remoteImg;
         item.image = remoteImg;
-        if (item.id && global.db) {
+        // Only the local library row can change; Discover cards have no row,
+        // so this used to be a no-op write per card (17 extra bridge calls).
+        const localRow = item.id ? localById.get(String(item.id)) : null;
+        if (localRow && localRow.image_url !== remoteImg && global.db) {
           try {
-            const table = isAnime ? "Anime" : "Manga";
             await global.db
               .prepare(`UPDATE ${table} SET image_url = ? WHERE id = ?`)
               .run(remoteImg, item.id);
@@ -328,27 +518,38 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
       }
     }
 
-    // Provider/extension fallback for anything still without a known status:
-    // local library row + mapping DB rows for this provider id / title.
+    // statusFromDbs fallback (old step 5): local → provider unmapped → id unmapped → name unmapped.
     if (!hasKnownStatus(item.status)) {
-      try {
-        const status = await statusFromDbs(item, isAnime);
-        if (status) item.status = status;
-      } catch (_) {}
+      const key = item.id != null ? String(item.id) : null;
+      if (key && localById.has(key) && hasKnownStatus(localById.get(key).status)) {
+        item.status = localById.get(key).status;
+      }
+      if (!hasKnownStatus(item.status) && key) {
+        const seg = String(item.provider || "").toLowerCase().split("/").pop();
+        const ps = seg ? unmappedStatusByProviderId.get(`${seg}:${key}`) : null;
+        if (ps) item.status = ps;
+      }
+      if (!hasKnownStatus(item.status) && key && unmappedStatusById.has(key)) {
+        item.status = unmappedStatusById.get(key);
+      }
+      if (!hasKnownStatus(item.status) && item.title) {
+        const ns = unmappedStatusByName.get(
+          String(item.title).trim().toLowerCase(),
+        );
+        if (ns) item.status = ns;
+      }
     }
 
+    // Unmapped image fallback.
     if (!item.mal_image && global.mappingDb && (item.id || item.title)) {
-      try {
-        const uRow = await global.mappingDb
-          .prepare(
-            "SELECT image_url FROM unmapped_items WHERE (id = ? OR name = ?) AND image_url IS NOT NULL AND image_url != '' LIMIT 1",
-          )
-          .get(String(item.id || ""), String(item.title || ""));
-        if (uRow && uRow.image_url) {
-          item.image = uRow.image_url;
-          item.image_url = uRow.image_url;
-        }
-      } catch (_) {}
+      const uImg =
+        (item.id != null && mapImgById.get(String(item.id))) ||
+        (item.title &&
+          mapImgByName.get(String(item.title).trim().toLowerCase()));
+      if (uImg) {
+        item.image = uImg;
+        item.image_url = uImg;
+      }
     }
 
     if (!item.image && !item.scraper_image) {
