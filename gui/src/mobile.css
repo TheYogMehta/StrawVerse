@@ -485,24 +485,57 @@
 
   /* Library stats container mobile optimization */
   html .library-stats-container {
-    gap: 8px !important;
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    gap: 10px !important;
     width: 100% !important;
     box-sizing: border-box !important;
+    padding-bottom: 4px !important;
+    scrollbar-width: none !important;
+  }
+
+  html .library-stats-container::-webkit-scrollbar {
+    display: none !important;
   }
 
   html .library-stat-card {
-    padding: 8px 10px !important;
-    gap: 6px !important;
-    min-width: 0 !important;
-    flex: 1 1 0px !important;
+    padding: 10px 14px !important;
+    gap: 10px !important;
+    min-width: fit-content !important;
+    flex: 1 0 auto !important;
     box-sizing: border-box !important;
   }
 
-  html .stat-value {
-    font-size: 13px !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
+  html .stat-icon-wrapper {
+    width: 32px !important;
+    height: 32px !important;
+    flex-shrink: 0 !important;
+  }
+
+  html .stat-content {
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    min-width: 0 !important;
+  }
+
+  html .stat-label {
+    font-size: 10px !important;
+    font-weight: 600 !important;
     white-space: nowrap !important;
+    letter-spacing: 0.3px !important;
+    text-overflow: clip !important;
+    overflow: visible !important;
+  }
+
+  html .stat-value {
+    font-size: 14px !important;
+    font-weight: 700 !important;
+    white-space: nowrap !important;
+    letter-spacing: -0.2px !important;
+    overflow: visible !important;
     min-width: 0 !important;
   }
 

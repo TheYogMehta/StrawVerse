@@ -1,6 +1,4 @@
 const express = require("express");
-const path = require("path");
-const fs = require("fs");
 const { logger, getLogs, clearLogs } = require("../utils/AppLogger");
 const { getQueue, updateQueue, isQueuePaused } = require("../utils/queue");
 const ImageCacheManager = require("../utils/ImageCacheManager");
@@ -93,6 +91,12 @@ router.post("/api/logger", async (req, res) => {
       EpNum: activeTaskItem?.EpNum,
       Title: activeTaskItem?.Title,
       Type: activeTaskItem?.Type,
+      season:
+        activeTaskItem?.season !== undefined && activeTaskItem?.season !== null
+          ? activeTaskItem.season
+          : activeTaskItem?.config?.season !== undefined
+            ? activeTaskItem.config.season
+            : null,
       concurrency,
       lastTestedConcurrency,
       downloadSpeed,
@@ -108,6 +112,12 @@ router.post("/api/logger", async (req, res) => {
         EpNum: task.EpNum,
         Title: task.Title,
         Type: task.Type,
+        season:
+          task.season !== undefined && task.season !== null
+            ? task.season
+            : task.config?.season !== undefined
+              ? task.config.season
+              : null,
         concurrency: task.epid === epid ? concurrency : task.concurrency,
         lastTestedConcurrency:
           task.epid === epid
@@ -116,7 +126,15 @@ router.post("/api/logger", async (req, res) => {
         downloadSpeed: task.epid === epid ? downloadSpeed : task.downloadSpeed,
         eta: task.epid === epid ? eta : task.eta,
       })),
-      queue: upcomingQueue,
+      queue: upcomingQueue.map((item) => ({
+        ...item,
+        season:
+          item.season !== undefined && item.season !== null
+            ? item.season
+            : item.config?.season !== undefined
+              ? item.config.season
+              : null,
+      })),
     });
 
     res.status(200).json({ message: "Download progress received" });

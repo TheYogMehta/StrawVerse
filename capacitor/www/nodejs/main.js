@@ -1447,7 +1447,10 @@ async function boot() {
 
   router.post("/api/ipc/native-response", (req, res) => {
     const [requestId, success, response, error] = req.body.args || [];
-    const pending = global.pendingRequests.get(requestId);
+    const pending =
+      global.pendingRequests.get(requestId) ||
+      global.pendingRequests.get(Number(requestId)) ||
+      global.pendingRequests.get(String(requestId));
     if (pending) {
       if (success) {
         pending.resolve(response);

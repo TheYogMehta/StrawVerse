@@ -2,7 +2,7 @@ class HLSLogger {
   constructor(
     caption = "downloading",
     epid = "downloadep",
-    indent = 0,
+    _indent = 0,
     quiet = false,
   ) {
     this.quiet = quiet;

@@ -39,7 +39,13 @@ const {
   getLinkedProvidersForMalId,
   getBestProviderForMalId,
 } = require("../utils/mappingResolver");
-const { sanitizeFolderName, getUserDataPath } = require("../utils/constants");
+const {
+  sanitizeFolderName,
+  getUserDataPath,
+  getEpisodeNumberFromFilename,
+  getChapterNumberFromFilename,
+  isMangaFile,
+} = require("../utils/constants");
 const { getDownloadsFolder } = require("../utils/DirectoryMaker");
 
 const router = express.Router();
@@ -291,15 +297,18 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
   const isAnime = AnimeManga === "Anime";
   const isMovies = AnimeManga === "Movies";
   const listTable = AnimeManga === "Manga" ? "MyMangaList" : "MyAnimeList";
-  const histTable = isVideo ? "WatchHistory" : "ReadHistory";
-  const mediaTable =
-    isMovies
-      ? "Movies"
-      : AnimeManga === "Manga"
-        ? "Manga"
-        : "Anime";
-  const idCol = isVideo ? "anime_id" : "manga_id";
-  const titleCol = isVideo ? "anime_title" : "manga_title";
+  const histTable = isMovies
+    ? "SeriesMovieWatchHistory"
+    : isAnime
+      ? "WatchHistory"
+      : "ReadHistory";
+  const mediaTable = isMovies
+    ? "Movies"
+    : AnimeManga === "Manga"
+      ? "Manga"
+      : "Anime";
+  const idCol = isMovies ? "movie_id" : isAnime ? "anime_id" : "manga_id";
+  const titleCol = isMovies ? "title" : isAnime ? "anime_title" : "manga_title";
   const epCol = isVideo ? "episode_number" : "chapter_number";
 
   try {
@@ -647,6 +656,235 @@ async function enrichResultsWithWatchProgress(results, AnimeManga) {
     }
   } catch (err) {
     logger.error(`Error in enrichResultsWithWatchProgress: ${err.message}`);
+  }
+
+  return results;
+}
+
+async function enrichResultsWithDownloads(results, AnimeManga) {
+  if (!results || !Array.isArray(results) || results.length === 0) {
+    return results;
+  }
+  const isAnime = AnimeManga === "Anime";
+  const mediaTable = isAnime ? "Anime" : "Manga";
+
+  try {
+    const config = await settingfetch();
+    const customDir = isAnime
+      ? config?.CustomDownloadLocationAnime
+      : config?.CustomDownloadLocationManga;
+    const baseDir =
+      typeof customDir === "string" && customDir.trim()
+        ? customDir
+        : await getDownloadsFolder();
+
+    const candidateDirs = [];
+    const addDir = (d) => {
+      if (d && fs.existsSync(d)) {
+        const resolved = path.resolve(d);
+        if (!candidateDirs.includes(resolved)) {
+          candidateDirs.push(resolved);
+        }
+      }
+    };
+    addDir(path.join(baseDir, AnimeManga));
+    addDir(baseDir);
+    const downloadsRoot = await getDownloadsFolder();
+    addDir(path.join(downloadsRoot, AnimeManga));
+
+    if (candidateDirs.length === 0) return results;
+
+    const diskFolders = new Set();
+    const diskFolderPaths = new Map();
+    for (const cDir of candidateDirs) {
+      try {
+        const dirs = await fs.promises.readdir(cDir, { withFileTypes: true });
+        for (const d of dirs) {
+          if (d.isDirectory()) {
+            const lower = d.name.toLowerCase();
+            diskFolders.add(lower);
+            if (!diskFolderPaths.has(lower)) {
+              diskFolderPaths.set(lower, path.join(cDir, d.name));
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (diskFolders.size === 0) return results;
+
+    const itemIds = new Set();
+    const itemTitles = new Set();
+    const malIdSet = new Set();
+
+    for (const item of results) {
+      if (!item) continue;
+      if (item.id) itemIds.add(String(item.id));
+      if (item.malid || item.MalID) {
+        malIdSet.add(String(item.malid || item.MalID));
+      }
+      if (item.title) {
+        itemTitles.add(String(item.title).toLowerCase().trim());
+      }
+    }
+
+    const dbRows = new Map();
+    if (
+      global.db &&
+      (itemIds.size > 0 || itemTitles.size > 0 || malIdSet.size > 0)
+    ) {
+      try {
+        const idArr = Array.from(itemIds);
+        const titleArr = Array.from(itemTitles);
+        const malArr = Array.from(malIdSet);
+
+        const conditions = [];
+        const params = [];
+        if (idArr.length > 0) {
+          conditions.push(`id IN (${idArr.map(() => "?").join(",")})`);
+          params.push(...idArr);
+        }
+        if (titleArr.length > 0) {
+          conditions.push(
+            `LOWER(title) IN (${titleArr.map(() => "?").join(",")})`,
+          );
+          params.push(...titleArr);
+        }
+        if (malArr.length > 0) {
+          conditions.push(`MalID IN (${malArr.map(() => "?").join(",")})`);
+          params.push(...malArr);
+        }
+
+        if (conditions.length > 0) {
+          const rows = await global.db
+            .prepare(
+              `SELECT id, title, MalID, folder_name FROM ${mediaTable} WHERE ${conditions.join(" OR ")}`,
+            )
+            .all(...params);
+          for (const r of rows) {
+            if (r.id) dbRows.set(String(r.id), r);
+            if (r.MalID) dbRows.set(`mal:${r.MalID}`, r);
+            if (r.title)
+              dbRows.set(`title:${String(r.title).toLowerCase().trim()}`, r);
+          }
+        }
+      } catch (_) {}
+    }
+
+    const findFolderOnDisk = (folderName) => {
+      if (!folderName) return null;
+      const lower = folderName.toLowerCase();
+      if (diskFolderPaths.has(lower)) return diskFolderPaths.get(lower);
+      return null;
+    };
+
+    const folderEpisodesCache = new Map();
+    const getFolderEpisodes = async (fPath) => {
+      if (!fPath) return [];
+      if (folderEpisodesCache.has(fPath)) return folderEpisodesCache.get(fPath);
+      try {
+        const files = await fs.promises.readdir(fPath, { withFileTypes: true });
+        let eps = [];
+        if (isAnime) {
+          eps = files
+            .filter((f) => f.isFile())
+            .map((f) => getEpisodeNumberFromFilename(f.name))
+            .filter((n) => n !== null && !isNaN(n));
+
+          const seasonDirs = files.filter(
+            (f) => f.isDirectory() && SEASON_FOLDER_RE.test(f.name),
+          );
+          for (const sDir of seasonDirs) {
+            try {
+              const sMatch = sDir.name.match(/\d+/);
+              const seasonNum = sMatch ? parseInt(sMatch[0], 10) : 1;
+              const sFiles = await fs.promises.readdir(
+                path.join(fPath, sDir.name),
+                { withFileTypes: true },
+              );
+              for (const sf of sFiles) {
+                if (
+                  sf.isFile() &&
+                  isVideoFile(sf.name) &&
+                  !sf.name.startsWith(".") &&
+                  !sf.name.includes(".temp")
+                ) {
+                  const num = getEpisodeNumberFromFilename(sf.name);
+                  if (num !== null && !isNaN(num)) {
+                    eps.push(num);
+                    eps.push(`s${seasonNum}_e${num}`);
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+          eps = Array.from(new Set(eps));
+        } else {
+          eps = files
+            .filter((f) => f.isFile() && isMangaFile(f.name))
+            .map((f) => getChapterNumberFromFilename(f.name))
+            .filter((n) => n !== null && !isNaN(n))
+            .sort((a, b) => a - b);
+        }
+        folderEpisodesCache.set(fPath, eps);
+        return eps;
+      } catch (_) {
+        folderEpisodesCache.set(fPath, []);
+        return [];
+      }
+    };
+
+    for (const item of results) {
+      if (!item) continue;
+      const cleanTitle = item.title
+        ? String(item.title).toLowerCase().trim()
+        : "";
+      const itemMalId =
+        item.malid || item.MalID ? String(item.malid || item.MalID) : null;
+
+      let dbMatch = null;
+      if (item.id && dbRows.has(String(item.id))) {
+        dbMatch = dbRows.get(String(item.id));
+      } else if (itemMalId && dbRows.has(`mal:${itemMalId}`)) {
+        dbMatch = dbRows.get(`mal:${itemMalId}`);
+      } else if (cleanTitle && dbRows.has(`title:${cleanTitle}`)) {
+        dbMatch = dbRows.get(`title:${cleanTitle}`);
+      }
+
+      const folderCandidates = [];
+      if (dbMatch?.folder_name) folderCandidates.push(dbMatch.folder_name);
+      if (item.id) folderCandidates.push(String(item.id));
+      if (item.title) {
+        folderCandidates.push(sanitizeFolderName(item.title));
+      }
+      if (dbMatch?.title && dbMatch.title !== item.title) {
+        folderCandidates.push(sanitizeFolderName(dbMatch.title));
+      }
+
+      let allDownloaded = [];
+      for (const cand of folderCandidates) {
+        const fPath = findFolderOnDisk(cand);
+        if (fPath) {
+          const eps = await getFolderEpisodes(fPath);
+          if (eps.length > 0) {
+            allDownloaded = Array.from(
+              new Set([...allDownloaded, ...eps]),
+            ).sort((a, b) => a - b);
+          }
+        }
+      }
+
+      if (allDownloaded.length > 0) {
+        item.Downloaded = allDownloaded;
+        if (isAnime) {
+          item.DownloadedEpisodes = allDownloaded;
+        } else {
+          item.DownloadedChapters = allDownloaded;
+        }
+      }
+    }
+  } catch (err) {
+    logger.error(`Error in enrichResultsWithDownloads: ${err.message}`);
   }
 
   return results;
@@ -1479,8 +1717,7 @@ router.post(
           data = { ...data, site: config?.Moviesprovider };
         } else if (provider === "mal") {
           const activeProvName =
-            config?.Moviesprovider ||
-            (await reconcileActiveProvider("Movies"));
+            config?.Moviesprovider || (await reconcileActiveProvider("Movies"));
           if (!activeProvName) {
             data = { results: [], totalPages: 1, hasNextPage: false };
           } else {
@@ -1546,6 +1783,29 @@ router.post(
         } catch (_) {}
 
         try {
+          if (provider !== "local") {
+            await enrichResultsWithDownloads(data.results, AnimeManga);
+          }
+        } catch (_) {}
+
+        if (filters?.downloadStatus && Array.isArray(data.results)) {
+          const dlStatus = String(filters.downloadStatus).toLowerCase();
+          if (dlStatus === "downloaded") {
+            data.results = data.results.filter(
+              (item) =>
+                Array.isArray(item.Downloaded) && item.Downloaded.length > 0,
+            );
+          } else if (
+            dlStatus === "not_downloaded" ||
+            dlStatus === "nondownloaded"
+          ) {
+            data.results = data.results.filter(
+              (item) => !item.Downloaded || item.Downloaded.length === 0,
+            );
+          }
+        }
+
+        try {
           if (provider === "local") {
             const orderKey = `custom_order_${AnimeManga}_local_${filters?.tag || "all"}`;
             const savedOrder = await getKeyValue("Settings", orderKey);
@@ -1566,7 +1826,11 @@ router.post(
         } catch (_) {}
       }
 
-      if (AnimeManga === "Movies" && data?.results && Array.isArray(data.results)) {
+      if (
+        AnimeManga === "Movies" &&
+        data?.results &&
+        Array.isArray(data.results)
+      ) {
         for (const item of data.results) {
           if (item) {
             delete item.MalID;
@@ -1842,7 +2106,9 @@ router.post(
               try {
                 let localRow = await global.db
                   .prepare(
-                    `SELECT MalID, id, provider FROM ${AnimeManga} WHERE id = ? OR folder_name = ? OR LOWER(title) = LOWER(?) LIMIT 1`,
+                    AnimeManga === "Movies"
+                      ? `SELECT id, provider FROM Movies WHERE id = ? OR folder_name = ? OR LOWER(title) = LOWER(?) LIMIT 1`
+                      : `SELECT MalID, id, provider FROM ${AnimeManga} WHERE id = ? OR folder_name = ? OR LOWER(title) = LOWER(?) LIMIT 1`,
                   )
                   .get(id, id, id);
                 if (!localRow) {
@@ -1867,7 +2133,9 @@ router.post(
                     fallbackTitle = histRow[titleCol];
                     localRow = await global.db
                       .prepare(
-                        `SELECT MalID, id, provider FROM ${AnimeManga} WHERE LOWER(title) = LOWER(?) LIMIT 1`,
+                        AnimeManga === "Movies"
+                          ? `SELECT id, provider FROM Movies WHERE LOWER(title) = LOWER(?) LIMIT 1`
+                          : `SELECT MalID, id, provider FROM ${AnimeManga} WHERE LOWER(title) = LOWER(?) LIMIT 1`,
                       )
                       .get(fallbackTitle);
                   }
@@ -2296,79 +2564,85 @@ router.post(
                   }
                 } catch (_) {}
 
-                try {
-                  await global.mappingDb
-                    .prepare(
-                      `INSERT OR REPLACE INTO unmapped_items (
-                      id, provider, media_type, name, image_url, type, episodes, status, season, year, last_fetched
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-                    )
-                    .run(
-                      targetId,
-                      targetProvider,
-                      "Anime",
-                      unmappedData.name ||
-                        unmappedData.title ||
-                        data.title ||
-                        "Unknown",
-                      unmappedData.image_url ||
-                        unmappedData.image ||
-                        data.image_url ||
-                        null,
-                      unmappedData.type || data.type || "TV",
-                      cleanEpCount(unmappedData.episodes) ||
-                        cleanEpCount(data.episodes) ||
-                        (data.totalEpisodes
-                          ? String(data.totalEpisodes)
-                          : null),
-                      unmappedData.status || data.status || "Unknown",
-                      unmappedData.season || data.season || null,
-                      unmappedData.year
-                        ? parseInt(unmappedData.year, 10)
-                        : data.year
-                          ? parseInt(data.year, 10)
-                          : null,
-                    );
-                } catch (_) {}
+                const validAnimeTitle = (
+                  unmappedData.name ||
+                  unmappedData.title ||
+                  data.title ||
+                  ""
+                ).trim();
 
-                try {
-                  const axiosClient = global.axios || require("axios");
-                  axiosClient
-                    .post(
-                      "https://strawverse.theyogmehta.online/api/unmapped/report",
-                      {
-                        id: targetId,
-                        provider: targetProvider,
-                        media_type: "Anime",
-                        name:
-                          unmappedData.name ||
-                          unmappedData.title ||
-                          data.title ||
-                          "Unknown",
-                        image_url:
-                          unmappedData.image_url ||
+                if (
+                  validAnimeTitle &&
+                  validAnimeTitle.toLowerCase() !== "unknown"
+                ) {
+                  try {
+                    await global.mappingDb
+                      .prepare(
+                        `INSERT OR REPLACE INTO unmapped_items (
+                        id, provider, media_type, name, image_url, type, episodes, status, season, year, last_fetched
+                      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+                      )
+                      .run(
+                        targetId,
+                        targetProvider,
+                        "Anime",
+                        validAnimeTitle,
+                        unmappedData.image_url ||
                           unmappedData.image ||
                           data.image_url ||
                           null,
-                        type: unmappedData.type || data.type || "TV",
-                        episodes:
-                          cleanEpCount(unmappedData.episodes) ||
+                        unmappedData.type || data.type || "TV",
+                        cleanEpCount(unmappedData.episodes) ||
                           cleanEpCount(data.episodes) ||
                           (data.totalEpisodes
                             ? String(data.totalEpisodes)
                             : null),
-                        status: unmappedData.status || data.status || "Unknown",
-                        season: unmappedData.season || data.season || null,
-                        year: unmappedData.year
+                        unmappedData.status || data.status || "Unknown",
+                        unmappedData.season || data.season || null,
+                        unmappedData.year
                           ? parseInt(unmappedData.year, 10)
                           : data.year
                             ? parseInt(data.year, 10)
                             : null,
-                      },
-                      { timeout: 5000 },
-                    )
-                    .catch(() => {});
-                } catch (_) {}
+                      );
+                  } catch (_) {}
+
+                  try {
+                    const axiosClient = global.axios || require("axios");
+                    axiosClient
+                      .post(
+                        "https://strawverse.theyogmehta.online/api/unmapped/report",
+                        {
+                          id: targetId,
+                          provider: targetProvider,
+                          media_type: "Anime",
+                          name: validAnimeTitle,
+                          image_url:
+                            unmappedData.image_url ||
+                            unmappedData.image ||
+                            data.image_url ||
+                            null,
+                          type: unmappedData.type || data.type || "TV",
+                          episodes:
+                            cleanEpCount(unmappedData.episodes) ||
+                            cleanEpCount(data.episodes) ||
+                            (data.totalEpisodes
+                              ? String(data.totalEpisodes)
+                              : null),
+                          status:
+                            unmappedData.status || data.status || "Unknown",
+                          season: unmappedData.season || data.season || null,
+                          year: unmappedData.year
+                            ? parseInt(unmappedData.year, 10)
+                            : data.year
+                              ? parseInt(data.year, 10)
+                              : null,
+                        },
+                        { timeout: 5000 },
+                      )
+                      .catch(() => {});
+                  } catch (_) {}
+                }
               },
               deleteUnmapped: async (itemId) => {
                 if (!global.mappingDb) return;
@@ -2601,82 +2875,87 @@ router.post(
                       }
                     } catch (_) {}
 
-                    try {
-                      await global.mappingDb
-                        .prepare(
-                          `INSERT OR REPLACE INTO unmapped_items (
-                          id, provider, media_type, name, image_url, type, episodes, status, season, year, last_fetched
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-                        )
-                        .run(
-                          targetId,
-                          targetProvider,
-                          "Manga",
-                          unmappedData.name ||
-                            unmappedData.title ||
-                            data.title ||
-                            "Unknown",
-                          unmappedData.image_url ||
-                            unmappedData.image ||
-                            data.image_url ||
-                            null,
-                          unmappedData.type || data.type || "Manga",
-                          cleanEpCount(unmappedData.episodes) ||
-                            cleanEpCount(unmappedData.chapters) ||
-                            cleanEpCount(data.chapters) ||
-                            (data.totalChapters
-                              ? String(data.totalChapters)
-                              : null),
-                          unmappedData.status || data.status || "Unknown",
-                          unmappedData.season || null,
-                          unmappedData.year
-                            ? parseInt(unmappedData.year, 10)
-                            : data.year
-                              ? parseInt(data.year, 10)
-                              : null,
-                        );
-                    } catch (_) {}
+                    const validMangaTitle = (
+                      unmappedData.name ||
+                      unmappedData.title ||
+                      data.title ||
+                      ""
+                    ).trim();
 
-                    try {
-                      const axiosClient = global.axios || require("axios");
-                      axiosClient
-                        .post(
-                          "https://strawverse.theyogmehta.online/api/unmapped/report",
-                          {
-                            id: targetId,
-                            provider: targetProvider,
-                            media_type: "Manga",
-                            name:
-                              unmappedData.name ||
-                              unmappedData.title ||
-                              data.title ||
-                              "Unknown",
-                            image_url:
-                              unmappedData.image_url ||
+                    if (
+                      validMangaTitle &&
+                      validMangaTitle.toLowerCase() !== "unknown"
+                    ) {
+                      try {
+                        await global.mappingDb
+                          .prepare(
+                            `INSERT OR REPLACE INTO unmapped_items (
+                            id, provider, media_type, name, image_url, type, episodes, status, season, year, last_fetched
+                          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+                          )
+                          .run(
+                            targetId,
+                            targetProvider,
+                            "Manga",
+                            validMangaTitle,
+                            unmappedData.image_url ||
                               unmappedData.image ||
                               data.image_url ||
                               null,
-                            type: unmappedData.type || data.type || "Manga",
-                            episodes:
-                              cleanEpCount(unmappedData.episodes) ||
+                            unmappedData.type || data.type || "Manga",
+                            cleanEpCount(unmappedData.episodes) ||
                               cleanEpCount(unmappedData.chapters) ||
                               cleanEpCount(data.chapters) ||
                               (data.totalChapters
                                 ? String(data.totalChapters)
                                 : null),
-                            status:
-                              unmappedData.status || data.status || "Unknown",
-                            season: unmappedData.season || null,
-                            year: unmappedData.year
+                            unmappedData.status || data.status || "Unknown",
+                            unmappedData.season || null,
+                            unmappedData.year
                               ? parseInt(unmappedData.year, 10)
                               : data.year
                                 ? parseInt(data.year, 10)
                                 : null,
-                          },
-                          { timeout: 5000 },
-                        )
-                        .catch(() => {});
-                    } catch (_) {}
+                          );
+                      } catch (_) {}
+
+                      try {
+                        const axiosClient = global.axios || require("axios");
+                        axiosClient
+                          .post(
+                            "https://strawverse.theyogmehta.online/api/unmapped/report",
+                            {
+                              id: targetId,
+                              provider: targetProvider,
+                              media_type: "Manga",
+                              name: validMangaTitle,
+                              image_url:
+                                unmappedData.image_url ||
+                                unmappedData.image ||
+                                data.image_url ||
+                                null,
+                              type: unmappedData.type || data.type || "Manga",
+                              episodes:
+                                cleanEpCount(unmappedData.episodes) ||
+                                cleanEpCount(unmappedData.chapters) ||
+                                cleanEpCount(data.chapters) ||
+                                (data.totalChapters
+                                  ? String(data.totalChapters)
+                                  : null),
+                              status:
+                                unmappedData.status || data.status || "Unknown",
+                              season: unmappedData.season || null,
+                              year: unmappedData.year
+                                ? parseInt(unmappedData.year, 10)
+                                : data.year
+                                  ? parseInt(data.year, 10)
+                                  : null,
+                            },
+                            { timeout: 5000 },
+                          )
+                          .catch(() => {});
+                      } catch (_) {}
+                    }
                   },
                   deleteUnmapped: async (itemId) => {
                     if (!global.mappingDb) return;
@@ -2723,9 +3002,27 @@ router.post(
               Object.assign(data, MovieInfoData);
 
               try {
+                let seasonCounts = null;
+                if (
+                  Array.isArray(MovieInfoData.episodes) &&
+                  MovieInfoData.episodes.length > 0
+                ) {
+                  seasonCounts = {};
+                  for (const ep of MovieInfoData.episodes) {
+                    const s =
+                      ep.season !== undefined && ep.season !== null
+                        ? Number(ep.season)
+                        : 1;
+                    const epNum = Number(ep.number || ep.episode || 1);
+                    if (!seasonCounts[s] || epNum > seasonCounts[s]) {
+                      seasonCounts[s] = epNum;
+                    }
+                  }
+                }
+
                 await global.db
                   .prepare(
-                    `UPDATE Movies SET description = ?, status = ?, genres = ?, aired = ?, image_url = ?, provider = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+                    `UPDATE Movies SET description = ?, status = ?, genres = ?, aired = ?, image_url = ?, provider = ?, episodes_json = ?, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
                   )
                   .run(
                     MovieInfoData.description || "",
@@ -2736,6 +3033,7 @@ router.post(
                     MovieInfoData.aired || MovieInfoData.released || "",
                     MovieInfoData.image_url || MovieInfoData.image || "",
                     Moviesprovider.provider_name,
+                    seasonCounts ? JSON.stringify(seasonCounts) : null,
                     id,
                   );
               } catch (dbErr) {
@@ -3015,54 +3313,62 @@ router.post(
                       ? prov.trim()
                       : `@${prov.trim()}`
                   : clean;
-              global.mappingDb
-                .prepare(
-                  `INSERT OR REPLACE INTO unmapped_items (
-                    id, provider, media_type, name, image_url, type, episodes, status, season, year, last_fetched
-                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-                )
-                .run(
-                  String(id),
-                  targetProvider,
-                  AnimeManga,
-                  data.title || data.name || "Unknown",
-                  data.image_url || data.image || null,
-                  data.type || (AnimeManga === "Anime" ? "TV" : "Manga"),
-                  cleanEpCount(data.episodes) ||
-                    cleanEpCount(data.chapters) ||
-                    (data.totalEpisodes ? String(data.totalEpisodes) : null) ||
-                    (data.totalChapters ? String(data.totalChapters) : null),
-                  data.status || "Unknown",
-                  data.season || null,
-                  data.year ? parseInt(data.year, 10) : null,
-                );
+              const reportTitle = (data.title || data.name || "").trim();
 
-              const axiosClient = global.axios || require("axios");
-              axiosClient
-                .post(
-                  "https://strawverse.theyogmehta.online/api/unmapped/report",
-                  {
-                    id: String(id),
-                    provider: targetProvider,
-                    media_type: AnimeManga,
-                    name: data.title || data.name || "Unknown",
-                    image_url: data.image_url || data.image || null,
-                    type:
-                      data.type || (AnimeManga === "Anime" ? "TV" : "Manga"),
-                    episodes:
-                      cleanEpCount(data.episodes) ||
+              if (reportTitle && reportTitle.toLowerCase() !== "unknown") {
+                global.mappingDb
+                  .prepare(
+                    `INSERT OR REPLACE INTO unmapped_items (
+                      id, provider, media_type, name, image_url, type, episodes, status, season, year, last_fetched
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+                  )
+                  .run(
+                    String(id),
+                    targetProvider,
+                    AnimeManga,
+                    reportTitle,
+                    data.image_url || data.image || null,
+                    data.type || (AnimeManga === "Anime" ? "TV" : "Manga"),
+                    cleanEpCount(data.episodes) ||
                       cleanEpCount(data.chapters) ||
                       (data.totalEpisodes
                         ? String(data.totalEpisodes)
                         : null) ||
                       (data.totalChapters ? String(data.totalChapters) : null),
-                    status: data.status || "Unknown",
-                    season: data.season || null,
-                    year: data.year ? parseInt(data.year, 10) : null,
-                  },
-                  { timeout: 5000 },
-                )
-                .catch(() => {});
+                    data.status || "Unknown",
+                    data.season || null,
+                    data.year ? parseInt(data.year, 10) : null,
+                  );
+
+                const axiosClient = global.axios || require("axios");
+                axiosClient
+                  .post(
+                    "https://strawverse.theyogmehta.online/api/unmapped/report",
+                    {
+                      id: String(id),
+                      provider: targetProvider,
+                      media_type: AnimeManga,
+                      name: reportTitle,
+                      image_url: data.image_url || data.image || null,
+                      type:
+                        data.type || (AnimeManga === "Anime" ? "TV" : "Manga"),
+                      episodes:
+                        cleanEpCount(data.episodes) ||
+                        cleanEpCount(data.chapters) ||
+                        (data.totalEpisodes
+                          ? String(data.totalEpisodes)
+                          : null) ||
+                        (data.totalChapters
+                          ? String(data.totalChapters)
+                          : null),
+                      status: data.status || "Unknown",
+                      season: data.season || null,
+                      year: data.year ? parseInt(data.year, 10) : null,
+                    },
+                    { timeout: 5000 },
+                  )
+                  .catch(() => {});
+              }
             } catch (_) {}
           }
         } catch (mappingErr) {
@@ -3210,6 +3516,102 @@ router.post(
         }
       }
 
+      if (
+        AnimeManga === "Movies" &&
+        (!Array.isArray(data.DownloadedEpisodes) ||
+          data.DownloadedEpisodes.length === 0 ||
+          !data.DownloadedEpisodes.some(
+            (x) => typeof x === "string" && x.startsWith("s"),
+          ))
+      ) {
+        try {
+          const cfg = await settingfetch();
+          const baseDir =
+            AnimeManga === "Movies"
+              ? cfg?.CustomDownloadLocationMovies || getDownloadsFolder()
+              : cfg?.CustomDownloadLocationAnime || getDownloadsFolder();
+          const candidates = [];
+          if (data.folder_name) candidates.push(data.folder_name);
+          if (data.title) candidates.push(sanitizeFolderName(data.title));
+          if (data.id) {
+            candidates.push(String(data.id));
+            candidates.push(sanitizeFolderName(String(data.id)));
+          }
+          if (id) {
+            candidates.push(String(id));
+            candidates.push(sanitizeFolderName(String(id)));
+          }
+
+          let matchedFolderPath = null;
+          for (const cand of candidates) {
+            if (!cand) continue;
+            let fp = path.join(baseDir, AnimeManga, cand);
+            if (
+              AnimeManga === "Movies" &&
+              !fs.existsSync(fp) &&
+              fs.existsSync(path.join(baseDir, "MoviesSeries", cand))
+            ) {
+              fp = path.join(baseDir, "MoviesSeries", cand);
+            }
+            if (!fs.existsSync(fp) && fs.existsSync(path.join(baseDir, cand))) {
+              fp = path.join(baseDir, cand);
+            }
+            if (fs.existsSync(fp)) {
+              matchedFolderPath = fp;
+              break;
+            }
+          }
+
+          if (matchedFolderPath) {
+            const filesAndFolders = await fs.promises.readdir(
+              matchedFolderPath,
+              { withFileTypes: true },
+            );
+            const scanned = filesAndFolders
+              .filter(
+                (f) =>
+                  f.isFile() &&
+                  isVideoFile(f.name) &&
+                  !f.name.startsWith(".") &&
+                  !f.name.includes(".temp"),
+              )
+              .map((f) => getEpisodeNumberFromFilename(f.name))
+              .filter((n) => n !== null && !isNaN(n));
+
+            const seasonDirs = filesAndFolders.filter(
+              (f) => f.isDirectory() && SEASON_FOLDER_RE.test(f.name),
+            );
+            for (const sDir of seasonDirs) {
+              try {
+                const sMatch = sDir.name.match(/\d+/);
+                const seasonNum = sMatch ? parseInt(sMatch[0], 10) : 1;
+                const sDirPath = path.join(matchedFolderPath, sDir.name);
+                const sFiles = await fs.promises.readdir(sDirPath, {
+                  withFileTypes: true,
+                });
+                for (const sf of sFiles) {
+                  if (
+                    sf.isFile() &&
+                    isVideoFile(sf.name) &&
+                    !sf.name.startsWith(".") &&
+                    !sf.name.includes(".temp")
+                  ) {
+                    const epNum = getEpisodeNumberFromFilename(sf.name);
+                    if (epNum !== null && !isNaN(epNum)) {
+                      scanned.push(`s${seasonNum}_e${epNum}`);
+                    }
+                  }
+                }
+              } catch (_) {}
+            }
+
+            if (scanned.length > 0) {
+              data.DownloadedEpisodes = Array.from(new Set(scanned));
+            }
+          }
+        } catch (_) {}
+      }
+
       if (!data?.id) throw new Error(`No ${AnimeManga} Found with id '${id}'`);
       return res.json(data);
     } catch (err) {
@@ -3244,7 +3646,7 @@ router.post("/api/info/items", async (req, res) => {
   const isAnime = type === "Anime";
   const fetchFunction =
     type === "Movies"
-      ? async (providerObj, itemId, pg) => {
+      ? async (providerObj, itemId) => {
           const info = await movieInfo(providerObj, null, itemId);
           return { episodes: info?.episodes || [] };
         }
@@ -3260,9 +3662,16 @@ router.post("/api/info/items", async (req, res) => {
         .prepare(`SELECT id FROM ${table} WHERE id = ?`)
         .get(id);
       if (!exists) {
-        const histTable = isVideo ? "WatchHistory" : "ReadHistory";
-        const idCol = isVideo ? "anime_id" : "manga_id";
-        const titleCol = isVideo ? "anime_title" : "manga_title";
+        const histTable =
+          type === "Movies"
+            ? "SeriesMovieWatchHistory"
+            : isAnime
+              ? "WatchHistory"
+              : "ReadHistory";
+        const idCol =
+          type === "Movies" ? "movie_id" : isAnime ? "anime_id" : "manga_id";
+        const titleCol =
+          type === "Movies" ? "title" : isAnime ? "anime_title" : "manga_title";
         const hist = await global.db
           .prepare(
             `SELECT ${titleCol} FROM ${histTable} WHERE ${idCol} = ? LIMIT 1`,

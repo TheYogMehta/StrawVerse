@@ -212,25 +212,48 @@ export default function DownloadsTracker() {
                 )
               : 0;
             const rawCaption = activeTask.caption || "";
-            let mainTitle = rawCaption;
+            let mainTitle;
             let subStatus = null;
 
             const errorMatch = rawCaption.match(
-              /(Download error on segment[\s\S]+|Error downloading[\s\S]+|Retrying in[\s\S]+)/i,
+              /(Download error on segment[\s\S]+|Error downloading[\s\S]+|Retrying in[\s\S]+|Rate limit[\s\S]+)/i,
             );
             if (errorMatch && errorMatch.index > 0) {
               mainTitle = rawCaption.substring(0, errorMatch.index).trim();
               subStatus = errorMatch[0].trim();
             } else {
-              const match = rawCaption.match(
-                /^(Downloading\s+(?:EP|CHP)\s+[\d\.]+\s+.*?\(\s*\d+p\s*\))/i,
+              mainTitle = rawCaption.trim();
+            }
+
+            if (subStatus && /^[^\w]+$/.test(subStatus)) {
+              subStatus = null;
+            }
+
+            mainTitle = mainTitle
+              .replace(/\(\s*(\d+p)\s*\(([^)]+)\)\s*\)/i, "($1 • $2)")
+              .replace(/\s+\)/g, ")")
+              .replace(/\(\s+/g, "(");
+
+            const activeSeason =
+              activeTask.season !== undefined && activeTask.season !== null
+                ? activeTask.season
+                : (() => {
+                    const sMatch = String(activeTask.epid || "").match(
+                      /tv:[^:]+:(\d+):\d+/,
+                    );
+                    return sMatch ? sMatch[1] : null;
+                  })();
+
+            if (
+              activeSeason !== null &&
+              activeSeason !== undefined &&
+              !mainTitle.includes(`S${activeSeason}`) &&
+              !mainTitle.includes(`Season ${activeSeason}`)
+            ) {
+              mainTitle = mainTitle.replace(
+                /(Downloading\s+)(EP\s+\d+|Episode\s+\d+|CHP\s+\d+)/i,
+                `$1S${activeSeason} $2`,
               );
-              if (match) {
-                mainTitle = match[1].trim();
-                if (rawCaption.length > mainTitle.length) {
-                  subStatus = rawCaption.substring(mainTitle.length).trim();
-                }
-              }
             }
 
             return (
@@ -343,9 +366,25 @@ export default function DownloadsTracker() {
                 const qualStr = item.config?.quality
                   ? ` ( ${item.config.quality} )`
                   : "";
+                const itemSeason =
+                  item.season !== undefined && item.season !== null
+                    ? item.season
+                    : item.config?.season !== undefined &&
+                        item.config?.season !== null
+                      ? item.config.season
+                      : (() => {
+                          const sMatch = String(item.epid || "").match(
+                            /tv:[^:]+:(\d+):\d+/,
+                          );
+                          return sMatch ? sMatch[1] : null;
+                        })();
+                const seasonPrefix =
+                  itemSeason !== null && itemSeason !== undefined
+                    ? `S${itemSeason} `
+                    : "";
                 const displayTitle =
                   item.Type === "Anime" || item.Type === "Movies"
-                    ? `EP ${item.EpNum} ${item.Title}${qualStr}`
+                    ? `${seasonPrefix}EP ${item.EpNum} ${item.Title}${qualStr}`
                     : `CHP ${item.EpNum} ${item.Title}${qualStr}`;
                 const isItemCooling =
                   item.caption &&

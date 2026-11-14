@@ -19,8 +19,6 @@ const iso6391 = require("iso-639-1");
 const path = require("path");
 const got = require("got").default || require("got");
 const fs = require("fs");
-const stream = require("stream");
-const { promisify } = require("util");
 const crypto = require("crypto");
 const { getHeaders } = require("./proxyHeaders");
 const { isLanguagePreferred, settingfetch } = require("./settings");
@@ -46,8 +44,6 @@ async function acquireMergeLock() {
   await currentLock;
   return release;
 }
-
-const pipeline = promisify(stream.pipeline);
 
 let resolvedFfmpegPath = null;
 
@@ -413,6 +409,106 @@ class downloader {
     } catch (_) {}
   }
 
+  parsePlaylistSegments(playlistContent, baseUrl) {
+    if (!playlistContent) return [];
+    let segments = [];
+    const lines = playlistContent.split("\n").map((line) => line.trim());
+    let currentKeyUrl = null;
+    let currentIv = null;
+    let mediaSequence = 1;
+
+    const mediaSeqLine = lines.find((l) =>
+      l.trim().startsWith("#EXT-X-MEDIA-SEQUENCE:"),
+    );
+    if (mediaSeqLine) {
+      const seqMatch = mediaSeqLine.match(/#EXT-X-MEDIA-SEQUENCE:(\d+)/);
+      if (seqMatch) {
+        mediaSequence = parseInt(seqMatch[1], 10);
+      }
+    }
+
+    let segmentCount = 0;
+
+    for (const line of lines) {
+      if (!line) continue;
+
+      if (line.startsWith("#")) {
+        if (line.startsWith("#EXT-X-MAP:")) {
+          const m = line.match(/URI=(?:"([^"]*)"|([^,]*))/i);
+          if (m) {
+            let mapUri = m[1] || m[2];
+            if (
+              mapUri &&
+              !mapUri.startsWith("http://") &&
+              !mapUri.startsWith("https://")
+            ) {
+              mapUri = resolveUrl(mapUri, baseUrl);
+            }
+            if (mapUri) {
+              segments.push({
+                url: mapUri,
+                encrypted: false,
+                isInitSegment: true,
+              });
+            }
+          }
+        }
+
+        if (line.startsWith("#EXT-X-KEY:")) {
+          const params = {};
+          const attrString = line.substring("#EXT-X-KEY:".length);
+          const regex = /([A-Z0-9_-]+)=(?:"([^"]*)"|([^,]*))/g;
+          let match;
+          while ((match = regex.exec(attrString)) !== null) {
+            const key = match[1];
+            const value = match[2] !== undefined ? match[2] : match[3];
+            params[key] = value;
+          }
+
+          const method = (params.METHOD || "").toUpperCase();
+          if (method === "AES-128") {
+            let rawUri = params.URI;
+            let absoluteKeyUri = rawUri;
+            if (
+              rawUri &&
+              !rawUri.startsWith("http://") &&
+              !rawUri.startsWith("https://")
+            ) {
+              absoluteKeyUri = resolveUrl(rawUri, baseUrl);
+            }
+            currentKeyUrl = absoluteKeyUri || null;
+            currentIv = params.IV || null;
+          } else {
+            currentKeyUrl = null;
+            currentIv = null;
+          }
+        }
+        continue;
+      }
+
+      // It's a segment or playlist URL
+      let absoluteUrl = line;
+      if (!line.startsWith("http://") && !line.startsWith("https://")) {
+        absoluteUrl = resolveUrl(line, baseUrl);
+      }
+
+      if (currentKeyUrl) {
+        const segIv = currentIv || String(mediaSequence + segmentCount);
+        segmentCount++;
+        segments.push({
+          url: absoluteUrl,
+          keyUrl: currentKeyUrl,
+          iv: segIv,
+          encrypted: true,
+        });
+      } else {
+        segments.push({ url: absoluteUrl, encrypted: false });
+      }
+    }
+
+    return segments;
+  }
+
   // Additional Checks
   async DownloadsChecking() {
     if (
@@ -433,6 +529,9 @@ class downloader {
     const base = this.fileBase || `${this.Epnum}Ep`;
     this.mp4 = path.join(this.directory, `${base}.mp4`);
     this.SegmentsFile = path.join(this.directory, `${base}.ts`);
+    this.AudioSegments = null;
+    this.AudioSegmentsFile = null;
+    this.audioStreamUrl = null;
 
     if (!this.streamUrl || this.streamUrl.length <= 0) {
       throw new Error("No Stream Url Provided");
@@ -493,6 +592,40 @@ class downloader {
 
       // Resolve master playlist to media playlist if applicable
       if (Playlist.includes("#EXT-X-STREAM-INF")) {
+        // Audio track extraction from master playlist
+        try {
+          const audioLines = Playlist.split("\n").filter((l) =>
+            l.includes("#EXT-X-MEDIA:TYPE=AUDIO"),
+          );
+          if (audioLines.length > 0) {
+            const currentSettings = (await settingfetch()) || {};
+            const preferredDub = currentSettings?.PreferredDub || "English";
+            let chosenLine =
+              audioLines.find((l) => {
+                const name = (l.match(/NAME="([^"]+)"/i) || [])[1] || "";
+                const lang = (l.match(/LANGUAGE="([^"]+)"/i) || [])[1] || "";
+                return (
+                  /URI=/i.test(l) &&
+                  (name.toLowerCase().includes(preferredDub.toLowerCase()) ||
+                    lang.toLowerCase().includes(preferredDub.toLowerCase()))
+                );
+              }) ||
+              audioLines.find(
+                (l) => /DEFAULT=YES/i.test(l) && /URI=/i.test(l),
+              ) ||
+              audioLines.find((l) => /URI=/i.test(l));
+
+            if (chosenLine) {
+              const uMatch =
+                chosenLine.match(/URI="([^"]+)"/i) ||
+                chosenLine.match(/URI=([^,\s]+)/i);
+              if (uMatch) {
+                this.audioStreamUrl = resolveUrl(uMatch[1], this.streamUrl);
+              }
+            }
+          }
+        } catch (_) {}
+
         if (!this.subtitles || this.subtitles.length === 0) {
           try {
             const mediaLines = Playlist.split("\n").filter((l) =>
@@ -594,86 +727,49 @@ class downloader {
           if (!Playlist)
             throw new Error("No Stream Found for selected quality!");
         }
-      }
 
-      let Segments = [];
-      const lines = Playlist.split("\n").map((line) => line.trim());
-      let currentKeyUrl = null;
-      let currentIv = null;
-      let mediaSequence = 1;
-
-      const mediaSeqLine = lines.find((l) =>
-        l.trim().startsWith("#EXT-X-MEDIA-SEQUENCE:"),
-      );
-      if (mediaSeqLine) {
-        const seqMatch = mediaSeqLine.match(/#EXT-X-MEDIA-SEQUENCE:(\d+)/);
-        if (seqMatch) {
-          mediaSequence = parseInt(seqMatch[1], 10);
-        }
-      }
-
-      let segmentCount = 0;
-
-      for (const line of lines) {
-        if (!line) continue;
-
-        if (line.startsWith("#")) {
-          if (line.startsWith("#EXT-X-KEY:")) {
-            const params = {};
-            const attrString = line.substring("#EXT-X-KEY:".length);
-            const regex = /([A-Z0-9_-]+)=(?:"([^"]*)"|([^,]*))/g;
-            let match;
-            while ((match = regex.exec(attrString)) !== null) {
-              const key = match[1];
-              const value = match[2] !== undefined ? match[2] : match[3];
-              params[key] = value;
-            }
-
-            const method = (params.METHOD || "").toUpperCase();
-            if (method === "AES-128") {
-              let rawUri = params.URI;
-              let absoluteKeyUri = rawUri;
-              if (
-                rawUri &&
-                !rawUri.startsWith("http://") &&
-                !rawUri.startsWith("https://")
-              ) {
-                absoluteKeyUri = resolveUrl(rawUri, this.streamUrl);
+        if (this.audioStreamUrl) {
+          try {
+            const audioPlaylistText = await this.fetchWithClearanceRetry(
+              this.audioStreamUrl,
+              () => this.fetchMediaText(this.audioStreamUrl, 30000),
+            );
+            if (audioPlaylistText && audioPlaylistText.includes("#EXTINF")) {
+              this.AudioSegments = this.parsePlaylistSegments(
+                audioPlaylistText,
+                this.audioStreamUrl,
+              );
+              if (this.AudioSegments && this.AudioSegments.length > 0) {
+                const base =
+                  this.fileBase ||
+                  mediaServerFileBase(
+                    this.directory,
+                    this.episode,
+                    this.quality,
+                  );
+                this.AudioSegmentsFile = path.join(
+                  this.directory,
+                  `${base}_audio.ts`,
+                );
+                logger.info(
+                  `[Download] Found separate audio stream with ${this.AudioSegments.length} segments: ${this.audioStreamUrl}`,
+                );
               }
-              currentKeyUrl = absoluteKeyUri || null;
-              currentIv = params.IV || null;
-            } else {
-              currentKeyUrl = null;
-              currentIv = null;
             }
+          } catch (aErr) {
+            logger.warn(
+              `[Download] Failed to fetch separate audio playlist: ${aErr.message}`,
+            );
           }
-          continue;
-        }
-
-        // It's a segment or playlist URL
-        let absoluteUrl = line;
-        if (!line.startsWith("http://") && !line.startsWith("https://")) {
-          absoluteUrl = resolveUrl(line, this.streamUrl);
-        }
-
-        if (currentKeyUrl) {
-          const segIv = currentIv || String(mediaSequence + segmentCount);
-          segmentCount++;
-          Segments.push({
-            url: absoluteUrl,
-            keyUrl: currentKeyUrl,
-            iv: segIv,
-            encrypted: true,
-          });
-        } else {
-          Segments.push({ url: absoluteUrl, encrypted: false });
         }
       }
 
-      if (Segments.length <= 0) throw new Error("No Segments Found!");
+      this.Segments = this.parsePlaylistSegments(Playlist, this.streamUrl);
+      if (this.Segments.length <= 0) throw new Error("No Segments Found!");
 
-      this.Segments = Segments;
-      this.totalSegments = Segments.length;
+      this.totalSegments =
+        this.Segments.length +
+        (this.AudioSegments ? this.AudioSegments.length : 0);
       this.currentSegments = 0;
 
       if (this.subtitles && this.subtitles.length > 0) {
@@ -1248,6 +1344,395 @@ class downloader {
     this.logProgress("Video download complete!");
   }
 
+  async downloadHlsTrack(segments, tempDir, outputFile, trackUrl) {
+    if (!segments || segments.length === 0) return;
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const firstSegUrl =
+      typeof segments[0] === "object" ? segments[0]?.url : segments[0];
+
+    try {
+      const ref = this.headers?.Referer || this.headers?.referer;
+      if (ref && global.setDynamicReferer && firstSegUrl) {
+        global.setDynamicReferer(new URL(firstSegUrl).hostname, ref);
+      }
+    } catch (_) {}
+
+    const domainName = extractDomain(
+      trackUrl || firstSegUrl,
+      this.headers?.Referer || this.headers?.referer,
+    );
+
+    let CONCURRENCY = await getInitialDomainConcurrency(domainName, 8);
+    const MAX_CONCURRENCY = 16;
+    CONCURRENCY = Math.min(CONCURRENCY, MAX_CONCURRENCY);
+    const SLOW_HOST_FLOOR_BPS = 60 * 1024;
+    const SLOW_HOST_AFTER_FRESH = 16;
+    const dlStartTime = Date.now();
+    let freshCount = 0;
+    let stopDownloading = false;
+    let failedSegmentsCount = 0;
+    if (!this._keyPromiseCache) this._keyPromiseCache = {};
+
+    const downloadSingleSegment = async (index, retryCount = 0) => {
+      if (
+        stopDownloading ||
+        (global.isQueuePaused && global.isQueuePaused()) ||
+        (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
+      ) {
+        if (
+          global.isEpisodeInQueue &&
+          !global.isEpisodeInQueue(this.EpID) &&
+          !stopDownloading
+        ) {
+          stopDownloading = true;
+          throw new Error("Episode Cancelled");
+        } else if (
+          global.isQueuePaused &&
+          global.isQueuePaused() &&
+          !stopDownloading
+        ) {
+          stopDownloading = true;
+          throw new Error("Queue Paused");
+        }
+        return false;
+      }
+
+      const segmentFile = path.join(tempDir, `${index}.ts`);
+      try {
+        if (fs.existsSync(segmentFile)) {
+          const stat = fs.statSync(segmentFile);
+          if (stat.size > 0) {
+            return true;
+          }
+        }
+      } catch (e) {}
+
+      try {
+        if (isCircuitOpen(domainName)) {
+          await waitForCircuit(domainName);
+        }
+
+        let Segment = segments[index];
+        if (!Segment) throw new Error("[ STOPPING ] Segment Missing!");
+
+        const segUrl = typeof Segment === "object" ? Segment.url : Segment;
+        let body;
+
+        if (typeof Segment === "object" && Segment.encrypted) {
+          if (!this._keyPromiseCache[Segment.keyUrl]) {
+            this._keyPromiseCache[Segment.keyUrl] = (async () => {
+              const keyBytes = await this.fetchWithClearanceRetry(
+                Segment.keyUrl,
+                async () => this.fetchMediaBytes(Segment.keyUrl, 15000),
+              );
+              return keyBytes;
+            })().catch((err) => {
+              delete this._keyPromiseCache[Segment.keyUrl];
+              throw err;
+            });
+          }
+          const keyBuffer = await this._keyPromiseCache[Segment.keyUrl];
+          const iv = Buffer.alloc(16);
+          if (typeof Segment.iv === "string" && Segment.iv.startsWith("0x")) {
+            Buffer.from(Segment.iv.slice(2), "hex").copy(iv);
+          } else {
+            iv.writeUInt32BE(parseInt(Segment.iv, 10), 12);
+          }
+          const cipherBytes = await this.fetchWithClearanceRetry(
+            segUrl,
+            async () => this.fetchMediaBytes(segUrl, 60000),
+          );
+          const cipherText = stripPngHeader(cipherBytes);
+          const decipher = crypto.createDecipheriv(
+            "aes-128-cbc",
+            keyBuffer,
+            iv,
+          );
+          body = Buffer.concat([decipher.update(cipherText), decipher.final()]);
+        } else {
+          const segBytes = await this.fetchWithClearanceRetry(
+            segUrl,
+            async () => this.fetchMediaBytes(segUrl, 60000),
+          );
+          body = stripPngHeader(segBytes);
+        }
+
+        if (!body || body.length === 0) {
+          throw new Error("Received empty segment payload");
+        }
+
+        const segDir = path.dirname(segmentFile);
+        if (!fs.existsSync(segDir)) {
+          fs.mkdirSync(segDir, { recursive: true });
+        }
+
+        await fs.promises.writeFile(segmentFile, body);
+        return body.length;
+      } catch (err) {
+        if (stopDownloading || (global.isQueuePaused && global.isQueuePaused()))
+          throw err;
+
+        const status = err?.response?.statusCode ?? err?.response?.status;
+        const isServerRateOrError =
+          status === 429 || status === 502 || status === 503 || status === 530;
+        const RETRY_DELAYS = isServerRateOrError
+          ? [2000, 5000, 8000]
+          : [1000, 3000, 5000];
+
+        if (retryCount >= RETRY_DELAYS.length) {
+          logger.error(
+            `[Download] Segment ${index} failed after 3 retries: ${err.message}`,
+          );
+          throw new Error(
+            `SCRAPER_TEMPORARY_ERROR: Segment ${index} failed after retries (${err.message})`,
+          );
+        }
+
+        const delay = RETRY_DELAYS[retryCount];
+        this.logProgress(
+          `Download error on segment ${index}! Retrying in ${delay / 1000}s (attempt ${retryCount + 2}/4)...`,
+        );
+
+        if (isCircuitOpen(domainName)) {
+          await waitForCircuit(domainName);
+        } else {
+          await new Promise((res) => setTimeout(res, delay));
+        }
+
+        return await downloadSingleSegment(index, retryCount + 1);
+      }
+    };
+
+    let activeWorkers = 0;
+    let nextIndex = 0;
+    let completedCount = 0;
+    let sampleBytesDownloaded = 0;
+    let sampleStartTime = Date.now();
+    let failedIndices = [];
+
+    await new Promise((resolve, reject) => {
+      const checkDone = () => {
+        if (completedCount >= segments.length || stopDownloading) {
+          if (stopDownloading) {
+            if (
+              global.isEpisodeInQueue &&
+              !global.isEpisodeInQueue(this.EpID)
+            ) {
+              reject(new Error("Episode Cancelled"));
+            } else {
+              reject(new Error("Queue Paused"));
+            }
+          } else {
+            resolve();
+          }
+        }
+      };
+
+      const enqueueNext = () => {
+        if (
+          stopDownloading ||
+          (global.isQueuePaused && global.isQueuePaused()) ||
+          (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
+        ) {
+          stopDownloading = true;
+          checkDone();
+          return;
+        }
+
+        while (
+          activeWorkers < CONCURRENCY &&
+          nextIndex < segments.length &&
+          !stopDownloading
+        ) {
+          const idx = nextIndex++;
+          activeWorkers++;
+
+          downloadSingleSegment(idx)
+            .then(async (downloadedBytes) => {
+              activeWorkers--;
+              completedCount++;
+              if (downloadedBytes) {
+                sampleBytesDownloaded +=
+                  typeof downloadedBytes === "number" ? downloadedBytes : 0;
+                if (typeof downloadedBytes === "number") {
+                  this.downloadedTotalBytes =
+                    (this.downloadedTotalBytes || 0) + downloadedBytes;
+                  freshCount++;
+                }
+                this.currentSegments = Math.min(
+                  this.totalSegments,
+                  this.currentSegments + 1,
+                );
+                this.logProgress(null, CONCURRENCY);
+              }
+
+              if (
+                completedCount === SLOW_HOST_AFTER_FRESH &&
+                freshCount >= SLOW_HOST_AFTER_FRESH
+              ) {
+                const elapsedSec = (Date.now() - dlStartTime) / 1000;
+                const overallBps =
+                  elapsedSec > 0
+                    ? (this.downloadedTotalBytes || 0) / elapsedSec
+                    : 0;
+                if (overallBps < SLOW_HOST_FLOOR_BPS) {
+                  let slowHost = domainName;
+                  try {
+                    slowHost = new URL(trackUrl).hostname;
+                  } catch (_) {}
+                  stopDownloading = true;
+                  const slowErr = new Error(
+                    `SCRAPER_TEMPORARY_ERROR: segment host ${slowHost} too slow (${Math.round(overallBps / 1024)} KB/s over first ${SLOW_HOST_AFTER_FRESH} segments), trying another server`,
+                  );
+                  slowErr.failedHost = slowHost;
+                  reject(slowErr);
+                  return;
+                }
+              }
+
+              if (completedCount % 4 === 0) {
+                const durationSec = (Date.now() - sampleStartTime) / 1000;
+                const throughput =
+                  durationSec > 0 ? sampleBytesDownloaded / durationSec : 0;
+                recordDomainBatchSuccess(domainName, throughput);
+                sampleBytesDownloaded = 0;
+                sampleStartTime = Date.now();
+                CONCURRENCY = Math.min(
+                  await getDomainConcurrency(domainName, 16),
+                  MAX_CONCURRENCY,
+                );
+              }
+
+              if (completedCount >= segments.length) {
+                resolve();
+              } else {
+                enqueueNext();
+              }
+            })
+            .catch((err) => {
+              activeWorkers--;
+              const cancelled =
+                (global.isEpisodeInQueue &&
+                  !global.isEpisodeInQueue(this.EpID)) ||
+                (global.isQueuePaused && global.isQueuePaused());
+              if (cancelled || stopDownloading) {
+                stopDownloading = true;
+                setDomainErrorCap(domainName, CONCURRENCY);
+                reject(err);
+                return;
+              }
+              completedCount++;
+              failedIndices.push(idx);
+              setDomainErrorCap(domainName, CONCURRENCY);
+              this.logProgress(
+                `Segment ${idx} failed, will retry after the rest finish...`,
+                CONCURRENCY,
+              );
+              enqueueNext();
+            });
+        }
+
+        checkDone();
+      };
+
+      enqueueNext();
+    });
+
+    if (failedIndices.length > 0) {
+      const massFailThreshold = Math.max(8, Math.ceil(segments.length * 0.1));
+      if (failedIndices.length > massFailThreshold) {
+        let host = "unknown-host";
+        try {
+          host = new URL(trackUrl).hostname;
+        } catch (_) {}
+        const abortErr = new Error(
+          `SCRAPER_TEMPORARY_ERROR: segment host ${host} unreachable (${failedIndices.length}/${segments.length} segments failed)`,
+        );
+        abortErr.failedHost = host;
+        throw abortErr;
+      }
+      this.logProgress(
+        `Retrying ${failedIndices.length} failed segment(s) one by one...`,
+      );
+      const secondPass = failedIndices.slice(0, 12);
+      const stillFailing = [...failedIndices.slice(12)];
+      for (const fIdx of secondPass) {
+        if (
+          stopDownloading ||
+          (global.isQueuePaused && global.isQueuePaused()) ||
+          (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
+        ) {
+          stillFailing.push(fIdx);
+          continue;
+        }
+        try {
+          const bytes = await downloadSingleSegment(fIdx, 0);
+          if (typeof bytes === "number") {
+            this.downloadedTotalBytes =
+              (this.downloadedTotalBytes || 0) + bytes;
+          }
+          this.currentSegments = Math.min(
+            this.totalSegments,
+            this.currentSegments + 1,
+          );
+          this.logProgress(null, CONCURRENCY);
+        } catch (err) {
+          stillFailing.push(fIdx);
+          logger.error(
+            `[Download] Segment ${fIdx} failed on second pass: ${err.message}`,
+          );
+        }
+      }
+      failedIndices = stillFailing;
+      if (failedIndices.length > 0) {
+        let host = "unknown-host";
+        try {
+          host = new URL(trackUrl).hostname;
+        } catch (_) {}
+        const finalErr = new Error(
+          `SCRAPER_TEMPORARY_ERROR: ${failedIndices.length} segment(s) failed after retries (e.g. #${failedIndices[0]})`,
+        );
+        finalErr.failedHost = host;
+        throw finalErr;
+      }
+    }
+
+    logger.info(
+      `[Download] Finished downloading track segments. Total: ${segments.length}, Failed/Empty: ${failedSegmentsCount}`,
+    );
+
+    // Concatenate segments
+    this.logProgress("Concatenating segments...");
+    const writer = fs.createWriteStream(outputFile, {
+      flags: "w",
+      encoding: null,
+    });
+
+    for (let j = 0; j < segments.length; j++) {
+      const segmentFile = path.join(tempDir, `${j}.ts`);
+      const data = await fs.promises.readFile(segmentFile);
+      const canWrite = writer.write(data);
+      if (!canWrite) {
+        await new Promise((resolve) => writer.once("drain", resolve));
+      }
+    }
+
+    await new Promise((resolve, reject) => {
+      writer.on("error", reject);
+      writer.end(resolve);
+    });
+
+    // Clean up temp segment files
+    for (let j = 0; j < segments.length; j++) {
+      const segmentFile = path.join(tempDir, `${j}.ts`);
+      await fs.promises.unlink(segmentFile).catch(() => {});
+    }
+    await fs.promises.rmdir(tempDir).catch(() => {});
+  }
+
   async DownloadStart() {
     try {
       if (this.isDirectVideo) {
@@ -1270,437 +1755,36 @@ class downloader {
         return;
       }
 
-      const tempDir = path.join(
+      // 1. Download Video Track
+      const tempVideoDir = path.join(
         this.directory,
         `.temp_${path.basename(this.SegmentsFile)}`,
       );
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-
-      const firstSegUrl =
-        typeof this.Segments[0] === "object"
-          ? this.Segments[0]?.url
-          : this.Segments[0];
-
-      try {
-        const ref = this.headers?.Referer || this.headers?.referer;
-        if (ref && global.setDynamicReferer && firstSegUrl) {
-          global.setDynamicReferer(new URL(firstSegUrl).hostname, ref);
-        }
-      } catch (_) {}
-
-      const domainName = extractDomain(
-        this.streamUrl || firstSegUrl,
-        this.headers?.Referer || this.headers?.referer,
+      await this.downloadHlsTrack(
+        this.Segments,
+        tempVideoDir,
+        this.SegmentsFile,
+        this.streamUrl,
       );
 
-      let CONCURRENCY = await getInitialDomainConcurrency(domainName, 8);
-      // Hard ceiling: the adaptive loop below has no upper bound on its own
-      // (it kept climbing past 20 threads, got the host to 429, and then a
-      // single bad segment aborted the whole episode).
-      const MAX_CONCURRENCY = 16;
-      CONCURRENCY = Math.min(CONCURRENCY, MAX_CONCURRENCY);
-      // Slow-mirror escape: kwik mirrors throttle per-host (0.04 MB/s seen
-      // on akirax.buzz vs 5 MB/s bursts on mikora.top). If the first 16
-      // freshly-downloaded segments average under the floor, abort with the
-      // host attached so the queue retries on a different server instead of
-      // trickling for over an hour.
-      const SLOW_HOST_FLOOR_BPS = 60 * 1024;
-      const SLOW_HOST_AFTER_FRESH = 16;
-      const dlStartTime = Date.now();
-      let freshCount = 0;
-      let currentIndex = 0;
-      let stopDownloading = false;
-      let failedSegmentsCount = 0;
-      if (!this._keyPromiseCache) this._keyPromiseCache = {};
-
-      const downloadSingleSegment = async (index, retryCount = 0) => {
-        if (
-          stopDownloading ||
-          (global.isQueuePaused && global.isQueuePaused()) ||
-          (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
-        ) {
-          if (
-            global.isEpisodeInQueue &&
-            !global.isEpisodeInQueue(this.EpID) &&
-            !stopDownloading
-          ) {
-            stopDownloading = true;
-            throw new Error("Episode Cancelled");
-          } else if (
-            global.isQueuePaused &&
-            global.isQueuePaused() &&
-            !stopDownloading
-          ) {
-            stopDownloading = true;
-            throw new Error("Queue Paused");
-          }
-          return false;
-        }
-
-        const segmentFile = path.join(tempDir, `${index}.ts`);
-        try {
-          if (fs.existsSync(segmentFile)) {
-            const stat = fs.statSync(segmentFile);
-            if (stat.size > 0) {
-              // Return true (not byte count) so cached segments don't inflate throughput measurements
-              return true;
-            }
-          }
-        } catch (e) {}
-
-        try {
-          if (isCircuitOpen(domainName)) {
-            await waitForCircuit(domainName);
-          }
-
-          let Segment = this.Segments[index];
-          if (!Segment) throw new Error("[ STOPPING ] Segment Missing!");
-
-          const segUrl = typeof Segment === "object" ? Segment.url : Segment;
-          let body;
-
-          if (typeof Segment === "object" && Segment.encrypted) {
-            if (!this._keyPromiseCache[Segment.keyUrl]) {
-              this._keyPromiseCache[Segment.keyUrl] = (async () => {
-                const keyBytes = await this.fetchWithClearanceRetry(
-                  Segment.keyUrl,
-                  async () => this.fetchMediaBytes(Segment.keyUrl, 15000),
-                );
-                return keyBytes;
-              })().catch((err) => {
-                delete this._keyPromiseCache[Segment.keyUrl];
-                throw err;
-              });
-            }
-            const keyBuffer = await this._keyPromiseCache[Segment.keyUrl];
-            const iv = Buffer.alloc(16);
-            if (typeof Segment.iv === "string" && Segment.iv.startsWith("0x")) {
-              Buffer.from(Segment.iv.slice(2), "hex").copy(iv);
-            } else {
-              iv.writeUInt32BE(parseInt(Segment.iv, 10), 12);
-            }
-            const cipherBytes = await this.fetchWithClearanceRetry(
-              segUrl,
-              async () => this.fetchMediaBytes(segUrl, 60000),
-            );
-            const cipherText = stripPngHeader(cipherBytes);
-            const decipher = crypto.createDecipheriv(
-              "aes-128-cbc",
-              keyBuffer,
-              iv,
-            );
-            body = Buffer.concat([
-              decipher.update(cipherText),
-              decipher.final(),
-            ]);
-          } else {
-            const segBytes = await this.fetchWithClearanceRetry(
-              segUrl,
-              async () => this.fetchMediaBytes(segUrl, 60000),
-            );
-            body = stripPngHeader(segBytes);
-          }
-
-          if (!body || body.length === 0) {
-            throw new Error("Received empty segment payload");
-          }
-
-          const segDir = path.dirname(segmentFile);
-          if (!fs.existsSync(segDir)) {
-            fs.mkdirSync(segDir, { recursive: true });
-          }
-
-          await fs.promises.writeFile(segmentFile, body);
-          return body.length;
-        } catch (err) {
-          if (
-            stopDownloading ||
-            (global.isQueuePaused && global.isQueuePaused())
-          )
-            throw err;
-
-          const status = err?.response?.statusCode ?? err?.response?.status;
-          const isServerRateOrError =
-            status === 429 ||
-            status === 502 ||
-            status === 503 ||
-            status === 530;
-          const RETRY_DELAYS = isServerRateOrError
-            ? [2000, 5000, 8000]
-            : [1000, 3000, 5000];
-
-          if (retryCount >= RETRY_DELAYS.length) {
-            logger.error(
-              `[Download] Segment ${index} failed after 3 retries: ${err.message}`,
-            );
-            // NOTE: do NOT set stopDownloading here. That flag means
-            // user pause/cancel; setting it on a segment error makes the
-            // worker loop below reject with a bogus "Queue Paused" and the
-            // queue halts silently. The caller parks this index for the
-            // sequential second pass instead.
-            throw new Error(
-              `SCRAPER_TEMPORARY_ERROR: Segment ${index} failed after retries (${err.message})`,
-            );
-          }
-
-          const delay = RETRY_DELAYS[retryCount];
-          this.logProgress(
-            `Download error on segment ${index}! Retrying in ${delay / 1000}s (attempt ${retryCount + 2}/4)...`,
-          );
-
-          if (isCircuitOpen(domainName)) {
-            await waitForCircuit(domainName);
-          } else {
-            await new Promise((res) => setTimeout(res, delay));
-          }
-
-          return await downloadSingleSegment(index, retryCount + 1);
-        }
-      };
-      let activeWorkers = 0;
-      let nextIndex = 0;
-      let completedCount = 0;
-      let sampleBytesDownloaded = 0;
-      let sampleStartTime = Date.now();
-      // Segments that exhausted retries: parked here and given a sequential
-      // second pass after the main loop, instead of aborting a whole episode
-      // over one flaky segment.
-      let failedIndices = [];
-
-      await new Promise((resolve, reject) => {
-        const checkDone = () => {
-          if (completedCount >= this.Segments.length || stopDownloading) {
-            if (stopDownloading) {
-              if (
-                global.isEpisodeInQueue &&
-                !global.isEpisodeInQueue(this.EpID)
-              ) {
-                reject(new Error("Episode Cancelled"));
-              } else {
-                reject(new Error("Queue Paused"));
-              }
-            } else {
-              resolve();
-            }
-          }
-        };
-
-        const enqueueNext = () => {
-          if (
-            stopDownloading ||
-            (global.isQueuePaused && global.isQueuePaused()) ||
-            (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
-          ) {
-            stopDownloading = true;
-            checkDone();
-            return;
-          }
-
-          while (
-            activeWorkers < CONCURRENCY &&
-            nextIndex < this.Segments.length &&
-            !stopDownloading
-          ) {
-            const idx = nextIndex++;
-            activeWorkers++;
-
-            downloadSingleSegment(idx)
-              .then(async (downloadedBytes) => {
-                activeWorkers--;
-                completedCount++;
-                if (downloadedBytes) {
-                  sampleBytesDownloaded +=
-                    typeof downloadedBytes === "number" ? downloadedBytes : 0;
-                  if (typeof downloadedBytes === "number") {
-                    this.downloadedTotalBytes =
-                      (this.downloadedTotalBytes || 0) + downloadedBytes;
-                    freshCount++;
-                  }
-                  this.currentSegments = Math.min(
-                    this.Segments.length,
-                    this.currentSegments + 1,
-                  );
-                  this.logProgress(null, CONCURRENCY);
-                }
-
-                // Slow-mirror escape hatch (see above): judge only once,
-                // after enough fresh bytes to see past handshake noise, and
-                // never on mostly-resumed downloads.
-                if (
-                  completedCount === SLOW_HOST_AFTER_FRESH &&
-                  freshCount >= SLOW_HOST_AFTER_FRESH
-                ) {
-                  const elapsedSec = (Date.now() - dlStartTime) / 1000;
-                  const overallBps =
-                    elapsedSec > 0
-                      ? (this.downloadedTotalBytes || 0) / elapsedSec
-                      : 0;
-                  if (overallBps < SLOW_HOST_FLOOR_BPS) {
-                    let slowHost = domainName;
-                    try {
-                      slowHost = new URL(this.streamUrl).hostname;
-                    } catch (_) {}
-                    stopDownloading = true;
-                    const slowErr = new Error(
-                      `SCRAPER_TEMPORARY_ERROR: segment host ${slowHost} too slow (${Math.round(overallBps / 1024)} KB/s over first ${SLOW_HOST_AFTER_FRESH} segments), trying another server`,
-                    );
-                    slowErr.failedHost = slowHost;
-                    reject(slowErr);
-                    return;
-                  }
-                }
-
-                if (completedCount % 4 === 0) {
-                  const durationSec = (Date.now() - sampleStartTime) / 1000;
-                  const throughput =
-                    durationSec > 0 ? sampleBytesDownloaded / durationSec : 0;
-                  recordDomainBatchSuccess(domainName, throughput);
-                  sampleBytesDownloaded = 0;
-                  sampleStartTime = Date.now();
-                  CONCURRENCY = Math.min(
-                    await getDomainConcurrency(domainName, 16),
-                    MAX_CONCURRENCY,
-                  );
-                }
-
-                if (completedCount >= this.Segments.length) {
-                  resolve();
-                } else {
-                  enqueueNext();
-                }
-              })
-              .catch((err) => {
-                activeWorkers--;
-                const cancelled =
-                  (global.isEpisodeInQueue &&
-                    !global.isEpisodeInQueue(this.EpID)) ||
-                  (global.isQueuePaused && global.isQueuePaused());
-                if (cancelled || stopDownloading) {
-                  stopDownloading = true;
-                  setDomainErrorCap(domainName, CONCURRENCY);
-                  reject(err);
-                  return;
-                }
-                completedCount++;
-                failedIndices.push(idx);
-                setDomainErrorCap(domainName, CONCURRENCY);
-                this.logProgress(
-                  `Segment ${idx} failed, will retry after the rest finish...`,
-                  CONCURRENCY,
-                );
-                enqueueNext();
-              });
-          }
-
-          checkDone();
-        };
-
-        enqueueNext();
-      });
-
-      if (failedIndices.length > 0) {
-        // Dead/rotated mirror host, not flaky segments: fail fast so the
-        // queue retries on a different server instead of grinding hundreds
-        // of dead segments sequentially (hours per episode).
-        const massFailThreshold = Math.max(
-          8,
-          Math.ceil(this.Segments.length * 0.1),
+      // 2. Download Audio Track if present
+      if (
+        this.AudioSegments &&
+        this.AudioSegments.length > 0 &&
+        this.AudioSegmentsFile
+      ) {
+        this.logProgress("Downloading audio track...");
+        const tempAudioDir = path.join(
+          this.directory,
+          `.temp_${path.basename(this.AudioSegmentsFile)}`,
         );
-        if (failedIndices.length > massFailThreshold) {
-          let host = "unknown-host";
-          try {
-            host = new URL(this.streamUrl).hostname;
-          } catch (_) {}
-          const abortErr = new Error(
-            `SCRAPER_TEMPORARY_ERROR: segment host ${host} unreachable (${failedIndices.length}/${this.Segments.length} segments failed)`,
-          );
-          abortErr.failedHost = host;
-          throw abortErr;
-        }
-        this.logProgress(
-          `Retrying ${failedIndices.length} failed segment(s) one by one...`,
+        await this.downloadHlsTrack(
+          this.AudioSegments,
+          tempAudioDir,
+          this.AudioSegmentsFile,
+          this.audioStreamUrl || this.streamUrl,
         );
-        // Cap the sequential pass: many failures means a dead host, which
-        // the mass-fail check above already handles; this bounds worst-case
-        // time when right at the threshold. Deferred items stay failing so
-        // the episode aborts fast instead of grinding them one by one.
-        const secondPass = failedIndices.slice(0, 12);
-        const stillFailing = [...failedIndices.slice(12)];
-        for (const fIdx of secondPass) {
-          if (
-            stopDownloading ||
-            (global.isQueuePaused && global.isQueuePaused()) ||
-            (global.isEpisodeInQueue && !global.isEpisodeInQueue(this.EpID))
-          ) {
-            stillFailing.push(fIdx);
-            continue;
-          }
-          try {
-            const bytes = await downloadSingleSegment(fIdx, 0);
-            if (typeof bytes === "number") {
-              this.downloadedTotalBytes =
-                (this.downloadedTotalBytes || 0) + bytes;
-            }
-            this.currentSegments = Math.min(
-              this.Segments.length,
-              this.currentSegments + 1,
-            );
-            this.logProgress(null, CONCURRENCY);
-          } catch (err) {
-            stillFailing.push(fIdx);
-            logger.error(
-              `[Download] Segment ${fIdx} failed on second pass: ${err.message}`,
-            );
-          }
-        }
-        failedIndices = stillFailing;
-        if (failedIndices.length > 0) {
-          failedSegmentsCount = failedIndices.length;
-          let host = "unknown-host";
-          try {
-            host = new URL(this.streamUrl).hostname;
-          } catch (_) {}
-          const finalErr = new Error(
-            `SCRAPER_TEMPORARY_ERROR: ${failedIndices.length} segment(s) failed after retries (e.g. #${failedIndices[0]})`,
-          );
-          finalErr.failedHost = host;
-          throw finalErr;
-        }
       }
-
-      logger.info(
-        `[Download] Finished downloading segments. Total: ${this.Segments.length}, Failed/Empty: ${failedSegmentsCount}`,
-      );
-
-      // Concatenate segments
-      this.logProgress("Concatenating segments...");
-      const writer = fs.createWriteStream(this.SegmentsFile, {
-        flags: "w",
-        encoding: null,
-      });
-
-      for (let j = 0; j < this.Segments.length; j++) {
-        const segmentFile = path.join(tempDir, `${j}.ts`);
-        const data = await fs.promises.readFile(segmentFile);
-        const canWrite = writer.write(data);
-        if (!canWrite) {
-          await new Promise((resolve) => writer.once("drain", resolve));
-        }
-      }
-
-      await new Promise((resolve, reject) => {
-        writer.on("error", reject);
-        writer.end(resolve);
-      });
-
-      // Clean up temp segment files
-      for (let j = 0; j < this.Segments.length; j++) {
-        const segmentFile = path.join(tempDir, `${j}.ts`);
-        await fs.promises.unlink(segmentFile).catch(() => {});
-      }
-      await fs.promises.rmdir(tempDir).catch(() => {});
     } catch (err) {
       if (
         err.message === "Queue Paused" ||
@@ -1958,7 +2042,7 @@ class downloader {
           for (const sub of this.downloadedPaths) {
             ffmpegArgs.push("-i", sub.path);
           }
-          ffmpegArgs.push("-map", "0:v", "-map", "0:a?");
+          ffmpegArgs.push("-map", "0:v?", "-map", "0:a?");
           for (let i = 0; i < this.downloadedPaths.length; i++) {
             ffmpegArgs.push("-map", `${i + 1}:s`);
           }
@@ -2014,15 +2098,42 @@ class downloader {
 
       try {
         const currentFfmpegPath = await getFfmpegPath();
-        const ffmpegArgs = ["-y", "-f", "mpegts", "-i", this.SegmentsFile];
+        const ffmpegArgs = [
+          "-y",
+          "-analyzeduration",
+          "50000000",
+          "-probesize",
+          "50000000",
+          "-i",
+          this.SegmentsFile,
+        ];
+
+        let hasSeparateAudio = false;
+        if (this.AudioSegmentsFile && fs.existsSync(this.AudioSegmentsFile)) {
+          hasSeparateAudio = true;
+          ffmpegArgs.push(
+            "-analyzeduration",
+            "50000000",
+            "-probesize",
+            "50000000",
+            "-i",
+            this.AudioSegmentsFile,
+          );
+        }
+
+        const subStartIndex = hasSeparateAudio ? 2 : 1;
 
         if (this.MergeSubtitles && this.downloadedPaths.length > 0) {
           for (const sub of this.downloadedPaths) {
             ffmpegArgs.push("-i", sub.path);
           }
-          ffmpegArgs.push("-map", "0:v", "-map", "0:a?");
+          if (hasSeparateAudio) {
+            ffmpegArgs.push("-map", "0:v", "-map", "1:a:0");
+          } else {
+            ffmpegArgs.push("-map", "0:v", "-map", "0:a?");
+          }
           for (let i = 0; i < this.downloadedPaths.length; i++) {
-            ffmpegArgs.push("-map", `${i + 1}:s`);
+            ffmpegArgs.push("-map", `${subStartIndex + i}:s`);
           }
           ffmpegArgs.push("-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text");
           for (let i = 0; i < this.downloadedPaths.length; i++) {
@@ -2033,7 +2144,11 @@ class downloader {
             }
           }
         } else {
-          ffmpegArgs.push("-c", "copy");
+          if (hasSeparateAudio) {
+            ffmpegArgs.push("-map", "0:v", "-map", "1:a:0", "-c", "copy");
+          } else {
+            ffmpegArgs.push("-c", "copy");
+          }
         }
 
         ffmpegArgs.push(this.mp4);
@@ -2099,13 +2214,29 @@ class downloader {
       if (ffmpegSucceeded) {
         try {
           const stats = fs.statSync(this.mp4);
+          let tsStats = null;
+          try {
+            tsStats = fs.statSync(this.SegmentsFile);
+          } catch (_) {}
+
+          if (
+            stats.size < 1024 * 1024 &&
+            tsStats &&
+            tsStats.size > 2 * 1024 * 1024
+          ) {
+            throw new Error(
+              `Output MP4 is suspiciously small (${stats.size} bytes vs ${tsStats.size} bytes TS), likely missing video stream`,
+            );
+          }
+
           logger.info(
             `[Video Remux] Output MP4 file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB (${stats.size} bytes)`,
           );
         } catch (e) {
-          logger.error(
-            `[Video Remux] Failed to check MP4 file size: ${e.message}`,
-          );
+          ffmpegSucceeded = false;
+          ffmpegError = e;
+          logger.error(`[Video Remux] Validation failed for MP4: ${e.message}`);
+          await fs.promises.unlink(this.mp4).catch(() => {});
         }
       } else {
         logger.warn(
@@ -2271,6 +2402,9 @@ class downloader {
   async CleanEverything(everything = false) {
     if (!this._keepSegmentsFile) {
       await fs.promises.unlink(this.SegmentsFile).catch(() => {});
+      if (this.AudioSegmentsFile) {
+        await fs.promises.unlink(this.AudioSegmentsFile).catch(() => {});
+      }
     }
 
     if (this.MergeSubtitles) {
@@ -2312,6 +2446,24 @@ class downloader {
           fs.rmdirSync(tempDir);
         } catch (e) {
           logger.error(`Failed to clean up temp dir: ${e.message}`);
+        }
+      }
+
+      if (this.AudioSegmentsFile) {
+        const audioTempDir = path.join(
+          this.directory,
+          `.temp_${path.basename(this.AudioSegmentsFile)}`,
+        );
+        if (fs.existsSync(audioTempDir)) {
+          try {
+            const files = fs.readdirSync(audioTempDir);
+            for (const file of files) {
+              fs.unlinkSync(path.join(audioTempDir, file));
+            }
+            fs.rmdirSync(audioTempDir);
+          } catch (e) {
+            logger.error(`Failed to clean up audio temp dir: ${e.message}`);
+          }
         }
       }
     }

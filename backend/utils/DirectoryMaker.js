@@ -18,7 +18,7 @@ async function getOrCreateMediaDir(
       const tableName =
         mediaType === "Manga"
           ? "Manga"
-          : mediaType === "Movies"
+          : mediaType === "Movies" || mediaType === "MoviesSeries"
             ? "Movies"
             : "Anime";
       const row = await queryOne(
@@ -50,7 +50,7 @@ async function getOrCreateMediaDir(
       const tableName =
         mediaType === "Manga"
           ? "Manga"
-          : mediaType === "Movies"
+          : mediaType === "Movies" || mediaType === "MoviesSeries"
             ? "Movies"
             : "Anime";
       await run(
@@ -75,7 +75,9 @@ async function getTypeDir(customdir, Type, create = false) {
     }
   } else {
     const destination = getDownloadsFolder();
-    Directory = path.join(destination, `./${Type}`);
+    const folderName =
+      Type === "Movies" || Type === "MoviesSeries" ? "MoviesSeries" : Type;
+    Directory = path.join(destination, `./${folderName}`);
     if (create) {
       try {
         await fs.promises.mkdir(Directory, { recursive: true });
@@ -98,7 +100,7 @@ function getEffectiveDownloadLocation(type, config) {
   if (!config) return null;
   const norm = String(type || "").toLowerCase();
   if (norm === "anime") return config.CustomDownloadLocationAnime || null;
-  if (norm === "movies" || norm === "movies-tvshows")
+  if (norm === "movies" || norm === "movies-tvshows" || norm === "moviesseries")
     return config.CustomDownloadLocationMovies || null;
   return config.CustomDownloadLocationManga || null;
 }
@@ -109,18 +111,26 @@ async function GetDir(title, customdir, Type, mediaId = null, create = false) {
   return await getOrCreateMediaDir(Directory, title, mediaId, Type, create);
 }
 
-// Media-server layout: Anime/<Series>/Season NN. Pins the entry's folder_name
+// Media-server layout: Anime/<Series>/Season NN or MoviesSeries/<Series>/Season NN. Pins the entry's folder_name
 // to it so the library finds the episodes there.
-async function mediaServerDir(series, season, customdir, mediaId = null) {
+async function mediaServerDir(
+  series,
+  season,
+  customdir,
+  mediaId = null,
+  type = "Anime",
+) {
   const folderName = `${sanitizeFolderName(series)}/Season ${String(season).padStart(2, "0")}`;
   const targetDir = path.join(
-    await getTypeDir(customdir, "Anime", true),
+    await getTypeDir(customdir, type, true),
     folderName,
   );
   await fs.promises.mkdir(targetDir, { recursive: true });
   if (mediaId) {
     try {
-      await run(`UPDATE Anime SET folder_name = ? WHERE id = ?`, [
+      const table =
+        type === "Movies" || type === "MoviesSeries" ? "Movies" : "Anime";
+      await run(`UPDATE ${table} SET folder_name = ? WHERE id = ?`, [
         folderName,
         mediaId,
       ]);
@@ -141,7 +151,7 @@ async function MangaDir(title, customdir, mediaId = null) {
 
 // Movies & Series Dir Maker
 async function MovieDir(title, customdir, mediaId = null) {
-  return await GetDir(title, customdir, "Movies", mediaId, true);
+  return await GetDir(title, customdir, "MoviesSeries", mediaId, true);
 }
 
 // download folder Location

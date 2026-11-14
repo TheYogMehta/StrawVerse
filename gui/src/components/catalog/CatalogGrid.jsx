@@ -5,8 +5,10 @@ import {
   Eye,
   CheckCircle,
   BookOpen,
-  ArrowLeft,
-  ArrowRight,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Loader2,
   X,
   Bookmark,
@@ -66,6 +68,26 @@ export default function CatalogGrid({
   onOpenTagModal,
 }) {
   const [loadingStatusText, setLoadingStatusText] = useState("");
+  const [pageInput, setPageInput] = useState(String(currentPage || 1));
+
+  useEffect(() => {
+    setPageInput(String(currentPage || 1));
+  }, [currentPage]);
+
+  const handleJumpSubmit = (e) => {
+    e.preventDefault();
+    const pageNum = parseInt(pageInput, 10);
+    if (!isNaN(pageNum) && handlePageChange) {
+      const maxPages = data?.totalPages || 9999;
+      const targetPage = Math.max(1, Math.min(maxPages, pageNum));
+      setPageInput(String(targetPage));
+      if (targetPage !== currentPage) {
+        handlePageChange(targetPage);
+      }
+    } else {
+      setPageInput(String(currentPage || 1));
+    }
+  };
 
   const canReorder =
     propCanReorder !== undefined
@@ -109,9 +131,14 @@ export default function CatalogGrid({
             ? activeFilters.tag
               ? `No items found tagged with "${activeFilters.tag}".`
               : `Your local ${type.toLowerCase()} library is empty.`
-            : searchQuery.trim().length > 0
-              ? "Try checking your spelling or using different search terms."
-              : "Try changing your selected filters."}
+            : activeFilters?.downloadStatus === "downloaded"
+              ? `No downloaded ${type.toLowerCase()} found on this page.`
+              : activeFilters?.downloadStatus === "not_downloaded" ||
+                  activeFilters?.downloadStatus === "nondownloaded"
+                ? `All ${type.toLowerCase()} on this page are already downloaded.`
+                : searchQuery.trim().length > 0
+                  ? "Try checking your spelling or using different search terms."
+                  : "Try changing your selected filters."}
         </p>
       </div>
     );
@@ -311,25 +338,66 @@ export default function CatalogGrid({
         (data.totalPages > 1 || data.hasNextPage || currentPage > 1) && (
           <div className="pagination-container">
             <button
+              onClick={() => handlePageChange(1)}
+              disabled={currentPage <= 1}
+              className="btn-page"
+              title="First Page"
+            >
+              <ChevronsLeft size={16} />
+            </button>
+            <button
               onClick={() => handlePageChange(currentPage - 1)}
               disabled={currentPage <= 1}
               className="btn-page"
+              title="Previous Page"
             >
-              <ArrowLeft size={16} />
+              <ChevronLeft size={16} />
             </button>
-            <span className="page-info">
-              Page {currentPage}{" "}
-              {data.totalPages ? `of ${data.totalPages}` : ""}
-            </span>
+
+            <form onSubmit={handleJumpSubmit} className="pagination-jump-form">
+              <span className="pagination-label">Page</span>
+              <input
+                type="number"
+                min="1"
+                max={data.totalPages || 9999}
+                value={pageInput}
+                onChange={(e) => setPageInput(e.target.value)}
+                onBlur={() => setPageInput(String(currentPage || 1))}
+                className="pagination-jump-input"
+                aria-label="Jump to page number"
+              />
+              {data.totalPages > 0 && (
+                <span className="pagination-total">of {data.totalPages}</span>
+              )}
+              <button
+                type="submit"
+                className="btn-page-go"
+                title="Jump to page"
+              >
+                Go
+              </button>
+            </form>
+
             <button
               onClick={() => handlePageChange(currentPage + 1)}
               disabled={
                 !data.hasNextPage && currentPage >= (data.totalPages || 999)
               }
               className="btn-page"
+              title="Next Page"
             >
-              <ArrowRight size={16} />
+              <ChevronRight size={16} />
             </button>
+            {data.totalPages > 1 && (
+              <button
+                onClick={() => handlePageChange(data.totalPages)}
+                disabled={currentPage >= data.totalPages}
+                className="btn-page"
+                title="Last Page"
+              >
+                <ChevronsRight size={16} />
+              </button>
+            )}
           </div>
         )}
     </div>

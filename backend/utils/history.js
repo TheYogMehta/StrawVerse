@@ -39,6 +39,7 @@ async function updateHistory({
   type,
   title,
   number,
+  season: rawSeason,
   currentTime,
   duration,
   timeSpent,
@@ -56,6 +57,11 @@ async function updateHistory({
     !isNaN(rawNum) && Number.isInteger(rawNum) ? Math.trunc(rawNum) : rawNum;
   const isVideo = type === "Anime" || type === "Movies";
   const isAnime = type === "Anime";
+  const isMovies = type === "Movies";
+  const parsedSeason =
+    isMovies && rawSeason !== undefined && rawSeason !== null
+      ? parseInt(rawSeason, 10) || 1
+      : 1;
   const langSubDub = subdub || sub_dub || null;
   if (type === "Movies") {
     malid = null;
@@ -63,11 +69,18 @@ async function updateHistory({
 
   // Resolve title
   let resolvedTitle = title;
-  const mainTable =
-    type === "Manga" ? "Manga" : type === "Movies" ? "Movies" : "Anime";
-  const historyTable = isVideo ? "WatchHistory" : "ReadHistory";
-  const idField = isVideo ? "anime_id" : "manga_id";
-  const titleField = isVideo ? "anime_title" : "manga_title";
+  const mainTable = type === "Manga" ? "Manga" : isMovies ? "Movies" : "Anime";
+  const historyTable = isMovies
+    ? "SeriesMovieWatchHistory"
+    : isAnime
+      ? "WatchHistory"
+      : "ReadHistory";
+  const idField = isMovies ? "movie_id" : isAnime ? "anime_id" : "manga_id";
+  const titleField = isMovies
+    ? "title"
+    : isAnime
+      ? "anime_title"
+      : "manga_title";
   const numberField = isVideo ? "episode_number" : "chapter_number";
   const currentField = isVideo ? "current_time" : "current_page";
   const totalField = isVideo ? "duration" : "total_pages";
@@ -118,12 +131,7 @@ async function updateHistory({
             INSERT OR IGNORE INTO Movies (id, title, provider, image_url, last_updated)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
           `,
-            [
-              mediaId,
-              resolvedTitle || type,
-              provider,
-              image || null,
-            ],
+            [mediaId, resolvedTitle || type, provider, image || null],
           );
         } else {
           await run(
@@ -192,24 +200,35 @@ async function updateHistory({
 
   const placeholders = queryIds.map(() => "?").join(",");
   const strNum = String(number);
+  const seasonCondition = isMovies
+    ? ` AND (season = ? OR (? = 1 AND season IS NULL))`
+    : ``;
+  const seasonParams = isMovies ? [parsedSeason, parsedSeason] : [];
   let record = null;
 
   if (queryIds.length > 0) {
     if (resolvedTitle && resolvedTitle !== type) {
       record = await queryOne(
-        `SELECT * FROM ${historyTable} WHERE (${idField} IN (${placeholders}) OR LOWER(${titleField}) = LOWER(?)) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
-        [...queryIds, resolvedTitle, parsedNum, parsedNum, strNum],
+        `SELECT * FROM ${historyTable} WHERE (${idField} IN (${placeholders}) OR LOWER(${titleField}) = LOWER(?)) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} ORDER BY id DESC LIMIT 1`,
+        [
+          ...queryIds,
+          resolvedTitle,
+          parsedNum,
+          parsedNum,
+          strNum,
+          ...seasonParams,
+        ],
       );
     } else {
       record = await queryOne(
-        `SELECT * FROM ${historyTable} WHERE ${idField} IN (${placeholders}) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
-        [...queryIds, parsedNum, parsedNum, strNum],
+        `SELECT * FROM ${historyTable} WHERE ${idField} IN (${placeholders}) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} ORDER BY id DESC LIMIT 1`,
+        [...queryIds, parsedNum, parsedNum, strNum, ...seasonParams],
       );
     }
   } else if (resolvedTitle && resolvedTitle !== type) {
     record = await queryOne(
-      `SELECT * FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
-      [resolvedTitle, parsedNum, parsedNum, strNum],
+      `SELECT * FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} ORDER BY id DESC LIMIT 1`,
+      [resolvedTitle, parsedNum, parsedNum, strNum, ...seasonParams],
     );
   }
 
@@ -218,7 +237,7 @@ async function updateHistory({
   if (isVideo && totVal > 0 && curVal > totVal) {
     curVal = totVal;
   }
-  let isComp = 0;
+  let isComp;
   if (isCompleted !== undefined && isCompleted !== null) {
     isComp = isCompleted ? 1 : 0;
   } else {
@@ -239,20 +258,28 @@ async function updateHistory({
     try {
       if (queryIds.length > 0) {
         await run(
-          `DELETE FROM ${historyTable} WHERE (LOWER(${titleField}) = LOWER(?) OR ${idField} IN (${placeholders})) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) AND id != ?`,
+          `DELETE FROM ${historyTable} WHERE (LOWER(${titleField}) = LOWER(?) OR ${idField} IN (${placeholders})) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} AND id != ?`,
           [
             resolvedTitle || type,
             ...queryIds,
             parsedNum,
             parsedNum,
             strNum,
+            ...seasonParams,
             excludeId,
           ],
         );
       } else {
         await run(
-          `DELETE FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) AND id != ?`,
-          [resolvedTitle || type, parsedNum, parsedNum, strNum, excludeId],
+          `DELETE FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} AND id != ?`,
+          [
+            resolvedTitle || type,
+            parsedNum,
+            parsedNum,
+            strNum,
+            ...seasonParams,
+            excludeId,
+          ],
         );
       }
     } catch (e) {}
@@ -264,9 +291,13 @@ async function updateHistory({
       synced = await autoTrackMAL(type, mediaId, parsedNum);
     }
     if (!synced) {
+      const seasonInfo =
+        isVideo && type === "Movies" && parsedSeason > 1
+          ? ` Season ${parsedSeason}`
+          : "";
       global.sendToRenderer("mal-sync-notification", {
         title: `${isVideo ? "Episode" : "Chapter"} Completed`,
-        body: `Finished ${isVideo ? "watching" : "reading"} "${resolvedTitle || type}" ${isVideo ? "Episode" : "Chapter"} ${parsedNum}.`,
+        body: `Finished ${isVideo ? "watching" : "reading"} "${resolvedTitle || type}"${seasonInfo} ${isVideo ? "Episode" : "Chapter"} ${parsedNum}.`,
         icon: "/assets/luffy.png",
       });
     }
@@ -282,6 +313,7 @@ async function updateHistory({
           ? null
           : record.completed_at;
 
+    const seasonUpdate = isMovies ? `, season = ?` : ``;
     const subDubUpdate = isVideo && langSubDub ? `, sub_dub = ?` : ``;
     const updateParams = [
       mediaId,
@@ -293,13 +325,14 @@ async function updateHistory({
       nowIso,
       compAt,
     ];
+    if (isMovies) updateParams.push(parsedSeason);
     if (isVideo && langSubDub) updateParams.push(langSubDub);
     updateParams.push(record.id);
 
     await run(
       `
       UPDATE ${historyTable} 
-      SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = ?, completed_at = ?, hidden = 0${subDubUpdate}
+      SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = ?, completed_at = ?${seasonUpdate}, hidden = 0${subDubUpdate}
       WHERE id = ?
     `,
       updateParams,
@@ -334,6 +367,10 @@ async function updateHistory({
       nowIso,
       compAt,
     ];
+    if (isMovies) {
+      insertCols.push("season");
+      insertVals.push(parsedSeason);
+    }
     if (isVideo) {
       insertCols.push("sub_dub");
       insertVals.push(langSubDub || "sub");
@@ -366,6 +403,7 @@ async function updateHistory({
           mediaId,
           currentTime,
           duration,
+          parsedSeason,
         ).catch(() => {});
       }
     } catch (rpcErr) {}

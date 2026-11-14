@@ -1,13 +1,11 @@
 // libs
 const { logger } = require("./AppLogger");
-const axios = require("axios");
 const path = require("path");
 const fs = require("fs");
 const child_process = require("child_process");
 const { getFfmpegPath } = require("./downloader");
 const {
   tables,
-  exec,
   queryAll,
   queryOne,
   run,
@@ -18,6 +16,7 @@ const ImageCacheManager = require("./ImageCacheManager");
 const { sanitizeFolderName, getDownloadsFolder } = require("./DirectoryMaker");
 const { migrateLegacyFolderIfNeeded } = require("./AnimeManga");
 const {
+  isVideoFile,
   isSubtitleFile,
   isMangaFile,
   hasLocalMediaFiles,
@@ -225,7 +224,10 @@ async function MetadataAdd(type, valuesToAdd) {
       );
     }
 
-    if (type !== "Movies" && (!existingRecord.MalID || existingRecord.MalID === "")) {
+    if (
+      type !== "Movies" &&
+      (!existingRecord.MalID || existingRecord.MalID === "")
+    ) {
       let malIdToUpdate = valuesToAdd?.MalID;
       if (!malIdToUpdate && existingRecord.title) {
         try {
@@ -301,7 +303,7 @@ async function MetadataRemove(type, id) {
   }
 }
 
-function resolveLocalFolder(metadata, folderSet, type) {
+function resolveLocalFolder(metadata, folderSet, _type) {
   let resolvedFolder = metadata.folder_name || "";
   if (resolvedFolder && folderSet.has(resolvedFolder)) {
     return resolvedFolder;
@@ -420,10 +422,19 @@ async function getAllMetadata(
         }
       }
     };
-    addDir(path.join(baseDir, type));
-    addDir(baseDir);
-    const downloadsRoot = getDownloadsFolder();
-    addDir(path.join(downloadsRoot, type));
+    if (type === "Movies") {
+      addDir(path.join(baseDir, "MoviesSeries"));
+      addDir(path.join(baseDir, "Movies"));
+      addDir(baseDir);
+      const downloadsRoot = getDownloadsFolder();
+      addDir(path.join(downloadsRoot, "MoviesSeries"));
+      addDir(path.join(downloadsRoot, "Movies"));
+    } else {
+      addDir(path.join(baseDir, type));
+      addDir(baseDir);
+      const downloadsRoot = getDownloadsFolder();
+      addDir(path.join(downloadsRoot, type));
+    }
 
     const folders = [];
     const seenFolders = new Set();
@@ -439,6 +450,7 @@ async function getAllMetadata(
             dir.name !== "Anime" &&
             dir.name !== "Manga" &&
             dir.name !== "Movies" &&
+            dir.name !== "MoviesSeries" &&
             !dir.name.startsWith(".")
           ) {
             const subDirPath = path.join(cDir, dir.name);
@@ -741,6 +753,23 @@ async function getAllMetadata(
             const num = Number(r.max_ep);
             watchMap[r.anime_id] = Math.max(
               watchMap[r.anime_id] || 0,
+              isNaN(num) ? 0 : num,
+            );
+          }
+        });
+      } catch (e) {}
+    } else if (type === "Movies") {
+      try {
+        const watchRows = await queryAll(`
+          SELECT movie_id, MAX(episode_number) as max_ep 
+          FROM SeriesMovieWatchHistory 
+          GROUP BY movie_id
+        `);
+        watchRows.forEach((r) => {
+          if (r.max_ep != null) {
+            const num = Number(r.max_ep);
+            watchMap[r.movie_id] = Math.max(
+              watchMap[r.movie_id] || 0,
               isNaN(num) ? 0 : num,
             );
           }
@@ -1329,7 +1358,7 @@ async function extractSubtitlesFromVideo(videoPath, epNum) {
 }
 
 // Get Local Source By id
-async function getSourceById(type, baseDir, id, number, subdub) {
+async function getSourceById(type, baseDir, id, number, subdub, season = null) {
   baseDir =
     typeof baseDir === "string" && baseDir.trim()
       ? baseDir
@@ -1338,19 +1367,22 @@ async function getSourceById(type, baseDir, id, number, subdub) {
     throw new Error(`Invalid table: ${type}`);
   }
 
-  if (
-    number == null ||
-    String(number).trim() === "" ||
-    isNaN(Number(number))
-  ) {
+  if (number == null || String(number).trim() === "" || isNaN(Number(number))) {
     return null;
   }
   const targetNum = Number(number);
+  const targetSeason =
+    season !== null && season !== undefined && !isNaN(Number(season))
+      ? Number(season)
+      : null;
 
   let folder_name = id;
   let malId = null;
   try {
-    const metadata = await queryOne(`SELECT * FROM ${type} WHERE id = ?`, [id]);
+    const metadata = await queryOne(
+      `SELECT * FROM ${type} WHERE id = ? OR title = ?`,
+      [id, id],
+    );
     if (metadata) {
       await migrateLegacyFolderIfNeeded(type, metadata, baseDir);
       folder_name =
@@ -1364,6 +1396,16 @@ async function getSourceById(type, baseDir, id, number, subdub) {
 
   try {
     let folderPath = path.join(baseDir, type, folder_name);
+    if (type === "Movies" && !fs.existsSync(folderPath)) {
+      if (fs.existsSync(path.join(baseDir, "MoviesSeries", folder_name))) {
+        folderPath = path.join(baseDir, "MoviesSeries", folder_name);
+      } else {
+        const sanitized = sanitizeFolderName(folder_name);
+        if (fs.existsSync(path.join(baseDir, "MoviesSeries", sanitized))) {
+          folderPath = path.join(baseDir, "MoviesSeries", sanitized);
+        }
+      }
+    }
     if (
       !fs.existsSync(folderPath) &&
       fs.existsSync(path.join(baseDir, folder_name))
@@ -1375,7 +1417,7 @@ async function getSourceById(type, baseDir, id, number, subdub) {
 
     const searchInFolder = (fPath) => {
       if (!fs.existsSync(fPath)) return null;
-      if (type === "Anime") {
+      if (type === "Anime" || type === "Movies") {
         const files = fs.readdirSync(fPath);
         const match = files.find((f) => {
           if (
@@ -1386,6 +1428,22 @@ async function getSourceById(type, baseDir, id, number, subdub) {
           ) {
             return false;
           }
+          if (!isVideoFile(f)) return false;
+
+          if (targetSeason !== null) {
+            const sMatch = f.match(/[Ss](\d+)[Ee](\d+)/);
+            if (sMatch) {
+              if (Number(sMatch[1]) !== targetSeason) return false;
+            } else {
+              const folderSMatch = path
+                .basename(fPath)
+                .match(/^Season\s+(\d+)$/i);
+              if (folderSMatch && Number(folderSMatch[1]) !== targetSeason) {
+                return false;
+              }
+            }
+          }
+
           const num = getEpisodeNumberFromFilename(f);
           return num !== null && num === targetNum;
         });
@@ -1405,7 +1463,23 @@ async function getSourceById(type, baseDir, id, number, subdub) {
     };
 
     let dirsToSearch = [];
+    if (targetSeason !== null) {
+      const sPadded = String(targetSeason).padStart(2, "0");
+      dirsToSearch.push(path.join(folderPath, `Season ${sPadded}`));
+      dirsToSearch.push(path.join(folderPath, `Season ${targetSeason}`));
+    }
     dirsToSearch.push(folderPath);
+    if (fs.existsSync(folderPath)) {
+      try {
+        const subs = fs.readdirSync(folderPath, { withFileTypes: true });
+        for (const ent of subs) {
+          if (ent.isDirectory() && SEASON_FOLDER_RE.test(ent.name)) {
+            const sp = path.join(folderPath, ent.name);
+            if (!dirsToSearch.includes(sp)) dirsToSearch.push(sp);
+          }
+        }
+      } catch (_) {}
+    }
 
     if (malId) {
       try {
@@ -1446,7 +1520,7 @@ async function getSourceById(type, baseDir, id, number, subdub) {
 
     if (!fileFound) {
       let fileName = null;
-      if (type === "Anime") {
+      if (type === "Anime" || type === "Movies") {
         fileName = `${targetNum}Ep.mp4`;
       } else if (type === "Manga") {
         fileName = `Chapter ${targetNum}.cbz`;
@@ -1587,13 +1661,15 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         if (!FoundRow) {
           try {
             const histRow = await queryOne(
-              `SELECT anime_title FROM WatchHistory WHERE anime_id = ? LIMIT 1`,
+              type === "Movies"
+                ? `SELECT title AS media_title FROM SeriesMovieWatchHistory WHERE movie_id = ? LIMIT 1`
+                : `SELECT anime_title AS media_title FROM WatchHistory WHERE anime_id = ? LIMIT 1`,
               [AnimeMangaid],
             );
-            if (histRow && histRow.anime_title) {
+            if (histRow && histRow.media_title) {
               FoundRow = await queryOne(
                 `SELECT * FROM ${mainTable} WHERE LOWER(title) = LOWER(?) LIMIT 1`,
-                [histRow.anime_title],
+                [histRow.media_title],
               );
             }
           } catch (_) {}
@@ -1657,9 +1733,10 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
       try {
         let Downloads = [];
         if (data.malid && type === "Anime") {
-          Downloads = await queryAll(`SELECT * FROM ${mainTable} WHERE MalID = ?`, [
-            String(data.malid),
-          ]);
+          Downloads = await queryAll(
+            `SELECT * FROM ${mainTable} WHERE MalID = ?`,
+            [String(data.malid)],
+          );
         }
         if (Downloads.length === 0) {
           Downloads = await queryAll(
@@ -1701,6 +1778,13 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
               SubDub.folder_name || `${sanitizeFolderName(SubDub.title)}`;
             let folderPath = path.join(dir, type, folderName);
             if (
+              type === "Movies" &&
+              !fs.existsSync(folderPath) &&
+              fs.existsSync(path.join(dir, "MoviesSeries", folderName))
+            ) {
+              folderPath = path.join(dir, "MoviesSeries", folderName);
+            }
+            if (
               !fs.existsSync(folderPath) &&
               fs.existsSync(path.join(dir, folderName))
             ) {
@@ -1714,7 +1798,13 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
               });
 
               const scanned = filesAndFolders
-                .filter((file) => file.isFile() && isVideoFile(file.name))
+                .filter(
+                  (file) =>
+                    file.isFile() &&
+                    isVideoFile(file.name) &&
+                    !file.name.startsWith(".") &&
+                    !file.name.includes(".temp"),
+                )
                 .map((file) => getEpisodeNumberFromFilename(file.name))
                 .filter((num) => num !== null && !isNaN(num))
                 .sort((a, b) => a - b);
@@ -1726,6 +1816,34 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
                 scanned.push(1);
               }
 
+              // Also scan Season NN subdirectories (Media Server format)
+              const seasonDirs = filesAndFolders.filter(
+                (f) => f.isDirectory() && SEASON_FOLDER_RE.test(f.name),
+              );
+              for (const sDir of seasonDirs) {
+                try {
+                  const sMatch = sDir.name.match(/\d+/);
+                  const seasonNum = sMatch ? parseInt(sMatch[0], 10) : 1;
+                  const sDirPath = path.join(folderPath, sDir.name);
+                  const sFiles = await fs.promises.readdir(sDirPath, {
+                    withFileTypes: true,
+                  });
+                  for (const sFile of sFiles) {
+                    if (
+                      sFile.isFile() &&
+                      isVideoFile(sFile.name) &&
+                      !sFile.name.startsWith(".") &&
+                      !sFile.name.includes(".temp")
+                    ) {
+                      const epNum = getEpisodeNumberFromFilename(sFile.name);
+                      if (epNum !== null && !isNaN(epNum)) {
+                        scanned.push(`s${seasonNum}_e${epNum}`);
+                      }
+                    }
+                  }
+                } catch (_) {}
+              }
+
               data.DownloadedEpisodes = Array.from(
                 new Set([
                   ...(Array.isArray(data.DownloadedEpisodes)
@@ -1733,7 +1851,7 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
                     : []),
                   ...scanned,
                 ]),
-              ).sort((a, b) => a - b);
+              );
             }
           }
         }
@@ -1849,7 +1967,10 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           const uniqueChapters = new Set();
           for (const dRecord of downloadsList) {
             let folderPath = path.join(dir, type, dRecord.folder_name);
-            if (!fs.existsSync(folderPath) && fs.existsSync(path.join(dir, dRecord.folder_name))) {
+            if (
+              !fs.existsSync(folderPath) &&
+              fs.existsSync(path.join(dir, dRecord.folder_name))
+            ) {
               folderPath = path.join(dir, dRecord.folder_name);
             }
             if (fs.existsSync(folderPath)) {

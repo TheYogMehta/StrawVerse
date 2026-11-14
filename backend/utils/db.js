@@ -65,6 +65,7 @@ const tables = {
     image_url: "TEXT",
     last_updated: "DATE",
     CustomTag: "TEXT",
+    episodes_json: "TEXT",
   },
   MyAnimeList: {
     id: "TEXT UNIQUE",
@@ -126,6 +127,21 @@ const tables = {
     anime_id: "TEXT",
     anime_title: "TEXT",
     episode_number: "NUMERIC",
+    current_time: "REAL",
+    duration: "REAL",
+    time_spent: "REAL",
+    is_completed: "INTEGER",
+    last_watched: "TEXT",
+    completed_at: "TEXT",
+    hidden: "INTEGER DEFAULT 0",
+    sub_dub: "TEXT",
+  },
+  SeriesMovieWatchHistory: {
+    id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+    movie_id: "TEXT",
+    title: "TEXT",
+    episode_number: "NUMERIC",
+    season: "INTEGER DEFAULT 1",
     current_time: "REAL",
     duration: "REAL",
     time_spent: "REAL",
@@ -455,6 +471,11 @@ function initDesktopTables() {
         "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
       )
       .run();
+    const movieWatchDeleted = desktopDb
+      .prepare(
+        "DELETE FROM SeriesMovieWatchHistory WHERE movie_id NOT IN (SELECT id FROM Movies)",
+      )
+      .run();
     const readDeleted = desktopDb
       .prepare(
         "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
@@ -467,11 +488,12 @@ function initDesktopTables() {
       .run();
     const changes =
       (watchDeleted?.changes || 0) +
+      (movieWatchDeleted?.changes || 0) +
       (readDeleted?.changes || 0) +
       (skipDeleted?.changes || 0);
     if (changes > 0) {
       logger.info(
-        `Database cleanup: Deleted ${watchDeleted?.changes || 0} orphaned watch history, ${readDeleted?.changes || 0} read history, and ${skipDeleted?.changes || 0} skip times entries.`,
+        `Database cleanup: Deleted ${watchDeleted?.changes || 0} orphaned watch history, ${movieWatchDeleted?.changes || 0} movie watch history, ${readDeleted?.changes || 0} read history, and ${skipDeleted?.changes || 0} skip times entries.`,
       );
     }
   } catch (_) {}
@@ -901,6 +923,9 @@ async function initDatabase() {
     const watchDeleted = await run(
       "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
     );
+    const movieWatchDeleted = await run(
+      "DELETE FROM SeriesMovieWatchHistory WHERE movie_id NOT IN (SELECT id FROM Movies)",
+    );
     const readDeleted = await run(
       "DELETE FROM ReadHistory WHERE manga_id NOT IN (SELECT id FROM Manga)",
     );
@@ -910,10 +935,12 @@ async function initDatabase() {
     await exec(`
       UPDATE SkipTimes SET episode_number = CAST(episode_number AS INTEGER) WHERE episode_number = CAST(episode_number AS INTEGER);
       UPDATE WatchHistory SET episode_number = CAST(episode_number AS INTEGER) WHERE episode_number = CAST(episode_number AS INTEGER);
+      UPDATE SeriesMovieWatchHistory SET episode_number = CAST(episode_number AS INTEGER) WHERE episode_number = CAST(episode_number AS INTEGER);
       UPDATE ReadHistory SET chapter_number = CAST(chapter_number AS INTEGER) WHERE chapter_number = CAST(chapter_number AS INTEGER);
     `);
     const totalChanges =
       (watchDeleted?.changes || 0) +
+      (movieWatchDeleted?.changes || 0) +
       (readDeleted?.changes || 0) +
       (skipDeleted?.changes || 0);
     if (totalChanges > 0) {
