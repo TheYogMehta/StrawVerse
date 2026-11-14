@@ -12,13 +12,13 @@ artifacts:
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/StrawVerse.Setup.11.2.2.exe
     platform: windows
     size: 237.28
-    sha512: B18F2758E3A15A28A951C586089534E728A8EAF72333F0CCA0E40AA2EBD5DAB9089661BC88A622A8B664FD52A3008F1DDC0C20CBD0892F3D71254C9A3F481150
+    sha512: 7CE17995CD723FC951F9646FC31BE35357106B7EAB4470C0C07B3CCE7AE76975B6EB7D914D09A5046B689DBF9D5DC8CD87F9240F7804961C671A246FFF038F0D
 
   - name: app-release.apk
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/app-release.apk
     platform: android
     size: 135.26
-    sha512: CC9BC36232F2C4C30DE30372B6535948255C4D30D010EB1D9AD6D1EDEA0B268F400963007CB5FCD69E15A8A75CB72D29CD08E16E7D9EB2535E858A5647859D89
+    sha512: 233832EE22622519DB9B3A343600096712394250C42CD1C7A28D478D482ADD707CA837A1500D8B04C3561963C3F07F0AFEA5D5881F76D744140F45A7DCD72303
 
   - name: strawverse-11.2.2.AppImage
     url: https://github.com/RavenGod1/StrawVerse/releases/download/v11.2.2/strawverse-11.2.2.AppImage
@@ -47,6 +47,7 @@ changelog:
   - "**Filter panel collapse**: Caret arrow (^) on the filter panel header collapses/expands the filter grid"
   - "**Filters start collapsed**: The Discover/Filters panel now opens collapsed by default; the caret expands it"
   - "**Discover keeps your place**: Switching sections (e.g. Downloads to Discover) restores the list, page, scroll position and filters you were last seeing; re-tapping the active nav icon still refreshes"
+  - "**Back button works across sections**: Android back from Downloads (or any section) now returns to the previous screen - the anime page or list you were on - instead of showing the exit prompt"
   - "**Log rotation fixed**: Only the 3 newest session logs are kept - older logs are now deleted at startup (previously the folder settled at 4 files)"
   - "**Faster filter badges**: Badge metadata loads after applying filters with a 250 ms debounce, bulk fetch of 48 items, and duplicate-fetch caching"
   - "**Anikoto speed**: Provider metadata cache keys use the provider name (fixes cache misses vs the official anikoto build)"
