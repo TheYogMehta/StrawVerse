@@ -754,8 +754,13 @@ export default function App() {
                 }
               }
               setReloadCounter((prev) => prev + 1);
+              setHistory([{ view, params: {} }]);
+            } else {
+              // Push instead of resetting the stack so Android back returns
+              // to the previous screen (Downloads -> back -> the anime page
+              // the user was on) instead of hitting the exit prompt.
+              setHistory((prev) => [...prev, { view, params: {} }]);
             }
-            setHistory([{ view, params: {} }]);
           }}
           isCollapsed={isSidebarCollapsed}
           toggleCollapse={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
