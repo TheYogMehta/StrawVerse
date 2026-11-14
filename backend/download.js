@@ -31,6 +31,7 @@ async function downloadMediaMulti({
   singleDownloadFn,
   fetchAllItemsFn,
   unitName = type === "Anime" || type === "Movies" ? "Episodes" : "Chapters",
+  quality = null,
 }) {
   if (!items || items.length <= 0) {
     return {
@@ -96,20 +97,37 @@ async function downloadMediaMulti({
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
-    const data = await singleDownloadFn(
-      provider,
-      mediaId,
-      item.id,
-      item.number,
-      title,
-      i === 0,
-      config,
-      mediaProvider,
-      true,
-      malid,
-      subDub,
-      item.season,
-    );
+    const data =
+      type === "Movies"
+        ? await singleDownloadFn(
+            provider,
+            mediaId,
+            item.id,
+            item.number,
+            title,
+            i === 0,
+            config,
+            mediaProvider,
+            true,
+            malid,
+            subDub,
+            item.season,
+            quality,
+          )
+        : await singleDownloadFn(
+            provider,
+            mediaId,
+            item.id,
+            item.number,
+            title,
+            i === 0,
+            config,
+            mediaProvider,
+            true,
+            malid,
+            subDub,
+            quality,
+          );
 
     if (data?.error) {
       if (data?.message !== "Already downloaded") {
@@ -140,6 +158,7 @@ async function downloadAnimeMulti(
   Title,
   SubDub,
   malid = null,
+  quality = null,
 ) {
   return downloadMediaMulti({
     type: "Anime",
@@ -149,6 +168,7 @@ async function downloadAnimeMulti(
     title: Title,
     subDub: SubDub,
     malid,
+    quality,
     singleDownloadFn: downloadAnimeSingle,
     fetchAllItemsFn: fetchAllEpisodes,
   });
@@ -167,6 +187,7 @@ async function downloadAnimeSingle(
   returnItemOnly = false,
   malid = null,
   subdub = null,
+  quality = null,
 ) {
   if (!episodeid) {
     return {
@@ -263,7 +284,7 @@ async function downloadAnimeSingle(
       malid: targetMalid ? String(targetMalid) : null,
       config: {
         Animeprovider: Animeprovider?.provider_name,
-        quality: config?.quality,
+        quality: quality || config?.quality || "1080p",
         mergeSubtitles: config?.mergeSubtitles,
         subtitleFormat: config?.subtitleFormat,
         CustomDownloadLocation: config?.CustomDownloadLocationAnime,
@@ -303,6 +324,7 @@ async function downloadMovieMulti(
   Title,
   SubDub,
   malid = null,
+  quality = null,
 ) {
   return downloadMediaMulti({
     type: "Movies",
@@ -312,6 +334,7 @@ async function downloadMovieMulti(
     title: Title,
     subDub: SubDub,
     malid,
+    quality,
     singleDownloadFn: downloadMovieSingle,
     fetchAllItemsFn: async (prov, mId) => {
       const data = await movieInfo(prov, null, mId);
@@ -335,6 +358,7 @@ async function downloadMovieSingle(
   _malid = null,
   subdub = null,
   season = null,
+  quality = null,
 ) {
   if (!episodeid) {
     return {
@@ -443,7 +467,7 @@ async function downloadMovieSingle(
       config: {
         Animeprovider: Moviesprovider?.provider_name,
         Moviesprovider: Moviesprovider?.provider_name,
-        quality: config?.quality,
+        quality: quality || config?.quality || "1080p",
         mergeSubtitles: config?.mergeSubtitles,
         subtitleFormat: config?.subtitleFormat,
         CustomDownloadLocation: config?.CustomDownloadLocationMovies,

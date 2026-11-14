@@ -299,8 +299,12 @@ function recordDomainBatchSuccess(domain, batchThroughput = null) {
             `[DomainConcurrency] '${domain}' good speed (+${(speedDiffRatio * 100).toFixed(1)}%, ${mbps}), concurrency ${current} -> ${newConcurrency}`,
           );
         }
-      } else if (speedDiffRatio < -0.05 && current > 1) {
-        newConcurrency = Math.max(1, current - 1);
+      } else if (
+        speedDiffRatio < -0.15 &&
+        current > 4 &&
+        batchThroughput > 1024 * 1024
+      ) {
+        newConcurrency = Math.max(4, current - 1);
         logTuning(
           domain,
           "warn",

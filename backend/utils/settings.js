@@ -365,6 +365,7 @@ async function SettingsLoad() {
             jellyfinCompatibility: false,
             animeNamingScheme: "default",
             mangaNamingScheme: "default",
+            minDownloadSpeed: "300 KB/s",
           };
 
     if (config && !config.hasOwnProperty("subFontSize")) {
@@ -432,6 +433,10 @@ async function SettingsLoad() {
 
     if (config && !config.hasOwnProperty("mangaNamingScheme")) {
       config.mangaNamingScheme = "default";
+    }
+
+    if (config && !config.hasOwnProperty("minDownloadSpeed")) {
+      config.minDownloadSpeed = "300 KB/s";
     }
 
     let currentVersion = "1.0.0";

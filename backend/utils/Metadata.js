@@ -1641,9 +1641,9 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
     if (type === "Anime" || type === "Movies") {
       const mainTable = type === "Movies" ? "Movies" : "Anime";
       data.DownloadedEpisodes = [];
+      let FoundRow = null;
 
       try {
-        let FoundRow = null;
         if (malid && type === "Anime") {
           FoundRow = await queryOne(
             `SELECT * FROM ${mainTable} WHERE MalID = ? LIMIT 1`,
@@ -1672,6 +1672,41 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
                 [histRow.media_title],
               );
             }
+          } catch (_) {}
+        }
+
+        if (!FoundRow && type === "Anime" && AnimeMangaid) {
+          try {
+            const customRow = await queryOne(
+              "SELECT malid FROM unlinked_mal_ids WHERE id = ? LIMIT 1",
+              [AnimeMangaid],
+            );
+            let resolvedMal = customRow?.malid ? String(customRow.malid) : null;
+            if (!resolvedMal) {
+              resolvedMal = await resolveMalIdFromMapping({
+                id: AnimeMangaid,
+                mediaType: type,
+                installedOnly: true,
+              });
+            }
+            if (resolvedMal) {
+              FoundRow = await queryOne(
+                `SELECT * FROM ${mainTable} WHERE MalID = ? LIMIT 1`,
+                [String(resolvedMal)],
+              );
+              if (FoundRow && !malid) {
+                data.malid = parseInt(resolvedMal);
+              }
+            }
+          } catch (_) {}
+        }
+
+        if (!FoundRow && AnimeMangaid) {
+          try {
+            FoundRow = await queryOne(
+              `SELECT * FROM ${mainTable} WHERE LOWER(title) = LOWER(?) LIMIT 1`,
+              [AnimeMangaid],
+            );
           } catch (_) {}
         }
 
@@ -1743,6 +1778,28 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
             `SELECT * FROM ${mainTable} WHERE id = ? OR folder_name = ? OR LOWER(REPLACE(title, ' ', '-')) = LOWER(?)`,
             [AnimeMangaid, AnimeMangaid, AnimeMangaid],
           );
+        }
+        if (Downloads.length === 0 && FoundRow) {
+          Downloads = [FoundRow];
+        }
+        if (Downloads.length === 0 && AnimeMangaid) {
+          const directDir = path.join(dir, type, AnimeMangaid);
+          const sanitizedDir = path.join(
+            dir,
+            type,
+            sanitizeFolderName(AnimeMangaid),
+          );
+          if (fs.existsSync(directDir) || fs.existsSync(sanitizedDir)) {
+            Downloads = [
+              {
+                id: AnimeMangaid,
+                title: AnimeMangaid,
+                folder_name: fs.existsSync(directDir)
+                  ? AnimeMangaid
+                  : sanitizeFolderName(AnimeMangaid),
+              },
+            ];
+          }
         }
 
         if (Downloads?.length > 0) {

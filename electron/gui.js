@@ -682,9 +682,82 @@ const createWindow = () => {
     }
   });
 
-  if (app.isPackaged) {
-    const menu = Menu.buildFromTemplate([]);
-    Menu.setApplicationMenu(menu);
+  if (process.platform === "darwin") {
+    const template = [
+      {
+        label: app.name || "StrawVerse",
+        submenu: [
+          { role: "about" },
+          { type: "separator" },
+          { role: "services" },
+          { type: "separator" },
+          { role: "hide" },
+          { role: "hideOthers" },
+          { role: "unhide" },
+          { type: "separator" },
+          { role: "quit" },
+        ],
+      },
+      {
+        label: "Edit",
+        submenu: [
+          { role: "undo" },
+          { role: "redo" },
+          { type: "separator" },
+          { role: "cut" },
+          { role: "copy" },
+          { role: "paste" },
+          { role: "selectAll" },
+        ],
+      },
+      {
+        label: "View",
+        submenu: [
+          { role: "reload" },
+          { role: "forceReload" },
+          { role: "toggleDevTools" },
+          { type: "separator" },
+          { role: "resetZoom" },
+          { role: "zoomIn" },
+          { role: "zoomOut" },
+          { type: "separator" },
+          { role: "togglefullscreen" },
+        ],
+      },
+      {
+        label: "Window",
+        submenu: [
+          { role: "minimize" },
+          { role: "zoom" },
+          { type: "separator" },
+          { role: "front" },
+          { type: "separator" },
+          { role: "window" },
+        ],
+      },
+      {
+        role: "help",
+        submenu: [
+          {
+            label: "StrawVerse GitHub",
+            click: async () => {
+              await shell.openExternal(
+                "https://github.com/TheYogMehta/StrawVerse",
+              );
+            },
+          },
+          {
+            label: "Discord Community",
+            click: async () => {
+              await shell.openExternal("https://discord.gg/PzfUBgQ2gt");
+            },
+          },
+        ],
+      },
+    ];
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  } else if (app.isPackaged) {
+    Menu.setApplicationMenu(null);
   }
 
   global.updatePowerSaveBlocker();
@@ -840,10 +913,28 @@ autoUpdater.on("download-progress", (progress) => {
 });
 
 autoUpdater.on("error", (err) => {
-  logger.error("Error checking for updates:", err);
+  const errMsg = err?.message || String(err || "Unknown error");
+  const isCodeSignError =
+    process.platform === "darwin" &&
+    (errMsg.includes("Code signature") ||
+      err?.domain === "SQRLCodeSignatureErrorDomain" ||
+      errMsg.includes("SQRLCodeSignatureErrorDomain"));
+
+  if (isCodeSignError) {
+    logger.warn(
+      "[AutoUpdater] macOS code signature verification failed (application is distributed unsigned). Direct download is recommended.",
+    );
+  } else {
+    logger.error("Error checking for updates:", err);
+  }
+
   if (global.win) {
     global.win.webContents.send("update-error", {
-      message: err?.message || "Unknown error",
+      message: isCodeSignError
+        ? "Auto-update failed due to macOS code signature verification (unsigned build). Please download the latest DMG release from GitHub."
+        : errMsg,
+      isCodeSignError: Boolean(isCodeSignError),
+      releaseUrl: "https://github.com/TheYogMehta/StrawVerse/releases/latest",
     });
   }
 });
@@ -1050,6 +1141,9 @@ Categories=Utility;
   }
 }
 
+// Cache of recently processed protocol codes to prevent duplicate invocations (e.g. on macOS)
+const processedProtocolCodes = new Map();
+
 // handle custom protocol - only works in packaged version
 function handleCustomProtocolUrl(urlStr) {
   const cleanUrlStr = urlStr.replace(/^['"]|['"]$/g, "");
@@ -1059,6 +1153,20 @@ function handleCustomProtocolUrl(urlStr) {
     const code = url.searchParams.get("code");
     logger.info("[Protocol] Parsed code: " + code);
     if (code) {
+      const now = Date.now();
+      for (const [c, timestamp] of processedProtocolCodes.entries()) {
+        if (now - timestamp > 30000) processedProtocolCodes.delete(c);
+      }
+      if (processedProtocolCodes.has(code)) {
+        logger.info(
+          "[Protocol] Skipping duplicate callback request for code: " +
+            code.substring(0, 10) +
+            "...",
+        );
+        return;
+      }
+      processedProtocolCodes.set(code, now);
+
       const callbackUrl = `http://localhost:${global.PORT}/mal/callback?code=${code}`;
       logger.info(
         "[Protocol] Triggering background callback request: " + callbackUrl,

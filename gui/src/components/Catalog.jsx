@@ -1820,7 +1820,7 @@ export default function Catalog({
               return item;
             }),
           );
-          setCatalog((prev) =>
+          setData((prev) =>
             (prev || []).map((item) => {
               if (
                 String(item.id) === String(data.oldId) ||
