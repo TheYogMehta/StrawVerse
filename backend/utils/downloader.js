@@ -760,13 +760,7 @@ class downloader {
                 this.audioStreamUrl,
               );
               if (this.AudioSegments && this.AudioSegments.length > 0) {
-                const base =
-                  this.fileBase ||
-                  mediaServerFileBase(
-                    this.directory,
-                    this.episode,
-                    this.quality,
-                  );
+                const base = this.fileBase || `${this.Epnum}Ep`;
                 this.AudioSegmentsFile = path.join(
                   this.directory,
                   `${base}_audio.ts`,

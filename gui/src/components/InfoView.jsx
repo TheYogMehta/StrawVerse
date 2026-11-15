@@ -2308,13 +2308,16 @@ export default function InfoView({
       });
       const data = await response.json();
 
-      if (!data.error) {
-        const isNotInLibrary =
-          !currentTags || currentTags.length === 0 || !currentTags[0];
-        if (isNotInLibrary) {
-          await saveTags("Downloads", false);
-          triggerPulse();
-        }
+      if (data?.error) {
+        swalError("Error", data.message || "Failed to add to download queue.");
+        return;
+      }
+
+      const isNotInLibrary =
+        !currentTags || currentTags.length === 0 || !currentTags[0];
+      if (isNotInLibrary) {
+        await saveTags("Downloads", false);
+        triggerPulse();
       }
 
       swalSuccess("Queue Updated", data.message || "Added to download queue!");
@@ -2322,7 +2325,7 @@ export default function InfoView({
       fetchDownloadsState();
     } catch (err) {
       console.error(err);
-      swalError("Error", "Failed to add to download queue.");
+      swalError("Error", err?.message || "Failed to add to download queue.");
     } finally {
       setProbingDownloadId(null);
     }
