@@ -19,6 +19,28 @@ const { MetadataAdd, FindMapping } = require("./utils/Metadata");
 const path = require("path");
 const { hasLocalMediaFiles, SEASON_FOLDER_RE } = require("./utils/constants");
 
+// Helper to format item label (e.g. Ep 1, Ch 5, S2E3)
+function formatItemLabel(item, type) {
+  if (!item) return "?";
+  const num =
+    item.number !== undefined && item.number !== null ? item.number : "?";
+  const numStr = Number.isInteger(Number(num)) ? Number(num) : num;
+  if (type === "Manga") {
+    return `Ch ${numStr}`;
+  }
+  let season = item.season;
+  if ((season === undefined || season === null) && item.id) {
+    const sMatch = String(item.id).match(/tv:[^:]+:(\d+):\d+/);
+    if (sMatch) {
+      season = parseInt(sMatch[1], 10);
+    }
+  }
+  if (type === "Movies" && season !== undefined && season !== null) {
+    return `S${season}E${numStr}`;
+  }
+  return `Ep ${numStr}`;
+}
+
 // Shared runner for multiple episodes/chapters download
 async function downloadMediaMulti({
   type,
@@ -46,9 +68,12 @@ async function downloadMediaMulti({
     return numA - numB;
   });
 
-  let hasError = false;
   let success = 0;
   const itemsToAdd = [];
+  const alreadyInQueue = [];
+  const alreadyDownloaded = [];
+  const failedItems = [];
+  const unresolvedLabels = [];
 
   const config = await settingfetch();
   const mediaProvider = await providerFetch(type, provider);
@@ -83,8 +108,11 @@ async function downloadMediaMulti({
 
   const unresolved = items.filter((it) => !it || !it.id);
   if (unresolved.length > 0) {
+    unresolved.forEach((u) => {
+      unresolvedLabels.push(formatItemLabel(u, type));
+    });
     logger.warn(
-      `[queueWorker] Dropping ${unresolved.length} ${unitName.toLowerCase()} with unresolvable IDs (numbers: ${unresolved.map((u) => u?.number ?? "?").join(", ")}).`,
+      `[queueWorker] Dropping ${unresolved.length} ${unitName.toLowerCase()} with unresolvable IDs (numbers: ${unresolvedLabels.join(", ")}).`,
     );
     items = items.filter((it) => it && it.id);
     if (items.length === 0) {
@@ -130,8 +158,14 @@ async function downloadMediaMulti({
           );
 
     if (data?.error) {
-      if (data?.message !== "Already downloaded") {
-        hasError = true;
+      const label = formatItemLabel(item, type);
+      const msg = String(data?.message || "").toLowerCase();
+      if (msg.includes("already in queue")) {
+        alreadyInQueue.push(label);
+      } else if (msg.includes("already downloaded")) {
+        alreadyDownloaded.push(label);
+      } else {
+        failedItems.push(label);
       }
     } else if (data?.queueItem) {
       itemsToAdd.push(data.queueItem);
@@ -143,10 +177,70 @@ async function downloadMediaMulti({
     await addMultipleToQueue(itemsToAdd);
   }
 
+  const unitSingular = type === "Manga" ? "chapter" : "episode";
+  const unitPlural = type === "Manga" ? "chapters" : "episodes";
+
+  const skipParts = [];
+  if (alreadyInQueue.length > 0) {
+    const joined = alreadyInQueue.join(", ");
+    skipParts.push(
+      alreadyInQueue.length === 1
+        ? `${joined} was not added as it's already in queue`
+        : `${joined} were not added as they are already in queue`,
+    );
+  }
+  if (alreadyDownloaded.length > 0) {
+    const joined = alreadyDownloaded.join(", ");
+    skipParts.push(
+      alreadyDownloaded.length === 1
+        ? `${joined} was not added as it's already downloaded`
+        : `${joined} were not added as they are already downloaded`,
+    );
+  }
+  if (failedItems.length > 0) {
+    const joined = failedItems.join(", ");
+    skipParts.push(
+      failedItems.length === 1
+        ? `${joined} could not be added`
+        : `${joined} could not be added`,
+    );
+  }
+  if (unresolvedLabels.length > 0) {
+    const joined = unresolvedLabels.join(", ");
+    skipParts.push(
+      unresolvedLabels.length === 1
+        ? `${joined} had unresolved ID`
+        : `${joined} had unresolved IDs`,
+    );
+  }
+
+  const skipSummary = skipParts.join(". ");
+
+  let finalMessage = "";
+  let finalError = false;
+
+  if (success > 0) {
+    if (skipParts.length > 0) {
+      const otherLabel = success === 1 ? unitSingular : unitPlural;
+      finalMessage = `${skipSummary}. ${success} other ${otherLabel} added to queue!`;
+    } else {
+      const label = success === 1 ? unitSingular : unitPlural;
+      finalMessage = `Added ${success} ${label} to queue!`;
+    }
+    finalError = false;
+  } else {
+    finalMessage = skipSummary
+      ? `${skipSummary}.`
+      : `No ${unitPlural} were added to the queue.`;
+    finalError = true;
+  }
+
   return {
-    type: hasError ? "error" : "info",
-    error: hasError,
-    message: `Added ${success} ${unitName} To Queue!`,
+    type: finalError ? "error" : "info",
+    error: finalError,
+    message: finalMessage,
+    successCount: success,
+    skippedCount: items.length + unresolvedLabels.length - success,
   };
 }
 
@@ -237,7 +331,7 @@ async function downloadAnimeSingle(
     if (is_in_queue) {
       return {
         error: true,
-        message: "Already in queue",
+        message: `Ep ${number} was not added as it's already in queue.`,
       };
     }
 
@@ -256,7 +350,7 @@ async function downloadAnimeSingle(
         if (downloadedList.map(Number).includes(num)) {
           return {
             error: true,
-            message: "Already downloaded",
+            message: `Ep ${number} was not added as it's already downloaded.`,
           };
         }
       }
@@ -417,9 +511,13 @@ async function downloadMovieSingle(
 
     let is_in_queue = await checkEpisodeDownload(episodeid);
     if (is_in_queue) {
+      const epLabel =
+        resolvedSeason !== null && resolvedSeason !== undefined
+          ? `S${resolvedSeason}E${number}`
+          : `Ep ${number}`;
       return {
         error: true,
-        message: "Already in queue",
+        message: `${epLabel} was not added as it's already in queue.`,
       };
     }
 
@@ -446,9 +544,13 @@ async function downloadMovieSingle(
           hasSeasonKey ||
           (!hasSeasonTags && downloadedList.map(Number).includes(num))
         ) {
+          const epLabel =
+            resolvedSeason !== null && resolvedSeason !== undefined
+              ? `S${resolvedSeason}E${number}`
+              : `Ep ${number}`;
           return {
             error: true,
-            message: "Already downloaded",
+            message: `${epLabel} was not added as it's already downloaded.`,
           };
         }
       }
@@ -637,7 +739,7 @@ async function downloadMangaSingle(
     if (is_in_queue) {
       return {
         error: true,
-        message: "Already in queue",
+        message: `Ch ${number} was not added as it's already in queue.`,
       };
     }
 
@@ -653,7 +755,7 @@ async function downloadMangaSingle(
         if (mangaMapping.DownloadedChapters.map(Number).includes(num)) {
           return {
             error: true,
-            message: "Already downloaded",
+            message: `Ch ${number} was not added as it's already downloaded.`,
           };
         }
       }
@@ -819,4 +921,5 @@ module.exports = {
   downloadMovieMulti,
   getBaseDownloadDir,
   cleanupEmptyDownloadFolder,
+  formatItemLabel,
 };

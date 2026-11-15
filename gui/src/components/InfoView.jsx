@@ -2308,7 +2308,11 @@ export default function InfoView({
       });
       const data = await response.json();
 
-      if (data?.error) {
+      const isPartialOrFullSuccess =
+        Boolean(data?.successCount && data.successCount > 0) ||
+        (data?.message && /added\s+\d+\s+other/i.test(data.message));
+
+      if (data?.error && !isPartialOrFullSuccess) {
         swalError("Error", data.message || "Failed to add to download queue.");
         return;
       }
@@ -4231,7 +4235,11 @@ export default function InfoView({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteEpisode(item.number, null, item.season);
+                                handleDeleteEpisode(
+                                  item.number,
+                                  null,
+                                  item.season,
+                                );
                               }}
                               className="btn-action-trash"
                               title="Delete Download"
