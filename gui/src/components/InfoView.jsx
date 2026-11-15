@@ -1430,7 +1430,6 @@ export default function InfoView({
       );
       if (progressRes.ok) {
         const progressData = await progressRes.json();
-        setHasProgress(progressData.hasProgress || false);
         setHistoryProgress(progressData);
         if (type === "Anime" && progressData.lastSubDub) {
           setDubSelect(progressData.lastSubDub);
@@ -2191,22 +2190,6 @@ export default function InfoView({
                 )
                 .join("")}
             </div>
-            ${
-              msShow
-                ? `<div style="margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
-              Jellyfin/Plex naming: saves to <strong>${String(
-                msShow.series || details?.title || "",
-              )
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(
-                  />/g,
-                  "&gt;",
-                )}\\${msShow.season === 0 ? "Season 00 (Specials)" : `Season ${String(msShow.season).padStart(2, "0")}`}</strong>.<br>
-              To change this, cancel and set <strong>Season</strong> and <strong>Show folder</strong> above the episode list.
-            </div>`
-                : ""
-            }
           `,
           showCancelButton: true,
           confirmButtonText: "Download",
@@ -2325,13 +2308,16 @@ export default function InfoView({
       });
       const data = await response.json();
 
-      if (!data.error) {
-        const isNotInLibrary =
-          !currentTags || currentTags.length === 0 || !currentTags[0];
-        if (isNotInLibrary) {
-          await saveTags("Downloads", false);
-          triggerPulse();
-        }
+      if (data?.error) {
+        swalError("Error", data.message || "Failed to add to download queue.");
+        return;
+      }
+
+      const isNotInLibrary =
+        !currentTags || currentTags.length === 0 || !currentTags[0];
+      if (isNotInLibrary) {
+        await saveTags("Downloads", false);
+        triggerPulse();
       }
 
       swalSuccess("Queue Updated", data.message || "Added to download queue!");
@@ -2339,7 +2325,7 @@ export default function InfoView({
       fetchDownloadsState();
     } catch (err) {
       console.error(err);
-      swalError("Error", "Failed to add to download queue.");
+      swalError("Error", err?.message || "Failed to add to download queue.");
     } finally {
       setProbingDownloadId(null);
     }
