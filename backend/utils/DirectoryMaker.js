@@ -120,7 +120,8 @@ async function mediaServerDir(
   mediaId = null,
   type = "Anime",
 ) {
-  const folderName = `${sanitizeFolderName(series)}/Season ${String(season).padStart(2, "0")}`;
+  const seriesFolder = sanitizeFolderName(series);
+  const folderName = `${seriesFolder}/Season ${String(season).padStart(2, "0")}`;
   const targetDir = path.join(
     await getTypeDir(customdir, type, true),
     folderName,
@@ -131,7 +132,7 @@ async function mediaServerDir(
       const table =
         type === "Movies" || type === "MoviesSeries" ? "Movies" : "Anime";
       await run(`UPDATE ${table} SET folder_name = ? WHERE id = ?`, [
-        folderName,
+        seriesFolder,
         mediaId,
       ]);
     } catch (_) {}

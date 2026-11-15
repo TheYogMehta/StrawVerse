@@ -127,6 +127,48 @@
     margin-bottom: 12px;
   }
 
+  html .desktop-only {
+    display: none !important;
+  }
+
+  html .mobile-only {
+    display: inline-flex !important;
+  }
+
+  html .header-left-section {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+  }
+
+  html .mobile-only:has(.header-type-dropdown),
+  html .header-type-dropdown {
+    margin-left: auto !important;
+  }
+
+  html .header-type-dropdown .custom-dropdown-trigger {
+    min-height: 34px !important;
+    height: 34px !important;
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+  }
+
+  html .header-type-dropdown .custom-dropdown-item {
+    font-size: 12px !important;
+    padding: 6px 10px !important;
+  }
+
+  html .discover-sub-tabs {
+    margin-left: 8px !important;
+    gap: 6px !important;
+  }
+
+  html .discover-sub-tab {
+    padding: 4px 10px !important;
+    font-size: 11px !important;
+  }
+
   html .catalog-header-row {
     display: flex;
     align-items: center;
@@ -430,12 +472,34 @@
   /* ---------------------------------------------------------------- */
   /* Settings: tab row scrolls horizontally instead of clipping        */
   /* ---------------------------------------------------------------- */
+  html .settings-wrapper {
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    padding: 0 12px 16px 12px !important;
+    box-sizing: border-box !important;
+  }
+
+  html .settings-container-inner,
+  html .settings-top-section,
+  html .settings-form,
+  html .settings-panel {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
+  }
+
   html .settings-tabs-row {
     overflow-x: auto;
     flex-wrap: nowrap;
     justify-content: flex-start;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    box-sizing: border-box !important;
   }
 
   html .settings-tab-btn {
@@ -487,13 +551,10 @@
   html .library-stats-container {
     display: flex !important;
     flex-wrap: nowrap !important;
-    overflow-x: auto !important;
-    -webkit-overflow-scrolling: touch !important;
-    gap: 10px !important;
+    gap: 8px !important;
     width: 100% !important;
     box-sizing: border-box !important;
-    padding-bottom: 4px !important;
-    scrollbar-width: none !important;
+    overflow: hidden !important;
   }
 
   html .library-stats-container::-webkit-scrollbar {
@@ -501,24 +562,27 @@
   }
 
   html .library-stat-card {
-    padding: 10px 14px !important;
-    gap: 10px !important;
-    min-width: fit-content !important;
-    flex: 1 0 auto !important;
+    padding: 8px 10px !important;
+    gap: 4px !important;
+    min-width: 0 !important;
+    flex: 1 1 0 !important;
     box-sizing: border-box !important;
+    text-align: center !important;
+    justify-content: center !important;
   }
 
   html .stat-icon-wrapper {
-    width: 32px !important;
-    height: 32px !important;
-    flex-shrink: 0 !important;
+    display: none !important;
   }
 
   html .stat-content {
     display: flex !important;
     flex-direction: column !important;
     justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
     min-width: 0 !important;
+    width: 100% !important;
   }
 
   html .stat-label {
@@ -526,8 +590,10 @@
     font-weight: 600 !important;
     white-space: nowrap !important;
     letter-spacing: 0.3px !important;
-    text-overflow: clip !important;
-    overflow: visible !important;
+    text-overflow: ellipsis !important;
+    overflow: hidden !important;
+    max-width: 100% !important;
+    color: var(--text-muted) !important;
   }
 
   html .stat-value {
@@ -535,7 +601,9 @@
     font-weight: 700 !important;
     white-space: nowrap !important;
     letter-spacing: -0.2px !important;
-    overflow: visible !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: 100% !important;
     min-width: 0 !important;
   }
 

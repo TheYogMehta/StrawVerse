@@ -412,6 +412,22 @@ export default function SettingsView({
   }, [scrollToSection, activeTab]);
 
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
+  const tabsRowRef = useRef(null);
+
+  useEffect(() => {
+    if (tabsRowRef.current) {
+      const activeBtn = tabsRowRef.current.querySelector(
+        ".settings-tab-btn.active",
+      );
+      if (activeBtn) {
+        activeBtn.scrollIntoView({
+          behavior: "smooth",
+          inline: "center",
+          block: "nearest",
+        });
+      }
+    }
+  }, [activeTab]);
 
   const handleTouchStart = (e) => {
     if (!e.touches || e.touches.length !== 1) return;
@@ -1372,7 +1388,7 @@ export default function SettingsView({
           </header>
 
           {/* Horizontal Tabs Navigation */}
-          <div className="settings-tabs-row">
+          <div className="settings-tabs-row" ref={tabsRowRef}>
             <button
               type="button"
               onClick={() => setActiveTab("general")}
@@ -2138,7 +2154,8 @@ export default function SettingsView({
                       Minimum Download Speed
                     </div>
                     <div className="settings-row-hint">
-                      Automatically boost parallel connections and switch to faster mirrors if download speed falls below this floor.
+                      Automatically boost parallel connections and switch to
+                      faster mirrors if download speed falls below this floor.
                     </div>
                   </div>
                   <div className="settings-row-control">
@@ -2624,7 +2641,8 @@ export default function SettingsView({
                       Minimum Download Speed
                     </div>
                     <div className="settings-row-hint">
-                      Automatically boost parallel connections and switch to faster mirrors if download speed falls below this floor.
+                      Automatically boost parallel connections and switch to
+                      faster mirrors if download speed falls below this floor.
                     </div>
                   </div>
                   <div className="settings-row-control">

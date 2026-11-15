@@ -1430,7 +1430,6 @@ export default function InfoView({
       );
       if (progressRes.ok) {
         const progressData = await progressRes.json();
-        setHasProgress(progressData.hasProgress || false);
         setHistoryProgress(progressData);
         if (type === "Anime" && progressData.lastSubDub) {
           setDubSelect(progressData.lastSubDub);
@@ -2191,22 +2190,6 @@ export default function InfoView({
                 )
                 .join("")}
             </div>
-            ${
-              msShow
-                ? `<div style="margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
-              Jellyfin/Plex naming: saves to <strong>${String(
-                msShow.series || details?.title || "",
-              )
-                .replace(/&/g, "&amp;")
-                .replace(/</g, "&lt;")
-                .replace(
-                  />/g,
-                  "&gt;",
-                )}\\${msShow.season === 0 ? "Season 00 (Specials)" : `Season ${String(msShow.season).padStart(2, "0")}`}</strong>.<br>
-              To change this, cancel and set <strong>Season</strong> and <strong>Show folder</strong> above the episode list.
-            </div>`
-                : ""
-            }
           `,
           showCancelButton: true,
           confirmButtonText: "Download",
@@ -2718,6 +2701,8 @@ export default function InfoView({
 
   const handleLocalDeleteFlow = async ({
     numbers,
+    items,
+    season,
     subdub,
     confirmTitle,
     confirmText,
@@ -2737,6 +2722,8 @@ export default function InfoView({
         id,
         type,
         numbers,
+        items,
+        season,
         subdub,
       });
       if (!data.error) {
@@ -2751,12 +2738,15 @@ export default function InfoView({
   };
 
   // Delete single local episode file
-  const handleDeleteEpisode = async (epNum, subdub) => {
+  const handleDeleteEpisode = async (epNum, subdub = null, epSeason = null) => {
+    const resolvedSeason = epSeason ?? activeSeasonNum;
     await handleLocalDeleteFlow({
       numbers: [epNum],
+      items: [{ number: epNum, season: resolvedSeason }],
+      season: resolvedSeason,
       subdub,
       confirmTitle: "Delete Episode?",
-      confirmText: `Delete downloaded file for Episode ${epNum} (${subdub})?`,
+      confirmText: `Delete downloaded file for Episode ${epNum}${resolvedSeason ? ` (Season ${resolvedSeason})` : ""}${subdub ? ` (${subdub})` : ""}?`,
       confirmBtn: "Yes, delete it",
       successTitle: "Deleted",
       successText: "Episode file deleted.",
@@ -2810,16 +2800,31 @@ export default function InfoView({
     const isAnime = type === "Anime" || type === "Movies";
     const selectedDownloaded = Array.from(selectedItems).filter((num) => {
       if (isAnime) {
-        return isDownloaded(num, "sub") || isDownloaded(num, "dub");
+        return (
+          isDownloaded(num, "sub", activeSeasonNum) ||
+          isDownloaded(num, "dub", activeSeasonNum)
+        );
       } else {
         return isDownloaded(num);
       }
     });
     if (selectedDownloaded.length === 0) return;
 
+    const itemsToDelete = selectedDownloaded.map((num) => {
+      const match = (filteredItems || []).find(
+        (it) => Number(it.number) === Number(num),
+      );
+      return {
+        number: num,
+        season: match?.season ?? activeSeasonNum ?? 1,
+      };
+    });
+
     const numbersToDelete = selectedDownloaded;
     await handleLocalDeleteFlow({
       numbers: numbersToDelete,
+      items: itemsToDelete,
+      season: activeSeasonNum,
       subdub: isAnime ? dubSelect : undefined,
       confirmTitle: `Delete Selected ${isAnime ? "Episode(s)" : "Chapter(s)"}?`,
       confirmText: `Are you sure you want to delete ${numbersToDelete.length} downloaded ${isAnime ? "episode(s)" : "chapter(s)"}?`,
@@ -4223,7 +4228,7 @@ export default function InfoView({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteEpisode(item.number);
+                                handleDeleteEpisode(item.number, null, item.season);
                               }}
                               className="btn-action-trash"
                               title="Delete Download"

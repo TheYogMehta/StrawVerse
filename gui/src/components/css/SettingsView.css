@@ -2,7 +2,11 @@
   flex: 1;
   padding: 0 16px 16px 16px;
   overflow-y: auto;
+  overflow-x: hidden;
   height: 100%;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   background-color: var(--bg-primary);
 }
 
@@ -15,6 +19,10 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .settings-header {
@@ -236,6 +244,9 @@
   padding-bottom: 0;
   overflow-x: auto;
   flex-wrap: nowrap;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
   -webkit-overflow-scrolling: touch;
 }
@@ -413,8 +424,13 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 12px 0 0 0;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .changelog-h1 {
@@ -470,6 +486,8 @@
   font-size: 13px;
   color: var(--text-muted);
   line-height: 1.6;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .changelog-li {
@@ -478,6 +496,8 @@
   line-height: 1.6;
   margin-left: 20px;
   list-style-type: disc;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .changelog-link {
@@ -502,6 +522,9 @@
   font-size: 12px;
   font-family: monospace;
   color: var(--accent-hover, #a78bfa);
+  white-space: normal;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .settings-history-item.clickable {
@@ -550,6 +573,9 @@
 
 .settings-container-inner {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 24px;

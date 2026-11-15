@@ -3528,10 +3528,19 @@ router.post(
           const cfg = await settingfetch();
           const baseDir =
             AnimeManga === "Movies"
-              ? cfg?.CustomDownloadLocationMovies || (await getDownloadsFolder())
-              : cfg?.CustomDownloadLocationAnime || (await getDownloadsFolder());
+              ? cfg?.CustomDownloadLocationMovies ||
+                (await getDownloadsFolder())
+              : cfg?.CustomDownloadLocationAnime ||
+                (await getDownloadsFolder());
           const candidates = [];
-          if (data.folder_name) candidates.push(data.folder_name);
+          if (data.folder_name) {
+            const cleanFolder = String(data.folder_name)
+              .replace(/[/\\]Season\s*\d+.*$/i, "")
+              .trim();
+            if (cleanFolder && cleanFolder !== data.folder_name)
+              candidates.push(cleanFolder);
+            candidates.push(data.folder_name);
+          }
           if (data.title) candidates.push(sanitizeFolderName(data.title));
           if (data.id) {
             candidates.push(String(data.id));
@@ -3567,16 +3576,27 @@ router.post(
               matchedFolderPath,
               { withFileTypes: true },
             );
-            const scanned = filesAndFolders
-              .filter(
-                (f) =>
-                  f.isFile() &&
-                  isVideoFile(f.name) &&
-                  !f.name.startsWith(".") &&
-                  !f.name.includes(".temp"),
-              )
-              .map((f) => getEpisodeNumberFromFilename(f.name))
-              .filter((n) => n !== null && !isNaN(n));
+            const scanned = [];
+            for (const f of filesAndFolders) {
+              if (
+                f.isFile() &&
+                isVideoFile(f.name) &&
+                !f.name.startsWith(".") &&
+                !f.name.includes(".temp")
+              ) {
+                const sMatch = f.name.match(
+                  /\bS(\d{1,3})E(?:p)?(\d+(?:\.\d+)?)/i,
+                );
+                if (sMatch) {
+                  scanned.push(
+                    `s${parseInt(sMatch[1], 10)}_e${parseFloat(sMatch[2])}`,
+                  );
+                } else {
+                  const num = getEpisodeNumberFromFilename(f.name);
+                  if (num !== null && !isNaN(num)) scanned.push(num);
+                }
+              }
+            }
 
             const seasonDirs = filesAndFolders.filter(
               (f) => f.isDirectory() && SEASON_FOLDER_RE.test(f.name),
@@ -3828,7 +3848,11 @@ router.post("/api/info/items", async (req, res) => {
         );
         if (isAnime && dlCheck && Array.isArray(dlCheck.DownloadedEpisodes)) {
           data.DownloadedEpisodes = dlCheck.DownloadedEpisodes;
-        } else if (!isAnime && dlCheck && Array.isArray(dlCheck.DownloadedChapters)) {
+        } else if (
+          !isAnime &&
+          dlCheck &&
+          Array.isArray(dlCheck.DownloadedChapters)
+        ) {
           data.DownloadedChapters = dlCheck.DownloadedChapters;
         }
       } catch (_) {}

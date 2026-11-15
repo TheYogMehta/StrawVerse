@@ -1831,21 +1831,35 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
 
           for (const SubDub of Downloads) {
             await migrateLegacyFolderIfNeeded(type, SubDub, dir);
-            const folderName =
+            let folderName =
               SubDub.folder_name || `${sanitizeFolderName(SubDub.title)}`;
-            let folderPath = path.join(dir, type, folderName);
-            if (
-              type === "Movies" &&
-              !fs.existsSync(folderPath) &&
-              fs.existsSync(path.join(dir, "MoviesSeries", folderName))
-            ) {
-              folderPath = path.join(dir, "MoviesSeries", folderName);
+            const cleanSeriesName = folderName
+              .replace(/[/\\]Season\s*\d+.*$/i, "")
+              .trim();
+            const candidateNames =
+              cleanSeriesName && cleanSeriesName !== folderName
+                ? [cleanSeriesName, folderName]
+                : [folderName];
+
+            let folderPath = null;
+            for (const cand of candidateNames) {
+              const pathsToTry = [
+                path.join(dir, type, cand),
+                ...(type === "Movies"
+                  ? [path.join(dir, "MoviesSeries", cand)]
+                  : []),
+                path.join(dir, cand),
+              ];
+              for (const p of pathsToTry) {
+                if (fs.existsSync(p)) {
+                  folderPath = p;
+                  break;
+                }
+              }
+              if (folderPath) break;
             }
-            if (
-              !fs.existsSync(folderPath) &&
-              fs.existsSync(path.join(dir, folderName))
-            ) {
-              folderPath = path.join(dir, folderName);
+            if (!folderPath) {
+              folderPath = path.join(dir, type, folderName);
             }
             const folderExists = fs.existsSync(folderPath);
 
@@ -1854,17 +1868,29 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
                 withFileTypes: true,
               });
 
-              const scanned = filesAndFolders
-                .filter(
-                  (file) =>
-                    file.isFile() &&
-                    isVideoFile(file.name) &&
-                    !file.name.startsWith(".") &&
-                    !file.name.includes(".temp"),
-                )
-                .map((file) => getEpisodeNumberFromFilename(file.name))
-                .filter((num) => num !== null && !isNaN(num))
-                .sort((a, b) => a - b);
+              const scanned = [];
+              for (const file of filesAndFolders) {
+                if (
+                  file.isFile() &&
+                  isVideoFile(file.name) &&
+                  !file.name.startsWith(".") &&
+                  !file.name.includes(".temp")
+                ) {
+                  const sMatch = file.name.match(
+                    /\bS(\d{1,3})E(?:p)?(\d+(?:\.\d+)?)/i,
+                  );
+                  if (sMatch) {
+                    const seasonNum = parseInt(sMatch[1], 10);
+                    const epNum = parseFloat(sMatch[2]);
+                    scanned.push(`s${seasonNum}_e${epNum}`);
+                  } else {
+                    const num = getEpisodeNumberFromFilename(file.name);
+                    if (num !== null && !isNaN(num)) {
+                      scanned.push(num);
+                    }
+                  }
+                }
+              }
 
               if (
                 scanned.length === 0 &&

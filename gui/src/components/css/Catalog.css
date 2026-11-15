@@ -27,6 +27,38 @@
   flex-wrap: wrap;
 }
 
+.header-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-right-section {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
+
+.header-type-dropdown {
+  width: auto;
+}
+
+.header-right-section .header-type-dropdown .custom-dropdown-menu,
+.mobile-only .header-type-dropdown .custom-dropdown-menu {
+  right: 0;
+  left: auto;
+  min-width: 100%;
+  width: max-content;
+}
+
+.desktop-only {
+  display: flex !important;
+}
+
+.mobile-only {
+  display: none !important;
+}
+
 .catalog-title {
   font-size: 26px;
   font-weight: 800;

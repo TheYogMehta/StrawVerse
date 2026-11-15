@@ -1,4 +1,5 @@
 import { Search, SlidersHorizontal } from "lucide-react";
+import Dropdown from "../common/Dropdown";
 
 export default function CatalogHeader({
   provider,
@@ -16,26 +17,50 @@ export default function CatalogHeader({
   activeFilterCount = 0,
   showFilterToggle = false,
 }) {
+  const typeOptions = [
+    { value: "Anime", label: "Anime" },
+    { value: "Manga", label: "Manga" },
+    ...(provider !== "mal"
+      ? [{ value: "Movies", label: "Movies & Series" }]
+      : []),
+  ];
+
   return (
     <header className="catalog-header">
       <div className="header-left-section">
-        {provider === "local" && <h1 className="catalog-title">Home</h1>}
-        {provider === "provider" && <h1 className="catalog-title">Discover</h1>}
-        {provider === "mal" && <h1 className="catalog-title">Filters</h1>}
-        {provider === "provider" && type === "Anime" && (
-          <div className="discover-sub-tabs">
-            <button
-              onClick={() => onSubTabChange && onSubTabChange("latest")}
-              className={`discover-sub-tab ${discoverTab === "latest" ? "active" : ""}`}
-            >
-              Latest
-            </button>
-            <button
-              onClick={() => onSubTabChange && onSubTabChange("calendar")}
-              className={`discover-sub-tab ${discoverTab === "calendar" ? "active" : ""}`}
-            >
-              Airing Calendar
-            </button>
+        <div className="header-title-group">
+          {provider === "local" && <h1 className="catalog-title">Home</h1>}
+          {provider === "provider" && (
+            <h1 className="catalog-title">Discover</h1>
+          )}
+          {provider === "mal" && <h1 className="catalog-title">Filters</h1>}
+          {provider === "provider" && type === "Anime" && (
+            <div className="discover-sub-tabs">
+              <button
+                onClick={() => onSubTabChange && onSubTabChange("latest")}
+                className={`discover-sub-tab ${discoverTab === "latest" ? "active" : ""}`}
+              >
+                Latest
+              </button>
+              <button
+                onClick={() => onSubTabChange && onSubTabChange("calendar")}
+                className={`discover-sub-tab ${discoverTab === "calendar" ? "active" : ""}`}
+              >
+                Airing Calendar
+              </button>
+            </div>
+          )}
+        </div>
+
+        {showTypeToggle && (
+          <div className="mobile-only">
+            <Dropdown
+              value={type}
+              onChange={(val) => onTypeChange && onTypeChange(val)}
+              options={typeOptions}
+              className="header-type-dropdown"
+              minWidth={140}
+            />
           </div>
         )}
       </div>
@@ -78,30 +103,14 @@ export default function CatalogHeader({
       </div>
 
       {showTypeToggle && (
-        <div className="market-tabs-wrapper">
-          <button
-            type="button"
-            onClick={() => onTypeChange && onTypeChange("Anime")}
-            className={`market-tab-btn ${type === "Anime" ? "active" : ""}`}
-          >
-            Anime
-          </button>
-          <button
-            type="button"
-            onClick={() => onTypeChange && onTypeChange("Manga")}
-            className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
-          >
-            Manga
-          </button>
-          {provider !== "mal" && (
-            <button
-              type="button"
-              onClick={() => onTypeChange && onTypeChange("Movies")}
-              className={`market-tab-btn ${type === "Movies" ? "active" : ""}`}
-            >
-              Movies & Series
-            </button>
-          )}
+        <div className="header-right-section desktop-only">
+          <Dropdown
+            value={type}
+            onChange={(val) => onTypeChange && onTypeChange(val)}
+            options={typeOptions}
+            className="header-type-dropdown"
+            minWidth={160}
+          />
         </div>
       )}
     </header>

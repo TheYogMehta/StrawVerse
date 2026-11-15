@@ -717,19 +717,29 @@ async function continuousExecution() {
               return;
             }
 
-            currentTask.retryCount = (currentTask.retryCount || 0) + 1;
+            const isNonRetryable = Boolean(
+              err.message && err.message.includes("NO_SOURCES_AVAILABLE"),
+            );
+            currentTask.retryCount = isNonRetryable
+              ? 3
+              : (currentTask.retryCount || 0) + 1;
             const maxRetries = 3;
             if (currentTask.retryCount >= maxRetries) {
+              const friendlyMsg = isNonRetryable
+                ? err.message.replace(/^NO_SOURCES_AVAILABLE:\s*/, "")
+                : `${err.message} (max retries exceeded)`;
               logger.error(
-                `[queueWorker] Task ${currentTask?.epid} failed after ${maxRetries} retries: ${err.message}. Removing from queue.`,
+                `[queueWorker] Task ${currentTask?.epid} failed: ${friendlyMsg}. Removing from queue.`,
               );
               try {
                 const itemLabel = currentTask?.Title
                   ? `${currentTask.Title} (${currentTask?.Type === "Manga" ? "CHP" : "EP"} ${currentTask?.EpNum || ""})`
                   : "Download";
                 global.sendToRenderer("download-error", {
-                  title: "Download Failed",
-                  message: `${itemLabel}: ${err.message} (max retries exceeded)`,
+                  title: isNonRetryable
+                    ? "Episode Unavailable"
+                    : "Download Failed",
+                  message: `${itemLabel}: ${friendlyMsg}`,
                   epid: currentTask?.epid,
                 });
               } catch (ipcErr) {}
@@ -1004,13 +1014,6 @@ async function downloadEpisodeByQuality(
       }
     }
 
-    logger.info(
-      `[queueWorker] ${epid} phase: sources-${sourcesArray ? "ok" : "empty"}`,
-    );
-    if (!sourcesArray && lastFetchErr) {
-      throw new Error(`SCRAPER_TEMPORARY_ERROR: ${lastFetchErr.message}`);
-    }
-
     const extractSources = (srcObj, prefSubDub) => {
       if (!srcObj) return [];
       if (
@@ -1052,6 +1055,14 @@ async function downloadEpisodeByQuality(
             : []),
       ];
     };
+
+    const initialSources = extractSources(sourcesArray, subdub);
+    logger.info(
+      `[queueWorker] ${epid} phase: sources-${initialSources.length > 0 ? "ok" : "empty"}`,
+    );
+    if (!sourcesArray && lastFetchErr) {
+      throw new Error(`SCRAPER_TEMPORARY_ERROR: ${lastFetchErr.message}`);
+    }
 
     let sourcesList = extractSources(sourcesArray, subdub);
 
@@ -1107,6 +1118,14 @@ async function downloadEpisodeByQuality(
           `[Download] Stale-id refresh failed: ${refreshErr.message}`,
         );
       }
+    }
+
+    if (!sourcesList || sourcesList.length === 0) {
+      const provName =
+        provider?.provider_name || config?.Animeprovider || "provider";
+      throw new Error(
+        `NO_SOURCES_AVAILABLE: No stream sources found for this episode on ${provName}. The episode may not have aired or been uploaded yet.`,
+      );
     }
 
     let subtitles =
@@ -1245,7 +1264,8 @@ async function downloadEpisodeByQuality(
             if (!bestQualityFallback || qualHeight > bestFallbackHeight) {
               bestQualityFallback = candidate;
               bestFallbackHeight = qualHeight;
-              if (candidateSubtitles) bestFallbackSubtitles = candidateSubtitles;
+              if (candidateSubtitles)
+                bestFallbackSubtitles = candidateSubtitles;
             }
           }
         } else {

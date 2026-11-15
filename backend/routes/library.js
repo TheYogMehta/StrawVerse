@@ -696,8 +696,12 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
 // Delete Local Files
 router.post("/api/local/delete", async (req, res) => {
   try {
-    const { id, type = "Anime", numbers, subdub } = req.body;
-    if (!id || !numbers || !Array.isArray(numbers) || numbers.length === 0) {
+    const { id, type = "Anime", numbers, items, season, subdub } = req.body;
+    if (
+      !id ||
+      ((!numbers || !Array.isArray(numbers) || numbers.length === 0) &&
+        (!items || !Array.isArray(items) || items.length === 0))
+    ) {
       throw new Error("Missing or invalid parameters");
     }
 
@@ -708,45 +712,153 @@ router.post("/api/local/delete", async (req, res) => {
       throw new Error(`${type} folder not found on disk`);
     }
 
-    const files = await fs.promises.readdir(typeDir);
+    // Normalize targets to delete: [{ number, season }]
+    const targets = [];
+    if (Array.isArray(items) && items.length > 0) {
+      for (const it of items) {
+        if (!it) continue;
+        const n = parseFloat(it.number);
+        if (!isNaN(n)) {
+          const s =
+            it.season != null
+              ? parseInt(it.season, 10)
+              : season != null
+                ? parseInt(season, 10)
+                : null;
+          targets.push({ number: n, season: !isNaN(s) ? s : null });
+        }
+      }
+    }
+    if (Array.isArray(numbers) && numbers.length > 0) {
+      for (const num of numbers) {
+        if (num == null) continue;
+        const strNum = String(num).trim();
+        const sKeyMatch = strNum.match(/^s(\d+)_e(\d+(?:\.\d+)?)$/i);
+        if (sKeyMatch) {
+          targets.push({
+            season: parseInt(sKeyMatch[1], 10),
+            number: parseFloat(sKeyMatch[2]),
+          });
+        } else {
+          const n = parseFloat(strNum);
+          if (!isNaN(n)) {
+            const s = season != null ? parseInt(season, 10) : null;
+            // Only push if not already in targets
+            if (!targets.some((t) => t.number === n && t.season === s)) {
+              targets.push({ number: n, season: s });
+            }
+          }
+        }
+      }
+    }
+
+    if (targets.length === 0) {
+      throw new Error("No valid episode or chapter targets specified");
+    }
+
+    // Collect all candidate files: directly in typeDir and in immediate Season subdirectories
+    const candidateFiles = [];
+    const rootEntries = await fs.promises.readdir(typeDir, {
+      withFileTypes: true,
+    });
+
+    for (const entry of rootEntries) {
+      const fullPath = path.join(typeDir, entry.name);
+      if (entry.isDirectory()) {
+        const seasonMatch = entry.name.match(/Season\s*(\d+)/i);
+        const folderSeason = seasonMatch ? parseInt(seasonMatch[1], 10) : null;
+        try {
+          const subEntries = await fs.promises.readdir(fullPath, {
+            withFileTypes: true,
+          });
+          for (const sub of subEntries) {
+            if (sub.isFile()) {
+              candidateFiles.push({
+                name: sub.name,
+                fullPath: path.join(fullPath, sub.name),
+                folderSeason,
+                dirPath: fullPath,
+              });
+            }
+          }
+        } catch (_) {}
+      } else if (entry.isFile()) {
+        candidateFiles.push({
+          name: entry.name,
+          fullPath,
+          folderSeason: null,
+          dirPath: typeDir,
+        });
+      }
+    }
+
     let deletedCount = 0;
+    const modifiedDirs = new Set();
 
-    for (const num of numbers) {
-      const targetNum = parseFloat(num);
-      if (isNaN(targetNum)) continue;
-
-      const filesToDelete = files.filter((file) => {
+    for (const target of targets) {
+      const filesToDelete = candidateFiles.filter((cand) => {
         if (type === "Anime" || type === "Movies") {
-          if (!isVideoFile(file) && !isSubtitleFile(file)) {
+          if (!isVideoFile(cand.name) && !isSubtitleFile(cand.name)) {
             return false;
           }
-          return getEpisodeNumberFromFilename(file) === targetNum;
+          const epNum = getEpisodeNumberFromFilename(cand.name);
+          if (epNum !== target.number) return false;
+
+          // If season is known for target, match against filename or folder season
+          if (target.season !== null && target.season !== undefined) {
+            const sMatch = cand.name.match(/\bS(\d{1,3})E(?:p)?(\d+)\b/i);
+            const fileSeason = sMatch
+              ? parseInt(sMatch[1], 10)
+              : cand.folderSeason;
+            if (fileSeason !== null && fileSeason !== target.season) {
+              return false;
+            }
+          }
+          return true;
         } else {
           return (
-            isMangaFile(file) &&
-            getChapterNumberFromFilename(file) === targetNum
+            isMangaFile(cand.name) &&
+            getChapterNumberFromFilename(cand.name) === target.number
           );
         }
       });
 
       for (const fileToDelete of filesToDelete) {
         try {
-          await fs.promises.unlink(path.join(typeDir, fileToDelete));
+          await fs.promises.unlink(fileToDelete.fullPath);
           deletedCount++;
-        } catch (e) {}
+          if (fileToDelete.dirPath !== typeDir) {
+            modifiedDirs.add(fileToDelete.dirPath);
+          }
+        } catch (e) {
+          logger.warn(
+            `Failed to delete file ${fileToDelete.fullPath}: ${e.message}`,
+          );
+        }
       }
 
       if (type === "Anime") {
-        const cleanNum = Number.isInteger(targetNum)
-          ? Math.trunc(targetNum)
-          : targetNum;
+        const cleanNum = Number.isInteger(target.number)
+          ? Math.trunc(target.number)
+          : target.number;
         try {
           await run(
             "DELETE FROM SkipTimes WHERE (anime_id = ? OR anime_id LIKE ?) AND (episode_number = ? OR episode_number = ?)",
-            [id, `${id}-%`, cleanNum, targetNum],
+            [id, `${id}-%`, cleanNum, target.number],
           );
         } catch (_) {}
       }
+    }
+
+    // Clean up empty season subdirectories if all their files were deleted
+    for (const dir of modifiedDirs) {
+      try {
+        const remaining = await fs.promises.readdir(dir);
+        if (remaining.length === 0) {
+          await fs.promises.rmdir(dir);
+          logger.info(`Removed empty season subfolder: ${dir}`);
+        }
+      } catch (_) {}
     }
 
     if (type === "Anime") {

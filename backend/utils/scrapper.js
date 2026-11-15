@@ -934,6 +934,16 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
             console.log(
               `[Bypass] Solved challenge and obtained cf_clearance for ${domain}: "${title}"`,
             );
+            for (let settle = 0; settle < 6; settle++) {
+              if (
+                !global.ScrapperWindow?.webContents?.isLoading() &&
+                global.ScrapperWindow?.getTitle() !==
+                  "StrawVerse - Verification"
+              ) {
+                break;
+              }
+              await sleep(500);
+            }
             break;
           }
 

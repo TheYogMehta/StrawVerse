@@ -2280,9 +2280,7 @@ export default function Catalog({
         onToggleFilter={() => setIsFilterPanelOpen((prev) => !prev)}
         activeFilterCount={activeFilterCount}
         showFilterToggle={
-          type !== "Movies" &&
-          (provider === "mal" ||
-            (provider === "provider" && Boolean(availableFilters)))
+          type !== "Movies" && (provider === "mal" || provider === "provider")
         }
         catalogSource={catalogSource}
         onCatalogSourceChange={handleCatalogSourceChange}
@@ -2306,7 +2304,7 @@ export default function Catalog({
       />
 
       {/* Universal Filter panel */}
-      {provider === "mal" && type !== "Movies" && (
+      {provider === "mal" && type !== "Movies" && isFilterPanelOpen && (
         <div className="filter-panel">
           <div className="filter-panel-header">
             <div className="filter-panel-left">
@@ -2502,31 +2500,21 @@ export default function Catalog({
       )}
 
       {/* Discover Provider-native Filter panel */}
-      {provider === "provider" && type !== "Movies" && availableFilters && (
+      {provider === "provider" && type !== "Movies" && isFilterPanelOpen && (
         <div className="filter-panel">
           <div className="filter-panel-header">
             <div className="filter-panel-left">
               <div className="filter-panel-title">
                 <SlidersHorizontal size={15} />
                 <span>Filters</span>
-                {Object.keys(activeFilters).filter(
-                  (k) => k !== "page" && activeFilters[k],
-                ).length > 0 && (
+                {activeFilterCount > 0 && (
                   <span className="filter-count-label">
-                    (
-                    {
-                      Object.keys(activeFilters).filter(
-                        (k) => k !== "page" && activeFilters[k],
-                      ).length
-                    }{" "}
-                    active)
+                    ({activeFilterCount} active)
                   </span>
                 )}
               </div>
             </div>
-            {Object.keys(activeFilters).filter(
-              (k) => k !== "page" && activeFilters[k],
-            ).length > 0 && (
+            {activeFilterCount > 0 && (
               <button
                 type="button"
                 onClick={handleResetFilters}
@@ -2553,22 +2541,25 @@ export default function Catalog({
                 <option value="not_downloaded">Not Downloaded</option>
               </select>
             </div>
-            {Object.entries(availableFilters).map(([key, filter]) => (
-              <div key={key} className="filter-group">
-                <label className="filter-label">{filter.label}</label>
-                <select
-                  value={activeFilters[key] || ""}
-                  onChange={(e) => handleFilterChange(key, e.target.value)}
-                  className={`filter-select ${activeFilters[key] ? "is-active" : ""}`}
-                >
-                  {Object.entries(filter.options).map(([optLabel, optVal]) => (
-                    <option key={optLabel} value={optVal}>
-                      {optLabel}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))}
+            {availableFilters &&
+              Object.entries(availableFilters).map(([key, filter]) => (
+                <div key={key} className="filter-group">
+                  <label className="filter-label">{filter.label}</label>
+                  <select
+                    value={activeFilters[key] || ""}
+                    onChange={(e) => handleFilterChange(key, e.target.value)}
+                    className={`filter-select ${activeFilters[key] ? "is-active" : ""}`}
+                  >
+                    {Object.entries(filter.options).map(
+                      ([optLabel, optVal]) => (
+                        <option key={optLabel} value={optVal}>
+                          {optLabel}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+              ))}
           </div>
         </div>
       )}

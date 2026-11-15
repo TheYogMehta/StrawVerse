@@ -9,9 +9,11 @@ import {
   Trash2,
   X,
   RotateCcw,
+  ChevronDown,
 } from "lucide-react";
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
+import Dropdown from "./common/Dropdown";
 import "./css/Marketplace.css";
 
 export default function Marketplace({ initialType }) {
@@ -560,7 +562,8 @@ export default function Marketplace({ initialType }) {
     if (selectedRepoFilter !== "all") {
       const filterLower = selectedRepoFilter.toLowerCase();
       const pRepo = (
-        provider.repoId || `${provider.repoOwner || ""}/${provider.repoName || ""}`
+        provider.repoId ||
+        `${provider.repoOwner || ""}/${provider.repoName || ""}`
       ).toLowerCase();
       if (pRepo !== filterLower) {
         return false;
@@ -576,26 +579,17 @@ export default function Marketplace({ initialType }) {
           <h1 className="market-title">Extensions</h1>
 
           <div className="market-header-actions">
-            <div className="market-tabs-wrapper">
-              <button
-                onClick={() => setActiveType("Anime")}
-                className={`market-tab-btn ${activeType === "Anime" ? "active" : ""}`}
-              >
-                Anime
-              </button>
-              <button
-                onClick={() => setActiveType("Manga")}
-                className={`market-tab-btn ${activeType === "Manga" ? "active" : ""}`}
-              >
-                Manga
-              </button>
-              <button
-                onClick={() => setActiveType("Movies")}
-                className={`market-tab-btn ${activeType === "Movies" ? "active" : ""}`}
-              >
-                Movies & Series
-              </button>
-            </div>
+            <Dropdown
+              value={activeType}
+              onChange={(val) => setActiveType(val)}
+              options={[
+                { value: "Anime", label: "Anime" },
+                { value: "Manga", label: "Manga" },
+                { value: "Movies", label: "Movies & Series" },
+              ]}
+              className="header-type-dropdown"
+              minWidth={160}
+            />
 
             <button
               onClick={handleAddRepository}
@@ -625,9 +619,7 @@ export default function Marketplace({ initialType }) {
                 <option value="all">All Repositories ({repos.length})</option>
                 {repos.map((r) => {
                   const val = r.id || `${r.owner}/${r.name}`;
-                  const label = r.name
-                    ? `${r.owner}/${r.name}`
-                    : `@${r.owner}`;
+                  const label = r.name ? `${r.owner}/${r.name}` : `@${r.owner}`;
                   return (
                     <option key={val} value={val}>
                       {label} {r.isDefault ? "(Official)" : ""}
