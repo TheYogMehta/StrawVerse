@@ -1775,6 +1775,7 @@ async function playInMpv(window, options) {
         DBIN_MANAGED: "1",
         APPIMAGE_SILENT: "1",
         NO_UPDATE_CHECK: "1",
+        DISABLE_AUTO_UPDATES: "1",
       },
     });
     global.activeMpvProcess = mpvProcess;
@@ -1820,7 +1821,10 @@ async function playInMpv(window, options) {
       if (
         m.includes("mpv is up to date") ||
         m.includes("mpv up to date") ||
-        m.includes("self updates disabled")
+        m.includes("self updates disabled") ||
+        m.includes("appimageupdatetool") ||
+        m.includes("mpv update check failed") ||
+        m.includes("locale not supported by c library")
       )
         return true;
       if (
