@@ -2,10 +2,45 @@
 
 # [12.0.0] - 2026-11-15
 
-### UI & Cleanup
+### Brand New "Movies & Series" Section
 
-- **Mobile Optimization:** Optimize mobile catalog layouts, header filters, and separate Anime vs Movies stats.
-- **Refactoring & Cleanups:** Remove deprecated `apiAdapter.js` and clean up unused variables across components.
+- **Dedicated Movies & TV Shows Section:** StrawVerse now includes a dedicated "Movies & Series" category alongside Anime and Manga! Browse, stream, and download movies and television shows.
+- **Full Multi-Season Support:** Watch and track multi-season TV shows effortlessly. Enjoy season selectors, season badges, and season-aware episode progress tracking that remembers where you left off.
+- **Custom Download Location:** Set an independent download directory for Movies & Series (`Downloads/MoviesSeries` on desktop or mobile) without cluttering your Anime or Manga folders.
+- **Separate Library Statistics:** Your Home page now displays separate watch time, episode counts, and total series counters for Movies & Series.
+- **Custom Tags for Series:** Organize your collection with custom tags created specifically for movies and TV shows.
+
+### Video Quality Selection & Smarter Downloads
+
+- **Choose Video Quality per Download:** When downloading an episode, a clean prompt lets you choose your preferred video resolution (1080p, 720p, 480p, 360p) along with audio language (Sub/Dub).
+- **Resolution-Aware Server Matching:** The downloader automatically searches for and selects the server that actually provides your chosen quality instead of defaulting to lower-resolution streams.
+- **Minimum Download Speed Floor:** Set a minimum download speed in Settings. If a download server throttles or slows down, StrawVerse automatically boosts parallel connections and switches to a faster mirror without failing your download.
+- **Detailed Queue Notifications:** Adding multiple episodes now clearly tells you if any were skipped and why (e.g. _"Ep 2 was not added as it's already in queue. 4 other episodes added to queue!"_), avoiding false error alerts.
+
+### Multi-Repository Extensions & Marketplace
+
+- **Multiple Extension Repositories:** You can now add multiple custom extension repositories from different GitHub developers or sources to expand your provider catalog.
+- **Repository Manager & Filtering:** Easily view all added repositories, see extension counts, filter extensions by repository, or remove custom repositories directly from the new "Repos" menu.
+- **Clean Extension Catalog:** Resolved ghost cards and duplicates so your marketplace stays clean, organized, and reliable.
+
+### Refined UI & Mobile Experience
+
+- **Custom Settings-Style Dropdowns:** Replaced standard browser dropdown boxes across Home, Discover, Airing Calendar, Filters, and Extensions with sleek, dark custom dropdown menus matching the app's modern aesthetic.
+- **Clean Header Layout:** Moved the media type selector to the top right of the header bar for quicker switching and a more balanced view on both desktop and mobile.
+- **Fitted Mobile Library Stats:** Redesigned mobile library stat cards so all three stats (Watch Time, Episodes, and Total Series) fit comfortably side-by-side without horizontal scrolling or text cutoff.
+- **Smooth Mobile Settings Navigation:** Swiping or tapping tabs in Settings now automatically scrolls the active tab into view smoothly.
+- **Mobile Filter Drawer:** Fixed the Filters toggle button on phones in Discover and Filters views so you can easily filter genres and release seasons on mobile devices.
+
+### Playback & Performance Improvements
+
+- **Cleaner Linux Player Experience:** Suppressed background updater checks and log spam for MPV AppImage packages on Linux.
+- **Separate Audio Track Downloads:** Fixed downloads for streams that host audio on a separate track.
+- **Unreleased Episode Safety:** Prevented scraper retries and rate limiting when attempting to download projected episodes that have not yet aired or have no stream sources.
+
+### Special Thanks to Contributors
+
+- Special thanks to **@cyber-winner** for architecting the Movies & Series section, multi-repository marketplace support, and download queue stability fixes!
+- Special thanks to **@Buff-alo** for implementing download video quality selection, smart server matching, and the minimum download speed mirror failover system!
 
 # [11.2.1] - 2026-11-09
 
