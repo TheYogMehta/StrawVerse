@@ -133,8 +133,8 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
   log "Building for macOS (DMG & ZIP)..."
   npx electron-builder --mac dmg zip --arm64
 else
-  log "Building for Windows (x64), Linux (x64) & macOS (arm64)..."
-  npx electron-builder --win --linux --mac
+  log "Building for Windows (x64), Linux (x64) & macOS (arm64 ZIP)..."
+  npx electron-builder --win --linux --mac zip
 fi
 ok "Desktop packaging complete"
 
