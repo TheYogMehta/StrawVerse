@@ -290,6 +290,11 @@ export default function VideoPlayer({
     );
 
     return () => {
+      try {
+        if (window.sharedStateAPI?.controlMpv) {
+          window.sharedStateAPI.controlMpv("quit", []);
+        }
+      } catch (_) {}
       removeMpvStartedListener();
       removeMpvLoadingListener();
       removeMpvActionListener();
