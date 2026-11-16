@@ -10,6 +10,9 @@
 
 ### Crash Diagnostics & Application Stability
 
+- **Native Bridge Memory Safeguard & OOM Prevention:** Enforced a 30 MB buffer limit on `nativeRequest` in `CloudflareBypassPlugin.java` to prevent Dalvik OutOfMemory crashes when large media chunks or video streams are fetched. Added graceful `Throwable` trapping with clean rejection to Node.js and automatic fallback to Node's native HTTP adapter.
+- **Stream Request Bridge Bypass:** Prevented streaming requests (`responseType: "stream"`) in `nativeAxiosAdapter` from routing through the native bridge buffer, ensuring video and audio streams bypass in-memory buffering without heap exhaustion.
+- **Database Migration Schema Alignment:** Fixed an SQLite startup error (`table Movies has no column named MalID`) by removing the non-existent `MalID` column from the automatic movie migration query in `backend/utils/db.js`.
 - **Persistent Session Logs:** Resolved an issue where `app.log` was wiped on application launch, erasing crash diagnostics. The previous session is now archived to `app-previous.log` and visible in the in-app Logs tab under `PREVIOUS SESSION`.
 - **Fatal Process Exception Trapping:** Added synchronous crash logging for uncaught Node.js exceptions and unhandled promise rejections to prevent silent background process terminations.
 - **Android Native Crash Handler:** Installed a global uncaught exception handler in `MainActivity.java` that records native Android runtime crash logs to disk (`Strawverse/data/crash.log`).

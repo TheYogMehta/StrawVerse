@@ -53,6 +53,7 @@ public class CloudflareBypassPlugin extends Plugin {
     private final List<Runnable> pendingTasks = new ArrayList<>();
     private final List<PluginCall> pendingTaskCalls = new ArrayList<>();
     private final Map<String, PluginCall> activeFetchCalls = new java.util.concurrent.ConcurrentHashMap<>();
+    public static final long MAX_NATIVE_REQUEST_BYTES = 30 * 1024 * 1024L; // 30 MB max buffer to avoid OOM
 
     private void sendNativeResponseToNode(String requestId, boolean success, JSONObject response, String error) {
         try {
@@ -1067,13 +1068,29 @@ public class CloudflareBypassPlugin extends Plugin {
                             : conn.getErrorStream();
                         break;
                     }
+
+                    long contentLengthLong = conn.getContentLengthLong();
+                    if (contentLengthLong > MAX_NATIVE_REQUEST_BYTES) {
+                        throw new java.io.IOException("Response body exceeds maximum allowed native buffer size (" 
+                            + contentLengthLong + " bytes > " + MAX_NATIVE_REQUEST_BYTES 
+                            + " bytes). Large responses must use direct streaming or downloading.");
+                    }
                         
                     byte[] responseBytes;
                     if (is != null) {
-                        try (java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream()) {
-                            byte[] buffer = new byte[4096];
+                        int initialCap = (contentLengthLong > 0 && contentLengthLong <= 1024 * 1024) 
+                            ? (int) contentLengthLong 
+                            : 8192;
+                        try (java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream(initialCap)) {
+                            byte[] buffer = new byte[8192];
                             int len;
+                            long totalRead = 0;
                             while ((len = is.read(buffer)) != -1) {
+                                totalRead += len;
+                                if (totalRead > MAX_NATIVE_REQUEST_BYTES) {
+                                    throw new java.io.IOException("Response body exceeded maximum allowed native buffer size (" 
+                                        + MAX_NATIVE_REQUEST_BYTES + " bytes). Large responses must use direct streaming or downloading.");
+                                }
                                 bos.write(buffer, 0, len);
                             }
                             responseBytes = bos.toByteArray();
@@ -1109,9 +1126,11 @@ public class CloudflareBypassPlugin extends Plugin {
                     String reqId = call.getString("requestId", call.getCallbackId());
                     sendNativeResponseToNode(reqId, true, ret, null);
 
-                } catch (Exception e) {
+                } catch (Throwable e) {
                     Log.e("StrawVerseBypass", "nativeRequest failed for " + currentUrl, e);
-                    String errMsg = "Native request failed: " + e.getMessage();
+                    String errMsg = (e instanceof OutOfMemoryError)
+                        ? "Native request ran out of memory buffering response"
+                        : ("Native request failed: " + e.getMessage());
                     call.reject(errMsg);
                     String reqId = call.getString("requestId", call.getCallbackId());
                     sendNativeResponseToNode(reqId, false, null, errMsg);

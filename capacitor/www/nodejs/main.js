@@ -388,7 +388,8 @@ async function boot() {
       }
       if (
         (config.strawverseDirectHttp === true ||
-          global.__isBackgroundDownload?.()) &&
+          global.__isBackgroundDownload?.() ||
+          config.responseType === "stream") &&
         config._forceNativeBridge !== true
       ) {
         return defaultAdapter(config);
