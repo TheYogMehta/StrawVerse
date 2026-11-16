@@ -6,6 +6,7 @@ const { getQueue, updateQueue, isQueuePaused } = require("../utils/queue");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getCurrentAppVersion } = require("../utils/constants");
 const { getChangelog } = require("../utils/changelog");
+const { checkForMappingUpdates } = require("../utils/mappingUpdater");
 
 const router = express.Router();
 
@@ -46,6 +47,23 @@ router.get("/api/changelog", (req, res) => {
   } catch (err) {
     logger.error("Failed to read changelog: " + err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Force-refresh the mapping database (Settings → General → Sync now)
+router.post("/api/mapping/refresh", async (req, res) => {
+  try {
+    const type =
+      req.body?.type === "Anime"
+        ? "Anime"
+        : req.body?.type === "Manga"
+          ? "Manga"
+          : null;
+    await checkForMappingUpdates(true, type); // force bypasses the auto-sync gate
+    res.json({ success: true, type: type || "all" });
+  } catch (err) {
+    logger.error("Mapping refresh failed: " + err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 

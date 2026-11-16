@@ -1660,6 +1660,13 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           );
         }
 
+        // Poison guard: a row whose id is just the MalID echoed back has no
+        // real provider id (fetching it 404s) — drop it so the caller falls
+        // through to unmapped handling instead of a dead-end provider link.
+        Downloads = (Downloads || []).filter(
+          (d) => String(d.id) !== String(d.MalID || ""),
+        );
+
         if (Downloads?.length > 0) {
           const mainDownload =
             Downloads.find(
@@ -1785,6 +1792,12 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
         if (downloadsList.length === 0 && mainRecord) {
           downloadsList = [mainRecord];
         }
+
+        // Poison guard: same as Anime — id === MalID rows carry no real
+        // provider id, so drop them instead of serving a dead-end link.
+        downloadsList = (downloadsList || []).filter(
+          (d) => String(d.id) !== String(d.MalID || ""),
+        );
 
         if (downloadsList.length > 0) {
           const firstRecord =

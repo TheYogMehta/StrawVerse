@@ -511,8 +511,10 @@ async function getBestProviderForMalId(
           preferredMeta.table_name === "pahe" ? "id, uuid" : "id";
         try {
           const row = await mappingQueryOne(
-            `SELECT ${selectCol} FROM "${preferredMeta.table_name}" WHERE malid = ? LIMIT 1`,
-            [numMalId],
+            // id = malid is a poisoned link (the malid was stored as the
+            // provider id) — skip it so callers fall back to auto-learning.
+            `SELECT ${selectCol} FROM "${preferredMeta.table_name}" WHERE malid = ? AND CAST(id AS TEXT) != ? LIMIT 1`,
+            [numMalId, String(numMalId)],
           );
           if (row) {
             const resolvedId =
@@ -532,8 +534,8 @@ async function getBestProviderForMalId(
       const selectCol = p.table_name === "pahe" ? "id, uuid" : "id";
       try {
         const row = await mappingQueryOne(
-          `SELECT ${selectCol} FROM "${p.table_name}" WHERE malid = ? LIMIT 1`,
-          [numMalId],
+          `SELECT ${selectCol} FROM "${p.table_name}" WHERE malid = ? AND CAST(id AS TEXT) != ? LIMIT 1`,
+          [numMalId, String(numMalId)],
         );
         if (row) {
           const resolvedId =

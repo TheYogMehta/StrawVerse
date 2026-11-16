@@ -47,6 +47,50 @@ const MAPPING_API_BASE =
 // Remembered here so later requests skip only the broken table.
 const syncFailedTables = new Set();
 
+// The mapping sync runs once at boot. Each side (anime / manga) has its own
+// toggle and freshness stamp: skip it when that side's auto-sync is off in
+// settings, or when its last successful sync is newer than this — a no-op
+// round trip on every launch buys nothing.
+const MAPPING_SYNC_TTL_MS = 24 * 60 * 60 * 1000;
+
+async function shouldAutoSyncMapping(type = "Anime") {
+  const isManga = type === "Manga";
+  try {
+    const toggle = await getKeyValue(
+      "Settings",
+      isManga ? "mappingAutoSyncManga" : "mappingAutoSyncAnime",
+    );
+    // Pre-split builds stored one combined toggle; honor it until each side
+    // has been set explicitly.
+    const legacy = await getKeyValue("Settings", "mappingAutoSync");
+    if (toggle === false || (toggle === null && legacy === false)) {
+      logger.info(
+        `[mappingUpdater] ${type} auto-sync disabled in settings; skipping.`,
+      );
+      return false;
+    }
+    let last =
+      Number(
+        await getKeyValue(
+          "Settings",
+          isManga ? "mappingLastSyncManga" : "mappingLastSyncAnime",
+        ),
+      ) || 0;
+    if (!last) {
+      last = Number(await getKeyValue("Settings", "mappingLastSync")) || 0;
+    }
+    if (last && Date.now() - last < MAPPING_SYNC_TTL_MS) {
+      logger.info(
+        `[mappingUpdater] ${type} mapping data is fresh; skipping sync.`,
+      );
+      return false;
+    }
+  } catch (_) {
+    // Unreadable settings: sync anyway (previous behavior).
+  }
+  return true;
+}
+
 async function dropAllTriggers() {
   try {
     const triggers = await mappingQueryAll(
@@ -613,40 +657,53 @@ async function checkCanaries(osName) {
   } catch (_) {}
 }
 
-async function checkForMappingUpdates(force = false) {
-  logger.info("[mappingUpdater] Checking for mapping database updates...");
+async function checkForMappingUpdates(force = false, type = null) {
+  const scope =
+    type === "Anime"
+      ? ["Anime"]
+      : type === "Manga"
+        ? ["Manga"]
+        : ["Anime", "Manga"];
+  const enabled = [];
+  for (const t of scope) {
+    if (force || (await shouldAutoSyncMapping(t))) enabled.push(t);
+  }
+  if (enabled.length === 0) return;
+  const syncAnime = enabled.includes("Anime");
+  const syncManga = enabled.includes("Manga");
+  logger.info(
+    `[mappingUpdater] Checking for mapping database updates (${enabled.join(", ")})...`,
+  );
 
   await dropAllTriggers();
   await ensureMappingTablesExist();
 
+  const animeProviders = new Set();
+  const mangaProviders = new Set();
+  const collect = (map, target) => {
+    if (!map) return;
+    for (const p of Object.values(map)) {
+      if (p?.name) {
+        const clean = String(p.name).toLowerCase().trim().split("/").pop();
+        if (clean) target.add(clean);
+      }
+    }
+  };
+  collect(global.Anime_providers, animeProviders);
+  collect(global.Manga_providers, mangaProviders);
+
   const installedProviders = new Set();
-  if (global.Anime_providers) {
-    for (const p of Object.values(global.Anime_providers)) {
-      if (p?.name) {
-        const clean = String(p.name).toLowerCase().trim().split("/").pop();
-        if (clean) installedProviders.add(clean);
-      }
-    }
-  }
-  if (global.Manga_providers) {
-    for (const p of Object.values(global.Manga_providers)) {
-      if (p?.name) {
-        const clean = String(p.name).toLowerCase().trim().split("/").pop();
-        if (clean) installedProviders.add(clean);
-      }
-    }
-  }
+  if (syncAnime) for (const prov of animeProviders) installedProviders.add(prov);
+  if (syncManga) for (const prov of mangaProviders) installedProviders.add(prov);
 
   for (const prov of installedProviders) {
     await ensureProviderTable(prov);
   }
 
-  const tablesToSync = [
-    "anime",
-    "manga",
-    "next_episodes",
-    ...Array.from(installedProviders),
-  ];
+  const tablesToSync = [];
+  if (syncAnime) tablesToSync.push("anime", "next_episodes");
+  if (syncManga) tablesToSync.push("manga");
+  for (const prov of installedProviders) tablesToSync.push(prov);
   const reqTables = {};
 
   for (const tbl of tablesToSync) {
@@ -727,6 +784,13 @@ async function checkForMappingUpdates(force = false) {
     return res.data || null;
   };
 
+  let syncSucceeded = false;
+  const scopeLabel =
+    syncAnime && syncManga
+      ? "Mapping database"
+      : syncAnime
+        ? "Anime mapping"
+        : "Manga mapping";
   const applyData = async (data, label) => {
     if (!data) return;
     if (
@@ -734,9 +798,11 @@ async function checkForMappingUpdates(force = false) {
       (!data.tables || Object.keys(data.tables).length === 0)
     ) {
       logger.info(`[mappingUpdater] ${label} is already up to date.`);
+      syncSucceeded = true;
       return;
     }
     const changed = await applySyncResponse(data);
+    syncSucceeded = true;
     logger.info(
       changed
         ? `[mappingUpdater] ${label} sync completed successfully.`
@@ -748,7 +814,7 @@ async function checkForMappingUpdates(force = false) {
   try {
     await applyData(
       await postSync(liveTables, liveUnmapped),
-      "Mapping database",
+      scopeLabel,
     );
   } catch (err) {
     const status = err.response && err.response.status;
@@ -813,6 +879,17 @@ async function checkForMappingUpdates(force = false) {
         }
       }
     }
+  }
+
+  if (syncSucceeded) {
+    try {
+      if (syncAnime) {
+        await setKeyValue("Settings", "mappingLastSyncAnime", Date.now());
+      }
+      if (syncManga) {
+        await setKeyValue("Settings", "mappingLastSyncManga", Date.now());
+      }
+    } catch (_) {}
   }
 
   try {

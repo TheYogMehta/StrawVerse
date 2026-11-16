@@ -171,6 +171,7 @@ export default function SettingsView({
   const [maxLogFiles, setMaxLogFiles] = useState(5);
   const [logDirectory, setLogDirectory] = useState("");
   const [autoSkipIntro, setAutoSkipIntro] = useState(true);
+  const [syncingMapping, setSyncingMapping] = useState(null);
   const [infoRecCount, setInfoRecCount] = useState(4);
   const [subFontSize, setSubFontSize] = useState(46);
   const [subColor, setSubColor] = useState("#FFFFFF");
@@ -942,6 +943,47 @@ export default function SettingsView({
     }
   };
 
+  // Mapping auto-sync saves directly instead of through the debounced form
+  // state: it only affects the backend's boot-time sync, not a form field.
+  const mappingToggleKey = (type) =>
+    type === "Manga" ? "mappingAutoSyncManga" : "mappingAutoSyncAnime";
+
+  const handleMappingAutoSyncChange = async (val, type) => {
+    const value = val === "true";
+    const key = mappingToggleKey(type);
+    setSettings((prev) => ({ ...(prev || {}), [key]: value }));
+    try {
+      if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+        await window.sharedStateAPI.updateSetting(key, value);
+      } else {
+        const res = await apiPost("/api/settings/update", { [key]: value });
+        if (res && res.success === false) {
+          throw new Error(res.error || "Save failed");
+        }
+      }
+    } catch (err) {
+      swalError("Error Saving Settings", err.message);
+    }
+  };
+
+  const handleSyncMappingNow = async (type) => {
+    setSyncingMapping(type);
+    try {
+      const res = await apiPost("/api/mapping/refresh", { type });
+      if (res && res.success === false) {
+        throw new Error(res.error || "Sync failed");
+      }
+      swalSuccess(
+        "Mapping Updated",
+        `The ${type.toLowerCase()} mapping database is up to date.`,
+      );
+    } catch (err) {
+      swalError("Sync Failed", err.message);
+    } finally {
+      setSyncingMapping(null);
+    }
+  };
+
   const autoSaveSettings = async () => {
     const finalLimit = parseInt(imageCacheSizeLimit, 10);
     const isValidLimit = !isNaN(finalLimit) && finalLimit >= 5;
@@ -1460,6 +1502,68 @@ export default function SettingsView({
                     ]}
                     minWidth={200}
                   />
+                </SettingsRow>
+                <SettingsRow
+                  label="Anime Mapping Auto-Sync"
+                  desc="Refresh anime title-to-MAL mappings when the app starts, at most once a day. Turn off to keep the current anime mapping data and skip the sync entirely."
+                >
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <Dropdown
+                      value={String(
+                        settings?.mappingAutoSyncAnime ??
+                          (settings?.mappingAutoSync !== false),
+                      )}
+                      onChange={(val) =>
+                        handleMappingAutoSyncChange(val, "Anime")
+                      }
+                      options={[
+                        { value: "true", label: "On" },
+                        { value: "false", label: "Off" },
+                      ]}
+                      minWidth={110}
+                    />
+                    <button
+                      type="button"
+                      className="settings-market-btn"
+                      disabled={syncingMapping === "Anime"}
+                      onClick={() => handleSyncMappingNow("Anime")}
+                    >
+                      {syncingMapping === "Anime" ? "Syncing..." : "Sync now"}
+                    </button>
+                  </div>
+                </SettingsRow>
+                <SettingsRow
+                  label="Manga Mapping Auto-Sync"
+                  desc="Refresh manga title-to-MAL mappings when the app starts, at most once a day. Turn off to keep the current manga mapping data and skip the sync entirely."
+                >
+                  <div
+                    style={{ display: "flex", gap: 8, alignItems: "center" }}
+                  >
+                    <Dropdown
+                      value={String(
+                        settings?.mappingAutoSyncManga ??
+                          (settings?.mappingAutoSync !== false),
+                      )}
+                      onChange={(val) =>
+                        handleMappingAutoSyncChange(val, "Manga")
+                      }
+                      options={[
+                        { value: "true", label: "On" },
+                        { value: "false", label: "Off" },
+                      ]}
+                      minWidth={110}
+                    />
+                    <button
+                      type="button"
+                      className="settings-market-btn"
+                      disabled={syncingMapping === "Manga"}
+                      onClick={() => handleSyncMappingNow("Manga")}
+                    >
+                      {syncingMapping === "Manga" ? "Syncing..." : "Sync now"}
+                    </button>
+                  </div>
                 </SettingsRow>
               </div>
               {/* MyAnimeList Connection */}

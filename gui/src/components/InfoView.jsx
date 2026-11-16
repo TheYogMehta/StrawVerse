@@ -184,10 +184,13 @@ export default function InfoView({
     if (!q) return;
     setIsSearchingMapping(true);
     try {
-      const apiType = type ? type.toLowerCase() : "anime";
-      const res = await fetch(
-        `https://strawverse.theyogmehta.online/api/search/${apiType}?q=${encodeURIComponent(q)}&limit=15`,
-      );
+      // Local mapping.db catalog (title substring or exact malid) — the old
+      // remote search was title-only and empty for anything the server lacked.
+      const res = await fetch("/api/mapping/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q, type: type || "Anime" }),
+      });
       const data = await res.json();
       if (data && Array.isArray(data.results)) {
         setMappingResults(data.results);
@@ -3930,7 +3933,32 @@ export default function InfoView({
       {/* Episodes / Chapters List */}
       <div className="items-section">
         <div className="section-header">
-          <h2>{type === "Anime" ? "Episodes List" : "Chapters List"}</h2>
+          <div
+            style={{
+              display: "flex",
+              width: "100%",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <h2>{type === "Anime" ? "Episodes List" : "Chapters List"}</h2>
+            <button
+              type="button"
+              className="btn-back"
+              disabled={itemsLoading}
+              onClick={() => fetchItems(1, details?.provider, details)}
+              style={{
+                margin: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                opacity: itemsLoading ? 0.6 : 1,
+              }}
+            >
+              <RotateCcw size={15} />
+              <span>{itemsLoading ? "Refreshing..." : "Refresh"}</span>
+            </button>
+          </div>
         </div>
         {episodesOrChapters.length > 0 && (
           <div className="bulk-actions">

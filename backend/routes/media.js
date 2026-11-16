@@ -27,7 +27,14 @@ const {
   getSourceById,
   FindMapping,
 } = require("../utils/Metadata");
-const { getKeyValue, queryOne, queryAll, run } = require("../utils/db");
+const {
+  getKeyValue,
+  queryOne,
+  queryAll,
+  run,
+  mappingQueryOne,
+  mappingQueryAll,
+} = require("../utils/db");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getHeaders } = require("../utils/proxyHeaders");
 const { isAdSegmentUrl } = require("../utils/adSegments");
@@ -2031,6 +2038,120 @@ async function healProviderId(
   return null;
 }
 
+function normalizeTitle(t) {
+  return String(t || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Confident title match only: a learned link is written once and never
+// overwritten, so near-misses are left to the manual link UI instead.
+function titlesMatch(a, b) {
+  const na = normalizeTitle(a);
+  const nb = normalizeTitle(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const bigrams = (s) => {
+    const set = new Set();
+    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+    return set;
+  };
+  const A = bigrams(na);
+  const B = bigrams(nb);
+  if (!A.size || !B.size) return false;
+  let overlap = 0;
+  for (const g of A) if (B.has(g)) overlap++;
+  return (2 * overlap) / (A.size + B.size) >= 0.86;
+}
+
+// A MAL entry with no provider link: search the installed scrapers for its
+// title and remember the match in the mapping db so it resolves from now on.
+async function autoLearnProviderLink(malid, mediaType, preferred) {
+  const numMalId = Number(malid);
+  if (!Number.isInteger(numMalId) || numMalId <= 0) return null;
+
+  let title = "";
+  try {
+    const malTable = mediaType === "Manga" ? "manga" : "anime";
+    const row = await mappingQueryOne(
+      `SELECT title FROM "${malTable}" WHERE malid = ? LIMIT 1`,
+      [numMalId],
+    );
+    title = row?.title || "";
+  } catch (_) {}
+  if (!title && global.db) {
+    try {
+      const row = await global.db
+        .prepare(`SELECT title FROM ${mediaType} WHERE MalID = ? LIMIT 1`)
+        .get(numMalId);
+      title = row?.title || "";
+    } catch (_) {}
+  }
+  if (!title) {
+    logger.info(
+      `[autoMapping] No title known for ${mediaType} malid ${numMalId}; cannot auto-learn a provider link`,
+    );
+    return null;
+  }
+
+  const pMap =
+    mediaType === "Anime" ? global.Anime_providers : global.Manga_providers;
+  const candidates = [];
+  const seen = new Set();
+  for (const [key, scraper] of Object.entries(pMap || {})) {
+    if (!scraper || seen.has(scraper) || typeof scraper.name !== "string")
+      continue;
+    seen.add(scraper);
+    candidates.push({ key, scraper });
+  }
+  const prefLower = String(preferred || "").toLowerCase();
+  const score = (c) =>
+    Number(
+      c.key.toLowerCase() === prefLower ||
+        c.scraper.name.toLowerCase() === prefLower,
+    );
+  candidates.sort((a, b) => score(b) - score(a));
+
+  // shortcut: 3 network searches max per unmapped entry; raise if long-tail titles keep missing
+  for (const { key, scraper } of candidates.slice(0, 3)) {
+    try {
+      const pObj = {
+        provider: scraper,
+        provider_name: scraper.name,
+        name: scraper.name,
+      };
+      const data =
+        mediaType === "Anime"
+          ? await animesearch(pObj, title)
+          : await MangaSearch(pObj, title);
+      const results = data?.results || data?.data || [];
+      const match = results.find(
+        (r) => r?.id != null && r?.title && titlesMatch(title, r.title),
+      );
+      if (!match) continue;
+
+      await learnProviderLinks([
+        { provider: key, id: match.id, malid: numMalId },
+      ]);
+      logger.info(
+        `[autoMapping] Linked ${mediaType} malid ${numMalId} ("${title}") -> ${scraper.name}/${match.id}`,
+      );
+      return { id: String(match.id), provider: key };
+    } catch (err) {
+      logger.warn(
+        `[autoMapping] Search failed on ${key} for malid ${numMalId}: ${err.message}`,
+      );
+    }
+  }
+  logger.info(
+    `[autoMapping] No confident match for ${mediaType} malid ${numMalId} ("${title}"); staying unmapped`,
+  );
+  return null;
+}
+
 // Fetches Anime / Manga Info
 router.post(
   [
@@ -2121,8 +2242,13 @@ router.post(
                   if (localRow.MalID) {
                     resolvedMalId = parseInt(localRow.MalID);
                   }
-                  resolvedId = localRow.id;
-                  resolvedProvider = localRow.provider || "pahe";
+                  // id === MalID means the row is poisoned (the malid was
+                  // stored as the provider id): keep the malid for recovery
+                  // but never adopt the row as a provider link.
+                  if (String(localRow.id) !== String(localRow.MalID || "")) {
+                    resolvedId = localRow.id;
+                    resolvedProvider = localRow.provider || "pahe";
+                  }
                 }
               } catch (_) {}
             }
@@ -2189,6 +2315,31 @@ router.post(
             } catch (_) {}
           }
 
+          // Recovery: with a malid but no usable provider link, search the
+          // installed scrapers by title just like the mal branch does.
+          if (!resolvedId && resolvedMalId) {
+            try {
+              const preferred = (
+                AnimeManga === "Anime"
+                  ? setting.Animeprovider || "pahe"
+                  : setting.Mangaprovider || "weebcentral"
+              ).toLowerCase();
+              const learned = await autoLearnProviderLink(
+                resolvedMalId,
+                AnimeManga,
+                preferred,
+              );
+              if (learned) {
+                resolvedId = learned.id;
+                resolvedProvider = learned.provider;
+              }
+            } catch (err) {
+              logger.warn(
+                `[autoMapping] Local-route auto-learn failed for malid ${resolvedMalId}: ${err.message}`,
+              );
+            }
+          }
+
           if (resolvedId && resolvedProvider) {
             resolvedId = String(resolvedId);
             id = resolvedId;
@@ -2247,6 +2398,24 @@ router.post(
                 resolvedProvider = unmapped.provider;
               }
             } catch (_) {}
+          }
+
+          if (!resolvedId && !isNaN(targetMalId)) {
+            try {
+              const learned = await autoLearnProviderLink(
+                targetMalId,
+                AnimeManga,
+                preferred,
+              );
+              if (learned) {
+                resolvedId = learned.id;
+                resolvedProvider = learned.provider;
+              }
+            } catch (err) {
+              logger.warn(
+                `[autoMapping] Info-route auto-learn failed for malid ${targetMalId}: ${err.message}`,
+              );
+            }
           }
 
           if (resolvedId && resolvedProvider) {
@@ -4830,6 +4999,9 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
   const numMalId = Number(malIdStr);
   let selectedProvider = null;
   let resolvedProviderId = null;
+  // `setting` was referenced below but never loaded here — unmapped links
+  // crashed with "setting is not defined" before reaching the fallback.
+  const cfg = await settingfetch();
 
   if (global.mappingDb && numMalId) {
     try {
@@ -4842,18 +5014,43 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
       logger.error(`Error querying mappingDb for link-mapping: ${err.message}`);
     }
   }
+  if (!selectedProvider && numMalId) {
+    // No provider link anywhere: search the installed scrapers by title and
+    // remember the match so Link & Open gets a real provider id instead of
+    // falling back to the raw malid.
+    try {
+      const learned = await autoLearnProviderLink(
+        numMalId,
+        itemType,
+        itemType === "Anime" ? cfg?.Animeprovider : cfg?.Mangaprovider,
+      );
+      if (learned) {
+        selectedProvider = learned.provider;
+        resolvedProviderId = learned.id;
+      }
+    } catch (err) {
+      logger.warn(
+        `[autoMapping] Link-time auto-learn failed for malid ${numMalId}: ${err.message}`,
+      );
+    }
+  }
   if (!selectedProvider) {
     selectedProvider =
       itemType === "Anime"
-        ? setting?.Animeprovider ||
+        ? cfg?.Animeprovider ||
           Object.keys(global.Anime_providers || {})[0] ||
           "pahe"
-        : setting?.Mangaprovider ||
+        : cfg?.Mangaprovider ||
           Object.keys(global.Manga_providers || {})[0] ||
           "weebcentral";
   }
 
   const finalId = resolvedProviderId || oldId || malIdStr;
+  // A final id equal to the raw malid means no provider id was ever resolved
+  // (oldId/malIdStr fallback). Storing it would write the MAL id as a
+  // provider id — a poisoned row that resolves to 404 forever — so the link
+  // is refused instead.
+  const isEcho = !!numMalId && String(finalId) === String(numMalId);
 
   if (numMalId) {
     if (!title) {
@@ -4897,39 +5094,43 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
       if (finalId) await stmt.run(finalId, String(numMalId));
       if (cleanFolder) await stmt.run(cleanFolder, String(numMalId));
 
-      const existing = await queryOne(
-        `SELECT * FROM ${itemType} WHERE id = ? OR id = ? OR folder_name = ?`,
-        [finalId, oldId, cleanFolder],
-      );
+      // Poison guard: an echo link must not create or rename a local row to
+      // the raw malid — the id->malid breadcrumb above is all it keeps.
+      if (!isEcho) {
+        const existing = await queryOne(
+          `SELECT * FROM ${itemType} WHERE id = ? OR id = ? OR folder_name = ?`,
+          [finalId, oldId, cleanFolder],
+        );
 
-      if (existing) {
-        await run(
-          `UPDATE ${itemType} SET id = ?, MalID = ?, provider = ?, title = COALESCE(NULLIF(?, ''), title), image_url = COALESCE(NULLIF(?, ''), image_url), folder_name = COALESCE(NULLIF(folder_name, ''), ?) WHERE id = ? OR id = ? OR folder_name = ?`,
-          [
-            finalId,
-            String(numMalId),
-            selectedProvider,
-            title || existing.title || "",
-            image || existing.image_url || "",
-            cleanFolder,
-            oldId || finalId,
-            finalId,
-            cleanFolder,
-          ],
-        );
-      } else {
-        await run(
-          `INSERT OR REPLACE INTO ${itemType} (id, title, image_url, folder_name, MalID, provider, CustomTag) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            finalId,
-            title || finalId,
-            image || "",
-            cleanFolder,
-            String(numMalId),
-            selectedProvider,
-            JSON.stringify(["downloads"]),
-          ],
-        );
+        if (existing) {
+          await run(
+            `UPDATE ${itemType} SET id = ?, MalID = ?, provider = ?, title = COALESCE(NULLIF(?, ''), title), image_url = COALESCE(NULLIF(?, ''), image_url), folder_name = COALESCE(NULLIF(folder_name, ''), ?) WHERE id = ? OR id = ? OR folder_name = ?`,
+            [
+              finalId,
+              String(numMalId),
+              selectedProvider,
+              title || existing.title || "",
+              image || existing.image_url || "",
+              cleanFolder,
+              oldId || finalId,
+              finalId,
+              cleanFolder,
+            ],
+          );
+        } else {
+          await run(
+            `INSERT OR REPLACE INTO ${itemType} (id, title, image_url, folder_name, MalID, provider, CustomTag) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              finalId,
+              title || finalId,
+              image || "",
+              cleanFolder,
+              String(numMalId),
+              selectedProvider,
+              JSON.stringify(["downloads"]),
+            ],
+          );
+        }
       }
     } catch (err) {
       logger.error(`Error updating local db in link-mapping: ${err.message}`);
@@ -4959,50 +5160,70 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
   if (global.mappingDb && (oldId || finalId)) {
     try {
       const cleanProv = (selectedProvider || "").toLowerCase().split("/").pop();
-      await global.mappingDb
-        .prepare(
-          "DELETE FROM unmapped_items WHERE (id = ? OR id = ?) OR (provider = ? AND id = ?)",
-        )
-        .run(oldId || "", finalId || "", cleanProv, oldId || finalId);
+      if (isEcho) {
+        // Refused link: drop any poisoned mapping row (id === malid) this
+        // malid already carries, and leave the entry in the unmapped queue.
+        if (cleanProv && numMalId) {
+          await global.mappingDb
+            .prepare(`DELETE FROM "${cleanProv}" WHERE id = ? AND malid = ?`)
+            .run(String(numMalId), numMalId);
+        }
+      } else {
+        await global.mappingDb
+          .prepare(
+            "DELETE FROM unmapped_items WHERE (id = ? OR id = ?) OR (provider = ? AND id = ?)",
+          )
+          .run(oldId || "", finalId || "", cleanProv, oldId || finalId);
 
-      if (cleanProv && numMalId) {
-        if (cleanProv === "pahe") {
-          const isUuid =
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-              String(finalId),
-            );
-          if (isUuid) {
+        if (cleanProv && numMalId) {
+          if (cleanProv === "pahe") {
+            const isUuid =
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                String(finalId),
+              );
+            if (isUuid) {
+              await global.mappingDb
+                .prepare(
+                  "INSERT OR REPLACE INTO pahe (id, uuid, malid) VALUES (?, ?, ?)",
+                )
+                .run(finalId, finalId, numMalId);
+            } else {
+              await global.mappingDb
+                .prepare(
+                  "INSERT OR REPLACE INTO pahe (id, malid) VALUES (?, ?)",
+                )
+                .run(finalId, numMalId);
+            }
+          } else {
+            try {
+              await global.mappingDb.exec(`
+                CREATE TABLE IF NOT EXISTS "${cleanProv}" (
+                  id TEXT PRIMARY KEY,
+                  malid INTEGER
+                );
+              `);
+            } catch (_) {}
             await global.mappingDb
               .prepare(
-                "INSERT OR REPLACE INTO pahe (id, uuid, malid) VALUES (?, ?, ?)",
+                `INSERT OR REPLACE INTO "${cleanProv}" (id, malid) VALUES (?, ?)`,
               )
-              .run(finalId, finalId, numMalId);
-          } else {
-            await global.mappingDb
-              .prepare("INSERT OR REPLACE INTO pahe (id, malid) VALUES (?, ?)")
               .run(finalId, numMalId);
           }
-        } else {
-          try {
-            await global.mappingDb.exec(`
-              CREATE TABLE IF NOT EXISTS "${cleanProv}" (
-                id TEXT PRIMARY KEY,
-                malid INTEGER
-              );
-            `);
-          } catch (_) {}
+          const malTable = itemType === "Anime" ? "anime" : "manga";
           await global.mappingDb
-            .prepare(
-              `INSERT OR REPLACE INTO "${cleanProv}" (id, malid) VALUES (?, ?)`,
-            )
-            .run(finalId, numMalId);
+            .prepare(`UPDATE ${malTable} SET has_mapping = 1 WHERE malid = ?`)
+            .run(numMalId);
         }
-        const malTable = itemType === "Anime" ? "anime" : "manga";
-        await global.mappingDb
-          .prepare(`UPDATE ${malTable} SET has_mapping = 1 WHERE malid = ?`)
-          .run(numMalId);
       }
     } catch (_) {}
+  }
+
+  if (isEcho) {
+    return {
+      success: false,
+      error:
+        "No installed provider returned a real id for this title — left unmapped.",
+    };
   }
 
   const linkedProviders = await getLinkedProvidersForMalId(numMalId, itemType, {
@@ -5031,6 +5252,36 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
     details,
   };
 }
+
+// Local mapping catalog search for the link UI: title substring or exact
+// malid. The old flow searched the remote server by title only, so a malid
+// (or any title the server lacked) always came back empty even when the
+// local mapping.db had the entry.
+router.post("/api/mapping/search", async (req, res) => {
+  try {
+    const q = String(req.body?.q || "").trim();
+    const type = req.body?.type === "Manga" ? "Manga" : "Anime";
+    if (!q || !global.mappingDb) return res.json({ results: [] });
+
+    const malTable = type === "Manga" ? "manga" : "anime";
+    const like = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const numeric = Number(q);
+    const rows =
+      Number.isInteger(numeric) && numeric > 0
+        ? await mappingQueryAll(
+            `SELECT malid, title, image_url, has_mapping FROM "${malTable}" WHERE title LIKE ? ESCAPE '\\' OR malid = ? ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 15`,
+            [like, numeric],
+          )
+        : await mappingQueryAll(
+            `SELECT malid, title, image_url, has_mapping FROM "${malTable}" WHERE title LIKE ? ESCAPE '\\' ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 15`,
+            [like],
+          );
+    res.json({ results: rows || [] });
+  } catch (err) {
+    logger.error(`Mapping search failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Handles linking local downloaded entries to provider mappings
 router.post(
