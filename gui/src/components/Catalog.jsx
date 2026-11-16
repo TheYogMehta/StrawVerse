@@ -2002,11 +2002,14 @@ export default function Catalog({
           : null;
 
     const itemType =
-      item.type ||
-      (typeof item.id === "string" &&
+      typeof item.id === "string" &&
       (item.id.startsWith("tv:") || item.id.startsWith("movie:"))
         ? "Movies"
-        : type);
+        : item.type === "Movies" ||
+            item.type === "Manga" ||
+            item.type === "Anime"
+          ? item.type
+          : type;
 
     if (resolvedProv) {
       handleSelectMediaWithCache(
@@ -2047,7 +2050,12 @@ export default function Catalog({
     targetSeason,
     mediaItemType,
   ) => {
-    const effectiveType = mediaItemType || type;
+    const effectiveType =
+      mediaItemType === "Movies" ||
+      mediaItemType === "Manga" ||
+      mediaItemType === "Anime"
+        ? mediaItemType
+        : type;
     const cacheKey = `${type}_${provider}`;
     if (!window.catalogCache) {
       window.catalogCache = {};

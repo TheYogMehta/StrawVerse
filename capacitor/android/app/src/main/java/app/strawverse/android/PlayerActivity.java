@@ -237,13 +237,13 @@ public class PlayerActivity extends Activity {
         if (animeId == null) animeId = "";
         currentEpisodeId = intent.getStringExtra("episodeId");
         if (currentEpisodeId == null) currentEpisodeId = "";
-        if (mediaType == null || mediaType.isEmpty() || mediaType.equalsIgnoreCase("Anime")) {
-            if ((currentEpisodeId != null && (currentEpisodeId.startsWith("tv:") || currentEpisodeId.startsWith("movie:")))
-                || (animeId != null && (animeId.startsWith("tv:") || animeId.startsWith("movie:")))) {
-                mediaType = "Movies";
-            } else if (mediaType == null || mediaType.isEmpty()) {
-                mediaType = "Anime";
-            }
+        if (mediaType != null && mediaType.equalsIgnoreCase("Movies")) {
+            mediaType = "Movies";
+        } else if ((currentEpisodeId != null && (currentEpisodeId.startsWith("tv:") || currentEpisodeId.startsWith("movie:")))
+            || (animeId != null && (animeId.startsWith("tv:") || animeId.startsWith("movie:")))) {
+            mediaType = "Movies";
+        } else {
+            mediaType = "Anime";
         }
         episodeNumber = intent.getDoubleExtra("episodeNumber", 0.0);
         downloaded = intent.getBooleanExtra("downloaded", false);

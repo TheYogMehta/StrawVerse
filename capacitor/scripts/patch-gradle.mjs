@@ -43,3 +43,25 @@ if (fs.existsSync(capacitorBuildGradle)) {
   }
   fs.writeFileSync(capacitorBuildGradle, content, "utf8");
 }
+
+const cmakeListsPath = path.resolve(
+  __dirname,
+  "..",
+  "node_modules",
+  "capacitor-nodejs",
+  "android",
+  "CMakeLists.txt",
+);
+if (fs.existsSync(cmakeListsPath)) {
+  let cmakeContent = fs.readFileSync(cmakeListsPath, "utf8");
+  if (!cmakeContent.includes("project(")) {
+    cmakeContent = cmakeContent.replace(
+      "cmake_minimum_required(VERSION 3.4.1)",
+      "cmake_minimum_required(VERSION 3.4.1)\nproject(capacitor-nodejs)",
+    );
+    fs.writeFileSync(cmakeListsPath, cmakeContent, "utf8");
+    console.log(
+      "[patch-gradle] Patched capacitor-nodejs CMakeLists.txt with project() declaration",
+    );
+  }
+}

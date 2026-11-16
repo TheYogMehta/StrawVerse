@@ -492,11 +492,14 @@ export default function App() {
               mediaItemType,
             ) => {
               const itemType =
-                mediaItemType ||
-                (typeof id === "string" &&
+                typeof id === "string" &&
                 (id.startsWith("tv:") || id.startsWith("movie:"))
                   ? "Movies"
-                  : contentType);
+                  : mediaItemType === "Movies" ||
+                      mediaItemType === "Manga" ||
+                      mediaItemType === "Anime"
+                    ? mediaItemType
+                    : contentType;
               navigateTo("info", {
                 id,
                 type: itemType,
@@ -727,14 +730,21 @@ export default function App() {
             onMarketplaceOpen={(initialType) =>
               navigateTo("marketplace", { type: initialType })
             }
-            onSelectMedia={(id, type, prov, backText) =>
+            onSelectMedia={(id, type, prov, backText) => {
+              const safeType =
+                typeof id === "string" &&
+                (id.startsWith("tv:") || id.startsWith("movie:"))
+                  ? "Movies"
+                  : type === "Movies" || type === "Manga" || type === "Anime"
+                    ? type
+                    : "Anime";
               navigateTo("info", {
                 id,
-                type,
+                type: safeType,
                 provider: prov,
                 backText,
-              })
-            }
+              });
+            }}
             onSettingsSaved={() => syncSettings()}
           />
         );
