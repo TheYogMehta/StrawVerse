@@ -1227,14 +1227,25 @@ export default function VideoPlayer({
       console.log(
         "[NATIVE VIDEO PLAYBACK] Launching native PlayerActivity with parameters",
       );
+      const isMovieStream =
+        type === "Movies" ||
+        (typeof id === "string" && (id.startsWith("tv:") || id.startsWith("movie:"))) ||
+        (currentEpisodeObj && typeof currentEpisodeObj.id === "string" && (currentEpisodeObj.id.startsWith("tv:") || currentEpisodeObj.id.startsWith("movie:")));
+      const finalType = isMovieStream ? "Movies" : type || "Anime";
       window.Capacitor.Plugins.CloudflareBypass.playVideo({
+        type: finalType,
         url,
-        animeTitle: animeTitle || "Anime Stream",
+        animeTitle: animeTitle || (finalType === "Movies" ? "Movie Stream" : "Anime Stream"),
         subtitles: subtitleList,
         sources: sourcesList,
         skipTimes: skipsList,
         currentSourceIndex: currentSourceIdx >= 0 ? currentSourceIdx : 0,
         animeId: id,
+        episodeId:
+          currentEpisodeObj?.id ||
+          (typeof episodeNumOrId === "string"
+            ? episodeNumOrId
+            : String(episodeNumOrId || "")),
         episodeNumber: currentEpisodeObj ? currentEpisodeObj.number : 1,
         provider: provider || "",
         image: image || "",
@@ -1242,6 +1253,7 @@ export default function VideoPlayer({
         autoSkipIntro: Boolean(autoSkip),
         playerSpeed: playbackSpeed || 1.0,
         preferredSubtitleLanguages: preferredSubLangs || [],
+        episodesList: JSON.stringify(episodesList || []),
       })
         .then(() => {
           if (onBack) onBack();

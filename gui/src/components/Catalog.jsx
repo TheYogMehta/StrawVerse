@@ -2001,12 +2001,41 @@ export default function Catalog({
           ? catalogSource.replace(/^unique[:_]/, "")
           : null;
 
+    const itemType =
+      item.type ||
+      (typeof item.id === "string" &&
+      (item.id.startsWith("tv:") || item.id.startsWith("movie:"))
+        ? "Movies"
+        : type);
+
     if (resolvedProv) {
-      handleSelectMediaWithCache(item.id, resolvedProv, backText);
+      handleSelectMediaWithCache(
+        item.id,
+        resolvedProv,
+        backText,
+        false,
+        undefined,
+        undefined,
+        itemType,
+      );
       return;
     }
 
-    handleSelectMediaWithCache(item.id, "mal", backText);
+    const defaultProv =
+      itemType === "Movies"
+        ? provider !== "local"
+          ? "provider"
+          : "local"
+        : "mal";
+    handleSelectMediaWithCache(
+      item.id,
+      defaultProv,
+      backText,
+      false,
+      undefined,
+      undefined,
+      itemType,
+    );
   };
 
   const handleSelectMediaWithCache = (
@@ -2016,7 +2045,9 @@ export default function Catalog({
     autoPlay,
     targetNum,
     targetSeason,
+    mediaItemType,
   ) => {
+    const effectiveType = mediaItemType || type;
     const cacheKey = `${type}_${provider}`;
     if (!window.catalogCache) {
       window.catalogCache = {};
@@ -2038,7 +2069,15 @@ export default function Catalog({
       scrollPosition: currentScroll,
       lastActivePage: currentPage,
     };
-    onSelectMedia(id, prov, backText, autoPlay, targetNum, targetSeason);
+    onSelectMedia(
+      id,
+      prov,
+      backText,
+      autoPlay,
+      targetNum,
+      targetSeason,
+      effectiveType,
+    );
   };
 
   const handleSearchSubmit = (e) => {

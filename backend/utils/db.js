@@ -466,6 +466,26 @@ function initDesktopTables() {
   } catch (_) {}
 
   try {
+    desktopDb.exec(`
+      INSERT OR IGNORE INTO Movies (id, folder_name, title, type, provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag)
+      SELECT id, folder_name, title, 'Movies', provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag
+      FROM Anime
+      WHERE id LIKE 'tv:%' OR id LIKE 'movie:%' OR LOWER(provider) IN ('bingr', 'cinejoy', 'hdhub4u', 'dramacool', 'kaidrama');
+
+      DELETE FROM Anime
+      WHERE id LIKE 'tv:%' OR id LIKE 'movie:%' OR LOWER(provider) IN ('bingr', 'cinejoy', 'hdhub4u', 'dramacool', 'kaidrama');
+
+      INSERT OR IGNORE INTO SeriesMovieWatchHistory (movie_id, title, episode_number, season, current_time, duration, time_spent, is_completed, last_watched, completed_at, hidden, sub_dub)
+      SELECT anime_id, anime_title, episode_number, 1, current_time, duration, time_spent, is_completed, last_watched, completed_at, hidden, sub_dub
+      FROM WatchHistory
+      WHERE anime_id LIKE 'tv:%' OR anime_id LIKE 'movie:%';
+
+      DELETE FROM WatchHistory
+      WHERE anime_id LIKE 'tv:%' OR anime_id LIKE 'movie:%';
+    `);
+  } catch (_) {}
+
+  try {
     const watchDeleted = desktopDb
       .prepare(
         "DELETE FROM WatchHistory WHERE anime_id NOT IN (SELECT id FROM Anime)",
@@ -918,6 +938,26 @@ async function initDatabase() {
   } catch (e) {
     logger.error("Failed to create unique index on SkipTimes: " + e.message);
   }
+
+  try {
+    await exec(`
+      INSERT OR IGNORE INTO Movies (id, folder_name, title, type, provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag)
+      SELECT id, folder_name, title, 'Movies', provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag
+      FROM Anime
+      WHERE id LIKE 'tv:%' OR id LIKE 'movie:%' OR LOWER(provider) IN ('bingr', 'cinejoy', 'hdhub4u', 'dramacool', 'kaidrama');
+
+      DELETE FROM Anime
+      WHERE id LIKE 'tv:%' OR id LIKE 'movie:%' OR LOWER(provider) IN ('bingr', 'cinejoy', 'hdhub4u', 'dramacool', 'kaidrama');
+
+      INSERT OR IGNORE INTO SeriesMovieWatchHistory (movie_id, title, episode_number, season, current_time, duration, time_spent, is_completed, last_watched, completed_at, hidden, sub_dub)
+      SELECT anime_id, anime_title, episode_number, 1, current_time, duration, time_spent, is_completed, last_watched, completed_at, hidden, sub_dub
+      FROM WatchHistory
+      WHERE anime_id LIKE 'tv:%' OR anime_id LIKE 'movie:%';
+
+      DELETE FROM WatchHistory
+      WHERE anime_id LIKE 'tv:%' OR anime_id LIKE 'movie:%';
+    `);
+  } catch (_) {}
 
   try {
     const watchDeleted = await run(

@@ -121,6 +121,7 @@ public class PlayerActivity extends Activity {
     private String preferredQuality = "highest";
 
     // History tracking fields
+    private String mediaType = "Anime";
     private String animeId = "";
     private double episodeNumber = 0.0;
     private String provider = "";
@@ -223,10 +224,19 @@ public class PlayerActivity extends Activity {
 
         // Read intent data
         Intent intent = getIntent();
+        mediaType = intent.getStringExtra("type");
         animeId = intent.getStringExtra("animeId");
         if (animeId == null) animeId = "";
         currentEpisodeId = intent.getStringExtra("episodeId");
         if (currentEpisodeId == null) currentEpisodeId = "";
+        if (mediaType == null || mediaType.isEmpty() || mediaType.equalsIgnoreCase("Anime")) {
+            if ((currentEpisodeId != null && (currentEpisodeId.startsWith("tv:") || currentEpisodeId.startsWith("movie:")))
+                || (animeId != null && (animeId.startsWith("tv:") || animeId.startsWith("movie:")))) {
+                mediaType = "Movies";
+            } else if (mediaType == null || mediaType.isEmpty()) {
+                mediaType = "Anime";
+            }
+        }
         episodeNumber = intent.getDoubleExtra("episodeNumber", 0.0);
         downloaded = intent.getBooleanExtra("downloaded", false);
         subdub = intent.getStringExtra("subdub");
@@ -765,7 +775,15 @@ public class PlayerActivity extends Activity {
             @Override
             public void run() {
                 try {
+                    if (mediaType == null || mediaType.isEmpty() || mediaType.equalsIgnoreCase("Anime")) {
+                        if ((ep != null && (ep.startsWith("tv:") || ep.startsWith("movie:")))
+                            || (currentEpisodeId != null && (currentEpisodeId.startsWith("tv:") || currentEpisodeId.startsWith("movie:")))
+                            || (animeId != null && (animeId.startsWith("tv:") || animeId.startsWith("movie:")))) {
+                            mediaType = "Movies";
+                        }
+                    }
                     JSONObject body = new JSONObject();
+                    body.put("type", mediaType);
                     if (downloaded) {
                         body.put("ep", animeId);
                         body.put("epNum", epNum);
@@ -775,7 +793,9 @@ public class PlayerActivity extends Activity {
                         body.put("ep", ep);
                         body.put("Downloaded", false);
                         body.put("subdub", subdub);
-                        body.put("provider", provider);
+                        if (provider != null && !provider.isEmpty() && !provider.equalsIgnoreCase("Anime") && !provider.equalsIgnoreCase("Movies")) {
+                            body.put("provider", provider);
+                        }
                     }
 
                     URL url = new URL("http://127.0.0.1:9545/api/watch");
@@ -1129,8 +1149,17 @@ public class PlayerActivity extends Activity {
             @Override
             public void run() {
                 try {
+                    if (mediaType == null || mediaType.isEmpty() || mediaType.equalsIgnoreCase("Anime")) {
+                        if ((currentEpisodeId != null && (currentEpisodeId.startsWith("tv:") || currentEpisodeId.startsWith("movie:")))
+                            || (animeId != null && (animeId.startsWith("tv:") || animeId.startsWith("movie:")))) {
+                            mediaType = "Movies";
+                        }
+                    }
                     JSONObject body = new JSONObject();
-                    body.put("provider", provider != null && !provider.isEmpty() ? provider : "Anime");
+                    body.put("type", mediaType);
+                    if (provider != null && !provider.isEmpty() && !provider.equalsIgnoreCase("Anime") && !provider.equalsIgnoreCase("Movies")) {
+                        body.put("provider", provider);
+                    }
                     body.put("server", sourceObj);
                     if (subdub != null) {
                         body.put("subdub", subdub);

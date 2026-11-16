@@ -254,7 +254,16 @@ export default function InfoView({
         } catch (_) {}
       }
 
+      const isMovieStream =
+        type === "Movies" ||
+        (typeof animeId === "string" &&
+          (animeId.startsWith("tv:") || animeId.startsWith("movie:"))) ||
+        (typeof epIdOrNum === "string" &&
+          (epIdOrNum.startsWith("tv:") || epIdOrNum.startsWith("movie:")));
+      const finalType = isMovieStream ? "Movies" : type || "Anime";
+
       window.Capacitor.Plugins.CloudflareBypass.playVideo({
+        type: finalType,
         animeId: animeId,
         episodeId:
           typeof epIdOrNum === "string"

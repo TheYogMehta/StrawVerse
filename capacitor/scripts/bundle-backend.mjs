@@ -17,7 +17,6 @@ try {
     "--platform=node",
     "--target=node18",
     "--external:bridge",
-    `--alias:got="${path.join(capacitorRoot, "node_modules", "got")}"`,
     "--outfile=main.bundle.js",
   ].join(" ");
 
