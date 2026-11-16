@@ -1,5 +1,26 @@
 # Changelog
 
+# [12.0.1] - 2026-11-16
+
+### Media Player & Background Audio Fixes
+
+- **Instant Audio Termination on Close:** Fixed a critical bug where audio or video streams continued playing in the background after closing the player, which previously forced users to close the entire application to stop playback.
+- **Android ExoPlayer Lifecycle Management:** Overrode `finish()`, `onBackPressed()`, `onPause()`, `onStop()`, and `onDestroy()` in `PlayerActivity` to immediately detach `PlayerView`, pause, clear media items, and release both `ExoPlayer` and `ForwardingPlayer` instances.
+- **Asynchronous Stream Guarding:** Added lifecycle status guards across all background stream resolution threads, AniSkip lookups, server fallback loops, and UI handlers in `PlayerActivity` to ensure background tasks abort cleanly if the activity is terminating instead of spawning detached player instances.
+- **Desktop MPV Exit Hook:** Added an unmount cleanup hook in `MpvPlayer.jsx` to dispatch a `quit` command to MPV when exiting playback, and enhanced `electron/gui.js` IPC handler to safely write the quit command to the socket and terminate any lingering MPV processes.
+
+### Movie & TV Series Scraper Isolation
+
+- **Scraper Cross-Contamination Prevention:** Fixed an issue where Movies and TV series streams and metadata were inadvertently routed through active Anime scrapers (such as `animesalt` or `reanime`), resulting in 404 stream resolution errors.
+- **Backend Stream Routing:** Added `isMovieProvider()` validation and automatic `tv:` / `movie:` ID prefix detection in `/api/watch` and `/api/watch/server` to strictly route requests to registered movie scrapers and call `fetchMovieSources()`.
+- **Database Mapping & History Resolution:** Registered `global.Movies_providers` in `mappingResolver.js` with `media_type: "Movies"`, and corrected `/api/info` to query `SeriesMovieWatchHistory` and `movie_id` when loading series data.
+- **Automatic Startup Migration:** Added an automated startup database migration in `backend/utils/db.js` that inspects and moves any misplaced movie/series entries from `Anime` / `WatchHistory` into `Movies` / `SeriesMovieWatchHistory` across both Desktop and Android.
+- **Preserved Content Types in Navigation:** Updated `InfoView.jsx`, `WebPlayer.jsx`, `RecentHistory.jsx`, and `Catalog.jsx` to explicitly pass and preserve `type: "Movies"`, `episodeId`, and `episodesList` when starting playback or selecting items from Continue Watching shelves.
+
+### Special Thanks to Contributors
+
+- Special thanks to **@cyber-winner** for architecting and developing the Movies & Series section, scraper isolation & routing, multi-repository marketplace support, and media player background audio fixes!
+
 # [12.0.0] - 2026-11-15
 
 ### Brand New "Movies & Series" Section

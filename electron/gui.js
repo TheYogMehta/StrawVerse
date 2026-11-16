@@ -1029,6 +1029,32 @@ ipcMain.handle("play-in-mpv", async (event, options) => {
 });
 
 ipcMain.handle("control-mpv", (event, command, args) => {
+  if (command === "quit") {
+    if (global.activeMpvClient && !global.activeMpvClient.destroyed) {
+      try {
+        global.activeMpvClient.write(
+          JSON.stringify({ command: ["quit"] }) + "\n",
+        );
+      } catch (err) {}
+    }
+    setTimeout(() => {
+      if (global.activeMpvProcess && !global.activeMpvProcess.killed) {
+        try {
+          global.activeMpvProcess.kill("SIGKILL");
+        } catch (_) {}
+      }
+      if (global.activeMpvClient) {
+        try {
+          global.activeMpvClient.destroy();
+        } catch (_) {}
+        global.activeMpvClient = null;
+      }
+      global.activeMpvProcess = null;
+      global.activeMpvSession = null;
+    }, 150);
+    return { success: true };
+  }
+
   if (global.activeMpvClient && !global.activeMpvClient.destroyed) {
     try {
       let finalArgs = [...args];

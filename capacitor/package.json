@@ -4,7 +4,7 @@
   "private": true,
   "description": "StrawVerse Android app (Capacitor shell around the shared backend + GUI)",
   "scripts": {
-    "sync:android": "npm run build --prefix ../gui && node scripts/sync.mjs && cap sync android && node scripts/patch-gradle.mjs",
+    "sync:android": "npm run build --prefix ../gui && node scripts/sync.mjs && npx cap sync android && node scripts/patch-gradle.mjs",
     "package:android": "npm run sync:android && cd android && ./gradlew assembleRelease"
   },
   "dependencies": {
