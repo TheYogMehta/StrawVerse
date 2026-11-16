@@ -107,6 +107,7 @@ import "../css/VideoPlayer.css";
 export default function VideoPlayer({
   id,
   episodeNumOrId,
+  season = 1,
   isDownloaded,
   subdub,
   episodesList = [],
@@ -117,6 +118,7 @@ export default function VideoPlayer({
   onBack,
   malid,
   hideExit = false,
+  type = "Anime",
 }) {
   const videoRef = useRef(null);
   const loadedSubMapRef = useRef({});
@@ -679,23 +681,38 @@ export default function VideoPlayer({
   );
 
   // Find current active episode object
-  const currentEpisodeObj = sortedEpisodes.find((item) => {
-    if (isCurrentDownloaded) {
-      return Number(item.number) === Number(currentEpisode);
-    } else {
-      return (
-        item.id === currentEpisode ||
-        Number(item.number) === Number(currentEpisode)
-      );
-    }
-  });
+  const currentEpisodeObj =
+    sortedEpisodes.find((item) => {
+      const matchSeason = season
+        ? Number(item.season || 1) === Number(season)
+        : true;
+      if (isCurrentDownloaded) {
+        return Number(item.number) === Number(currentEpisode) && matchSeason;
+      } else {
+        return (
+          (item.id === currentEpisode ||
+            Number(item.number) === Number(currentEpisode)) &&
+          matchSeason
+        );
+      }
+    }) ||
+    sortedEpisodes.find((item) => {
+      if (isCurrentDownloaded) {
+        return Number(item.number) === Number(currentEpisode);
+      } else {
+        return (
+          item.id === currentEpisode ||
+          Number(item.number) === Number(currentEpisode)
+        );
+      }
+    });
 
   useEffect(() => {
     const fetchSkipTimes = async () => {
       if (skipTimes && skipTimes.length > 0) {
         return;
       }
-      if (!malid) {
+      if (type === "Movies" || !malid) {
         setSkipTimes([]);
         return;
       }
@@ -819,9 +836,10 @@ export default function VideoPlayer({
       try {
         await apiPost("/api/history/update", {
           mediaId: id,
-          type: "Anime",
+          type: type || "Anime",
           title: animeTitleVal,
           number: currentEpisodeObj ? currentEpisodeObj.number : 1,
+          season: currentEpisodeObj?.season || 1,
           currentTime,
           duration,
           timeSpent,
@@ -847,7 +865,7 @@ export default function VideoPlayer({
       try {
         const epNum = currentEpisodeObj ? currentEpisodeObj.number : 1;
         const res = await fetch(
-          `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=Anime`,
+          `/api/history/progress?mediaId=${encodeURIComponent(id)}&type=${encodeURIComponent(type || "Anime")}`,
         );
         const progressData = await res.json();
 
@@ -955,6 +973,7 @@ export default function VideoPlayer({
               epNum: targetEpNum,
               Downloaded: true,
               subdub: playerSubDub,
+              type: type || "Anime",
             }
           : {
               ep: targetEp,
@@ -963,6 +982,7 @@ export default function VideoPlayer({
               Downloaded: false,
               subdub: playerSubDub,
               provider: provider,
+              type: type || "Anime",
             },
         { signal },
       );
@@ -1163,7 +1183,7 @@ export default function VideoPlayer({
         if (!trimmed.startsWith("WEBVTT")) {
           const converted = text.replace(
             /(\d{1,2}:\d{2}:\d{2}),(\d{2,3})/g,
-            (m, time, ms) => `${time.padStart(8, "0")}.${ms.padEnd(3, "0")}`,
+            (_, time, ms) => `${time.padStart(8, "0")}.${ms.padEnd(3, "0")}`,
           );
           text = "WEBVTT\n\n" + converted;
         }

@@ -1,6 +1,4 @@
 const express = require("express");
-const path = require("path");
-const fs = require("fs");
 const { logger, getLogs, clearLogs } = require("../utils/AppLogger");
 const { getQueue, updateQueue, isQueuePaused } = require("../utils/queue");
 const ImageCacheManager = require("../utils/ImageCacheManager");
@@ -111,6 +109,12 @@ router.post("/api/logger", async (req, res) => {
       EpNum: activeTaskItem?.EpNum,
       Title: activeTaskItem?.Title,
       Type: activeTaskItem?.Type,
+      season:
+        activeTaskItem?.season !== undefined && activeTaskItem?.season !== null
+          ? activeTaskItem.season
+          : activeTaskItem?.config?.season !== undefined
+            ? activeTaskItem.config.season
+            : null,
       concurrency,
       lastTestedConcurrency,
       downloadSpeed,
@@ -126,6 +130,12 @@ router.post("/api/logger", async (req, res) => {
         EpNum: task.EpNum,
         Title: task.Title,
         Type: task.Type,
+        season:
+          task.season !== undefined && task.season !== null
+            ? task.season
+            : task.config?.season !== undefined
+              ? task.config.season
+              : null,
         concurrency: task.epid === epid ? concurrency : task.concurrency,
         lastTestedConcurrency:
           task.epid === epid
@@ -134,7 +144,15 @@ router.post("/api/logger", async (req, res) => {
         downloadSpeed: task.epid === epid ? downloadSpeed : task.downloadSpeed,
         eta: task.epid === epid ? eta : task.eta,
       })),
-      queue: upcomingQueue,
+      queue: upcomingQueue.map((item) => ({
+        ...item,
+        season:
+          item.season !== undefined && item.season !== null
+            ? item.season
+            : item.config?.season !== undefined
+              ? item.config.season
+              : null,
+      })),
     });
 
     res.status(200).json({ message: "Download progress received" });
@@ -169,7 +187,12 @@ router.post("/api/cache/clear", async (req, res) => {
 router.get("/api/marketplace", async (req, res) => {
   try {
     const { fetchAggregatedMarketplace } = require("../utils/settings");
-    const activeType = req.query.type === "Manga" ? "Manga" : "Anime";
+    const activeType =
+      req.query.type === "Manga"
+        ? "Manga"
+        : req.query.type === "Movies" || req.query.type === "movies-tvshows"
+          ? "Movies"
+          : "Anime";
     const data = await fetchAggregatedMarketplace(activeType);
     res.json(data);
   } catch (err) {
@@ -197,10 +220,49 @@ router.post("/api/marketplace/repos", async (req, res) => {
   }
 });
 
-router.delete("/api/marketplace/repos/:owner", async (req, res) => {
+router.post("/api/marketplace/repos/restore-default", async (req, res) => {
+  try {
+    const { restoreDefaultExtensionRepo } = require("../utils/settings");
+    const result = await restoreDefaultExtensionRepo();
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete("/api/marketplace/repos", async (req, res) => {
   try {
     const { removeExtensionRepo } = require("../utils/settings");
-    const result = await removeExtensionRepo(req.params.owner);
+    const target =
+      req.query.id || req.query.url || req.body?.id || req.body?.url;
+    const result = await removeExtensionRepo(target);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete("/api/marketplace/repos/:owner/:repo", async (req, res) => {
+  try {
+    const { removeExtensionRepo } = require("../utils/settings");
+    const target = `${req.params.owner}/${req.params.repo}`;
+    const result = await removeExtensionRepo(target);
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete("/api/marketplace/repos/:identifier", async (req, res) => {
+  try {
+    const { removeExtensionRepo } = require("../utils/settings");
+    const target =
+      req.params.identifier ||
+      req.query.id ||
+      req.query.url ||
+      req.body?.id ||
+      req.body?.url;
+    const result = await removeExtensionRepo(target);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });

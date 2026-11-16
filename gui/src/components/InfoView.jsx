@@ -22,7 +22,7 @@ import {
   Check,
 } from "lucide-react";
 import Swal from "sweetalert2";
-import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
+import { swalSuccess, swalError, swalConfirm, swalInfo } from "../utils/swal";
 import {
   apiPost,
   parseTags,
@@ -107,13 +107,13 @@ export default function InfoView({
   backText,
   autoPlay,
   targetNum: propTargetNum,
+  targetSeason: propTargetSeason,
   sortOrder,
   setSortOrder,
   onBack,
   onWatch: propOnWatch,
   onRead: propOnRead,
   title: propTitle,
-  onSearchFallback,
   onIdChange,
   onOpenExtra,
 }) {
@@ -176,8 +176,10 @@ export default function InfoView({
   const [mappingResults, setMappingResults] = useState([]);
   const [isSearchingMapping, setIsSearchingMapping] = useState(false);
   const [isLinkingMapping, setIsLinkingMapping] = useState(false);
+  const [probingDownloadId, setProbingDownloadId] = useState(null);
 
   const handleMappingSearch = async (overrideQuery) => {
+    if (type === "Movies") return;
     const q = (
       overrideQuery !== undefined ? overrideQuery : mappingSearchQuery
     ).trim();
@@ -206,6 +208,7 @@ export default function InfoView({
   };
 
   const handleLinkMappingItem = async (item) => {
+    if (type === "Movies") return;
     setIsLinkingMapping(true);
     try {
       const res = await fetch("/api/local/link-mapping", {
@@ -256,6 +259,7 @@ export default function InfoView({
   };
 
   useEffect(() => {
+    if (type === "Movies") return;
     if (details && details.error) {
       const initialQ = propTitle || id || "";
       if (initialQ) {
@@ -263,7 +267,7 @@ export default function InfoView({
         handleMappingSearch(initialQ);
       }
     }
-  }, [details]);
+  }, [details, type]);
 
   const onWatch = async (...args) => {
     const isNotInLibrary =
@@ -350,7 +354,7 @@ export default function InfoView({
     }
 
     const newArgs = [...args];
-    while (newArgs.length < 9) {
+    while (newArgs.length < 10) {
       newArgs.push(undefined);
     }
     newArgs[9] = details?.malid || details?.MalID;
@@ -418,23 +422,36 @@ export default function InfoView({
     return `${m}:${pad(s)}`;
   };
 
-  const isDownloaded = (itemNum, subdub = null) => {
+  const isDownloaded = (itemNum, subdub = null, season = null) => {
     const num = parseFloat(itemNum);
     if (isNaN(num)) return false;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const episodes = details?.DownloadedEpisodes;
+      const checkList = (list) => {
+        if (!Array.isArray(list)) return false;
+        if (season !== null && season !== undefined) {
+          const sKey = `s${season}_e${num}`;
+          if (list.includes(sKey)) return true;
+          const hasSeasonTags = list.some(
+            (x) => typeof x === "string" && x.startsWith("s"),
+          );
+          if (hasSeasonTags) return false;
+        }
+        return list.map(Number).includes(num);
+      };
+
       if (Array.isArray(episodes)) {
-        return episodes.map(Number).includes(num);
+        return checkList(episodes);
       }
       if (subdub && episodes?.[subdub]) {
-        return episodes[subdub].map(Number).includes(num);
+        return checkList(episodes[subdub]);
       }
       const list = [
         ...(episodes?.sub || []),
         ...(episodes?.dub || []),
         ...(episodes?.hsub || []),
       ];
-      return list.map(Number).includes(num);
+      return checkList(list);
     } else {
       const list = details?.DownloadedChapters || [];
       return list.map(Number).includes(num);
@@ -442,11 +459,11 @@ export default function InfoView({
   };
 
   const isItemFullyDownloaded = (item) => {
-    return isDownloaded(item.number);
+    return isDownloaded(item.number, null, item.season);
   };
 
   const hasDownloads =
-    type === "Anime"
+    type === "Anime" || type === "Movies"
       ? Array.isArray(details?.DownloadedEpisodes)
         ? details.DownloadedEpisodes.length > 0
         : (details?.DownloadedEpisodes?.sub?.length || 0) +
@@ -468,7 +485,6 @@ export default function InfoView({
   };
 
   const malStatusOptions = getMalStatusOptions(type);
-  const [newTagInput, setNewTagInput] = useState("");
 
   // Inline MAL Search states
   const [malSearchQuery, setMalSearchQuery] = useState("");
@@ -477,9 +493,8 @@ export default function InfoView({
   const [isLinkingMal, setIsLinkingMal] = useState(false);
 
   const [historyProgress, setHistoryProgress] = useState(null);
-  const [hasProgress, setHasProgress] = useState(false);
 
-  // Title copy & long-press hold state
+  // Title copy state
   const [copiedTitle, setCopiedTitle] = useState(false);
   const [copiedDesc, setCopiedDesc] = useState(false);
   const titleHoldTimerRef = useRef(null);
@@ -579,69 +594,6 @@ export default function InfoView({
     [details?.title],
   );
 
-  const handleTitleTouchStart = (e) => {
-    if (e.touches && e.touches[0]) {
-      touchStartPosRef.current = {
-        x: e.touches[0].clientX,
-        y: e.touches[0].clientY,
-      };
-    }
-    if (titleHoldTimerRef.current) clearTimeout(titleHoldTimerRef.current);
-    titleHoldTimerRef.current = setTimeout(() => {
-      handleCopyTitle(e);
-    }, 450);
-  };
-
-  const handleTitleTouchMove = (e) => {
-    if (e.touches && e.touches[0]) {
-      const dx = Math.abs(e.touches[0].clientX - touchStartPosRef.current.x);
-      const dy = Math.abs(e.touches[0].clientY - touchStartPosRef.current.y);
-      if (dx > 10 || dy > 10) {
-        if (titleHoldTimerRef.current) {
-          clearTimeout(titleHoldTimerRef.current);
-          titleHoldTimerRef.current = null;
-        }
-      }
-    }
-  };
-
-  const handleTitleTouchEnd = () => {
-    if (titleHoldTimerRef.current) {
-      clearTimeout(titleHoldTimerRef.current);
-      titleHoldTimerRef.current = null;
-    }
-  };
-
-  const handleTitleMouseDown = (e) => {
-    if (e.button !== 0) return;
-    touchStartPosRef.current = { x: e.clientX, y: e.clientY };
-    if (titleHoldTimerRef.current) clearTimeout(titleHoldTimerRef.current);
-    titleHoldTimerRef.current = setTimeout(() => {
-      const sel = window.getSelection ? window.getSelection().toString() : "";
-      if (!sel || sel.trim().length === 0) {
-        handleCopyTitle(e);
-      }
-    }, 500);
-  };
-
-  const handleTitleMouseMove = (e) => {
-    const dx = Math.abs(e.clientX - touchStartPosRef.current.x);
-    const dy = Math.abs(e.clientY - touchStartPosRef.current.y);
-    if (dx > 8 || dy > 8) {
-      if (titleHoldTimerRef.current) {
-        clearTimeout(titleHoldTimerRef.current);
-        titleHoldTimerRef.current = null;
-      }
-    }
-  };
-
-  const handleTitleMouseUp = () => {
-    if (titleHoldTimerRef.current) {
-      clearTimeout(titleHoldTimerRef.current);
-      titleHoldTimerRef.current = null;
-    }
-  };
-
   const [downloadsState, setDownloadsState] = useState({
     activeTask: null,
     queue: [],
@@ -672,6 +624,7 @@ export default function InfoView({
           EpNum: data.EpNum,
           Title: data.Title,
           Type: data.Type,
+          season: data.season,
         },
       ];
     }
@@ -776,7 +729,7 @@ export default function InfoView({
   }, [fetchDownloadsState, parseActiveTasksData, stopPollingDownloads]);
 
   const getItemQueueStatus = useCallback(
-    (itemNum) => {
+    (itemNum, itemSeason = null, itemId = null) => {
       const activeList =
         Array.isArray(downloadsState.activeTasks) &&
         downloadsState.activeTasks.length > 0
@@ -811,9 +764,42 @@ export default function InfoView({
           (String(active.epid).includes(String(id)) ||
             String(active.epid).includes(String(details?.id)));
 
+        const epidMatchesExact =
+          itemId && active.epid && String(active.epid) === String(itemId);
+
+        const activeSeason =
+          active.season !== undefined && active.season !== null
+            ? Number(active.season)
+            : (() => {
+                if (active.epid) {
+                  const sMatch = String(active.epid).match(
+                    /tv:[^:]+:(\d+):\d+/,
+                  );
+                  if (sMatch) return Number(sMatch[1]);
+                }
+                if (active.caption) {
+                  const capSMatch = String(active.caption).match(/\bS(\d+)\b/i);
+                  if (capSMatch) return Number(capSMatch[1]);
+                }
+                return null;
+              })();
+
+        let seasonMatches = true;
+        if (itemSeason !== null && itemSeason !== undefined) {
+          if (activeSeason !== null) {
+            seasonMatches = activeSeason === Number(itemSeason);
+          } else if (Number(itemSeason) > 1) {
+            seasonMatches = false;
+          }
+        } else if (activeSeason !== null && activeSeason > 1) {
+          seasonMatches = false;
+        }
+
         if (
-          (matchesId || matchesMalid || matchesTitle || matchesEpid) &&
-          Number(activeNum) === Number(itemNum)
+          epidMatchesExact ||
+          ((matchesId || matchesMalid || matchesTitle || matchesEpid) &&
+            Number(activeNum) === Number(itemNum) &&
+            seasonMatches)
         ) {
           const total = active.totalSegments || 1;
           const current = active.currentSegments || 0;
@@ -844,9 +830,40 @@ export default function InfoView({
           (String(q.epid).includes(String(id)) ||
             String(q.epid).includes(String(details?.id)));
 
+        const epidMatchesExact =
+          itemId && q.epid && String(q.epid) === String(itemId);
+
+        const qSeason =
+          q.season !== undefined && q.season !== null
+            ? Number(q.season)
+            : (() => {
+                if (q.epid) {
+                  const sMatch = String(q.epid).match(/tv:[^:]+:(\d+):\d+/);
+                  if (sMatch) return Number(sMatch[1]);
+                }
+                if (q.caption) {
+                  const capSMatch = String(q.caption).match(/\bS(\d+)\b/i);
+                  if (capSMatch) return Number(capSMatch[1]);
+                }
+                return null;
+              })();
+
+        let seasonMatches = true;
+        if (itemSeason !== null && itemSeason !== undefined) {
+          if (qSeason !== null) {
+            seasonMatches = qSeason === Number(itemSeason);
+          } else if (Number(itemSeason) > 1) {
+            seasonMatches = false;
+          }
+        } else if (qSeason !== null && qSeason > 1) {
+          seasonMatches = false;
+        }
+
         return (
-          (matchesId || matchesMalid || matchesTitle || matchesEpid) &&
-          Number(qNum) === Number(itemNum)
+          epidMatchesExact ||
+          ((matchesId || matchesMalid || matchesTitle || matchesEpid) &&
+            Number(qNum) === Number(itemNum) &&
+            seasonMatches)
         );
       });
 
@@ -1006,6 +1023,7 @@ export default function InfoView({
   const [sortDirection, setSortDirection] = useState(() =>
     sortOrder === "desc" ? "desc" : "asc",
   );
+  const [selectedSeason, setSelectedSeason] = useState("all");
 
   useEffect(() => {
     if (sortOrder === "asc" || sortOrder === "desc") {
@@ -1015,16 +1033,23 @@ export default function InfoView({
 
   const isItemWatched = useCallback(
     (item) => {
-      const epStatus =
-        type === "Anime"
-          ? (historyProgress?.episodesStatus || []).find(
-              (h) => Number(h.number) === Number(item.number),
-            )
-          : (historyProgress?.chaptersStatus || []).find(
-              (h) => Number(h.number) === Number(item.number),
-            );
+      const isVideo = type === "Anime" || type === "Movies";
+      const itemSeason = item.season ? Number(item.season) : null;
+      const epStatus = isVideo
+        ? (historyProgress?.episodesStatus || []).find(
+            (h) =>
+              Number(h.number) === Number(item.number) &&
+              (itemSeason === null ||
+                (h.season ? Number(h.season) === itemSeason : itemSeason <= 1)),
+          )
+        : (historyProgress?.chaptersStatus || []).find(
+            (h) => Number(h.number) === Number(item.number),
+          );
+      // Only apply MAL-based completion for Anime (not Movies/Series)
       const isMalCompleted =
-        malWatched && Number(item.number) <= Number(malWatched);
+        type === "Anime" &&
+        malWatched &&
+        Number(item.number) <= Number(malWatched);
       return Boolean((epStatus && epStatus.isCompleted) || isMalCompleted);
     },
     [historyProgress, malWatched, type],
@@ -1038,10 +1063,110 @@ export default function InfoView({
   const showWatchedSort =
     watchedCount > 0 && watchedCount < (episodesOrChapters?.length || 0);
 
+  // Compute available seasons for Movies/Series season filter
+  const availableSeasons = useMemo(() => {
+    if (type !== "Movies" && type !== "Anime") return [];
+    const seasonSet = new Set();
+    episodesOrChapters.forEach((item) => {
+      if (item.season !== undefined && item.season !== null) {
+        seasonSet.add(Number(item.season));
+      }
+    });
+    const seasons = Array.from(seasonSet)
+      .filter((s) => !isNaN(s))
+      .sort((a, b) => a - b);
+    return seasons.length > 1 ? seasons : [];
+  }, [episodesOrChapters, type]);
+
+  const userSelectedSeasonRef = useRef(false);
+
+  // Automatically select the last playing season, or Season 1, when availableSeasons or historyProgress changes
+  useEffect(() => {
+    userSelectedSeasonRef.current = false;
+  }, [id, type]);
+
+  useEffect(() => {
+    if (userSelectedSeasonRef.current) return;
+    if (propTargetSeason !== undefined && propTargetSeason !== null) {
+      if (availableSeasons.includes(Number(propTargetSeason))) {
+        setSelectedSeason(String(propTargetSeason));
+        return;
+      }
+    }
+    if (availableSeasons.length > 0) {
+      const last = historyProgress?.lastProgress;
+      let targetSeason =
+        last?.season !== undefined && last?.season !== null
+          ? Number(last.season)
+          : null;
+      if (
+        last?.isCompleted &&
+        episodesOrChapters.length > 0 &&
+        targetSeason !== null
+      ) {
+        // If last played episode is completed, check if it was the last ep of its season
+        const epsOfThisSeason = episodesOrChapters.filter(
+          (ep) => (ep.season ? Number(ep.season) : 1) === targetSeason,
+        );
+        const maxEpInSeason = Math.max(
+          ...epsOfThisSeason.map((ep) => Number(ep.number) || 0),
+        );
+        if (Number(last.number) >= maxEpInSeason) {
+          const nextS = targetSeason + 1;
+          if (availableSeasons.includes(nextS)) {
+            targetSeason = nextS;
+          }
+        }
+      }
+      if (targetSeason !== null && availableSeasons.includes(targetSeason)) {
+        setSelectedSeason(String(targetSeason));
+      } else {
+        setSelectedSeason(String(availableSeasons[0]));
+      }
+    } else {
+      setSelectedSeason("all");
+    }
+  }, [
+    id,
+    type,
+    availableSeasons,
+    historyProgress?.lastProgress,
+    propTargetSeason,
+    episodesOrChapters,
+  ]);
+
   const sortedItems = useMemo(() => {
+    // Apply season filter first (for Movies/Series with multiple seasons)
+    const seasonFiltered =
+      availableSeasons.length > 0 && selectedSeason !== "all"
+        ? episodesOrChapters.filter(
+            (item) =>
+              item.season !== undefined &&
+              Number(item.season) === Number(selectedSeason),
+          )
+        : episodesOrChapters;
+
+    // Season-aware sorter: by season ASC then by episode number
+    const seasonAwareSort = (a, b) => {
+      const sA =
+        a.season !== undefined && a.season !== null ? Number(a.season) : 1;
+      const sB =
+        b.season !== undefined && b.season !== null ? Number(b.season) : 1;
+      const nA = parseFloat(a.number) || 0;
+      const nB = parseFloat(b.number) || 0;
+
+      if (sortOrder === "desc" || sortDirection === "desc") {
+        if (sA !== sB) return sB - sA;
+        return nB - nA;
+      } else {
+        if (sA !== sB) return sA - sB;
+        return nA - nB;
+      }
+    };
+
     if (sortOrder === "downloaded") {
       const allDownloadedNums =
-        type === "Anime"
+        type === "Anime" || type === "Movies"
           ? Array.from(
               new Set(
                 Array.isArray(details?.DownloadedEpisodes)
@@ -1059,12 +1184,12 @@ export default function InfoView({
       allDownloadedNums.sort((a, b) => a - b);
 
       return allDownloadedNums.map((num) => {
-        const existingItem = episodesOrChapters.find(
+        const existingItem = seasonFiltered.find(
           (item) => Number(item.number) === num,
         );
         if (existingItem) return existingItem;
 
-        if (type === "Anime") {
+        if (type === "Anime" || type === "Movies") {
           const subList = details?.DownloadedEpisodes?.sub || [];
           const dubList = details?.DownloadedEpisodes?.dub || [];
           const localLangs = [];
@@ -1089,36 +1214,24 @@ export default function InfoView({
     }
 
     if (sortOrder === "watched") {
-      const watchedList = episodesOrChapters.filter((item) =>
-        isItemWatched(item),
-      );
-      return watchedList.sort((a, b) => {
-        const numA = parseFloat(a.number) || 0;
-        const numB = parseFloat(b.number) || 0;
-        return sortDirection === "desc" ? numB - numA : numA - numB;
-      });
+      const watchedList = seasonFiltered.filter((item) => isItemWatched(item));
+      return watchedList.sort(seasonAwareSort);
     }
 
     if (sortOrder === "unwatched") {
-      const unwatchedList = episodesOrChapters.filter(
+      const unwatchedList = seasonFiltered.filter(
         (item) => !isItemWatched(item),
       );
-      return unwatchedList.sort((a, b) => {
-        const numA = parseFloat(a.number) || 0;
-        const numB = parseFloat(b.number) || 0;
-        return sortDirection === "desc" ? numB - numA : numA - numB;
-      });
+      return unwatchedList.sort(seasonAwareSort);
     }
 
-    return [...episodesOrChapters].sort((a, b) => {
-      const numA = parseFloat(a.number) || 0;
-      const numB = parseFloat(b.number) || 0;
-      return sortOrder === "asc" ? numA - numB : numB - numA;
-    });
+    return [...seasonFiltered].sort(seasonAwareSort);
   }, [
     episodesOrChapters,
     sortOrder,
     sortDirection,
+    selectedSeason,
+    availableSeasons,
     details?.DownloadedEpisodes,
     details?.DownloadedChapters,
     dubSelect,
@@ -1287,7 +1400,7 @@ export default function InfoView({
   ) => {
     setItemsLoading(true);
     try {
-      const isAnime = type === "Anime";
+      const isAnime = type === "Anime" || type === "Movies";
       const response = await fetch("/api/info/items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1354,7 +1467,7 @@ export default function InfoView({
   };
 
   const fallbackToDownloaded = (targetDetails = details) => {
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = targetDetails?.DownloadedEpisodes;
       const subList = Array.isArray(dl) ? dl : dl?.sub || [];
       const dubList = Array.isArray(dl) ? dl : dl?.dub || [];
@@ -1406,7 +1519,7 @@ export default function InfoView({
 
   const playItem = (targetItem, overrideSubDub = null) => {
     const activeSubDub = overrideSubDub || dubSelect;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = details?.DownloadedEpisodes;
       const isDownloadedLocal = Array.isArray(dl)
         ? dl.map(Number).includes(Number(targetItem.number))
@@ -1416,7 +1529,7 @@ export default function InfoView({
 
       onWatch(
         details?.id || id,
-        isDownloadedLocal ? targetItem.number : targetItem.id,
+        isDownloadedLocal ? targetItem.id || targetItem.number : targetItem.id,
         isDownloadedLocal,
         activeSubDub,
         episodesOrChapters,
@@ -1424,6 +1537,8 @@ export default function InfoView({
         details?.title,
         details?.provider,
         details?.image,
+        undefined, // malid passed by InfoView's onWatch wrapper
+        targetItem.season || 1,
       );
     } else {
       const isDownloadedLocal = (details?.DownloadedChapters || [])
@@ -1451,7 +1566,6 @@ export default function InfoView({
       );
       if (progressRes.ok) {
         const progressData = await progressRes.json();
-        setHasProgress(progressData.hasProgress || false);
         setHistoryProgress(progressData);
         if (type === "Anime" && progressData.lastSubDub) {
           setDubSelect(progressData.lastSubDub);
@@ -1721,30 +1835,38 @@ export default function InfoView({
             if (isNaN(epNum)) return prevDetails;
 
             const updated = { ...prevDetails };
-            if (type === "Anime") {
+            if (type === "Anime" || type === "Movies") {
               const subdub = data.SubDub || "sub";
+              const sKey =
+                type === "Movies" &&
+                data.season !== undefined &&
+                data.season !== null
+                  ? `s${data.season}_e${epNum}`
+                  : null;
               if (Array.isArray(updated.DownloadedEpisodes)) {
-                if (!updated.DownloadedEpisodes.map(Number).includes(epNum)) {
-                  updated.DownloadedEpisodes = [
-                    ...updated.DownloadedEpisodes.map(Number),
-                    epNum,
-                  ].sort((a, b) => a - b);
+                const current = updated.DownloadedEpisodes;
+                const toAdd = [];
+                if (!current.map(Number).includes(epNum)) toAdd.push(epNum);
+                if (sKey && !current.includes(sKey)) toAdd.push(sKey);
+                if (toAdd.length > 0) {
+                  updated.DownloadedEpisodes = [...current, ...toAdd];
                 }
               } else if (
                 updated.DownloadedEpisodes &&
                 typeof updated.DownloadedEpisodes === "object"
               ) {
-                const currentList = (
-                  updated.DownloadedEpisodes[subdub] || []
-                ).map(Number);
-                if (!currentList.includes(epNum)) {
+                const currentList = updated.DownloadedEpisodes[subdub] || [];
+                const toAdd = [];
+                if (!currentList.map(Number).includes(epNum)) toAdd.push(epNum);
+                if (sKey && !currentList.includes(sKey)) toAdd.push(sKey);
+                if (toAdd.length > 0) {
                   updated.DownloadedEpisodes = {
                     ...updated.DownloadedEpisodes,
-                    [subdub]: [...currentList, epNum].sort((a, b) => a - b),
+                    [subdub]: [...currentList, ...toAdd],
                   };
                 }
               } else {
-                updated.DownloadedEpisodes = [epNum];
+                updated.DownloadedEpisodes = sKey ? [epNum, sKey] : [epNum];
               }
             } else {
               const currentList = (updated.DownloadedChapters || []).map(
@@ -1834,17 +1956,9 @@ export default function InfoView({
     itemsPage,
   ]);
 
-  // Calculate next episode/chapter number and progress
-  const maxEpNumber = Math.max(
-    episodesOrChapters.length > 0
-      ? Math.max(...episodesOrChapters.map((item) => Number(item.number) || 0))
-      : 0,
-    totalItemsCount || 0,
-  );
-
   const hasAnyDownloads = useMemo(() => {
     if (!details) return false;
-    if (type === "Anime") {
+    if (type === "Anime" || type === "Movies") {
       const dl = details.DownloadedEpisodes;
       if (Array.isArray(dl)) return dl.length > 0;
       const subList = dl?.sub || [];
@@ -1856,43 +1970,117 @@ export default function InfoView({
     }
   }, [details, type]);
 
-  const localNext =
-    (propTargetNum ? Number(propTargetNum) : 0) ||
-    historyProgress?.suggestedNumber ||
-    historyProgress?.lastProgress?.number ||
-    0;
-  const malNext = details?.malid && malWatched ? Number(malWatched) + 1 : 0;
+  const allSortedEpisodes = useMemo(() => {
+    return [...episodesOrChapters].sort((a, b) => {
+      const sA =
+        a.season !== undefined && a.season !== null ? Number(a.season) : 1;
+      const sB =
+        b.season !== undefined && b.season !== null ? Number(b.season) : 1;
+      if (sA !== sB) return sA - sB;
+      return (parseFloat(a.number) || 0) - (parseFloat(b.number) || 0);
+    });
+  }, [episodesOrChapters]);
 
-  let nextToPlay = 1;
-  let hasAnyProgress = false;
-  if (localNext > 0 || malNext > 0) {
-    hasAnyProgress = true;
-    nextToPlay = Math.max(localNext, malNext);
-  }
+  const { nextToPlayItem, isCaughtUp, hasAnyProgress } = useMemo(() => {
+    if (!allSortedEpisodes || allSortedEpisodes.length === 0) {
+      return { nextToPlayItem: null, isCaughtUp: false, hasAnyProgress: false };
+    }
 
-  const isCaughtUp =
-    !historyLoading &&
-    hasAnyProgress &&
-    maxEpNumber > 0 &&
-    nextToPlay > maxEpNumber;
+    // 1. If targetNum (and targetSeason) is passed via props:
+    if (propTargetNum) {
+      const tNum = Number(propTargetNum);
+      const tSeason = propTargetSeason ? Number(propTargetSeason) : null;
+      const matched = allSortedEpisodes.find((ep) => {
+        const epSeason = ep.season ? Number(ep.season) : 1;
+        if (tSeason !== null && epSeason !== tSeason) return false;
+        return Number(ep.number) === tNum;
+      });
+      if (matched) {
+        return {
+          nextToPlayItem: matched,
+          isCaughtUp: false,
+          hasAnyProgress: true,
+        };
+      }
+    }
+
+    // 2. Check history progress:
+    const last = historyProgress?.lastProgress;
+    if (last && (last.number !== undefined || last.season !== undefined)) {
+      const lastSeason = last.season ? Number(last.season) : 1;
+      const lastNum = Number(last.number);
+      const curIdx = allSortedEpisodes.findIndex((ep) => {
+        const epSeason = ep.season ? Number(ep.season) : 1;
+        return epSeason === lastSeason && Number(ep.number) === lastNum;
+      });
+
+      if (curIdx >= 0) {
+        if (last.isCompleted) {
+          if (curIdx + 1 < allSortedEpisodes.length) {
+            return {
+              nextToPlayItem: allSortedEpisodes[curIdx + 1],
+              isCaughtUp: false,
+              hasAnyProgress: true,
+            };
+          } else {
+            return {
+              nextToPlayItem: null,
+              isCaughtUp: true,
+              hasAnyProgress: true,
+            };
+          }
+        } else {
+          return {
+            nextToPlayItem: allSortedEpisodes[curIdx],
+            isCaughtUp: false,
+            hasAnyProgress: true,
+          };
+        }
+      }
+    }
+
+    // 3. MAL watched (for Anime):
+    if (type === "Anime" && malWatched && Number(malWatched) > 0) {
+      const nextNum = Number(malWatched) + 1;
+      const matched = allSortedEpisodes.find(
+        (ep) => Number(ep.number) === nextNum,
+      );
+      if (matched) {
+        return {
+          nextToPlayItem: matched,
+          isCaughtUp: false,
+          hasAnyProgress: true,
+        };
+      } else if (Number(malWatched) >= allSortedEpisodes.length) {
+        return { nextToPlayItem: null, isCaughtUp: true, hasAnyProgress: true };
+      }
+    }
+
+    // 4. Default: first episode of the series
+    return {
+      nextToPlayItem: allSortedEpisodes[0],
+      isCaughtUp: false,
+      hasAnyProgress: false,
+    };
+  }, [
+    allSortedEpisodes,
+    historyProgress?.lastProgress,
+    propTargetNum,
+    propTargetSeason,
+    malWatched,
+    type,
+  ]);
+
+  const nextToPlay = nextToPlayItem ? Number(nextToPlayItem.number) : 1;
+  const nextToPlaySeason = nextToPlayItem?.season
+    ? Number(nextToPlayItem.season)
+    : 1;
 
   const showContinueBtn =
     !historyLoading &&
     !itemsLoading &&
     !isCaughtUp &&
     episodesOrChapters.length > 0;
-
-  // Bulk Selection Helper
-  const handleSelectToggle = (itemNum) => {
-    const nextSelected = new Set(selectedItems);
-    const num = Number(itemNum);
-    if (nextSelected.has(num)) {
-      nextSelected.delete(num);
-    } else {
-      nextSelected.add(num);
-    }
-    setSelectedItems(nextSelected);
-  };
 
   const isNumberInRange = (num, rangeStr) => {
     const parts = rangeStr.split(",");
@@ -2053,17 +2241,14 @@ export default function InfoView({
     if (isCaughtUp) {
       return;
     }
-    const targetNum = nextToPlay;
-    const sorted = [...episodesOrChapters].sort(
-      (a, b) => Number(a.number) - Number(b.number),
-    );
-    let targetItem = sorted.find(
-      (item) => Number(item.number) === Number(targetNum),
-    );
-
+    const targetItem = nextToPlayItem || allSortedEpisodes[0];
     const activeSubDub = historyProgress?.lastSubDub || dubSelect;
 
     if (targetItem) {
+      if (targetItem.season && availableSeasons.length > 0) {
+        userSelectedSeasonRef.current = true;
+        setSelectedSeason(String(targetItem.season));
+      }
       playItem(targetItem, activeSubDub);
     } else {
       const isAnimePahe =
@@ -2072,12 +2257,12 @@ export default function InfoView({
       if (isAnimePahe && totalPages > 1 && totalItemsCount > 0) {
         const epsPerPage = getEpsPerPage();
         const targetPage =
-          1 + Math.floor((totalItemsCount - targetNum) / epsPerPage);
+          1 + Math.floor((totalItemsCount - nextToPlay) / epsPerPage);
         const safePage = Math.max(1, Math.min(totalPages, targetPage));
-        setPendingPlayEpisodeNum(targetNum);
+        setPendingPlayEpisodeNum(nextToPlay);
         await fetchItems(safePage);
-      } else if (!hasAnyProgress && sorted.length > 0) {
-        playItem(sorted[0], activeSubDub);
+      } else if (!hasAnyProgress && allSortedEpisodes.length > 0) {
+        playItem(allSortedEpisodes[0], activeSubDub);
       }
     }
   };
@@ -2097,109 +2282,33 @@ export default function InfoView({
     }
   }, [autoPlay, loading, itemsLoading, historyLoading, isCaughtUp]);
 
-  const handleStartFromBegin = () => {
-    const sorted = [...episodesOrChapters].sort(
-      (a, b) => Number(a.number) - Number(b.number),
-    );
-    if (sorted.length > 0) {
-      const targetItem = sorted[0];
-      if (type === "Anime") {
-        const dl = details?.DownloadedEpisodes;
-        const isDownloadedLocal = Array.isArray(dl)
-          ? dl.map(Number).includes(Number(targetItem.number))
-          : dubSelect === "dub"
-            ? (dl?.dub || []).map(Number).includes(Number(targetItem.number))
-            : (dl?.sub || []).map(Number).includes(Number(targetItem.number));
-
-        onWatch(
-          details?.id || id,
-          isDownloadedLocal ? targetItem.number : targetItem.id,
-          isDownloadedLocal,
-          dubSelect,
-          episodesOrChapters,
-          details?.DownloadedEpisodes,
-          details?.title,
-          details?.provider,
-          details?.image,
-        );
-      } else {
-        const isDownloadedLocal = (details?.DownloadedChapters || [])
-          .map(Number)
-          .includes(Number(targetItem.number));
-
-        onRead(
-          details?.id || id,
-          isDownloadedLocal ? targetItem.number : targetItem.id,
-          isDownloadedLocal,
-          episodesOrChapters,
-          details?.DownloadedChapters,
-          details?.title,
-          details?.provider,
-          details?.image,
-        );
-      }
-    }
-  };
-
-  const handleWatchReadLatest = () => {
-    const sorted = [...episodesOrChapters].sort(
-      (a, b) => Number(a.number) - Number(b.number),
-    );
-    if (sorted.length > 0) {
-      const targetItem = sorted[sorted.length - 1];
-      if (type === "Anime") {
-        const dl = details?.DownloadedEpisodes;
-        const isDownloadedLocal = Array.isArray(dl)
-          ? dl.map(Number).includes(Number(targetItem.number))
-          : dubSelect === "dub"
-            ? (dl?.dub || []).map(Number).includes(Number(targetItem.number))
-            : (dl?.sub || []).map(Number).includes(Number(targetItem.number));
-
-        onWatch(
-          details?.id || id,
-          isDownloadedLocal ? targetItem.number : targetItem.id,
-          isDownloadedLocal,
-          dubSelect,
-          episodesOrChapters,
-          details?.DownloadedEpisodes,
-          details?.title,
-          details?.provider,
-          details?.image,
-        );
-      } else {
-        const isDownloadedLocal = (details?.DownloadedChapters || [])
-          .map(Number)
-          .includes(Number(targetItem.number));
-
-        onRead(
-          id,
-          isDownloadedLocal ? targetItem.number : targetItem.id,
-          isDownloadedLocal,
-          episodesOrChapters,
-          details?.DownloadedChapters,
-          details?.title,
-          details?.provider,
-          details?.image,
-        );
-      }
-    }
-  };
-
   // Download Trigger
   const handleDownload = async (singleItem = null) => {
+    const probeId = singleItem ? singleItem.id || singleItem.number : "bulk";
+    setProbingDownloadId(probeId);
     try {
-      const isAnime = type === "Anime";
+      const isAnime = type === "Anime" || type === "Movies";
       const singleMulti = singleItem ? "Single" : "Multi";
       const endpoint = `/api/download/${type}/${singleMulti}`;
 
-      let chosenLang = null;
+      let chosenLang = "sub";
+      let chosenQuality = "1080p";
 
       if (isAnime) {
         const targetEpisodes = singleItem
           ? [singleItem]
-          : episodesOrChapters.filter((item) =>
-              selectedItems.has(Number(item.number)),
-            );
+          : episodesOrChapters.filter((item) => {
+              if (!selectedItems.has(Number(item.number))) return false;
+              if (selectedSeason !== "all" && availableSeasons.length > 0) {
+                return Number(item.season || 1) === Number(selectedSeason);
+              }
+              return true;
+            });
+
+        if (!targetEpisodes || targetEpisodes.length === 0) {
+          swalError("No Items", "No episodes selected to download.");
+          return;
+        }
 
         let hasSub = false;
         let hasDub = false;
@@ -2220,63 +2329,177 @@ export default function InfoView({
         if (hasSub) availableLangs.push("sub");
         if (hasDub) availableLangs.push("dub");
         if (hasHsub) availableLangs.push("hsub");
+        if (availableLangs.length === 0) availableLangs.push("sub");
 
-        if (availableLangs.length > 1) {
-          const inputOptions = {};
-          if (hasSub) inputOptions.sub = "SUB";
-          if (hasDub) inputOptions.dub = "DUB";
-          if (hasHsub) inputOptions.hsub = "Hardsub (HSUB)";
+        let defaultQuality = "1080p";
+        try {
+          if (window.sharedStateAPI?.getSettings) {
+            const sRes = await window.sharedStateAPI.getSettings(["quality"]);
+            if (sRes?.settings?.quality) defaultQuality = sRes.settings.quality;
+          }
+        } catch (_) {}
 
-          const result = await Swal.fire({
-            title: "Select Version",
-            html: `
-              <style>
-                .swal2-html-container {
-                  overflow: visible !important;
-                  z-index: 20 !important;
-                  position: relative !important;
-                }
-                .swal2-popup {
-                  overflow: visible !important;
-                }
-                .swal2-actions {
-                  z-index: 10 !important;
-                  position: relative !important;
-                }
-                #swal-version-menu {
-                  border: 1px solid var(--border);
-                  border-radius: 8px;
-                  background: var(--bg-secondary);
-                  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-                }
-              </style>
-              <div style="margin-bottom: 16px; font-size: 14px; color: var(--text-muted); line-height: 1.5; text-align: center;">
-                ${
-                  singleItem
-                    ? `Choose the language version to download for Episode <strong>${singleItem.number}</strong>:`
-                    : `Choose the language version to download for the <strong>${targetEpisodes.length}</strong> selected episodes:`
-                }
-              </div>
-              <div class="input-group" style="position: relative; width: 100%; text-align: left; box-sizing: border-box;">
-                <div class="custom-dropdown-trigger" id="swal-version-trigger" style="display: flex; align-items: center; justify-content: space-between; min-height: 38px;">
-                  <span class="custom-dropdown-trigger-text" id="swal-version-text" style="color: var(--text-muted);">Select version</span>
-                  <svg class="custom-dropdown-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="pointer-events: none;"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                </div>
-                <div class="custom-dropdown-menu" id="swal-version-menu" style="display: none; position: absolute; top: calc(100% + 4px); left: 0; width: 100%; box-sizing: border-box; z-index: 9999;">
-                  ${Object.entries(inputOptions)
-                    .map(
-                      ([key, label]) => `
-                    <div class="custom-dropdown-item" data-value="${key}" style="display: flex; align-items: center; padding: 8px 12px; cursor: pointer;">
-                      ${label}
-                    </div>
-                  `,
-                    )
-                    .join("")}
-                </div>
-              </div>
+        // Probe first episode for available qualities
+        const probeEp = singleItem || targetEpisodes[0];
+        let availableQualities = [];
+        if (probeEp?.id) {
+          try {
+            const probeController = new AbortController();
+            const probeTimer = setTimeout(() => probeController.abort(), 4000);
+            const probeData = await apiPost(
+              "/api/watch",
+              {
+                ep: probeEp.id,
+                epNum: probeEp.number,
+                animeId: id,
+                Downloaded: false,
+                provider: details?.provider,
+                type: type || "Anime",
+              },
+              { signal: probeController.signal },
+            );
+            clearTimeout(probeTimer);
+
+            const rawSources = [
+              ...(Array.isArray(probeData?.sources) ? probeData.sources : []),
+              ...(Array.isArray(probeData?.sub?.sources)
+                ? probeData.sub.sources
+                : []),
+              ...(Array.isArray(probeData?.dub?.sources)
+                ? probeData.dub.sources
+                : []),
+              ...(Array.isArray(probeData?.hsub?.sources)
+                ? probeData.hsub.sources
+                : []),
+            ];
+
+            const foundQuals = new Set();
+            rawSources.forEach((s) => {
+              const qStr = String(s?.quality || s?.name || "").toLowerCase();
+              const match = qStr.match(/(\d+)p/);
+              if (match) foundQuals.add(`${match[1]}p`);
+              else if (qStr.includes("1080")) foundQuals.add("1080p");
+              else if (qStr.includes("720")) foundQuals.add("720p");
+              else if (qStr.includes("480")) foundQuals.add("480p");
+              else if (qStr.includes("360")) foundQuals.add("360p");
+            });
+
+            if (foundQuals.size > 0) {
+              const standardOrder = ["1080p", "720p", "480p", "360p"];
+              availableQualities = standardOrder.filter((q) =>
+                foundQuals.has(q),
+              );
+              foundQuals.forEach((q) => {
+                if (!availableQualities.includes(q)) availableQualities.push(q);
+              });
+            }
+          } catch (_) {}
+        }
+
+        if (availableQualities.length === 0) {
+          availableQualities = ["1080p", "720p", "480p", "360p"];
+        }
+
+        const selectedQualityDefault = availableQualities.includes(
+          defaultQuality,
+        )
+          ? defaultQuality
+          : availableQualities[0] || "1080p";
+
+        const result = await Swal.fire({
+          title: "Download Options",
+          html: `
+            <style>
+              .swal2-html-container {
+                overflow: visible !important;
+                z-index: 20 !important;
+                position: relative !important;
+                text-align: left !important;
+              }
+              .swal2-popup {
+                overflow: visible !important;
+                border-radius: 12px !important;
+              }
+              .swal-dl-section-label {
+                font-size: 12px;
+                font-weight: 600;
+                color: var(--text-main, #ffffff);
+                margin-bottom: 8px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+              }
+              .swal-pill-group {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 8px;
+                margin-bottom: 16px;
+                justify-content: flex-start;
+              }
+              .swal-pill-btn {
+                flex: 1 1 auto;
+                min-width: 65px;
+                padding: 8px 14px;
+                border-radius: 8px;
+                border: 1px solid var(--border, rgba(255, 255, 255, 0.15));
+                background: var(--bg-tertiary, #222222);
+                color: var(--text-muted, #aaaaaa);
+                font-size: 13px;
+                font-weight: 600;
+                cursor: pointer;
+                text-align: center;
+                transition: all 0.2s ease;
+              }
+              .swal-pill-btn:hover {
+                background: var(--bg-hover, #333333);
+                color: var(--text-main, #ffffff);
+              }
+              .swal-pill-btn.active {
+                background: var(--accent, #e50914) !important;
+                border-color: var(--accent, #e50914) !important;
+                color: #ffffff !important;
+                box-shadow: 0 2px 10px rgba(229, 9, 20, 0.4);
+              }
+            </style>
+            <div style="margin-bottom: 16px; font-size: 14px; color: var(--text-muted); line-height: 1.5; text-align: center;">
               ${
-                msShow
-                  ? `<div style="margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
+                singleItem
+                  ? `Choose download options for Episode <strong>${singleItem.number}</strong>:`
+                  : `Choose download options for <strong>${targetEpisodes.length}</strong> selected episodes:`
+              }
+            </div>
+            ${
+              availableLangs.length > 1
+                ? `
+              <div class="swal-dl-section-label">Language Version</div>
+              <div class="swal-pill-group" id="swal-lang-pills">
+                ${availableLangs
+                  .map(
+                    (lang, idx) => `
+                  <button type="button" class="swal-pill-btn swal-lang-btn ${idx === 0 ? "active" : ""}" data-value="${lang}">
+                    ${lang.toUpperCase()}
+                  </button>
+                `,
+                  )
+                  .join("")}
+              </div>
+            `
+                : ""
+            }
+            <div class="swal-dl-section-label">Video Quality</div>
+            <div class="swal-pill-group" id="swal-quality-pills">
+              ${availableQualities
+                .map(
+                  (q) => `
+                <button type="button" class="swal-pill-btn swal-quality-btn ${q === selectedQualityDefault ? "active" : ""}" data-value="${q}">
+                  ${q}
+                </button>
+              `,
+                )
+                .join("")}
+            </div>
+            ${
+              msShow
+                ? `<div style="margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
                 Jellyfin/Plex naming: saves to <strong>${String(
                   msShow.series || details?.title || "",
                 )
@@ -2288,92 +2511,54 @@ export default function InfoView({
                   )}\\${msShow.season === 0 ? "Season 00 (Specials)" : `Season ${String(msShow.season).padStart(2, "0")}`}</strong>.<br>
                 To change this, cancel and set <strong>Season</strong> and <strong>Show folder</strong> above the episode list.
               </div>`
-                  : ""
-              }
-            `,
-            showCancelButton: true,
-            confirmButtonText: "Confirm",
-            cancelButtonText: "Cancel",
-            background: "var(--bg-secondary)",
-            color: "var(--text-main)",
-            confirmButtonColor: "var(--accent)",
-            cancelButtonColor: "var(--bg-tertiary)",
-            didOpen: () => {
-              const trigger = Swal.getHtmlContainer().querySelector(
-                "#swal-version-trigger",
-              );
-              const menu =
-                Swal.getHtmlContainer().querySelector("#swal-version-menu");
-              const items = Swal.getHtmlContainer().querySelectorAll(
-                ".custom-dropdown-item",
-              );
-              const textSpan =
-                Swal.getHtmlContainer().querySelector("#swal-version-text");
-
-              let selectedVal = "";
-
-              const handleOutsideClick = (e) => {
-                if (!trigger.contains(e.target) && !menu.contains(e.target)) {
-                  trigger.classList.remove("open");
-                  menu.style.display = "none";
-                }
-              };
-
-              trigger.addEventListener("click", (e) => {
-                e.stopPropagation();
-                const isOpen = trigger.classList.contains("open");
-                if (isOpen) {
-                  trigger.classList.remove("open");
-                  menu.style.display = "none";
-                  document.removeEventListener("click", handleOutsideClick);
-                } else {
-                  trigger.classList.add("open");
-                  menu.style.display = "block";
-                  document.addEventListener("click", handleOutsideClick);
-                }
+                : ""
+            }
+          `,
+          showCancelButton: true,
+          confirmButtonText: "Download",
+          cancelButtonText: "Cancel",
+          background: "var(--bg-secondary)",
+          color: "var(--text-main)",
+          confirmButtonColor: "var(--accent)",
+          cancelButtonColor: "var(--bg-tertiary)",
+          didOpen: () => {
+            const popup = Swal.getHtmlContainer();
+            const langBtns = popup.querySelectorAll(".swal-lang-btn");
+            langBtns.forEach((btn) => {
+              btn.addEventListener("click", () => {
+                langBtns.forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
               });
-
-              items.forEach((item) => {
-                item.addEventListener("click", (e) => {
-                  e.stopPropagation();
-                  selectedVal = item.getAttribute("data-value");
-                  textSpan.textContent = item.textContent.trim();
-                  textSpan.style.color = "white";
-
-                  items.forEach((i) => i.classList.remove("selected"));
-                  item.classList.add("selected");
-
-                  trigger.classList.remove("open");
-                  menu.style.display = "none";
-                  document.removeEventListener("click", handleOutsideClick);
-
-                  trigger.setAttribute("data-selected-value", selectedVal);
-                  Swal.resetValidationMessage();
-                });
+            });
+            const qualBtns = popup.querySelectorAll(".swal-quality-btn");
+            qualBtns.forEach((btn) => {
+              btn.addEventListener("click", () => {
+                qualBtns.forEach((b) => b.classList.remove("active"));
+                btn.classList.add("active");
               });
-            },
-            preConfirm: () => {
-              const trigger = Swal.getHtmlContainer().querySelector(
-                "#swal-version-trigger",
-              );
-              const selectedValue = trigger.getAttribute("data-selected-value");
-              if (!selectedValue) {
-                Swal.showValidationMessage("Please select a version");
-                return false;
-              }
-              return selectedValue;
-            },
-          });
+            });
+          },
+          preConfirm: () => {
+            const popup = Swal.getHtmlContainer();
+            const activeLangBtn = popup.querySelector(".swal-lang-btn.active");
+            const activeQualBtn = popup.querySelector(
+              ".swal-quality-btn.active",
+            );
+            const selLang = activeLangBtn
+              ? activeLangBtn.getAttribute("data-value")
+              : availableLangs[0] || "sub";
+            const selQual = activeQualBtn
+              ? activeQualBtn.getAttribute("data-value")
+              : selectedQualityDefault;
+            return { subdub: selLang, quality: selQual };
+          },
+        });
 
-          if (!result.value) {
-            return; // user cancelled
-          }
-          chosenLang = result.value;
-        } else if (availableLangs.length === 1) {
-          chosenLang = availableLangs[0];
-        } else {
-          chosenLang = "sub";
+        if (!result.value) {
+          return; // user cancelled
         }
+        chosenLang = result.value.subdub;
+        chosenQuality = result.value.quality;
       }
 
       let bodyData = {};
@@ -2385,14 +2570,26 @@ export default function InfoView({
           number: singleItem.number,
           provider: details?.provider,
           malid: details?.malid || details?.MalID,
-          ...(isAnime ? { subdub: chosenLang } : {}),
+          ...(isAnime ? { subdub: chosenLang, quality: chosenQuality } : {}),
+          season:
+            singleItem.season !== undefined && singleItem.season !== null
+              ? singleItem.season
+              : selectedSeason !== "all"
+                ? Number(selectedSeason)
+                : 1,
         };
       } else {
         const itemsToDownload = [];
         selectedItems.forEach((num) => {
-          const loadedItem = episodesOrChapters.find(
-            (item) => Number(item.number) === num,
-          );
+          const loadedItem =
+            (selectedSeason !== "all" && availableSeasons.length > 0
+              ? episodesOrChapters.find(
+                  (item) =>
+                    Number(item.number) === num &&
+                    Number(item.season || 1) === Number(selectedSeason),
+                )
+              : null) ||
+            episodesOrChapters.find((item) => Number(item.number) === num);
           if (loadedItem) {
             if (
               !isItemFullyDownloaded(loadedItem) &&
@@ -2401,10 +2598,20 @@ export default function InfoView({
               itemsToDownload.push({
                 id: loadedItem.id,
                 number: loadedItem.number,
+                season:
+                  loadedItem.season !== undefined && loadedItem.season !== null
+                    ? loadedItem.season
+                    : selectedSeason !== "all"
+                      ? Number(selectedSeason)
+                      : 1,
               });
             }
           } else {
-            itemsToDownload.push({ id: null, number: num });
+            itemsToDownload.push({
+              id: null,
+              number: num,
+              season: selectedSeason !== "all" ? Number(selectedSeason) : 1,
+            });
           }
         });
         bodyData = {
@@ -2413,7 +2620,7 @@ export default function InfoView({
           Title: details?.title,
           provider: details?.provider,
           malid: details?.malid || details?.MalID,
-          ...(isAnime ? { SubDub: chosenLang } : {}),
+          ...(isAnime ? { SubDub: chosenLang, quality: chosenQuality } : {}),
         };
       }
 
@@ -2424,13 +2631,20 @@ export default function InfoView({
       });
       const data = await response.json();
 
-      if (!data.error) {
-        const isNotInLibrary =
-          !currentTags || currentTags.length === 0 || !currentTags[0];
-        if (isNotInLibrary) {
-          await saveTags("Downloads", false);
-          triggerPulse();
-        }
+      const isPartialOrFullSuccess =
+        Boolean(data?.successCount && data.successCount > 0) ||
+        (data?.message && /added\s+\d+\s+other/i.test(data.message));
+
+      if (data?.error && !isPartialOrFullSuccess) {
+        swalError("Error", data.message || "Failed to add to download queue.");
+        return;
+      }
+
+      const isNotInLibrary =
+        !currentTags || currentTags.length === 0 || !currentTags[0];
+      if (isNotInLibrary) {
+        await saveTags("Downloads", false);
+        triggerPulse();
       }
 
       swalSuccess("Queue Updated", data.message || "Added to download queue!");
@@ -2438,7 +2652,9 @@ export default function InfoView({
       fetchDownloadsState();
     } catch (err) {
       console.error(err);
-      swalError("Error", "Failed to add to download queue.");
+      swalError("Error", err?.message || "Failed to add to download queue.");
+    } finally {
+      setProbingDownloadId(null);
     }
   };
 
@@ -2455,7 +2671,7 @@ export default function InfoView({
 
   // MAL Status sync
   const handleMalSync = async () => {
-    if (!details?.malid) return;
+    if (type === "Movies" || !details?.malid) return;
     if (malStatus === "not_in_list") {
       swalInfo(
         "Status Required",
@@ -2485,7 +2701,7 @@ export default function InfoView({
   };
 
   const handleMalRemove = async () => {
-    if (!details?.malid) return;
+    if (type === "Movies" || !details?.malid) return;
 
     const result = await swalConfirm(
       "Remove from MyAnimeList?",
@@ -2562,7 +2778,7 @@ export default function InfoView({
           type: type,
           id: details?.id || id,
           provider: activeProvider,
-          MalID: details?.malid || details?.MalID,
+          MalID: type === "Movies" ? null : details?.malid || details?.MalID,
           CustomTag: updatedTag,
         }),
       });
@@ -2599,6 +2815,7 @@ export default function InfoView({
   };
 
   const startMalLink = () => {
+    if (type === "Movies") return;
     setIsLinkingMal(true);
     const initialQuery = details?.title || "";
     setMalSearchQuery(initialQuery);
@@ -2608,7 +2825,7 @@ export default function InfoView({
   };
 
   const performMalSearch = async (query) => {
-    if (!query) return;
+    if (type === "Movies" || !query) return;
     setMalSearchLoading(true);
     try {
       const searchType = type === "Anime" ? "anime" : "manga";
@@ -2738,6 +2955,7 @@ export default function InfoView({
   };
 
   const handleUnlinkMal = async () => {
+    if (type === "Movies") return;
     const confirmResult = await Swal.fire({
       title: "Unlink MyAnimeList?",
       text: "Are you sure you want to unlink this item from MyAnimeList?",
@@ -2784,7 +3002,7 @@ export default function InfoView({
 
   // Delete local catalog entry
   const handleDeleteLocal = async () => {
-    const isAnime = type === "Anime";
+    const isAnime = type === "Anime" || type === "Movies";
     const allDownloaded = [];
     if (isAnime) {
       const dl = details?.DownloadedEpisodes;
@@ -2813,6 +3031,8 @@ export default function InfoView({
 
   const handleLocalDeleteFlow = async ({
     numbers,
+    items,
+    season,
     subdub,
     confirmTitle,
     confirmText,
@@ -2832,6 +3052,8 @@ export default function InfoView({
         id,
         type,
         numbers,
+        items,
+        season,
         subdub,
       });
       if (!data.error) {
@@ -2846,12 +3068,15 @@ export default function InfoView({
   };
 
   // Delete single local episode file
-  const handleDeleteEpisode = async (epNum, subdub) => {
+  const handleDeleteEpisode = async (epNum, subdub = null, epSeason = null) => {
+    const resolvedSeason = epSeason ?? activeSeasonNum;
     await handleLocalDeleteFlow({
       numbers: [epNum],
+      items: [{ number: epNum, season: resolvedSeason }],
+      season: resolvedSeason,
       subdub,
       confirmTitle: "Delete Episode?",
-      confirmText: `Delete downloaded file for Episode ${epNum} (${subdub})?`,
+      confirmText: `Delete downloaded file for Episode ${epNum}${resolvedSeason ? ` (Season ${resolvedSeason})` : ""}${subdub ? ` (${subdub})` : ""}?`,
       confirmBtn: "Yes, delete it",
       successTitle: "Deleted",
       successText: "Episode file deleted.",
@@ -2877,6 +3102,7 @@ export default function InfoView({
     number = null,
     subdub = null,
     action = "open_folder",
+    season = null,
   ) => {
     try {
       const res = await apiPost("/api/local/open", {
@@ -2885,6 +3111,7 @@ export default function InfoView({
         number,
         subdub,
         action,
+        season,
       });
       if (res.error) {
         swalError(
@@ -2900,19 +3127,34 @@ export default function InfoView({
 
   // Bulk Delete Trigger
   const handleBulkDelete = async () => {
-    const isAnime = type === "Anime";
+    const isAnime = type === "Anime" || type === "Movies";
     const selectedDownloaded = Array.from(selectedItems).filter((num) => {
       if (isAnime) {
-        return isDownloaded(num, "sub") || isDownloaded(num, "dub");
+        return (
+          isDownloaded(num, "sub", activeSeasonNum) ||
+          isDownloaded(num, "dub", activeSeasonNum)
+        );
       } else {
         return isDownloaded(num);
       }
     });
     if (selectedDownloaded.length === 0) return;
 
+    const itemsToDelete = selectedDownloaded.map((num) => {
+      const match = (filteredItems || []).find(
+        (it) => Number(it.number) === Number(num),
+      );
+      return {
+        number: num,
+        season: match?.season ?? activeSeasonNum ?? 1,
+      };
+    });
+
     const numbersToDelete = selectedDownloaded;
     await handleLocalDeleteFlow({
       numbers: numbersToDelete,
+      items: itemsToDelete,
+      season: activeSeasonNum,
       subdub: isAnime ? dubSelect : undefined,
       confirmTitle: `Delete Selected ${isAnime ? "Episode(s)" : "Chapter(s)"}?`,
       confirmText: `Are you sure you want to delete ${numbersToDelete.length} downloaded ${isAnime ? "episode(s)" : "chapter(s)"}?`,
@@ -2927,14 +3169,34 @@ export default function InfoView({
   };
 
   // Mark items as read/completed or unread/unwatched
-  const handleMarkRead = async (isCompleted, numbersList = null) => {
+  const handleMarkRead = async (
+    isCompleted,
+    numbersList = null,
+    itemsWithSeason = null,
+  ) => {
     const targets = numbersList || Array.from(selectedItems);
     if (!targets || targets.length === 0) return;
     const numbers = [...targets].sort((a, b) => a - b);
+
+    // Build items array with season info when available
+    const items =
+      itemsWithSeason ||
+      numbers.map((num) => {
+        const matchingEp =
+          type === "Movies" || type === "Anime"
+            ? filteredItems.find((it) => Number(it.number) === Number(num))
+            : null;
+        return {
+          number: num,
+          season: matchingEp?.season || 1,
+        };
+      });
+
     try {
       const res = await apiPost("/api/history/mark-read", {
         mediaId: id,
         type,
+        items,
         numbers,
         isCompleted: Boolean(isCompleted),
         title: details?.title || "",
@@ -3000,7 +3262,12 @@ export default function InfoView({
             className="u-style-31"
           />
           <h2 className="u-style-32">
-            {type === "Anime" ? "Anime" : "Manga"} Data Not Found
+            {type === "Manga"
+              ? "Manga"
+              : type === "Movies"
+                ? "Movie / Series"
+                : "Anime"}{" "}
+            Data Not Found
           </h2>
           <p className="u-style-33">
             {details?.message ||
@@ -3068,222 +3335,235 @@ export default function InfoView({
           </div>
 
           {/* SIMILAR MAPPING SEARCH & MAL LINKING SECTION */}
-          <div
-            style={{
-              marginTop: "30px",
-              borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-              paddingTop: "20px",
-              width: "100%",
-              textAlign: "left",
-            }}
-          >
-            <h3
+          {type !== "Movies" && (
+            <div
               style={{
-                fontSize: "1.1rem",
-                fontWeight: "600",
-                marginBottom: "6px",
-                color: "#fff",
+                marginTop: "30px",
+                borderTop: "1px solid rgba(255, 255, 255, 0.1)",
+                paddingTop: "20px",
+                width: "100%",
+                textAlign: "left",
               }}
             >
-              Link to Database Mapping
-            </h3>
-            <p
-              style={{
-                fontSize: "0.85rem",
-                color: "#aaa",
-                marginBottom: "15px",
-              }}
-            >
-              Search for similar titles in mapping.db to link this entry and
-              restore metadata.
-            </p>
-
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleMappingSearch();
-              }}
-              style={{ display: "flex", gap: "10px", marginBottom: "20px" }}
-            >
-              <input
-                type="text"
-                value={mappingSearchQuery}
-                onChange={(e) => setMappingSearchQuery(e.target.value)}
-                placeholder="Edit title to search..."
+              <h3
                 style={{
-                  flex: 1,
-                  padding: "10px 14px",
-                  borderRadius: "8px",
-                  border: "1px solid rgba(255, 255, 255, 0.2)",
-                  background: "rgba(0, 0, 0, 0.4)",
+                  fontSize: "1.1rem",
+                  fontWeight: "600",
+                  marginBottom: "6px",
                   color: "#fff",
-                  outline: "none",
-                }}
-              />
-              <button
-                type="submit"
-                disabled={isSearchingMapping}
-                className="btn-back"
-                style={{
-                  backgroundColor: "var(--accent-blue, #3b82f6)",
-                  border: "none",
-                  margin: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "0 18px",
-                  cursor: "pointer",
                 }}
               >
-                <Search size={16} />
-                <span>{isSearchingMapping ? "Searching..." : "Search"}</span>
-              </button>
-            </form>
+                Link to Database Mapping
+              </h3>
+              <p
+                style={{
+                  fontSize: "0.85rem",
+                  color: "#aaa",
+                  marginBottom: "15px",
+                }}
+              >
+                Search for similar titles in mapping.db to link this entry and
+                restore metadata.
+              </p>
 
-            {isSearchingMapping ? (
-              <div
-                style={{
-                  textAlign: "center",
-                  padding: "20px",
-                  color: "#888",
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  handleMappingSearch();
                 }}
+                style={{ display: "flex", gap: "10px", marginBottom: "20px" }}
               >
-                Searching database mappings...
-              </div>
-            ) : mappingResults.length === 0 ? (
-              <div
-                style={{
-                  textAlign: "center",
-                  padding: "15px",
-                  color: "#666",
-                  fontSize: "0.9rem",
-                }}
-              >
-                No similar mapping results found for "{mappingSearchQuery}".
-              </div>
-            ) : (
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
-                  gap: "15px",
-                  maxHeight: "360px",
-                  overflowY: "auto",
-                  paddingRight: "5px",
-                }}
-              >
-                {mappingResults.map((item, idx) => (
-                  <div
-                    key={item.malid || item.id || idx}
-                    style={{
-                      background: "rgba(255, 255, 255, 0.05)",
-                      borderRadius: "8px",
-                      padding: "10px",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
-                    }}
-                  >
+                <input
+                  type="text"
+                  value={mappingSearchQuery}
+                  onChange={(e) => setMappingSearchQuery(e.target.value)}
+                  placeholder="Edit title to search..."
+                  style={{
+                    flex: 1,
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid rgba(255, 255, 255, 0.2)",
+                    background: "rgba(0, 0, 0, 0.4)",
+                    color: "#fff",
+                    outline: "none",
+                  }}
+                />
+                <button
+                  type="submit"
+                  disabled={isSearchingMapping}
+                  className="btn-back"
+                  style={{
+                    backgroundColor: "var(--accent-blue, #3b82f6)",
+                    border: "none",
+                    margin: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "0 18px",
+                    cursor: "pointer",
+                  }}
+                >
+                  <Search size={16} />
+                  <span>{isSearchingMapping ? "Searching..." : "Search"}</span>
+                </button>
+              </form>
+
+              {isSearchingMapping ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "20px",
+                    color: "#888",
+                  }}
+                >
+                  Searching database mappings...
+                </div>
+              ) : mappingResults.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "15px",
+                    color: "#666",
+                    fontSize: "0.9rem",
+                  }}
+                >
+                  No similar mapping results found for "{mappingSearchQuery}".
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(150px, 1fr))",
+                    gap: "15px",
+                    maxHeight: "360px",
+                    overflowY: "auto",
+                    paddingRight: "5px",
+                  }}
+                >
+                  {mappingResults.map((item, idx) => (
                     <div
+                      key={item.malid || item.id || idx}
                       style={{
-                        width: "100%",
-                        height: "160px",
-                        borderRadius: "6px",
-                        overflow: "hidden",
-                        marginBottom: "8px",
-                        background: "#111",
+                        background: "rgba(255, 255, 255, 0.05)",
+                        borderRadius: "8px",
+                        padding: "10px",
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                        border: "1px solid rgba(255, 255, 255, 0.1)",
                       }}
                     >
-                      <img
-                        src={
-                          item.image || item.image_url
-                            ? `/api/image?url=${encodeURIComponent(item.image || item.image_url)}`
-                            : "/images/image-404.png"
-                        }
-                        alt={item.title}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
-                        }}
-                        onError={(e) => {
-                          e.target.onerror = null;
-                          e.target.src = "/images/image-404.png";
-                        }}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        fontSize: "0.8rem",
-                        fontWeight: "600",
-                        color: "#fff",
-                        marginBottom: "4px",
-                        display: "-webkit-box",
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: "vertical",
-                        overflow: "hidden",
-                      }}
-                    >
-                      {item.title || item.id}
-                    </div>
-                    {item.malid && (
                       <div
                         style={{
-                          fontSize: "0.7rem",
-                          color: "#3b82f6",
+                          width: "100%",
+                          height: "160px",
+                          borderRadius: "6px",
+                          overflow: "hidden",
                           marginBottom: "8px",
+                          background: "#111",
                         }}
                       >
-                        MAL ID: {item.malid}
+                        <img
+                          src={
+                            item.image || item.image_url
+                              ? `/api/image?url=${encodeURIComponent(item.image || item.image_url)}`
+                              : "/images/image-404.png"
+                          }
+                          alt={item.title}
+                          style={{
+                            width: "100%",
+                            height: "100%",
+                            objectFit: "cover",
+                          }}
+                          onError={(e) => {
+                            e.target.onerror = null;
+                            e.target.src = "/images/image-404.png";
+                          }}
+                        />
                       </div>
-                    )}
-                    <button
-                      onClick={() => handleLinkMappingItem(item)}
-                      disabled={isLinkingMapping}
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "6px",
-                        border: "none",
-                        backgroundColor: "var(--accent-green, #10b981)",
-                        color: "#fff",
-                        fontSize: "0.75rem",
-                        fontWeight: "600",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {isLinkingMapping ? "Linking..." : "Link & Open"}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+                      <div
+                        style={{
+                          fontSize: "0.8rem",
+                          fontWeight: "600",
+                          color: "#fff",
+                          marginBottom: "4px",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          overflow: "hidden",
+                        }}
+                      >
+                        {item.title || item.id}
+                      </div>
+                      {item.malid && (
+                        <div
+                          style={{
+                            fontSize: "0.7rem",
+                            color: "#3b82f6",
+                            marginBottom: "8px",
+                          }}
+                        >
+                          MAL ID: {item.malid}
+                        </div>
+                      )}
+                      <button
+                        onClick={() => handleLinkMappingItem(item)}
+                        disabled={isLinkingMapping}
+                        style={{
+                          width: "100%",
+                          padding: "8px",
+                          borderRadius: "6px",
+                          border: "none",
+                          backgroundColor: "var(--accent-green, #10b981)",
+                          color: "#fff",
+                          fontSize: "0.75rem",
+                          fontWeight: "600",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {isLinkingMapping ? "Linking..." : "Link & Open"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  const selectableItems = episodesOrChapters.filter(
-    (item) => !isItemUnavailable(item),
-  );
+  const selectableItems = (
+    selectedSeason !== "all" && availableSeasons.length > 0
+      ? episodesOrChapters.filter(
+          (item) => Number(item.season || 1) === Number(selectedSeason),
+        )
+      : episodesOrChapters
+  ).filter((item) => !isItemUnavailable(item));
   const allSelectableSelected =
     selectableItems.length > 0 &&
     selectableItems.every((item) => selectedItems.has(Number(item.number)));
 
+  const activeSeasonNum =
+    selectedSeason !== "all" && availableSeasons.length > 0
+      ? Number(selectedSeason)
+      : null;
   const numToDownload = Array.from(selectedItems).filter((num) => {
     const downloaded =
-      type === "Anime"
-        ? isDownloaded(num, "sub") || isDownloaded(num, "dub")
+      type === "Anime" || type === "Movies"
+        ? isDownloaded(num, "sub", activeSeasonNum) ||
+          isDownloaded(num, "dub", activeSeasonNum)
         : isDownloaded(num);
     return !downloaded;
   }).length;
 
   const numToDelete = Array.from(selectedItems).filter((num) => {
     const downloaded =
-      type === "Anime"
-        ? isDownloaded(num, "sub") || isDownloaded(num, "dub")
+      type === "Anime" || type === "Movies"
+        ? isDownloaded(num, "sub", activeSeasonNum) ||
+          isDownloaded(num, "dub", activeSeasonNum)
         : isDownloaded(num);
     return downloaded;
   }).length;
@@ -3475,13 +3755,16 @@ export default function InfoView({
                     ) : (
                       <Play size={16} className="u-style-35" />
                     )}
-                    {type === "Anime"
-                      ? nextToPlay === 1
-                        ? "Start watching Episode 1"
-                        : `Continue Watching Episode ${nextToPlay}`
-                      : nextToPlay === 1
+                    {type === "Manga"
+                      ? !hasAnyProgress
                         ? "Start reading Chapter 1"
-                        : `Continue Reading Chapter ${nextToPlay}`}
+                        : `Continue Reading Chapter ${nextToPlay}`
+                      : !hasAnyProgress
+                        ? "Start watching Episode 1"
+                        : nextToPlayItem?.season &&
+                            (type === "Movies" || availableSeasons.length > 0)
+                          ? `Continue Watching Season ${nextToPlaySeason} Episode ${nextToPlay}`
+                          : `Continue Watching Episode ${nextToPlay}`}
                   </button>
                 )}
 
@@ -3696,116 +3979,122 @@ export default function InfoView({
           </div>
 
           {/* Consolidated MyAnimeList Integration Box */}
-          <div className="mal-box glass-panel">
-            <div className="mal-box-header u-style-39">
-              <h3 className="mal-title u-style-11">MyAnimeList Integration</h3>
-              {details?.malid ? (
-                <div className="mal-link-status u-style-27">
-                  <span className="mal-link-badge">
-                    Linked (ID: {details.malid})
-                  </span>
-                  <button onClick={handleUnlinkMal} className="btn-unlink">
-                    Unlink
-                  </button>
-                </div>
-              ) : (
-                <button onClick={startMalLink} className="btn-link-mal">
-                  Link MyAnimeList Title
-                </button>
-              )}
-            </div>
-
-            {details?.malid ? (
-              details?.MalLoggedIn ? (
-                <div className="mal-row">
-                  <div className="input-group">
-                    <label className="input-label">
-                      {type === "Anime" ? "Watched Episodes" : "Read Chapters"}
-                    </label>
-                    <input
-                      type="number"
-                      value={malWatched}
-                      onChange={(e) =>
-                        setMalWatched(parseInt(e.target.value) || 0)
-                      }
-                      className="input-val"
-                    />
+          {type !== "Movies" && (
+            <div className="mal-box glass-panel">
+              <div className="mal-box-header u-style-39">
+                <h3 className="mal-title u-style-11">
+                  MyAnimeList Integration
+                </h3>
+                {details?.malid ? (
+                  <div className="mal-link-status u-style-27">
+                    <span className="mal-link-badge">
+                      Linked (ID: {details.malid})
+                    </span>
+                    <button onClick={handleUnlinkMal} className="btn-unlink">
+                      Unlink
+                    </button>
                   </div>
-                  <div
-                    className="input-group u-style-40"
-                    ref={malStatusDropdownRef}
-                  >
-                    <label className="input-label">Status</label>
-                    <div
-                      className={`custom-dropdown-trigger ${isMalStatusDropdownOpen ? "open" : ""}`}
-                      onClick={() =>
-                        setIsMalStatusDropdownOpen(!isMalStatusDropdownOpen)
-                      }
-                    >
-                      <span className="custom-dropdown-trigger-text">
-                        {getMalStatusLabel(malStatus)}
-                      </span>
-                      <ChevronDown
-                        className="custom-dropdown-chevron"
-                        size={16}
+                ) : (
+                  <button onClick={startMalLink} className="btn-link-mal">
+                    Link MyAnimeList Title
+                  </button>
+                )}
+              </div>
+
+              {details?.malid ? (
+                details?.MalLoggedIn ? (
+                  <div className="mal-row">
+                    <div className="input-group">
+                      <label className="input-label">
+                        {type === "Manga"
+                          ? "Read Chapters"
+                          : "Watched Episodes"}
+                      </label>
+                      <input
+                        type="number"
+                        value={malWatched}
+                        onChange={(e) =>
+                          setMalWatched(parseInt(e.target.value) || 0)
+                        }
+                        className="input-val"
                       />
                     </div>
-
-                    {isMalStatusDropdownOpen && (
-                      <div className="custom-dropdown-menu">
-                        {malStatusOptions.map((statusOption) => (
-                          <div
-                            key={statusOption}
-                            className={`custom-dropdown-item ${malStatus === statusOption ? "selected" : ""}`}
-                            onClick={() => {
-                              setMalStatus(statusOption);
-                              setIsMalStatusDropdownOpen(false);
-                            }}
-                          >
-                            {getMalStatusLabel(statusOption)}
-                          </div>
-                        ))}
+                    <div
+                      className="input-group u-style-40"
+                      ref={malStatusDropdownRef}
+                    >
+                      <label className="input-label">Status</label>
+                      <div
+                        className={`custom-dropdown-trigger ${isMalStatusDropdownOpen ? "open" : ""}`}
+                        onClick={() =>
+                          setIsMalStatusDropdownOpen(!isMalStatusDropdownOpen)
+                        }
+                      >
+                        <span className="custom-dropdown-trigger-text">
+                          {getMalStatusLabel(malStatus)}
+                        </span>
+                        <ChevronDown
+                          className="custom-dropdown-chevron"
+                          size={16}
+                        />
                       </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={handleMalSync}
-                    disabled={malSyncing}
-                    className="btn-sync glow-button"
-                  >
-                    {malSyncing ? (
-                      <Loader2 size={16} className="spin" />
-                    ) : (
-                      "Save Status"
-                    )}
-                  </button>
-                  {malStatus !== "not_in_list" && (
+
+                      {isMalStatusDropdownOpen && (
+                        <div className="custom-dropdown-menu">
+                          {malStatusOptions.map((statusOption) => (
+                            <div
+                              key={statusOption}
+                              className={`custom-dropdown-item ${malStatus === statusOption ? "selected" : ""}`}
+                              onClick={() => {
+                                setMalStatus(statusOption);
+                                setIsMalStatusDropdownOpen(false);
+                              }}
+                            >
+                              {getMalStatusLabel(statusOption)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <button
-                      onClick={handleMalRemove}
+                      onClick={handleMalSync}
                       disabled={malSyncing}
-                      className="btn-unlink u-style-41"
+                      className="btn-sync glow-button"
                     >
                       {malSyncing ? (
                         <Loader2 size={16} className="spin" />
                       ) : (
-                        "Remove from List"
+                        "Save Status"
                       )}
                     </button>
-                  )}
-                </div>
+                    {malStatus !== "not_in_list" && (
+                      <button
+                        onClick={handleMalRemove}
+                        disabled={malSyncing}
+                        className="btn-unlink u-style-41"
+                      >
+                        {malSyncing ? (
+                          <Loader2 size={16} className="spin" />
+                        ) : (
+                          "Remove from List"
+                        )}
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mal-unlinked-placeholder u-style-42">
+                    Log in to MyAnimeList in Settings to synchronize your status
+                    and progress automatically.
+                  </p>
+                )
               ) : (
                 <p className="mal-unlinked-placeholder u-style-42">
-                  Log in to MyAnimeList in Settings to synchronize your status
-                  and progress automatically.
+                  This title is not linked to a MyAnimeList entry. Link it to
+                  synchronize your status and watch history automatically.
                 </p>
-              )
-            ) : (
-              <p className="mal-unlinked-placeholder u-style-42">
-                This title is not linked to a MyAnimeList entry. Link it to
-                synchronize your status and watch history automatically.
-              </p>
-            )}
-          </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -3941,7 +4230,7 @@ export default function InfoView({
               alignItems: "center",
             }}
           >
-            <h2>{type === "Anime" ? "Episodes List" : "Chapters List"}</h2>
+            <h2>{type === "Manga" ? "Chapters List" : "Episodes List"}</h2>
             <button
               type="button"
               className="btn-back"
@@ -3968,7 +4257,7 @@ export default function InfoView({
               <input
                 type="text"
                 placeholder={
-                  type === "Anime" ? "Search episode..." : "Search chapter..."
+                  type === "Manga" ? "Search chapter..." : "Search episode..."
                 }
                 value={episodeSearchQuery}
                 onChange={(e) => setEpisodeSearchQuery(e.target.value)}
@@ -4017,11 +4306,11 @@ export default function InfoView({
                     ? [
                         {
                           value: "watched",
-                          label: type === "Anime" ? "WATCHED" : "READ",
+                          label: type === "Manga" ? "READ" : "WATCHED",
                         },
                         {
                           value: "unwatched",
-                          label: type === "Anime" ? "UNWATCHED" : "UNREAD",
+                          label: type === "Manga" ? "UNREAD" : "UNWATCHED",
                         },
                       ]
                     : []),
@@ -4033,6 +4322,29 @@ export default function InfoView({
                 triggerClassName="u-style-44"
                 menuClassName="u-style-45"
               />
+
+              {/* Season filter — only shown for Movies/Series or Anime with multiple seasons */}
+              {availableSeasons.length > 0 && (
+                <Dropdown
+                  label="Season:"
+                  value={selectedSeason}
+                  onChange={(v) => {
+                    userSelectedSeasonRef.current = true;
+                    setSelectedItems(new Set());
+                    setSelectedSeason(v);
+                  }}
+                  options={[
+                    ...availableSeasons.map((s) => ({
+                      value: String(s),
+                      label: `Season ${s}`,
+                    })),
+                    { value: "all", label: "All Seasons" },
+                  ]}
+                  className="u-style-43"
+                  triggerClassName="u-style-44"
+                  menuClassName="u-style-45"
+                />
+              )}
 
               {details?.provider &&
                 details?.provider !== "local source" &&
@@ -4206,9 +4518,14 @@ export default function InfoView({
                   <button
                     onClick={() => handleDownload()}
                     className="btn-download-all"
+                    disabled={probingDownloadId !== null}
                   >
                     <Download size={16} />
-                    <span>Download Checked ({numToDownload})</span>
+                    <span>
+                      {probingDownloadId === "bulk"
+                        ? "Checking sources..."
+                        : `Download Checked (${numToDownload})`}
+                    </span>
                   </button>
                 )}
                 {numToDelete > 0 && (
@@ -4237,7 +4554,7 @@ export default function InfoView({
               }}
             >
               <p style={{ fontSize: "1.05em", marginBottom: "8px" }}>
-                No {type === "Anime" ? "episodes" : "chapters"} available from{" "}
+                No {type === "Manga" ? "chapters" : "episodes"} available from{" "}
                 {details?.provider || "this provider"}.
               </p>
               {details?.linkedProviders &&
@@ -4256,20 +4573,27 @@ export default function InfoView({
           )}
           {filteredItems.map((item) => {
             const hasSub = isDownloaded(item.number, "sub");
-            const hasDub = isDownloaded(item.number, "dub");
             const isLocal = localMalProvider === "local";
 
+            const itemSeason = item.season ? Number(item.season) : null;
             const epStatus =
-              type === "Anime"
+              type === "Anime" || type === "Movies"
                 ? (historyProgress?.episodesStatus || []).find(
-                    (h) => Number(h.number) === Number(item.number),
+                    (h) =>
+                      Number(h.number) === Number(item.number) &&
+                      (itemSeason === null ||
+                        (h.season
+                          ? Number(h.season) === itemSeason
+                          : itemSeason <= 1)),
                   )
                 : (historyProgress?.chaptersStatus || []).find(
                     (h) => Number(h.number) === Number(item.number),
                   );
 
             const isMalCompleted =
-              malWatched && Number(item.number) <= Number(malWatched);
+              type === "Anime" &&
+              malWatched &&
+              Number(item.number) <= Number(malWatched);
             const isCompleted =
               (epStatus && epStatus.isCompleted) || isMalCompleted;
             const isStarted = epStatus && !epStatus.isCompleted;
@@ -4312,11 +4636,11 @@ export default function InfoView({
                       />
                     )}
                     <span className="item-num">
-                      {type === "Anime"
-                        ? `Episode ${item.number}`
-                        : `Chapter ${item.number}`}
+                      {type === "Manga"
+                        ? `Chapter ${item.number}`
+                        : `Episode ${item.number}`}
                     </span>
-                    {type === "Anime" &&
+                    {type !== "Manga" &&
                       item.title &&
                       item.title !== `Episode ${item.number}` && (
                         <span title={item.title} className="item-title-sub">
@@ -4336,13 +4660,13 @@ export default function InfoView({
                     {(() => {
                       if (!epStatus) return null;
                       const curVal =
-                        type === "Anime"
-                          ? epStatus.currentTime
-                          : epStatus.currentPage;
+                        type === "Manga"
+                          ? epStatus.currentPage
+                          : epStatus.currentTime;
                       const totVal =
-                        type === "Anime"
-                          ? epStatus.duration
-                          : epStatus.totalPages;
+                        type === "Manga"
+                          ? epStatus.totalPages
+                          : epStatus.duration;
                       if (
                         curVal === undefined ||
                         curVal === null ||
@@ -4366,9 +4690,9 @@ export default function InfoView({
                             />
                           </div>
                           <span className="item-progress-text">
-                            {type === "Anime"
-                              ? `${formatTime(curVal)} / ${formatTime(totVal)}`
-                              : `Page ${curVal}/${totVal}`}
+                            {type === "Manga"
+                              ? `Page ${curVal}/${totVal}`
+                              : `${formatTime(curVal)} / ${formatTime(totVal)}`}
                           </span>
                         </div>
                       );
@@ -4384,7 +4708,16 @@ export default function InfoView({
                       }
                       onClick={(e) => {
                         e.stopPropagation();
-                        handleMarkRead(!isCompleted, [Number(item.number)]);
+                        handleMarkRead(
+                          !isCompleted,
+                          [Number(item.number)],
+                          [
+                            {
+                              number: Number(item.number),
+                              season: item.season || 1,
+                            },
+                          ],
+                        );
                       }}
                     >
                       <CheckCircle2 size={14} />
@@ -4394,22 +4727,26 @@ export default function InfoView({
 
                 {/* LINE 2: All sub, dub, hsub, download button */}
                 <div className="item-card-row-bottom">
-                  {type === "Anime" ? (
+                  {type === "Anime" || type === "Movies" ? (
                     <>
-                      {isDownloaded(item.number) ? (
+                      {isDownloaded(item.number, null, item.season) ? (
                         <div className="badge-and-action">
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               const downloadedLang =
                                 itemLangs.find((langKey) =>
-                                  isDownloaded(item.number, langKey),
+                                  isDownloaded(
+                                    item.number,
+                                    langKey,
+                                    item.season,
+                                  ),
                                 ) ||
                                 dubSelect ||
                                 "sub";
                               onWatch(
                                 details?.id || id,
-                                item.number,
+                                item.id || item.number,
                                 true,
                                 downloadedLang,
                                 episodesOrChapters,
@@ -4417,6 +4754,8 @@ export default function InfoView({
                                 details?.title,
                                 details?.provider,
                                 details?.image,
+                                undefined,
+                                item.season || 1,
                               );
                             }}
                             className="badge-subdub sub"
@@ -4430,7 +4769,11 @@ export default function InfoView({
                               e.stopPropagation();
                               const downloadedLang =
                                 itemLangs.find((langKey) =>
-                                  isDownloaded(item.number, langKey),
+                                  isDownloaded(
+                                    item.number,
+                                    langKey,
+                                    item.season,
+                                  ),
                                 ) ||
                                 dubSelect ||
                                 "sub";
@@ -4438,6 +4781,7 @@ export default function InfoView({
                                 item.number,
                                 downloadedLang,
                                 "open_folder",
+                                item.season,
                               );
                             }}
                             className="btn-action-open"
@@ -4449,7 +4793,11 @@ export default function InfoView({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                handleDeleteEpisode(item.number);
+                                handleDeleteEpisode(
+                                  item.number,
+                                  null,
+                                  item.season,
+                                );
                               }}
                               className="btn-action-trash"
                               title="Delete Download"
@@ -4460,7 +4808,11 @@ export default function InfoView({
                         </div>
                       ) : (
                         (() => {
-                          const qStatus = getItemQueueStatus(item.number);
+                          const qStatus = getItemQueueStatus(
+                            item.number,
+                            item.season,
+                            item.id,
+                          );
                           if (qStatus.inProgress) {
                             return (
                               <div
@@ -4511,47 +4863,75 @@ export default function InfoView({
                           return (
                             showOnlineActions && (
                               <div className="badge-and-action">
-                                {itemLangs.map((langKey) => {
-                                  let label = langKey.toUpperCase();
-                                  if (
-                                    langKey === "softsub" ||
-                                    langKey === "soft_sub"
-                                  )
-                                    label = "SOFT SUB";
-                                  else if (
-                                    langKey === "softdub" ||
-                                    langKey === "soft_dub"
-                                  )
-                                    label = "SOFT DUB";
-                                  else if (langKey === "hsub") label = "HSUB";
-                                  else if (langKey === "sub") label = "SUB";
-                                  else if (langKey === "dub") label = "DUB";
+                                {type === "Movies" ? (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onWatch(
+                                        details?.id || id,
+                                        item.id,
+                                        false,
+                                        "sub",
+                                        episodesOrChapters,
+                                        details?.DownloadedEpisodes,
+                                        details?.title,
+                                        details?.provider,
+                                        details?.image,
+                                        undefined,
+                                        item.season || 1,
+                                      );
+                                    }}
+                                    className="badge-subdub sub"
+                                    title="Play Episode"
+                                  >
+                                    <Play size={11} fill="currentColor" />
+                                    <span>PLAY</span>
+                                  </button>
+                                ) : (
+                                  itemLangs.map((langKey) => {
+                                    let label = langKey.toUpperCase();
+                                    if (
+                                      langKey === "softsub" ||
+                                      langKey === "soft_sub"
+                                    )
+                                      label = "SOFT SUB";
+                                    else if (
+                                      langKey === "softdub" ||
+                                      langKey === "soft_dub"
+                                    )
+                                      label = "SOFT DUB";
+                                    else if (langKey === "hsub") label = "HSUB";
+                                    else if (langKey === "sub") label = "SUB";
+                                    else if (langKey === "dub") label = "DUB";
 
-                                  return (
-                                    <button
-                                      key={langKey}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onWatch(
-                                          details?.id || id,
-                                          item.id,
-                                          false,
-                                          langKey,
-                                          episodesOrChapters,
-                                          details?.DownloadedEpisodes,
-                                          details?.title,
-                                          details?.provider,
-                                          details?.image,
-                                        );
-                                      }}
-                                      className={`badge-subdub ${langKey}`}
-                                      title={`Play ${label}`}
-                                    >
-                                      <Play size={11} fill="currentColor" />
-                                      <span>{label}</span>
-                                    </button>
-                                  );
-                                })}
+                                    return (
+                                      <button
+                                        key={langKey}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onWatch(
+                                            details?.id || id,
+                                            item.id,
+                                            false,
+                                            langKey,
+                                            episodesOrChapters,
+                                            details?.DownloadedEpisodes,
+                                            details?.title,
+                                            details?.provider,
+                                            details?.image,
+                                            undefined,
+                                            item.season || 1,
+                                          );
+                                        }}
+                                        className={`badge-subdub ${langKey}`}
+                                        title={`Play ${label}`}
+                                      >
+                                        <Play size={11} fill="currentColor" />
+                                        <span>{label}</span>
+                                      </button>
+                                    );
+                                  })
+                                )}
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -4559,9 +4939,15 @@ export default function InfoView({
                                   }}
                                   className="badge-subdub download-btn"
                                   title="Download Episode"
+                                  disabled={probingDownloadId !== null}
                                 >
                                   <Download size={11} />
-                                  <span>DOWNLOAD</span>
+                                  <span>
+                                    {probingDownloadId ===
+                                    (item.id || item.number)
+                                      ? "CHECKING..."
+                                      : "DOWNLOAD"}
+                                  </span>
                                 </button>
                               </div>
                             )
@@ -4619,7 +5005,11 @@ export default function InfoView({
                         </div>
                       ) : (
                         (() => {
-                          const qStatus = getItemQueueStatus(item.number);
+                          const qStatus = getItemQueueStatus(
+                            item.number,
+                            null,
+                            item.id,
+                          );
                           if (qStatus.inProgress) {
                             return (
                               <div
@@ -4825,7 +5215,7 @@ export default function InfoView({
       </div>
 
       {/* MAL Link Modal Overlay */}
-      {isLinkingMal && (
+      {type !== "Movies" && isLinkingMal && (
         <div className="mal-modal-overlay">
           <div className="mal-modal-card">
             <div className="mal-modal-header">

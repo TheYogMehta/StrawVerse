@@ -44,7 +44,8 @@ function isMangaFile(fileNameOrPath) {
 }
 
 function isMediaFile(fileNameOrPath, type = "Anime") {
-  return type === "Anime"
+  const norm = String(type || "").toLowerCase();
+  return norm === "anime" || norm === "movies"
     ? isVideoFile(fileNameOrPath)
     : isMangaFile(fileNameOrPath);
 }
@@ -216,27 +217,44 @@ function parseTags(val) {
 const SYSTEM_TAGS = Object.freeze({
   Anime: Object.freeze(["Watching", "Plan to Watch", "Completed", "Downloads"]),
   Manga: Object.freeze(["Reading", "Plan to Read", "Completed", "Downloads"]),
+  Movies: Object.freeze([
+    "Watching",
+    "Plan to Watch",
+    "Completed",
+    "Downloads",
+  ]),
 });
 
 const RESERVED_TAGS = Object.freeze({
   Anime: Object.freeze(SYSTEM_TAGS.Anime.map((t) => t.toLowerCase())),
   Manga: Object.freeze(SYSTEM_TAGS.Manga.map((t) => t.toLowerCase())),
+  Movies: Object.freeze(SYSTEM_TAGS.Movies.map((t) => t.toLowerCase())),
 });
 
 function getReservedTags(type = "Anime") {
-  const isManga = String(type).toLowerCase() === "manga";
-  return SYSTEM_TAGS[isManga ? "Manga" : "Anime"] || SYSTEM_TAGS.Anime;
+  const norm = String(type).toLowerCase();
+  if (norm === "manga") return SYSTEM_TAGS.Manga;
+  if (norm === "movies") return SYSTEM_TAGS.Movies;
+  return SYSTEM_TAGS.Anime;
 }
 
 function isReservedTag(tag, type = null) {
   if (!tag || typeof tag !== "string") return false;
   const lower = tag.trim().toLowerCase();
   if (type) {
-    const isManga = String(type).toLowerCase() === "manga";
-    return RESERVED_TAGS[isManga ? "Manga" : "Anime"].includes(lower);
+    const norm = String(type).toLowerCase();
+    const tagList =
+      norm === "manga"
+        ? RESERVED_TAGS.Manga
+        : norm === "movies"
+          ? RESERVED_TAGS.Movies
+          : RESERVED_TAGS.Anime;
+    return tagList.includes(lower);
   }
   return (
-    RESERVED_TAGS.Anime.includes(lower) || RESERVED_TAGS.Manga.includes(lower)
+    RESERVED_TAGS.Anime.includes(lower) ||
+    RESERVED_TAGS.Manga.includes(lower) ||
+    RESERVED_TAGS.Movies.includes(lower)
   );
 }
 
@@ -363,12 +381,7 @@ function formatEpisodeFilename(
   totalEpisodesArg,
   seasonArg,
 ) {
-  let title = "";
-  let epNum = 1;
-  let season = 1;
-  let totalEpisodes = null;
-  let namingScheme = "default";
-  let ext = ".mp4";
+  let title, epNum, season, totalEpisodes, namingScheme, ext;
 
   if (typeof optsOrTitle === "object" && optsOrTitle !== null) {
     title = optsOrTitle.title || "";
@@ -396,7 +409,7 @@ function formatEpisodeFilename(
   const paddedSeason = String(season).padStart(2, "0");
   const cleanTitle = sanitizeFolderName(title || "Anime");
 
-  let baseName = "";
+  let baseName;
   if (namingScheme === "plex_jellyfin") {
     baseName = `${cleanTitle} - S${paddedSeason}E${paddedEp}`;
   } else if (namingScheme === "series_s_ep") {
@@ -416,10 +429,7 @@ function formatChapterFilename(
   namingSchemeArg,
   extArg,
 ) {
-  let title = "";
-  let chapterNum = 1;
-  let namingScheme = "default";
-  let ext = ".cbz";
+  let title, chapterNum, namingScheme, ext;
 
   if (typeof optsOrTitle === "object" && optsOrTitle !== null) {
     title = optsOrTitle.title || "";
@@ -436,7 +446,7 @@ function formatChapterFilename(
 
   const num = chapterNum;
   const cleanTitle = sanitizeFolderName(title || "Manga");
-  let baseName = "";
+  let baseName;
 
   if (namingScheme === "series_chapter") {
     baseName = `${cleanTitle} - Chapter ${num}`;

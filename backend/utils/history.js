@@ -39,6 +39,7 @@ async function updateHistory({
   type,
   title,
   number,
+  season: rawSeason,
   currentTime,
   duration,
   timeSpent,
@@ -54,19 +55,36 @@ async function updateHistory({
   const rawNum = parseFloat(number);
   const parsedNum =
     !isNaN(rawNum) && Number.isInteger(rawNum) ? Math.trunc(rawNum) : rawNum;
+  const isVideo = type === "Anime" || type === "Movies";
   const isAnime = type === "Anime";
+  const isMovies = type === "Movies";
+  const parsedSeason =
+    isMovies && rawSeason !== undefined && rawSeason !== null
+      ? parseInt(rawSeason, 10) || 1
+      : 1;
   const langSubDub = subdub || sub_dub || null;
+  if (type === "Movies") {
+    malid = null;
+  }
 
   // Resolve title
   let resolvedTitle = title;
-  const mainTable = isAnime ? "Anime" : "Manga";
-  const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
-  const idField = isAnime ? "anime_id" : "manga_id";
-  const titleField = isAnime ? "anime_title" : "manga_title";
-  const numberField = isAnime ? "episode_number" : "chapter_number";
-  const currentField = isAnime ? "current_time" : "current_page";
-  const totalField = isAnime ? "duration" : "total_pages";
-  const timeField = isAnime ? "last_watched" : "last_read";
+  const mainTable = type === "Manga" ? "Manga" : isMovies ? "Movies" : "Anime";
+  const historyTable = isMovies
+    ? "SeriesMovieWatchHistory"
+    : isAnime
+      ? "WatchHistory"
+      : "ReadHistory";
+  const idField = isMovies ? "movie_id" : isAnime ? "anime_id" : "manga_id";
+  const titleField = isMovies
+    ? "title"
+    : isAnime
+      ? "anime_title"
+      : "manga_title";
+  const numberField = isVideo ? "episode_number" : "chapter_number";
+  const currentField = isVideo ? "current_time" : "current_page";
+  const totalField = isVideo ? "duration" : "total_pages";
+  const timeField = isVideo ? "last_watched" : "last_read";
 
   if (!resolvedTitle || resolvedTitle === type) {
     try {
@@ -96,7 +114,7 @@ async function updateHistory({
       let exists = await queryOne(`SELECT id FROM ${mainTable} WHERE id = ?`, [
         mediaId,
       ]);
-      if (!exists && malid) {
+      if (type !== "Movies" && !exists && malid) {
         const byMal = await queryOne(
           `SELECT id FROM ${mainTable} WHERE MalID = ? LIMIT 1`,
           [String(malid)],
@@ -107,88 +125,123 @@ async function updateHistory({
         }
       }
       if (!exists) {
-        await run(
-          `
-          INSERT OR IGNORE INTO ${mainTable} (id, title, provider, MalID, image_url, last_updated)
-          VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-        `,
-          [
-            mediaId,
-            resolvedTitle || type,
-            provider,
-            malid ? String(malid) : null,
-            image || null,
-          ],
-        );
+        if (type === "Movies") {
+          await run(
+            `
+            INSERT OR IGNORE INTO Movies (id, title, provider, image_url, last_updated)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+          `,
+            [mediaId, resolvedTitle || type, provider, image || null],
+          );
+        } else {
+          await run(
+            `
+            INSERT OR IGNORE INTO ${mainTable} (id, title, provider, MalID, image_url, last_updated)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          `,
+            [
+              mediaId,
+              resolvedTitle || type,
+              provider,
+              malid ? String(malid) : null,
+              image || null,
+            ],
+          );
+        }
       } else {
-        await run(
-          `
-          UPDATE ${mainTable} 
-          SET provider = COALESCE(provider, ?), 
-              MalID = COALESCE(MalID, ?), 
-              image_url = COALESCE(image_url, ?)
-          WHERE id = ?
-        `,
-          [provider, malid ? String(malid) : null, image || null, mediaId],
-        );
+        if (type === "Movies") {
+          await run(
+            `
+            UPDATE Movies 
+            SET provider = COALESCE(provider, ?), 
+                image_url = COALESCE(image_url, ?)
+            WHERE id = ?
+          `,
+            [provider, image || null, mediaId],
+          );
+        } else {
+          await run(
+            `
+            UPDATE ${mainTable} 
+            SET provider = COALESCE(provider, ?), 
+                MalID = COALESCE(MalID, ?), 
+                image_url = COALESCE(image_url, ?)
+            WHERE id = ?
+          `,
+            [provider, malid ? String(malid) : null, image || null, mediaId],
+          );
+        }
       }
     } catch (cacheErr) {
       logger.error(`Error saving ${type} history cache: ${cacheErr.message}`);
     }
   }
 
-  // Sync across all sibling provider IDs linked to same MAL ID
+  // Sync across all sibling provider IDs linked to same MAL ID (Anime/Manga only)
   let queryIds = [mediaId];
-  try {
-    const localRec = await queryOne(
-      `SELECT MalID FROM ${mainTable} WHERE id = ?`,
-      [mediaId],
-    );
-    if (localRec && localRec.MalID) {
-      const siblings = await queryAll(
-        `SELECT id FROM ${mainTable} WHERE MalID = ?`,
-        [localRec.MalID],
+  if (type !== "Movies") {
+    try {
+      const localRec = await queryOne(
+        `SELECT MalID FROM ${mainTable} WHERE id = ?`,
+        [mediaId],
       );
-      siblings.forEach((s) => {
-        if (s.id) queryIds.push(s.id);
-      });
-    }
-  } catch (err) {}
+      if (localRec && localRec.MalID) {
+        const siblings = await queryAll(
+          `SELECT id FROM ${mainTable} WHERE MalID = ?`,
+          [localRec.MalID],
+        );
+        siblings.forEach((s) => {
+          if (s.id) queryIds.push(s.id);
+        });
+      }
+    } catch (err) {}
+  }
   queryIds = Array.from(new Set(queryIds));
 
   const placeholders = queryIds.map(() => "?").join(",");
   const strNum = String(number);
+  const seasonCondition = isMovies
+    ? ` AND (season = ? OR (? = 1 AND season IS NULL))`
+    : ``;
+  const seasonParams = isMovies ? [parsedSeason, parsedSeason] : [];
   let record = null;
 
   if (queryIds.length > 0) {
     if (resolvedTitle && resolvedTitle !== type) {
       record = await queryOne(
-        `SELECT * FROM ${historyTable} WHERE (${idField} IN (${placeholders}) OR LOWER(${titleField}) = LOWER(?)) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
-        [...queryIds, resolvedTitle, parsedNum, parsedNum, strNum],
+        `SELECT * FROM ${historyTable} WHERE (${idField} IN (${placeholders}) OR LOWER(${titleField}) = LOWER(?)) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} ORDER BY id DESC LIMIT 1`,
+        [
+          ...queryIds,
+          resolvedTitle,
+          parsedNum,
+          parsedNum,
+          strNum,
+          ...seasonParams,
+        ],
       );
     } else {
       record = await queryOne(
-        `SELECT * FROM ${historyTable} WHERE ${idField} IN (${placeholders}) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
-        [...queryIds, parsedNum, parsedNum, strNum],
+        `SELECT * FROM ${historyTable} WHERE ${idField} IN (${placeholders}) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} ORDER BY id DESC LIMIT 1`,
+        [...queryIds, parsedNum, parsedNum, strNum, ...seasonParams],
       );
     }
   } else if (resolvedTitle && resolvedTitle !== type) {
     record = await queryOne(
-      `SELECT * FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) ORDER BY id DESC LIMIT 1`,
-      [resolvedTitle, parsedNum, parsedNum, strNum],
+      `SELECT * FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} ORDER BY id DESC LIMIT 1`,
+      [resolvedTitle, parsedNum, parsedNum, strNum, ...seasonParams],
     );
   }
 
-  let curVal = isAnime ? parseSeconds(currentTime) : parseInt(currentTime || 1);
-  const totVal = isAnime ? parseFloat(duration || 0) : parseInt(duration || 1);
-  if (isAnime && totVal > 0 && curVal > totVal) {
+  let curVal = isVideo ? parseSeconds(currentTime) : parseInt(currentTime || 1);
+  const totVal = isVideo ? parseFloat(duration || 0) : parseInt(duration || 1);
+  if (isVideo && totVal > 0 && curVal > totVal) {
     curVal = totVal;
   }
-  let isComp = 0;
+  let isComp;
   if (isCompleted !== undefined && isCompleted !== null) {
     isComp = isCompleted ? 1 : 0;
   } else {
-    if (isAnime) {
+    if (isVideo) {
       isComp = totVal > 0 && curVal / totVal >= 0.75 ? 1 : 0;
     } else {
       const cumulativeTime = (record?.time_spent || 0) + tSpent;
@@ -205,31 +258,46 @@ async function updateHistory({
     try {
       if (queryIds.length > 0) {
         await run(
-          `DELETE FROM ${historyTable} WHERE (LOWER(${titleField}) = LOWER(?) OR ${idField} IN (${placeholders})) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) AND id != ?`,
+          `DELETE FROM ${historyTable} WHERE (LOWER(${titleField}) = LOWER(?) OR ${idField} IN (${placeholders})) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} AND id != ?`,
           [
             resolvedTitle || type,
             ...queryIds,
             parsedNum,
             parsedNum,
             strNum,
+            ...seasonParams,
             excludeId,
           ],
         );
       } else {
         await run(
-          `DELETE FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?) AND id != ?`,
-          [resolvedTitle || type, parsedNum, parsedNum, strNum, excludeId],
+          `DELETE FROM ${historyTable} WHERE LOWER(${titleField}) = LOWER(?) AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ? OR ${numberField} = ?)${seasonCondition} AND id != ?`,
+          [
+            resolvedTitle || type,
+            parsedNum,
+            parsedNum,
+            strNum,
+            ...seasonParams,
+            excludeId,
+          ],
         );
       }
     } catch (e) {}
   };
 
   const notifyCompletion = async () => {
-    const synced = await autoTrackMAL(type, mediaId, parsedNum);
+    let synced = false;
+    if (type === "Anime" || type === "Manga") {
+      synced = await autoTrackMAL(type, mediaId, parsedNum);
+    }
     if (!synced) {
+      const seasonInfo =
+        isVideo && type === "Movies" && parsedSeason > 1
+          ? ` Season ${parsedSeason}`
+          : "";
       global.sendToRenderer("mal-sync-notification", {
-        title: `${isAnime ? "Episode" : "Chapter"} Completed`,
-        body: `Finished ${isAnime ? "watching" : "reading"} "${resolvedTitle || type}" ${isAnime ? "Episode" : "Chapter"} ${parsedNum}.`,
+        title: `${isVideo ? "Episode" : "Chapter"} Completed`,
+        body: `Finished ${isVideo ? "watching" : "reading"} "${resolvedTitle || type}"${seasonInfo} ${isVideo ? "Episode" : "Chapter"} ${parsedNum}.`,
         icon: "/assets/luffy.png",
       });
     }
@@ -245,7 +313,8 @@ async function updateHistory({
           ? null
           : record.completed_at;
 
-    const subDubUpdate = isAnime && langSubDub ? `, sub_dub = ?` : ``;
+    const seasonUpdate = isMovies ? `, season = ?` : ``;
+    const subDubUpdate = isVideo && langSubDub ? `, sub_dub = ?` : ``;
     const updateParams = [
       mediaId,
       resolvedTitle || type,
@@ -256,13 +325,14 @@ async function updateHistory({
       nowIso,
       compAt,
     ];
-    if (isAnime && langSubDub) updateParams.push(langSubDub);
+    if (isMovies) updateParams.push(parsedSeason);
+    if (isVideo && langSubDub) updateParams.push(langSubDub);
     updateParams.push(record.id);
 
     await run(
       `
       UPDATE ${historyTable} 
-      SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = ?, completed_at = ?, hidden = 0${subDubUpdate}
+      SET ${idField} = ?, ${titleField} = ?, ${currentField} = ?, ${totalField} = ?, time_spent = time_spent + ?, is_completed = ?, ${timeField} = ?, completed_at = ?${seasonUpdate}, hidden = 0${subDubUpdate}
       WHERE id = ?
     `,
       updateParams,
@@ -297,7 +367,11 @@ async function updateHistory({
       nowIso,
       compAt,
     ];
-    if (isAnime) {
+    if (isMovies) {
+      insertCols.push("season");
+      insertVals.push(parsedSeason);
+    }
+    if (isVideo) {
       insertCols.push("sub_dub");
       insertVals.push(langSubDub || "sub");
     }
@@ -329,6 +403,7 @@ async function updateHistory({
           mediaId,
           currentTime,
           duration,
+          parsedSeason,
         ).catch(() => {});
       }
     } catch (rpcErr) {}

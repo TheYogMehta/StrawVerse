@@ -12,12 +12,14 @@ const {
   directoryMaker,
   mediaServerDir,
   MangaDir,
+  MovieDir,
 } = require("./DirectoryMaker");
 const {
   MangaChapterFetch,
   DownloadChapters,
   fetchEpisode,
   fetchEpisodeSources,
+  fetchMovieSources,
   processServer,
 } = require("./AnimeManga");
 const {
@@ -122,6 +124,10 @@ async function resumeQueue() {
 // Add to Queue
 async function addToQueue(item) {
   try {
+    const cfg = { ...(item.config || {}) };
+    if (item.season !== undefined && item.season !== null) {
+      cfg.season = item.season;
+    }
     await run(
       `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
@@ -138,7 +144,7 @@ async function addToQueue(item) {
         item.currentSegments || 0,
         item.caption || "",
         item.added_at || Date.now(),
-        JSON.stringify(item.config || {}),
+        JSON.stringify(cfg),
       ],
     );
   } catch (err) {
@@ -177,6 +183,12 @@ async function loadQueue() {
         } catch (e) {
           item.config = {};
         }
+      }
+      if (item.config?.season !== undefined && item.config?.season !== null) {
+        item.season = item.config.season;
+      } else if (item.epid) {
+        const sMatch = String(item.epid).match(/tv:[^:]+:(\d+):\d+/);
+        if (sMatch) item.season = parseInt(sMatch[1], 10);
       }
       item.progress = 0;
       return item;
@@ -240,6 +252,10 @@ async function removeQueue(AnimeEpId, isSuccess = false) {
       EpNum: removedItem.EpNum,
       SubDub: removedItem.SubDub,
       epid: removedItem.epid,
+      season:
+        removedItem.season !== undefined && removedItem.season !== null
+          ? removedItem.season
+          : removedItem.config?.season,
     });
 
     if (!isAndroid && removedItem.Type === "Anime") {
@@ -338,25 +354,31 @@ async function SaveQueueData(QueueData) {
   AnimeQueue = QueueData;
   try {
     await run("DELETE FROM DownloadQueue");
-    const operations = QueueData.map((item) => ({
-      sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [
-        item.epid,
-        item.Type,
-        item.Title,
-        item.EpNum || "",
-        item.SubDub || "",
-        item.malid || "",
-        item.id || "",
-        item.ChapterTitle || "",
-        item.status || "Pending",
-        item.totalSegments || 0,
-        item.currentSegments || 0,
-        item.caption || "",
-        item.added_at || Date.now(),
-        JSON.stringify(item.config || {}),
-      ],
-    }));
+    const operations = QueueData.map((item) => {
+      const cfg = { ...(item.config || {}) };
+      if (item.season !== undefined && item.season !== null) {
+        cfg.season = item.season;
+      }
+      return {
+        sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [
+          item.epid,
+          item.Type,
+          item.Title,
+          item.EpNum || "",
+          item.SubDub || "",
+          item.malid || "",
+          item.id || "",
+          item.ChapterTitle || "",
+          item.status || "Pending",
+          item.totalSegments || 0,
+          item.currentSegments || 0,
+          item.caption || "",
+          item.added_at || Date.now(),
+          JSON.stringify(cfg),
+        ],
+      };
+    });
     if (operations.length > 0) {
       await batchRun("main", operations);
     }
@@ -438,25 +460,31 @@ async function checkEpisodeDownload(epid) {
 async function addMultipleToQueue(items) {
   if (items && items.length > 0) {
     try {
-      const operations = items.map((item) => ({
-        sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        params: [
-          item.epid,
-          item.Type,
-          item.Title,
-          item.EpNum || "",
-          item.SubDub || "",
-          item.malid || "",
-          item.id || "",
-          item.ChapterTitle || "",
-          item.status || "Pending",
-          item.totalSegments || 0,
-          item.currentSegments || 0,
-          item.caption || "",
-          item.added_at || Date.now(),
-          JSON.stringify(item.config || {}),
-        ],
-      }));
+      const operations = items.map((item) => {
+        const cfg = { ...(item.config || {}) };
+        if (item.season !== undefined && item.season !== null) {
+          cfg.season = item.season;
+        }
+        return {
+          sql: `INSERT OR REPLACE INTO DownloadQueue (epid, Type, Title, EpNum, SubDub, malid, id, ChapterTitle, status, totalSegments, currentSegments, caption, added_at, config) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          params: [
+            item.epid,
+            item.Type,
+            item.Title,
+            item.EpNum || "",
+            item.SubDub || "",
+            item.malid || "",
+            item.id || "",
+            item.ChapterTitle || "",
+            item.status || "Pending",
+            item.totalSegments || 0,
+            item.currentSegments || 0,
+            item.caption || "",
+            item.added_at || Date.now(),
+            JSON.stringify(cfg),
+          ],
+        };
+      });
       await batchRun("main", operations);
     } catch (err) {
       logger.error(
@@ -512,6 +540,7 @@ function isRetryableError(err) {
     return false;
   }
   return (
+    msg.includes("slow_mirror_failover") ||
     msg.includes("scraper_temporary_error") ||
     msg.includes("stream link") ||
     msg.includes("resolution timeout") ||
@@ -585,8 +614,6 @@ async function continuousExecution() {
       }
     } catch (_) {}
 
-    let startedNewTask = false;
-
     for (const currentTask of currentQueue) {
       if (isQueuePausedState) break;
 
@@ -612,11 +639,10 @@ async function continuousExecution() {
 
       activeProcessingEpids.add(currentTask.epid);
       activeEpidSince.set(currentTask.epid, Date.now());
-      startedNewTask = true;
 
       (async () => {
         try {
-          if (currentTask?.Type === "Anime") {
+          if (currentTask?.Type === "Anime" || currentTask?.Type === "Movies") {
             let {
               config,
               Title,
@@ -625,10 +651,11 @@ async function continuousExecution() {
               SubDub,
               malid,
               id: animeId,
+              Type,
             } = currentTask;
             if (config && Title && EpNum && epid && SubDub) {
               await downloadep(
-                config,
+                { ...config, Type, season: currentTask.season },
                 Title,
                 EpNum,
                 epid,
@@ -638,7 +665,7 @@ async function continuousExecution() {
               );
             } else {
               logger.error(
-                `Error message: Some Anime Data missing [ removing from queue ]`,
+                `Error message: Some ${currentTask.Type || "Media"} Data missing [ removing from queue ]`,
               );
               await removeQueue(currentTask.epid, false);
               return;
@@ -688,14 +715,17 @@ async function continuousExecution() {
               await removeQueue(currentTask.epid, false);
             }
           } else if (isRetryableError(err)) {
-            // Remember dead mirror hosts so the retry resolves a different server.
+            const isSlow =
+              err?.isSlowMirror ||
+              (err?.message && err.message.includes("SLOW_MIRROR_FAILOVER"));
+            // Remember dead/slow mirror hosts so the retry resolves a different server.
             if (err.failedHost && currentTask?.epid) {
               const known = hostSkipByEpid.get(currentTask.epid) || [];
               if (!known.includes(err.failedHost)) {
                 known.push(err.failedHost);
                 hostSkipByEpid.set(currentTask.epid, known);
                 logger.warn(
-                  `[queueWorker] Excluding dead host ${err.failedHost} for ${currentTask.epid} on retry`,
+                  `[queueWorker] Excluding ${isSlow ? "slow" : "dead"} host ${err.failedHost} for ${currentTask.epid} on retry`,
                 );
               }
               const stableKey = deadSkipStableKey(
@@ -706,19 +736,52 @@ async function continuousExecution() {
               );
               await savePersistedDeadHosts(stableKey, hostSkipByEpid.get(currentTask.epid) || []);
             }
-            currentTask.retryCount = (currentTask.retryCount || 0) + 1;
+
+            if (isSlow) {
+              logger.info(
+                `[queueWorker] Slow mirror failover on ${currentTask?.epid} from host ${err.failedHost}. Switching immediately to alternate mirror...`,
+              );
+              const cleanEp =
+                currentTask.EpNum !== undefined && currentTask.EpNum !== null
+                  ? String(currentTask.EpNum)
+                  : "";
+              const switchCaption = `Switching to faster mirror for EP ${cleanEp}...`;
+              await updateQueue(currentTask.epid, 0, 0, switchCaption);
+              try {
+                global.sendToRenderer("download-logger", {
+                  caption: switchCaption,
+                  totalSegments: 0,
+                  currentSegments: 0,
+                  epid: currentTask.epid,
+                  isPaused: isQueuePaused(),
+                });
+              } catch (_) {}
+              return;
+            }
+
+            const isNonRetryable = Boolean(
+              err.message && err.message.includes("NO_SOURCES_AVAILABLE"),
+            );
+            currentTask.retryCount = isNonRetryable
+              ? 3
+              : (currentTask.retryCount || 0) + 1;
             const maxRetries = 3;
             if (currentTask.retryCount >= maxRetries) {
+              const friendlyMsg = isNonRetryable
+                ? err.message.replace(/^NO_SOURCES_AVAILABLE:\s*/, "")
+                : `${err.message} (max retries exceeded)`;
               logger.error(
-                `[queueWorker] Task ${currentTask?.epid} failed after ${maxRetries} retries: ${err.message}. Removing from queue.`,
+                `[queueWorker] Task ${currentTask?.epid} failed: ${friendlyMsg}. Removing from queue.`,
               );
               try {
                 const itemLabel = currentTask?.Title
                   ? `${currentTask.Title} (${currentTask?.Type === "Manga" ? "CHP" : "EP"} ${currentTask?.EpNum || ""})`
                   : "Download";
                 global.sendToRenderer("download-error", {
-                  title: "Download Failed",
-                  message: `${itemLabel}: ${err.message} (max retries exceeded)`,
+                  title: isNonRetryable
+                    ? "Episode Unavailable"
+                    : "Download Failed",
+                  message: `${itemLabel}: ${friendlyMsg}`,
                   epid: currentTask?.epid,
                 });
               } catch (ipcErr) {}
@@ -738,11 +801,19 @@ async function continuousExecution() {
               const qualStr = currentTask.config?.quality
                 ? ` ( ${currentTask.config.quality} )`
                 : "";
+              const taskSeason =
+                currentTask.season !== undefined && currentTask.season !== null
+                  ? currentTask.season
+                  : currentTask.config?.season;
+              const seasonPrefix =
+                taskSeason !== undefined && taskSeason !== null
+                  ? `S${taskSeason} `
+                  : "";
               const prefix = currentTask.Type === "Manga" ? "CHP" : "EP";
               const deadNote = err?.failedHost
                 ? ` (dead mirror ${err.failedHost} skipped, trying another server)`
                 : "";
-              const retryCaption = `Downloading ${prefix} ${cleanEp} ${currentTask.Title || ""}${qualStr} Retrying in ${Math.round(backoffMs / 1000)}s...${deadNote}`;
+              const retryCaption = `Downloading ${seasonPrefix}${prefix} ${cleanEp} ${currentTask.Title || ""}${qualStr} Retrying in ${Math.round(backoffMs / 1000)}s...${deadNote}`;
               await updateQueue(currentTask.epid, 0, 0, retryCaption);
               try {
                 global.sendToRenderer("download-logger", {
@@ -827,29 +898,47 @@ async function downloadep(
   } catch (_) {}
   const liveSettings = (await settingfetch()) || {};
   let directoryPath;
+  const isMovie =
+    Videoconfig?.Type === "Movies" || !!Videoconfig?.Moviesprovider;
+  const dlLoc =
+    (isMovie
+      ? liveSettings?.CustomDownloadLocationMovies ||
+        Videoconfig?.CustomDownloadLocationMovies
+      : liveSettings?.CustomDownloadLocationAnime ||
+        Videoconfig?.CustomDownloadLocationAnime) ||
+    Videoconfig?.CustomDownloadLocation;
+
   if (liveSettings.mediaServerNaming === true) {
     // Season and show folder picked on the show's page (default: S1, title)
     const show = liveSettings.mediaServerShows?.[String(animeId)] || {};
-    const season = parseInt(show.season, 10);
-    const dlLoc =
-      Videoconfig?.CustomDownloadLocationAnime ||
-      Videoconfig?.CustomDownloadLocation;
+    const taskSeason =
+      Videoconfig?.season !== undefined && Videoconfig?.season !== null
+        ? parseInt(Videoconfig.season, 10)
+        : parseInt(show.season, 10);
+    const resolvedSeason =
+      Number.isInteger(taskSeason) && taskSeason >= 0 ? taskSeason : 1;
     directoryPath = await mediaServerDir(
       String(show.series || "").trim() || Title,
-      Number.isInteger(season) && season >= 0 ? season : 1,
+      resolvedSeason,
       dlLoc,
       animeId || AnimeEpId,
+      isMovie ? "MoviesSeries" : "Anime",
     );
-    try {
-      const { generateNfoAndPosterForAnime } = require("./mediaServer");
-      generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(() => {});
-    } catch (_) {}
+    if (!isMovie) {
+      try {
+        const { generateNfoAndPosterForAnime } = require("./mediaServer");
+        generateNfoAndPosterForAnime(animeId || AnimeEpId, dlLoc).catch(
+          () => {},
+        );
+      } catch (_) {}
+    }
+  } else if (isMovie) {
+    directoryPath = await MovieDir(Title, dlLoc, animeId || AnimeEpId);
   } else {
     directoryPath = await directoryMaker(
       Title,
       EpNum,
-      Videoconfig?.CustomDownloadLocationAnime ||
-        Videoconfig?.CustomDownloadLocation,
+      dlLoc,
       animeId || AnimeEpId,
     );
   }
@@ -861,7 +950,13 @@ async function downloadep(
       EpNum !== undefined && EpNum !== null && !isNaN(Number(EpNum))
         ? String(Number(EpNum))
         : EpNum;
-    const initialCaption = `Resolving EP ${cleanEp} ${Title}${qualStr}...`;
+    const taskSeason =
+      Videoconfig?.season !== undefined && Videoconfig?.season !== null
+        ? Videoconfig.season
+        : null;
+    const seasonPrefix =
+      taskSeason !== undefined && taskSeason !== null ? `S${taskSeason} ` : "";
+    const initialCaption = `Resolving ${seasonPrefix}EP ${cleanEp} ${Title}${qualStr}...`;
     await updateQueue(AnimeEpId, 0, 0, initialCaption);
     global.sendToRenderer("request-battery-optimization", {});
     global.sendToRenderer("download-logger", {
@@ -888,6 +983,48 @@ async function downloadep(
   }
 }
 
+function extractSourceQualityHeight(s) {
+  const qStr = String(s?.quality || s?.name || "").toLowerCase();
+  const match = qStr.match(/(\d+)p/);
+  if (match) return parseInt(match[1], 10);
+  if (qStr.includes("1080")) return 1080;
+  if (qStr.includes("720")) return 720;
+  if (qStr.includes("480")) return 480;
+  if (qStr.includes("360")) return 360;
+  return 0;
+}
+
+async function inspectStreamMaxHeight(streamUrl, headers = {}) {
+  if (!streamUrl || typeof streamUrl !== "string") return 0;
+  try {
+    const res = await axios.get(streamUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        ...headers,
+      },
+      timeout: 5000,
+      responseType: "text",
+    });
+    const body = typeof res.data === "string" ? res.data : "";
+    if (body.includes("#EXT-X-STREAM-INF:")) {
+      let maxHeight = 0;
+      const lines = body.split("\n");
+      for (const line of lines) {
+        const resMatch = line.match(/RESOLUTION=\d+x(\d+)/i);
+        if (resMatch) {
+          const h = parseInt(resMatch[1], 10);
+          if (h > maxHeight) maxHeight = h;
+        }
+      }
+      return maxHeight;
+    }
+    return 0;
+  } catch (_) {
+    return 0;
+  }
+}
+
 // Download episode by quality
 async function downloadEpisodeByQuality(
   config,
@@ -900,7 +1037,13 @@ async function downloadEpisodeByQuality(
   animeId,
 ) {
   try {
-    const provider = await providerFetch("Anime", config.Animeprovider);
+    const isMovie = config?.Type === "Movies" || !!config?.Moviesprovider;
+    const provider = await providerFetch(
+      isMovie ? "Movies" : "Anime",
+      isMovie
+        ? config.Moviesprovider || config.Animeprovider
+        : config.Animeprovider,
+    );
     logger.info(`[queueWorker] ${epid} phase: provider-ok, fetching sources`);
     let resolvedEpid = epid;
     if (subdub && !epid.endsWith(`-${subdub}`) && !epid.endsWith("-both")) {
@@ -914,11 +1057,9 @@ async function downloadEpisodeByQuality(
     while (fetchAttempt < maxFetchAttempts && !sourcesArray) {
       fetchAttempt++;
       try {
-        sourcesArray = await fetchEpisodeSources(
-          provider,
-          resolvedEpid,
-          subdub,
-        );
+        sourcesArray = isMovie
+          ? await fetchMovieSources(provider, resolvedEpid, subdub)
+          : await fetchEpisodeSources(provider, resolvedEpid, subdub);
       } catch (err) {
         lastFetchErr = err;
         logger.warn(
@@ -930,13 +1071,6 @@ async function downloadEpisodeByQuality(
           );
         }
       }
-    }
-
-    logger.info(
-      `[queueWorker] ${epid} phase: sources-${sourcesArray ? "ok" : "empty"}`,
-    );
-    if (!sourcesArray && lastFetchErr) {
-      throw new Error(`SCRAPER_TEMPORARY_ERROR: ${lastFetchErr.message}`);
     }
 
     const extractSources = (srcObj, prefSubDub) => {
@@ -980,6 +1114,14 @@ async function downloadEpisodeByQuality(
             : []),
       ];
     };
+
+    const initialSources = extractSources(sourcesArray, subdub);
+    logger.info(
+      `[queueWorker] ${epid} phase: sources-${initialSources.length > 0 ? "ok" : "empty"}`,
+    );
+    if (!sourcesArray && lastFetchErr) {
+      throw new Error(`SCRAPER_TEMPORARY_ERROR: ${lastFetchErr.message}`);
+    }
 
     let sourcesList = extractSources(sourcesArray, subdub);
 
@@ -1073,6 +1215,14 @@ async function downloadEpisodeByQuality(
       }
     }
 
+    if (!sourcesList || sourcesList.length === 0) {
+      const provName =
+        provider?.provider_name || config?.Animeprovider || "provider";
+      throw new Error(
+        `NO_SOURCES_AVAILABLE: No stream sources found for this episode on ${provName}. The episode may not have aired or been uploaded yet.`,
+      );
+    }
+
     let subtitles =
       sourcesArray?.subtitles ||
       sourcesArray?.[subdub]?.subtitles ||
@@ -1110,18 +1260,27 @@ async function downloadEpisodeByQuality(
     }
 
     const Animeprovider = provider;
+    const targetQualStr = config?.quality ?? "1080p";
+    const targetHeight =
+      parseInt(String(targetQualStr).replace(/\D/g, ""), 10) || 1080;
     const sortedSources = sortSourcesByPreferredQuality(
       sourcesList,
-      config?.quality ?? "1080p",
+      targetQualStr,
     );
 
     let selectedSource = null;
+    let bestQualityFallback = null;
+    let bestFallbackHeight = 0;
+    let bestFallbackSubtitles = null;
     let fallbackExcludedSource = null;
     let fallbackUnverifiedSource = null;
 
     for (let i = 0; i < sortedSources.length; i++) {
       const src = sortedSources[i];
       if (!src) continue;
+
+      let candidate = null;
+      let candidateSubtitles = null;
 
       if (src.isUnresolved || !src.url) {
         try {
@@ -1148,7 +1307,7 @@ async function downloadEpisodeByQuality(
               }
               continue;
             }
-            selectedSource = {
+            candidate = {
               ...src,
               ...resolved,
               isUnresolved: false,
@@ -1157,9 +1316,8 @@ async function downloadEpisodeByQuality(
               Array.isArray(resolved.subtitles) &&
               resolved.subtitles.length > 0
             ) {
-              subtitles = resolved.subtitles;
+              candidateSubtitles = resolved.subtitles;
             }
-            break;
           } else {
             logger.warn(
               `[Download] Server #${i + 1} "${src.name || src.quality}" resolution failed or returned no stream URL. Trying fallback server...`,
@@ -1189,30 +1347,73 @@ async function downloadEpisodeByQuality(
           fallbackUnverifiedSource = src;
         }
         if (sortedSources.length === 1) {
-          selectedSource = src;
-          break;
-        }
-        const isAlive = await verifyStreamReachability(
-          src.url,
-          src.headers || {},
-          src.isM3U8 !== false,
-        );
-        if (isAlive.ok || isAlive.isProtected) {
-          selectedSource = src;
-          break;
+          candidate = src;
         } else {
-          logger.warn(
-            `[Download] Server #${i + 1} "${src.name || src.quality}" stream verification failed: ${isAlive.message}. Trying fallback server...`,
+          const isAlive = await verifyStreamReachability(
+            src.url,
+            src.headers || {},
+            src.isM3U8 !== false,
           );
+          if (isAlive.ok || isAlive.isProtected) {
+            candidate = src;
+          } else {
+            logger.warn(
+              `[Download] Server #${i + 1} "${src.name || src.quality}" stream verification failed: ${isAlive.message}. Trying fallback server...`,
+            );
+          }
+        }
+      }
+
+      if (candidate) {
+        if (targetHeight > 0 && sortedSources.length > 1) {
+          let qualHeight = extractSourceQualityHeight(candidate);
+          if (qualHeight === 0 && candidate.isM3U8 !== false) {
+            qualHeight = await inspectStreamMaxHeight(
+              candidate.url,
+              candidate.headers || {},
+            );
+          }
+
+          if (qualHeight >= targetHeight) {
+            logger.info(
+              `[Download] Server #${i + 1} "${src.name || src.quality}" satisfies requested quality (${qualHeight}p >= ${targetHeight}p). Selecting this server.`,
+            );
+            selectedSource = candidate;
+            if (candidateSubtitles) subtitles = candidateSubtitles;
+            break;
+          } else {
+            logger.info(
+              `[Download] Server #${i + 1} "${src.name || src.quality}" provides ${qualHeight ? `${qualHeight}p` : "unknown resolution"} (requested: ${targetHeight}p). Retaining as fallback...`,
+            );
+            if (!bestQualityFallback || qualHeight > bestFallbackHeight) {
+              bestQualityFallback = candidate;
+              bestFallbackHeight = qualHeight;
+              if (candidateSubtitles)
+                bestFallbackSubtitles = candidateSubtitles;
+            }
+          }
+        } else {
+          selectedSource = candidate;
+          if (candidateSubtitles) subtitles = candidateSubtitles;
+          break;
         }
       }
     }
 
+    if (!selectedSource && bestQualityFallback) {
+      logger.info(
+        `[Download] No server matched requested quality ${targetHeight}p. Proceeding with best available server (${bestFallbackHeight ? `${bestFallbackHeight}p` : "default"}).`,
+      );
+      selectedSource = bestQualityFallback;
+      if (bestFallbackSubtitles) subtitles = bestFallbackSubtitles;
+    }
+
     if (!selectedSource && fallbackExcludedSource) {
       logger.warn(
-        `[Download] All available servers are on previously excluded host(s). Reusing best available server to allow download to proceed.`,
+        `[Download] All available servers are on previously excluded host(s). Reusing best available server in permissive mode to allow download to proceed.`,
       );
       selectedSource = fallbackExcludedSource;
+      if (config) config.permissiveMode = true;
     }
 
     if (!selectedSource && fallbackUnverifiedSource) {
@@ -1295,6 +1496,10 @@ async function downloadEpisodeByQuality(
       currentSettings.mediaServerNaming === true
         ? mediaServerFileBase(directoryName, episodeNumber, dlQuality)
         : null,
+      config?.season,
+      config?.permissiveMode
+        ? "0"
+        : currentSettings.minDownloadSpeed || "300 KB/s",
     );
     hostSkipByEpid.delete(epid);
     run("DELETE FROM Settings WHERE key = ?", [
@@ -1376,6 +1581,8 @@ async function downloadVideo(
   headers = {},
   isM3U8 = true,
   fileBase = null,
+  season = null,
+  minDownloadSpeed = null,
 ) {
   try {
     const qualStr = quality ? ` ( ${quality} )` : "";
@@ -1385,13 +1592,15 @@ async function downloadVideo(
       !isNaN(Number(episodeNumber))
         ? String(Number(episodeNumber))
         : episodeNumber;
+    const seasonPrefix =
+      season !== undefined && season !== null ? `S${season} ` : "";
 
     await download({
       directory: directoryPath,
       Epnum: episodeNumber,
       streamUrl: Url,
       quality: quality,
-      caption: `Downloading EP ${cleanEp} ${Title}${qualStr}`,
+      caption: `Downloading ${seasonPrefix}EP ${cleanEp} ${Title}${qualStr}`,
       EpID: epid,
       subtitles: subtitles,
       MergeSubtitles: MergeSubtitles,
@@ -1399,6 +1608,7 @@ async function downloadVideo(
       headers: headers,
       isM3U8: isM3U8,
       fileBase: fileBase,
+      minDownloadSpeed: minDownloadSpeed,
     });
   } catch (err) {
     if (err.message === "Queue Paused" || err.message === "Episode Cancelled") {
@@ -1408,6 +1618,8 @@ async function downloadVideo(
     const wrapped = new Error(`Failed To Download: ${errMsg}`);
     // Preserve dead-host info so the queue can exclude the mirror on retry.
     if (err?.failedHost) wrapped.failedHost = err.failedHost;
+    if (err?.isSlowMirror) wrapped.isSlowMirror = true;
+    if (err?.bps) wrapped.bps = err.bps;
     throw wrapped;
   }
 }
@@ -1452,16 +1664,10 @@ async function downloadMangaChapters(
       config?.CustomDownloadLocationManga ||
       config?.CustomDownloadLocation;
 
-    const directoryPath = await MangaDir(
-      Title,
-      customLoc,
-      mediaId,
-    );
+    const directoryPath = await MangaDir(Title, customLoc, mediaId);
 
     const mangaScheme =
-      liveSettings?.mangaNamingScheme ||
-      config?.mangaNamingScheme ||
-      "default";
+      liveSettings?.mangaNamingScheme || config?.mangaNamingScheme || "default";
     const cbzFilename = formatChapterFilename({
       title: Title,
       chapterNum: EpNum,

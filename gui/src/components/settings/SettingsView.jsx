@@ -1,5 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useState, useEffect, useRef } from "react";
+import Swal from "sweetalert2";
 import {
   Loader2,
   LogOut,
@@ -64,6 +65,8 @@ const SETTINGS_TABS = [
   "general",
   "anime",
   "manga",
+  "movies",
+  "player",
   "tags",
   "history",
   "changelog",
@@ -134,7 +137,6 @@ const PRESET_THEMES = [
 export default function SettingsView({
   initialTab = "general",
   scrollToSection = null,
-  onMarketplaceOpen,
   onSelectMedia,
   onSettingsSaved,
 }) {
@@ -147,7 +149,9 @@ export default function SettingsView({
   // Form states
   const [animeProvider, setAnimeProvider] = useState("");
   const [quality, setQuality] = useState("1080p");
+  const [minDownloadSpeed, setMinDownloadSpeed] = useState("300 KB/s");
   const [mangaProvider, setMangaProvider] = useState("");
+  const [moviesProvider, setMoviesProvider] = useState("");
   const [autoLoadNextChapter, setAutoLoadNextChapter] = useState(true);
   const [pagination, setPagination] = useState(false);
   const [malStatus, setMalStatus] = useState("watching");
@@ -162,10 +166,12 @@ export default function SettingsView({
   const [downloadNotification, setDownloadNotification] = useState(true);
   const [animeDownloadLocation, setAnimeDownloadLocation] = useState("");
   const [mangaDownloadLocation, setMangaDownloadLocation] = useState("");
+  const [moviesDownloadLocation, setMoviesDownloadLocation] = useState("");
   const [mangaAutoScrollSpeed, setMangaAutoScrollSpeed] = useState(2);
   const [browsingFolder, setBrowsingFolder] = useState(false);
   const [animeNamingScheme, setAnimeNamingScheme] = useState("default");
   const [mangaNamingScheme, setMangaNamingScheme] = useState("default");
+  const [moviesNamingScheme, setMoviesNamingScheme] = useState("default");
   const [jellyfinCompatibility, setJellyfinCompatibility] = useState(false);
   const [externalLogEnabled, setExternalLogEnabled] = useState(true);
   const [maxLogFiles, setMaxLogFiles] = useState(5);
@@ -267,17 +273,23 @@ export default function SettingsView({
 
   const handleBrowseLocation = async (type) => {
     const isAnime = type === "Anime";
-    const currentLoc = isAnime ? animeDownloadLocation : mangaDownloadLocation;
+    const isMovies = type === "Movies";
+    const currentLoc = isMovies
+      ? moviesDownloadLocation
+      : isAnime
+        ? animeDownloadLocation
+        : mangaDownloadLocation;
     const defaultPlaceholder = isMobileApp()
-      ? `/StrawVerse/${type}`
-      : `Downloads/${type}`;
+      ? `/StrawVerse/${isMovies ? "MoviesSeries" : type}`
+      : `Downloads/${isMovies ? "MoviesSeries" : type}`;
 
     if (window.sharedStateAPI?.selectDirectory && !isMobileApp()) {
       setBrowsingFolder(true);
       try {
         const result = await window.sharedStateAPI.selectDirectory(currentLoc);
         if (result?.success && result.path) {
-          if (isAnime) setAnimeDownloadLocation(result.path);
+          if (isMovies) setMoviesDownloadLocation(result.path);
+          else if (isAnime) setAnimeDownloadLocation(result.path);
           else setMangaDownloadLocation(result.path);
         } else if (result && !result.canceled && result.error) {
           swalError("Could Not Pick Folder", result.error);
@@ -294,17 +306,18 @@ export default function SettingsView({
     const { value: customPath } = await Swal.fire({
       background: "var(--bg-secondary)",
       color: "var(--text-main)",
-      title: `${type} Download Location`,
+      title: `${isMovies ? "Movies & Series" : type} Download Location`,
       input: "text",
       inputValue: currentLoc || "",
       inputPlaceholder: defaultPlaceholder,
-      text: `Enter custom storage folder path on device for ${type.toLowerCase()} downloads:`,
+      text: `Enter custom storage folder path on device for ${isMovies ? "movies and series" : type.toLowerCase()} downloads:`,
       showCancelButton: true,
       confirmButtonText: "Save",
       confirmButtonColor: "var(--primary-accent)",
     });
     if (customPath !== undefined && customPath !== null) {
-      if (isAnime) setAnimeDownloadLocation(customPath.trim());
+      if (isMovies) setMoviesDownloadLocation(customPath.trim());
+      else if (isAnime) setAnimeDownloadLocation(customPath.trim());
       else setMangaDownloadLocation(customPath.trim());
     }
   };
@@ -354,7 +367,9 @@ export default function SettingsView({
     const list =
       type === "Anime"
         ? settings.installedExtensions.Anime
-        : settings.installedExtensions.Manga;
+        : type === "Movies"
+          ? settings.installedExtensions.Movies
+          : settings.installedExtensions.Manga;
     const cleanName = String(name || "")
       .toLowerCase()
       .replace(/^@/, "");
@@ -400,6 +415,22 @@ export default function SettingsView({
   }, [scrollToSection, activeTab]);
 
   const touchStartRef = useRef({ x: 0, y: 0, time: 0 });
+  const tabsRowRef = useRef(null);
+
+  useEffect(() => {
+    if (tabsRowRef.current) {
+      const activeBtn = tabsRowRef.current.querySelector(
+        ".settings-tab-btn.active",
+      );
+      if (activeBtn) {
+        activeBtn.scrollIntoView({
+          behavior: "smooth",
+          inline: "center",
+          block: "nearest",
+        });
+      }
+    }
+  }, [activeTab]);
 
   const handleTouchStart = (e) => {
     if (!e.touches || e.touches.length !== 1) return;
@@ -720,7 +751,9 @@ export default function SettingsView({
         const s = data.settings;
         setAnimeProvider(s.Animeprovider || "");
         setQuality(s.quality || "1080p");
+        setMinDownloadSpeed(s.minDownloadSpeed || "300 KB/s");
         setMangaProvider(s.Mangaprovider || "");
+        setMoviesProvider(s.Moviesprovider || "");
         setAutoLoadNextChapter(s.autoLoadNextChapter);
         setPagination(s.Pagination);
         setMalStatus(s.status || "watching");
@@ -749,6 +782,7 @@ export default function SettingsView({
         );
         setAnimeDownloadLocation(s.CustomDownloadLocationAnime || "");
         setMangaDownloadLocation(s.CustomDownloadLocationManga || "");
+        setMoviesDownloadLocation(s.CustomDownloadLocationMovies || "");
         setMangaAutoScrollSpeed(
           s.mangaAutoScrollSpeed !== undefined
             ? parseInt(s.mangaAutoScrollSpeed, 10) || 2
@@ -756,6 +790,7 @@ export default function SettingsView({
         );
         setAnimeNamingScheme(s.animeNamingScheme || "default");
         setMangaNamingScheme(s.mangaNamingScheme || "default");
+        setMoviesNamingScheme(s.moviesNamingScheme || "default");
         setJellyfinCompatibility(Boolean(s.jellyfinCompatibility));
         setExternalLogEnabled(
           s.externalLogEnabled !== undefined ? s.externalLogEnabled : true,
@@ -848,7 +883,7 @@ export default function SettingsView({
   const handleDeleteHistory = async (type, id, title, number) => {
     const result = await swalConfirm(
       "Delete History Entry?",
-      `Are you sure you want to delete the tracking entry for "${title}" (${type === "Anime" ? "Episode" : "Chapter"} ${number})? This will update your watch/read statistics.`,
+      `Are you sure you want to delete the tracking entry for "${title}" (${type === "Manga" ? "Chapter" : "Episode"} ${number})? This will update your watch/read statistics.`,
       "Yes, delete it!",
     );
 
@@ -992,8 +1027,12 @@ export default function SettingsView({
     if (animeProvider !== (settings.Animeprovider || ""))
       dirty.Animeprovider = animeProvider;
     if (quality !== (settings.quality || "1080p")) dirty.quality = quality;
+    if (minDownloadSpeed !== (settings.minDownloadSpeed || "300 KB/s"))
+      dirty.minDownloadSpeed = minDownloadSpeed;
     if (mangaProvider !== (settings.Mangaprovider || ""))
       dirty.Mangaprovider = mangaProvider;
+    if (moviesProvider !== (settings.Moviesprovider || ""))
+      dirty.Moviesprovider = moviesProvider;
     if (autoLoadNextChapter !== settings.autoLoadNextChapter)
       dirty.autoLoadNextChapter = autoLoadNextChapter;
     if (pagination !== settings.Pagination) dirty.Pagination = pagination;
@@ -1049,12 +1088,18 @@ export default function SettingsView({
       dirty.CustomDownloadLocationAnime = animeDownloadLocation;
     if (mangaDownloadLocation !== (settings.CustomDownloadLocationManga || ""))
       dirty.CustomDownloadLocationManga = mangaDownloadLocation;
+    if (
+      moviesDownloadLocation !== (settings.CustomDownloadLocationMovies || "")
+    )
+      dirty.CustomDownloadLocationMovies = moviesDownloadLocation;
     if (mangaAutoScrollSpeed !== (settings.mangaAutoScrollSpeed || 2))
       dirty.mangaAutoScrollSpeed = mangaAutoScrollSpeed;
     if (animeNamingScheme !== (settings.animeNamingScheme || "default"))
       dirty.animeNamingScheme = animeNamingScheme;
     if (mangaNamingScheme !== (settings.mangaNamingScheme || "default"))
       dirty.mangaNamingScheme = mangaNamingScheme;
+    if (moviesNamingScheme !== (settings.moviesNamingScheme || "default"))
+      dirty.moviesNamingScheme = moviesNamingScheme;
     if (jellyfinCompatibility !== (settings.jellyfinCompatibility || false))
       dirty.jellyfinCompatibility = jellyfinCompatibility;
     if (
@@ -1148,10 +1193,15 @@ export default function SettingsView({
           ).catch(() => {});
         }
 
-        if (dirty.Animeprovider || dirty.Mangaprovider) {
+        if (
+          dirty.Animeprovider ||
+          dirty.Mangaprovider ||
+          dirty.Moviesprovider
+        ) {
           if (window.catalogCache) {
             delete window.catalogCache[`Anime_provider`];
             delete window.catalogCache[`Manga_provider`];
+            delete window.catalogCache[`Movies_provider`];
           }
         }
 
@@ -1177,7 +1227,9 @@ export default function SettingsView({
     const changed =
       animeProvider !== (settings.Animeprovider || "") ||
       quality !== (settings.quality || "1080p") ||
+      minDownloadSpeed !== (settings.minDownloadSpeed || "300 KB/s") ||
       mangaProvider !== (settings.Mangaprovider || "") ||
+      moviesProvider !== (settings.Moviesprovider || "") ||
       autoLoadNextChapter !== settings.autoLoadNextChapter ||
       pagination !== settings.Pagination ||
       malStatus !== (settings.status || "watching") ||
@@ -1208,9 +1260,12 @@ export default function SettingsView({
           : true) ||
       animeDownloadLocation !== (settings.CustomDownloadLocationAnime || "") ||
       mangaDownloadLocation !== (settings.CustomDownloadLocationManga || "") ||
+      moviesDownloadLocation !==
+        (settings.CustomDownloadLocationMovies || "") ||
       mangaAutoScrollSpeed !== (settings.mangaAutoScrollSpeed || 2) ||
       animeNamingScheme !== (settings.animeNamingScheme || "default") ||
       mangaNamingScheme !== (settings.mangaNamingScheme || "default") ||
+      moviesNamingScheme !== (settings.moviesNamingScheme || "default") ||
       jellyfinCompatibility !== (settings.jellyfinCompatibility || false) ||
       externalLogEnabled !==
         (settings.externalLogEnabled !== undefined
@@ -1398,7 +1453,7 @@ export default function SettingsView({
           </header>
 
           {/* Horizontal Tabs Navigation */}
-          <div className="settings-tabs-row">
+          <div className="settings-tabs-row" ref={tabsRowRef}>
             <button
               type="button"
               onClick={() => setActiveTab("general")}
@@ -1419,6 +1474,20 @@ export default function SettingsView({
               className={`settings-tab-btn ${activeTab === "manga" ? "active" : ""}`}
             >
               Manga Settings
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("movies")}
+              className={`settings-tab-btn ${activeTab === "movies" ? "active" : ""}`}
+            >
+              Movies & Series
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("player")}
+              className={`settings-tab-btn ${activeTab === "player" ? "active" : ""}`}
+            >
+              Player Settings
             </button>
             <button
               type="button"
@@ -2169,9 +2238,9 @@ export default function SettingsView({
 
           {activeTab === "anime" && (
             <div className="settings-column">
-              {/* Playback & Streaming */}
+              {/* Provider Settings */}
               <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">Playback & Streaming</h2>
+                <h2 className="settings-section-title">Provider Settings</h2>
 
                 <div className="settings-row-item">
                   <div className="settings-row-info">
@@ -2198,28 +2267,6 @@ export default function SettingsView({
                     />
                   </div>
                 </div>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">Preferred Quality</div>
-                    <div className="settings-row-hint">
-                      Streaming and downloading resolution defaults.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={quality}
-                      onChange={setQuality}
-                      options={[
-                        { value: "1080p", label: "1080p (Full HD)" },
-                        { value: "720p", label: "720p (HD)" },
-                        { value: "360p", label: "360p (SD)" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
-
                 <SettingsRow
                   label={`Recommendations Shown (${infoRecCount} ${infoRecCount === 1 ? "title" : "titles"})`}
                   desc="How many recommendation cards appear on a title page. Rendered as a single horizontal row (1-10, default 4)."
@@ -2240,55 +2287,38 @@ export default function SettingsView({
                     ))}
                   </div>
                 </SettingsRow>
-
-                <SettingsRow
-                  label="Default Playback Speed"
-                  desc="Default playback speed when launching video player (MPV / Android)."
-                >
-                  <Dropdown
-                    value={String(playerSpeed)}
-                    onChange={(val) => setPlayerSpeed(parseFloat(val))}
-                    options={[
-                      { value: "0.5", label: "0.5x" },
-                      { value: "0.75", label: "0.75x" },
-                      { value: "1", label: "1.0x (Normal)" },
-                      { value: "1.25", label: "1.25x" },
-                      { value: "1.5", label: "1.5x" },
-                      { value: "1.75", label: "1.75x" },
-                      { value: "2", label: "2.0x" },
-                      { value: "2.5", label: "2.5x" },
-                    ]}
-                    minWidth={200}
-                  />
-                </SettingsRow>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Auto-Skip Intro & Outro
-                    </div>
-                    <div className="settings-row-hint">
-                      Automatically skip intro and outro segments during
-                      playback when detected.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={String(autoSkipIntro)}
-                      onChange={(val) => setAutoSkipIntro(val === "true")}
-                      options={[
-                        { value: "true", label: "Yes" },
-                        { value: "false", label: "No" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
               </div>
 
               {/* Downloads & Media Server */}
               <div className="settings-section glass-panel">
                 <h2 className="settings-section-title">Downloads</h2>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Minimum Download Speed
+                    </div>
+                    <div className="settings-row-hint">
+                      Automatically boost parallel connections and switch to
+                      faster mirrors if download speed falls below this floor.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={minDownloadSpeed}
+                      onChange={setMinDownloadSpeed}
+                      options={[
+                        { value: "0", label: "Disabled" },
+                        { value: "150 KB/s", label: "150 KB/s" },
+                        { value: "300 KB/s", label: "300 KB/s (Default)" },
+                        { value: "500 KB/s", label: "500 KB/s" },
+                        { value: "1 MB/s", label: "1 MB/s" },
+                        { value: "2 MB/s", label: "2 MB/s" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
 
                 <SettingsRow
                   label="Anime Download Location"
@@ -2334,6 +2364,443 @@ export default function SettingsView({
                     )}
                   </div>
                 </SettingsRow>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "manga" && (
+            <div className="settings-column">
+              {/* Provider Settings */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Provider Settings</h2>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Active Manga Provider
+                    </div>
+                    <div className="settings-row-hint">
+                      Default scrapers used to search and read manga chapters.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={mangaProvider || ""}
+                      onChange={setMangaProvider}
+                      options={[
+                        { value: "", label: "None selected" },
+                        ...(settings?.providers?.Manga || []).map((name) => ({
+                          value: name,
+                          label: name,
+                          icon: getProviderIcon(name, "Manga"),
+                        })),
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Reader Settings */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Reader Settings</h2>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Manga Reader Layout
+                    </div>
+                    <div className="settings-row-hint">
+                      Choose how pages are laid out inside the manga reader.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={mangaReaderLayout}
+                      onChange={setMangaReaderLayout}
+                      options={[
+                        {
+                          value: "long-strip",
+                          label: "Long Strip (Vertical Scroll)",
+                        },
+                        { value: "single", label: "Single Page" },
+                        { value: "double", label: "Double Page" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+
+                <SettingsRow
+                  label="Manga Reader Width"
+                  desc="Adjust the maximum page display width inside the manga reader."
+                >
+                  <Dropdown
+                    value={String(mangaReaderWidth)}
+                    onChange={(val) => setMangaReaderWidth(parseInt(val, 10))}
+                    options={[
+                      { value: "600", label: "600px (Compact)" },
+                      { value: "700", label: "700px" },
+                      { value: "800", label: "800px (Default)" },
+                      { value: "900", label: "900px" },
+                      { value: "1000", label: "1000px (Medium)" },
+                      { value: "1100", label: "1100px" },
+                      { value: "1200", label: "1200px (Wide)" },
+                      { value: "1400", label: "1400px (Extra Wide)" },
+                      { value: "1600", label: "1600px (Full Width)" },
+                      ...(![
+                        "600",
+                        "700",
+                        "800",
+                        "900",
+                        "1000",
+                        "1100",
+                        "1200",
+                        "1400",
+                        "1600",
+                      ].includes(String(mangaReaderWidth))
+                        ? [
+                            {
+                              value: String(mangaReaderWidth),
+                              label: `${mangaReaderWidth}px (Custom)`,
+                            },
+                          ]
+                        : []),
+                    ]}
+                    minWidth={200}
+                  />
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Auto-Scroll Speed"
+                  desc="Default continuous vertical scrolling speed in Long Strip mode."
+                >
+                  <Dropdown
+                    value={String(mangaAutoScrollSpeed)}
+                    onChange={(val) =>
+                      setMangaAutoScrollSpeed(parseInt(val, 10))
+                    }
+                    options={[
+                      { value: "1", label: "1.0x (Slowest)" },
+                      { value: "2", label: "2.0x (Default)" },
+                      { value: "3", label: "3.0x (Normal)" },
+                      { value: "4", label: "4.0x (Fast)" },
+                      { value: "5", label: "5.0x (Faster)" },
+                      { value: "6", label: "6.0x (Fastest)" },
+                    ]}
+                    minWidth={200}
+                  />
+                </SettingsRow>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Auto Load Next Chapter
+                    </div>
+                    <div className="settings-row-hint">
+                      Automatically fetch and display the next chapter when
+                      scrolling to the end.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={String(autoLoadNextChapter)}
+                      onChange={(val) => setAutoLoadNextChapter(val === "true")}
+                      options={[
+                        { value: "true", label: "Enabled" },
+                        { value: "false", label: "Disabled" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Downloads & Storage */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Downloads & Storage</h2>
+
+                <SettingsRow
+                  label="Manga Download Location"
+                  desc="Where new manga chapters are saved (.cbz archives). Takes effect for new downloads. Custom paths download manga files directly inside without creating an extra Manga subfolder."
+                >
+                  <div className="download-location-picker">
+                    <input
+                      type="text"
+                      className="settings-text-input download-location-path"
+                      value={mangaDownloadLocation}
+                      placeholder={
+                        isMobileApp()
+                          ? "Default (/StrawVerse/Manga)"
+                          : "Default (Downloads/Manga)"
+                      }
+                      readOnly
+                      title={
+                        mangaDownloadLocation ||
+                        (isMobileApp()
+                          ? "Default (/StrawVerse/Manga)"
+                          : "Default (Downloads/Manga)")
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="settings-market-btn download-location-btn"
+                      onClick={() => handleBrowseLocation("Manga")}
+                      disabled={browsingFolder}
+                    >
+                      <FolderOpen size={14} />
+                      {browsingFolder ? "Browsing..." : "Browse"}
+                    </button>
+                    {mangaDownloadLocation && (
+                      <button
+                        type="button"
+                        className="theme-reset-btn"
+                        onClick={() => setMangaDownloadLocation("")}
+                        title="Reset to default Manga Downloads folder"
+                        aria-label="Reset Manga download location"
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Manga Download Naming"
+                  desc="Naming format for downloaded manga chapter archives (.cbz files)."
+                >
+                  <Dropdown
+                    value={mangaNamingScheme}
+                    onChange={setMangaNamingScheme}
+                    options={[
+                      {
+                        value: "default",
+                        label: "Default (Chapter 1052.cbz)",
+                      },
+                      {
+                        value: "series_chapter",
+                        label:
+                          "Series - Chapter (One Piece - Chapter 1052.cbz)",
+                      },
+                      { value: "short", label: "Short (Ch. 1052.cbz)" },
+                    ]}
+                    minWidth={220}
+                  />
+                </SettingsRow>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "movies" && (
+            <div className="settings-column">
+              {/* Provider Settings */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Provider Settings</h2>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Active Movies & Series Provider
+                    </div>
+                    <div className="settings-row-hint">
+                      Default scraper used to browse, search, and stream movies
+                      and TV series.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={moviesProvider || ""}
+                      onChange={setMoviesProvider}
+                      options={[
+                        { value: "", label: "None selected" },
+                        ...(settings?.providers?.Movies || []).map((name) => ({
+                          value: name,
+                          label: name,
+                          icon: getProviderIcon(name, "Movies"),
+                        })),
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Downloads & Storage */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Downloads & Storage</h2>
+
+                <SettingsRow
+                  label="Movies & Series Download Location"
+                  desc="Where downloaded movies and series are saved. Custom paths download video files directly inside without creating an extra MoviesSeries subfolder."
+                >
+                  <div className="download-location-picker">
+                    <input
+                      type="text"
+                      className="settings-text-input download-location-path"
+                      value={moviesDownloadLocation}
+                      placeholder={
+                        isMobileApp()
+                          ? "Default (/StrawVerse/MoviesSeries)"
+                          : "Default (Downloads/MoviesSeries)"
+                      }
+                      readOnly
+                      title={
+                        moviesDownloadLocation ||
+                        (isMobileApp()
+                          ? "Default (/StrawVerse/MoviesSeries)"
+                          : "Default (Downloads/MoviesSeries)")
+                      }
+                    />
+                    <button
+                      type="button"
+                      className="settings-market-btn download-location-btn"
+                      onClick={() => handleBrowseLocation("Movies")}
+                      disabled={browsingFolder}
+                    >
+                      <FolderOpen size={14} />
+                      {browsingFolder ? "Browsing..." : "Browse"}
+                    </button>
+                    {moviesDownloadLocation && (
+                      <button
+                        type="button"
+                        className="theme-reset-btn"
+                        onClick={() => setMoviesDownloadLocation("")}
+                        title="Reset to default Movies & Series Downloads folder"
+                        aria-label="Reset Movies & Series download location"
+                      >
+                        <RotateCcw size={16} />
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
+
+                <SettingsRow
+                  label="Video Download Naming Scheme"
+                  desc="Naming scheme for downloaded movie and series video files."
+                >
+                  <Dropdown
+                    value={moviesNamingScheme}
+                    onChange={setMoviesNamingScheme}
+                    options={[
+                      { value: "default", label: "Default (Title - 01.mp4)" },
+                      {
+                        value: "title_s01e01",
+                        label: "Plex / Jellyfin (Title - S01E01.mp4)",
+                      },
+                      {
+                        value: "title_ep",
+                        label: "Standard (Title - Episode 1.mp4)",
+                      },
+                      {
+                        value: "title_only",
+                        label: "Movie Only (Title.mp4)",
+                      },
+                    ]}
+                    minWidth={240}
+                  />
+                </SettingsRow>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Minimum Download Speed
+                    </div>
+                    <div className="settings-row-hint">
+                      Automatically boost parallel connections and switch to
+                      faster mirrors if download speed falls below this floor.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={minDownloadSpeed}
+                      onChange={setMinDownloadSpeed}
+                      options={[
+                        { value: "0", label: "Disabled" },
+                        { value: "150 KB/s", label: "150 KB/s" },
+                        { value: "300 KB/s", label: "300 KB/s (Default)" },
+                        { value: "500 KB/s", label: "500 KB/s" },
+                        { value: "1 MB/s", label: "1 MB/s" },
+                        { value: "2 MB/s", label: "2 MB/s" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "player" && (
+            <div className="settings-column">
+              {/* Playback & Streaming */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Playback & Streaming</h2>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">Preferred Quality</div>
+                    <div className="settings-row-hint">
+                      Streaming and downloading resolution defaults.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={quality}
+                      onChange={setQuality}
+                      options={[
+                        { value: "1080p", label: "1080p (Full HD)" },
+                        { value: "720p", label: "720p (HD)" },
+                        { value: "480p", label: "480p (SD)" },
+                        { value: "360p", label: "360p (Data Saver)" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
+
+                <SettingsRow
+                  label="Default Playback Speed"
+                  desc="Default playback speed when launching video player (MPV / Android)."
+                >
+                  <Dropdown
+                    value={String(playerSpeed)}
+                    onChange={(val) => setPlayerSpeed(parseFloat(val))}
+                    options={[
+                      { value: "0.5", label: "0.5x" },
+                      { value: "0.75", label: "0.75x" },
+                      { value: "1", label: "1.0x (Normal)" },
+                      { value: "1.25", label: "1.25x" },
+                      { value: "1.5", label: "1.5x" },
+                      { value: "1.75", label: "1.75x" },
+                      { value: "2", label: "2.0x" },
+                      { value: "2.5", label: "2.5x" },
+                    ]}
+                    minWidth={200}
+                  />
+                </SettingsRow>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Auto-Skip Intro & Outro
+                    </div>
+                    <div className="settings-row-hint">
+                      Automatically skip intro and outro segments during
+                      playback when detected.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={String(autoSkipIntro)}
+                      onChange={(val) => setAutoSkipIntro(val === "true")}
+                      options={[
+                        { value: "true", label: "Yes" },
+                        { value: "false", label: "No" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
               </div>
 
               {/* Subtitles & Audio */}
@@ -2488,6 +2955,7 @@ export default function SettingsView({
                       options={[
                         { value: "srt", label: "SubRip (.srt)" },
                         { value: "vtt", label: "WebVTT (.vtt)" },
+                        { value: "ass", label: "Advanced SubStation (.ass)" },
                       ]}
                       minWidth={200}
                     />
@@ -2844,229 +3312,6 @@ export default function SettingsView({
               </div>
             </div>
           )}
-
-          {activeTab === "manga" && (
-            <div className="settings-column">
-              {/* Provider Settings */}
-              <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">Provider Settings</h2>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Active Manga Provider
-                    </div>
-                    <div className="settings-row-hint">
-                      Default scrapers used to search and read manga chapters.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={mangaProvider || ""}
-                      onChange={setMangaProvider}
-                      options={[
-                        { value: "", label: "None selected" },
-                        ...(settings?.providers?.Manga || []).map((name) => ({
-                          value: name,
-                          label: name,
-                          icon: getProviderIcon(name, "Manga"),
-                        })),
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Reader Settings */}
-              <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">Reader Settings</h2>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Manga Reader Layout
-                    </div>
-                    <div className="settings-row-hint">
-                      Choose how pages are laid out inside the manga reader.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={mangaReaderLayout}
-                      onChange={setMangaReaderLayout}
-                      options={[
-                        {
-                          value: "long-strip",
-                          label: "Long Strip (Vertical Scroll)",
-                        },
-                        { value: "single", label: "Single Page" },
-                        { value: "double", label: "Double Page" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
-
-                <SettingsRow
-                  label="Manga Reader Width"
-                  desc="Adjust the maximum page display width inside the manga reader."
-                >
-                  <Dropdown
-                    value={String(mangaReaderWidth)}
-                    onChange={(val) => setMangaReaderWidth(parseInt(val, 10))}
-                    options={[
-                      { value: "600", label: "600px (Compact)" },
-                      { value: "700", label: "700px" },
-                      { value: "800", label: "800px (Default)" },
-                      { value: "900", label: "900px" },
-                      { value: "1000", label: "1000px (Medium)" },
-                      { value: "1100", label: "1100px" },
-                      { value: "1200", label: "1200px (Wide)" },
-                      { value: "1400", label: "1400px (Extra Wide)" },
-                      { value: "1600", label: "1600px (Full Width)" },
-                      ...(![
-                        "600",
-                        "700",
-                        "800",
-                        "900",
-                        "1000",
-                        "1100",
-                        "1200",
-                        "1400",
-                        "1600",
-                      ].includes(String(mangaReaderWidth))
-                        ? [
-                            {
-                              value: String(mangaReaderWidth),
-                              label: `${mangaReaderWidth}px (Custom)`,
-                            },
-                          ]
-                        : []),
-                    ]}
-                    minWidth={200}
-                  />
-                </SettingsRow>
-
-                <SettingsRow
-                  label="Auto-Scroll Speed"
-                  desc="Default continuous vertical scrolling speed in Long Strip mode."
-                >
-                  <Dropdown
-                    value={String(mangaAutoScrollSpeed)}
-                    onChange={(val) =>
-                      setMangaAutoScrollSpeed(parseInt(val, 10))
-                    }
-                    options={[
-                      { value: "1", label: "1.0x (Slowest)" },
-                      { value: "2", label: "2.0x (Default)" },
-                      { value: "3", label: "3.0x (Normal)" },
-                      { value: "4", label: "4.0x (Fast)" },
-                      { value: "5", label: "5.0x (Faster)" },
-                      { value: "6", label: "6.0x (Fastest)" },
-                    ]}
-                    minWidth={200}
-                  />
-                </SettingsRow>
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Auto Load Next Chapter
-                    </div>
-                    <div className="settings-row-hint">
-                      Automatically fetch and display the next chapter when
-                      scrolling to the end.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={String(autoLoadNextChapter)}
-                      onChange={(val) => setAutoLoadNextChapter(val === "true")}
-                      options={[
-                        { value: "true", label: "Enabled" },
-                        { value: "false", label: "Disabled" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Downloads & Storage */}
-              <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">Downloads & Storage</h2>
-
-                <SettingsRow
-                  label="Manga Download Location"
-                  desc="Where new manga chapters are saved (.cbz archives). Takes effect for new downloads. Custom paths download manga files directly inside without creating an extra Manga subfolder."
-                >
-                  <div className="download-location-picker">
-                    <input
-                      type="text"
-                      className="settings-text-input download-location-path"
-                      value={mangaDownloadLocation}
-                      placeholder={
-                        isMobileApp()
-                          ? "Default (/StrawVerse/Manga)"
-                          : "Default (Downloads/Manga)"
-                      }
-                      readOnly
-                      title={
-                        mangaDownloadLocation ||
-                        (isMobileApp()
-                          ? "Default (/StrawVerse/Manga)"
-                          : "Default (Downloads/Manga)")
-                      }
-                    />
-                    <button
-                      type="button"
-                      className="settings-market-btn download-location-btn"
-                      onClick={() => handleBrowseLocation("Manga")}
-                      disabled={browsingFolder}
-                    >
-                      <FolderOpen size={14} />
-                      {browsingFolder ? "Browsing..." : "Browse"}
-                    </button>
-                    {mangaDownloadLocation && (
-                      <button
-                        type="button"
-                        className="theme-reset-btn"
-                        onClick={() => setMangaDownloadLocation("")}
-                        title="Reset to default Manga Downloads folder"
-                        aria-label="Reset Manga download location"
-                      >
-                        <RotateCcw size={16} />
-                      </button>
-                    )}
-                  </div>
-                </SettingsRow>
-
-                <SettingsRow
-                  label="Manga Download Naming"
-                  desc="Naming format for downloaded manga chapter archives (.cbz files)."
-                >
-                  <Dropdown
-                    value={mangaNamingScheme}
-                    onChange={setMangaNamingScheme}
-                    options={[
-                      {
-                        value: "default",
-                        label: "Default (Chapter 1052.cbz)",
-                      },
-                      {
-                        value: "series_chapter",
-                        label:
-                          "Series - Chapter (One Piece - Chapter 1052.cbz)",
-                      },
-                      { value: "short", label: "Short (Ch. 1052.cbz)" },
-                    ]}
-                    minWidth={220}
-                  />
-                </SettingsRow>
-              </div>
-            </div>
-          )}
           {activeTab === "history" && (
             <div className="u-style-83">
               {statsLoading ? (
@@ -3087,8 +3332,12 @@ export default function SettingsView({
                         <span className="settings-stat-unit">hrs</span>
                       </h3>
                       <p className="settings-stat-card-sub">
-                        {stats?.completedEpisodes || 0} episodes watched (
-                        {stats?.distinctAnime || 0} Anime)
+                        {stats?.completedEpisodes || 0} episodes / movies
+                        watched ({stats?.distinctAnime || 0} Anime
+                        {stats?.distinctMovies
+                          ? `, ${stats.distinctMovies} Movies & Series`
+                          : ""}
+                        )
                       </p>
                     </div>
                     <div className="settings-stat-card glass-panel">
@@ -3116,14 +3365,14 @@ export default function SettingsView({
 
                         {/* Segmented Toggle Control */}
                         <div className="segmented-toggle-wrapper">
-                          {["All", "Anime", "Manga"].map((t) => (
+                          {["All", "Anime", "Manga", "Movies"].map((t) => (
                             <button
                               key={t}
                               type="button"
                               onClick={() => setHistoryFilter(t)}
                               className={`segmented-toggle-btn ${historyFilter === t ? "active" : ""}`}
                             >
-                              {t}
+                              {t === "Movies" ? "Movies & Series" : t}
                             </button>
                           ))}
                         </div>
@@ -3191,7 +3440,7 @@ export default function SettingsView({
                               >
                                 <div className="settings-history-item-left">
                                   <span
-                                    className={`settings-history-type-badge ${item.type === "Anime" ? "" : "manga"}`}
+                                    className={`settings-history-type-badge ${item.type === "Anime" ? "" : item.type === "Movies" ? "movies" : "manga"}`}
                                   >
                                     {item.type}
                                   </span>
@@ -3215,9 +3464,9 @@ export default function SettingsView({
                                       )}
                                     </div>
                                     <span className="settings-history-item-meta">
-                                      {item.type === "Anime"
-                                        ? "Episode"
-                                        : "Chapter"}{" "}
+                                      {item.type === "Manga"
+                                        ? "Chapter"
+                                        : "Episode"}{" "}
                                       {item.number} • Spent {formattedTime}
                                     </span>
                                   </div>
@@ -3295,6 +3544,13 @@ export default function SettingsView({
                     className={`tag-type-btn ${tagType === "Manga" ? "active" : ""}`}
                   >
                     Manga Tags
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTagType("Movies")}
+                    className={`tag-type-btn ${tagType === "Movies" ? "active" : ""}`}
+                  >
+                    Movies & Series Tags
                   </button>
                 </div>
               </div>

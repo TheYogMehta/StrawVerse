@@ -24,7 +24,7 @@ export async function apiPost(url, body = {}, options = {}) {
   }
 }
 
-export function hexToRgba(hex, alpha = 1, fallback = null) {
+function hexToRgba(hex, alpha = 1, fallback = null) {
   if (!hex || typeof hex !== "string") {
     return fallback || `rgba(124, 58, 237, ${alpha})`;
   }
@@ -192,34 +192,40 @@ export function parseTags(val) {
   return [str];
 }
 
-export const SYSTEM_TAGS = Object.freeze({
+const SYSTEM_TAGS = Object.freeze({
   Anime: Object.freeze(["Watching", "Plan to Watch", "Completed", "Downloads"]),
   Manga: Object.freeze(["Reading", "Plan to Read", "Completed", "Downloads"]),
+  Movies: Object.freeze([
+    "Watching",
+    "Plan to Watch",
+    "Completed",
+    "Downloads",
+  ]),
 });
 
-export const RESERVED_TAGS = Object.freeze({
+const RESERVED_TAGS = Object.freeze({
   Anime: Object.freeze(SYSTEM_TAGS.Anime.map((t) => t.toLowerCase())),
   Manga: Object.freeze(SYSTEM_TAGS.Manga.map((t) => t.toLowerCase())),
+  Movies: Object.freeze(SYSTEM_TAGS.Movies.map((t) => t.toLowerCase())),
 });
-
-export function getReservedTags(type = "Anime") {
-  const isManga = String(type).toLowerCase() === "manga";
-  return SYSTEM_TAGS[isManga ? "Manga" : "Anime"] || SYSTEM_TAGS.Anime;
-}
 
 export function isReservedTag(tag, type = null) {
   if (!tag || typeof tag !== "string") return false;
   const lower = tag.trim().toLowerCase();
   if (type) {
-    const isManga = String(type).toLowerCase() === "manga";
-    return RESERVED_TAGS[isManga ? "Manga" : "Anime"].includes(lower);
+    const norm = String(type || "").toLowerCase();
+    const key =
+      norm === "manga" ? "Manga" : norm === "movies" ? "Movies" : "Anime";
+    return RESERVED_TAGS[key].includes(lower);
   }
   return (
-    RESERVED_TAGS.Anime.includes(lower) || RESERVED_TAGS.Manga.includes(lower)
+    RESERVED_TAGS.Anime.includes(lower) ||
+    RESERVED_TAGS.Manga.includes(lower) ||
+    RESERVED_TAGS.Movies.includes(lower)
   );
 }
 
-export const MAL_ANIME_STATUSES = Object.freeze([
+const MAL_ANIME_STATUSES = Object.freeze([
   "plan_to_watch",
   "watching",
   "completed",
@@ -227,7 +233,7 @@ export const MAL_ANIME_STATUSES = Object.freeze([
   "dropped",
 ]);
 
-export const MAL_MANGA_STATUSES = Object.freeze([
+const MAL_MANGA_STATUSES = Object.freeze([
   "plan_to_read",
   "reading",
   "completed",
@@ -240,18 +246,12 @@ export const MAL_STATUSES = Object.freeze({
   Manga: MAL_MANGA_STATUSES,
 });
 
-export function getMalStatuses(type = "Anime") {
+function getMalStatuses(type = "Anime") {
   const isManga = String(type).toLowerCase() === "manga";
   return isManga ? MAL_MANGA_STATUSES : MAL_ANIME_STATUSES;
 }
 
-export const getValidMalStatuses = getMalStatuses;
 export const getMalStatusOptions = getMalStatuses;
-
-export function isValidMalStatus(status, type = "Anime") {
-  if (!status || typeof status !== "string") return false;
-  return getMalStatuses(type).includes(status.trim().toLowerCase());
-}
 
 export function getMalStatusLabel(status) {
   if (!status || typeof status !== "string") return "";

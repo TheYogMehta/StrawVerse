@@ -88,12 +88,6 @@ const YEARS_LIST = [
   "Older",
 ];
 
-const MAPPING_OPTIONS = [
-  { label: "All", value: "" },
-  { label: "Mapped (MAL Linked)", value: "mapped" },
-  { label: "Unmapped (Unique to Extension)", value: "unmapped" },
-];
-
 const getMalStatusOptions = (type) => {
   const isManga = type === "Manga";
   return [
@@ -195,6 +189,36 @@ function matchItemFilters(item, filters) {
         (t) => t && String(t).toLowerCase().trim() === targetTag,
       );
       if (!hasTag) return false;
+    }
+  }
+
+  if (
+    filters.downloadStatus &&
+    filters.downloadStatus !== "all" &&
+    filters.downloadStatus !== "" &&
+    filters.downloadStatus !== "All"
+  ) {
+    const isDownloaded =
+      (Array.isArray(item.Downloaded) && item.Downloaded.length > 0) ||
+      (Array.isArray(item.DownloadedChapters) &&
+        item.DownloadedChapters.length > 0) ||
+      (Array.isArray(item.DownloadedEpisodes) &&
+        item.DownloadedEpisodes.length > 0) ||
+      (item.DownloadedEpisodes?.sub?.length || 0) +
+        (item.DownloadedEpisodes?.dub?.length || 0) >
+        0;
+
+    const targetDl = String(filters.downloadStatus).toLowerCase().trim();
+    if (targetDl === "downloaded" && !isDownloaded) {
+      return false;
+    }
+    if (
+      (targetDl === "not_downloaded" ||
+        targetDl === "nondownloaded" ||
+        targetDl === "not downloaded") &&
+      isDownloaded
+    ) {
+      return false;
     }
   }
 
@@ -361,8 +385,9 @@ export default function Catalog({
   const [errorMsg, setErrorMsg] = useState(() => cache?.errorMsg || "");
   const [localTags, setLocalTags] = useState([]);
   const [tagModalMedia, setTagModalMedia] = useState(null);
-  // Filters start collapsed; the header caret expands them.
-  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(false);
+  const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(
+    () => provider === "mal" && type !== "Movies",
+  );
   const [installedProvidersList, setInstalledProvidersList] = useState([]);
   const [providerMetadataList, setProviderMetadataList] = useState([]);
   const [activeProviderName, setActiveProviderName] = useState("");
@@ -454,7 +479,7 @@ export default function Catalog({
   const activeFilterCount = useMemo(() => {
     return Object.entries(activeFilters).filter(([k, v]) => {
       if (k === "page") return false;
-      if (v === "" || v === "All" || v == null) return false;
+      if (v === "" || v === "All" || v === "all" || v == null) return false;
       return true;
     }).length;
   }, [activeFilters]);
@@ -702,6 +727,7 @@ export default function Catalog({
         if (window.catalogCache) {
           delete window.catalogCache[`Anime_local`];
           delete window.catalogCache[`Manga_local`];
+          delete window.catalogCache[`Movies_local`];
         }
         if (provider === "local") {
           setData((prev) => {
@@ -764,6 +790,7 @@ export default function Catalog({
         if (window.catalogCache) {
           delete window.catalogCache[`Anime_local`];
           delete window.catalogCache[`Manga_local`];
+          delete window.catalogCache[`Movies_local`];
         }
         if (provider === "local") {
           setData((prev) => {
@@ -936,6 +963,7 @@ export default function Catalog({
   const [calendarLoading, setCalendarLoading] = useState(false);
   const [scheduleUpdating, setScheduleUpdating] = useState(false);
   const [timeTicker, setTimeTicker] = useState(Date.now());
+
   const lastLoadedKeyRef = useRef(`${type}_${provider}`);
   const scrollDebounceRef = useRef(null);
 
@@ -1153,7 +1181,7 @@ export default function Catalog({
     return `${type}_local_${currentTag || "all"}`;
   };
 
-  const applyCustomOrder = (resultsList, currentFilters = activeFilters) => {
+  const applyCustomOrder = (resultsList) => {
     if (!resultsList || resultsList.length === 0) return resultsList;
     return resultsList;
   };
@@ -1174,7 +1202,7 @@ export default function Catalog({
     }
   };
 
-  const handleDragLeave = (e, index) => {
+  const handleDragLeave = (_e, index) => {
     if (!canReorder) return;
     if (dragOverIndex === index) {
       setDragOverIndex(null);
@@ -1227,7 +1255,7 @@ export default function Catalog({
     setDragOverIndex(null);
   };
 
-  const handleTouchStart = (e, index) => {
+  const handleTouchStart = (_e, index) => {
     if (!canReorder) return;
     setDraggedIndex(index);
   };
@@ -1249,7 +1277,7 @@ export default function Catalog({
     }
   };
 
-  const handleTouchEnd = async (e) => {
+  const handleTouchEnd = async () => {
     if (!canReorder || draggedIndex === null) return;
     const dropIndex = dragOverIndex;
     if (dropIndex !== null && draggedIndex !== dropIndex && data?.results) {
@@ -1587,10 +1615,7 @@ export default function Catalog({
     },
   };
 
-  const getApiEndpoint = (
-    currentTag = activeFilters.tag,
-    source = catalogSource,
-  ) => {
+  const getApiEndpoint = (source = catalogSource) => {
     if (provider === "local") {
       return `/api/list/${type}/local`;
     }
@@ -1607,7 +1632,7 @@ export default function Catalog({
   const preloadPagesAround = async (targetPage, currentFilters) => {
     const startP = Math.max(1, targetPage - 1);
     const endP = targetPage + 1;
-    const endpoint = getApiEndpoint(currentFilters.tag, catalogSource);
+    const endpoint = getApiEndpoint(catalogSource);
 
     let updatedPages = {};
     setFetchedPages((prev) => {
@@ -1749,7 +1774,7 @@ export default function Catalog({
       if (isLinking) {
         endpoint = `/api/list/${type}/search?query=${encodeURIComponent(activeSearch)}`;
       } else {
-        endpoint = getApiEndpoint(currentFilters.tag, activeSource);
+        endpoint = getApiEndpoint(activeSource);
       }
 
       if (provider === "mal" && !isAppend && page === 1) {
@@ -1962,12 +1987,14 @@ export default function Catalog({
         const grouped = {};
         for (const item of filtered) {
           const key = getGroupKey(item);
-          const currentNum = Number(item.number) || 0;
-          if (
-            !grouped[key] ||
-            currentNum > (Number(grouped[key].number) || 0)
-          ) {
+          if (!grouped[key]) {
             grouped[key] = item;
+          } else {
+            const curTime = new Date(item.date).getTime() || 0;
+            const existingTime = new Date(grouped[key].date).getTime() || 0;
+            if (curTime > existingTime) {
+              grouped[key] = item;
+            }
           }
         }
         const unique = [];
@@ -2239,7 +2266,7 @@ export default function Catalog({
               return item;
             }),
           );
-          setCatalog((prev) =>
+          setData((prev) =>
             (prev || []).map((item) => {
               if (
                 String(item.id) === String(data.oldId) ||
@@ -2291,7 +2318,7 @@ export default function Catalog({
       confirmButtonText,
     );
 
-    if (confirmed) {
+    if (confirmed?.isConfirmed) {
       setData((prev) => ({
         ...prev,
         results: (prev?.results || []).filter((x) => x.id !== item.id),
@@ -2323,6 +2350,7 @@ export default function Catalog({
           if (window.catalogCache) {
             delete window.catalogCache[`Anime_local`];
             delete window.catalogCache[`Manga_local`];
+            delete window.catalogCache[`Movies_local`];
           }
           swalSuccess(
             "Removed",
@@ -2397,10 +2425,7 @@ export default function Catalog({
       return;
     }
 
-    const isMalActive =
-      provider === "mal" ||
-      (!catalogSource?.startsWith("unique:") && provider !== "local");
-    let backText = "Back to Collection";
+    let backText;
     if (searchQuery.trim().length > 0) {
       backText = "Back to Search";
     } else if (provider === "local") {
@@ -2436,6 +2461,7 @@ export default function Catalog({
     backText,
     autoPlay,
     targetNum,
+    targetSeason,
   ) => {
     const cacheKey = `${type}_${provider}`;
     if (!window.catalogCache) {
@@ -2458,7 +2484,7 @@ export default function Catalog({
       scrollPosition: currentScroll,
       lastActivePage: currentPage,
     };
-    onSelectMedia(id, prov, backText, autoPlay, targetNum);
+    onSelectMedia(id, prov, backText, autoPlay, targetNum, targetSeason);
   };
 
   const handleSearchSubmit = (e) => {
@@ -2488,7 +2514,11 @@ export default function Catalog({
 
   const handlePageChange = (page) => {
     if (page < 1) return;
+    if (data?.totalPages && page > data.totalPages) return;
     setCurrentPage(page);
+    if (wrapperRef.current) {
+      wrapperRef.current.scrollTop = 0;
+    }
     fetchData(page);
   };
 
@@ -2537,8 +2567,7 @@ export default function Catalog({
     }
     setInfiniteLoading(true);
     try {
-      const activeSearch = searchQuery;
-      let endpoint = getApiEndpoint(activeFilters.tag);
+      let endpoint = getApiEndpoint();
       const response = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2709,6 +2738,9 @@ export default function Catalog({
         isFilterOpen={isFilterPanelOpen}
         onToggleFilter={() => setIsFilterPanelOpen((prev) => !prev)}
         activeFilterCount={activeFilterCount}
+        showFilterToggle={
+          type !== "Movies" && (provider === "mal" || provider === "provider")
+        }
         catalogSource={catalogSource}
         onCatalogSourceChange={handleCatalogSourceChange}
         availableProviders={providerMetadataList}
@@ -2734,7 +2766,7 @@ export default function Catalog({
       />
 
       {/* Universal Filter panel */}
-      {provider === "mal" && (
+      {provider === "mal" && type !== "Movies" && isFilterPanelOpen && (
         <div className="filter-panel">
           <div className="filter-panel-header">
             <div className="filter-panel-left">
@@ -2934,9 +2966,12 @@ export default function Catalog({
         </div>
       )}
 
-      {/* Provider-native filter panel (Discover): forwards filters to the
+      {/* Discover Provider-native filter panel: forwards filters to the
           active provider extension (e.g. MangaKatana genre/status). */}
-      {provider === "provider" && availableFilters && (
+      {provider === "provider" &&
+        type !== "Movies" &&
+        isFilterPanelOpen &&
+        availableFilters && (
         <div className="filter-panel">
           <div className="filter-panel-header">
             <div className="filter-panel-left">
@@ -2968,22 +3003,39 @@ export default function Catalog({
           <div
             className={`filter-grid${isFilterPanelOpen ? "" : " is-collapsed"}`}
           >
-            {Object.entries(availableFilters).map(([key, filter]) => (
-              <div key={key} className="filter-group">
-                <label className="filter-label">{filter.label}</label>
-                <select
-                  value={activeFilters[key] || ""}
-                  onChange={(e) => handleFilterChange(key, e.target.value)}
-                  className={`filter-select ${activeFilters[key] ? "is-active" : ""}`}
-                >
-                  {Object.entries(filter.options).map(([optLabel, optVal]) => (
-                    <option key={optLabel} value={optVal}>
-                      {optLabel}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ))}
+            <div className="filter-group">
+              <label className="filter-label">Downloads</label>
+              <select
+                value={activeFilters.downloadStatus || ""}
+                onChange={(e) =>
+                  handleFilterChange("downloadStatus", e.target.value)
+                }
+                className={`filter-select ${activeFilters.downloadStatus ? "is-active" : ""}`}
+              >
+                <option value="">All</option>
+                <option value="downloaded">Downloaded Only</option>
+                <option value="not_downloaded">Not Downloaded</option>
+              </select>
+            </div>
+            {availableFilters &&
+              Object.entries(availableFilters).map(([key, filter]) => (
+                <div key={key} className="filter-group">
+                  <label className="filter-label">{filter.label}</label>
+                  <select
+                    value={activeFilters[key] || ""}
+                    onChange={(e) => handleFilterChange(key, e.target.value)}
+                    className={`filter-select ${activeFilters[key] ? "is-active" : ""}`}
+                  >
+                    {Object.entries(filter.options).map(
+                      ([optLabel, optVal]) => (
+                        <option key={optLabel} value={optVal}>
+                          {optLabel}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+              ))}
           </div>
         </div>
       )}

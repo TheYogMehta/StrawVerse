@@ -1290,6 +1290,13 @@ async function boot() {
             ),
           ),
         ),
+        Movies: Array.from(
+          new Set(
+            Object.values(global.Movies_providers || {}).map(
+              (p) => p.uniqueId || p.name,
+            ),
+          ),
+        ),
       });
 
       const getIconUrl = (name, valScraper) => {
@@ -1329,6 +1336,22 @@ async function boot() {
         Manga: Array.from(
           new Map(
             Object.values(global.Manga_providers || {}).map((val) => [
+              val.uniqueId || val.name,
+              {
+                name: val.name,
+                repoOwner: val.repoOwner || "TheYogMehta",
+                uniqueId:
+                  val.uniqueId ||
+                  `${val.repoOwner || "TheYogMehta"}/${val.name}`,
+                version: val.version || "1.0.0",
+                icon: getIconUrl(val.name, val),
+              },
+            ]),
+          ).values(),
+        ),
+        Movies: Array.from(
+          new Map(
+            Object.values(global.Movies_providers || {}).map((val) => [
               val.uniqueId || val.name,
               {
                 name: val.name,
@@ -1426,7 +1449,10 @@ async function boot() {
 
   router.post("/api/ipc/native-response", (req, res) => {
     const [requestId, success, response, error] = req.body.args || [];
-    const pending = global.pendingRequests.get(requestId);
+    const pending =
+      global.pendingRequests.get(requestId) ||
+      global.pendingRequests.get(Number(requestId)) ||
+      global.pendingRequests.get(String(requestId));
     if (pending) {
       if (success) {
         pending.resolve(response);

@@ -6,6 +6,7 @@ const { settingfetch, providerFetch } = require("../utils/settings");
 const {
   animeinfo,
   MangaInfo,
+  movieInfo,
   invalidateCache,
   resolveDownloadFolder,
 } = require("../utils/AnimeManga");
@@ -26,6 +27,7 @@ const {
   parseTags,
   isReservedTag,
   getReservedTags,
+  SEASON_FOLDER_RE,
 } = require("../utils/constants");
 const { updateHistory } = require("../utils/history");
 const {
@@ -36,15 +38,20 @@ const {
   run,
 } = require("../utils/db");
 const { exec } = require("child_process");
-const { sanitizeFolderName, GetDir } = require("../utils/DirectoryMaker");
+const { GetDir } = require("../utils/DirectoryMaker");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { resolveMalIdFromMapping } = require("../utils/mappingResolver");
 
 const router = express.Router();
 
-// View tags for Anime/Manga in custom user order
+// View tags for Anime/Manga/Movies in custom user order
 router.get("/api/local/tags", (req, res) => {
-  const type = req.query.type === "Manga" ? "Manga" : "Anime";
+  const type =
+    req.query.type === "Manga"
+      ? "Manga"
+      : req.query.type === "Movies"
+        ? "Movies"
+        : "Anime";
   res.redirect(
     `/api/local/tags/view/${type}${req.query.includeHidden ? "?includeHidden=true" : ""}`,
   );
@@ -53,7 +60,7 @@ router.get("/api/local/tags", (req, res) => {
 router.get("/api/local/tags/view/:type", async (req, res) => {
   try {
     const { type } = req.params;
-    if (type !== "Anime" && type !== "Manga") {
+    if (type !== "Anime" && type !== "Manga" && type !== "Movies") {
       throw new Error("Invalid type parameter");
     }
     const includeHidden = req.query.includeHidden === "true";
@@ -124,7 +131,11 @@ router.get("/api/local/tags/view/:type", async (req, res) => {
 router.post("/api/local/tags/create", async (req, res) => {
   try {
     const { type, tag } = req.body;
-    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+    if (
+      !type ||
+      !tag ||
+      (type !== "Anime" && type !== "Manga" && type !== "Movies")
+    ) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -172,7 +183,7 @@ router.post("/api/local/tags/reorder", async (req, res) => {
     if (
       !type ||
       !Array.isArray(tags) ||
-      (type !== "Anime" && type !== "Manga")
+      (type !== "Anime" && type !== "Manga" && type !== "Movies")
     ) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
@@ -193,7 +204,11 @@ router.post("/api/local/tags/reorder", async (req, res) => {
 router.post("/api/local/tags/toggle-visibility", async (req, res) => {
   try {
     const { type, tag, hidden } = req.body;
-    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+    if (
+      !type ||
+      !tag ||
+      (type !== "Anime" && type !== "Manga" && type !== "Movies")
+    ) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -225,7 +240,11 @@ router.post("/api/local/tags/toggle-visibility", async (req, res) => {
 router.post("/api/local/tags/delete-tag", async (req, res) => {
   try {
     const { type, tag } = req.body;
-    if (!type || !tag || (type !== "Anime" && type !== "Manga")) {
+    if (
+      !type ||
+      !tag ||
+      (type !== "Anime" && type !== "Manga" && type !== "Movies")
+    ) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -292,9 +311,9 @@ router.post("/api/local/tags/add", async (req, res) => {
       provider = null;
     }
 
-    let resolvedMalID = MalID ? String(MalID) : null;
+    let resolvedMalID = type !== "Movies" && MalID ? String(MalID) : null;
 
-    if (!resolvedMalID) {
+    if (!resolvedMalID && type !== "Movies") {
       if (global.mappingDb && id) {
         try {
           const mal = await resolveMalIdFromMapping({
@@ -319,23 +338,25 @@ router.post("/api/local/tags/add", async (req, res) => {
       tagValue = cleanArr.length > 0 ? JSON.stringify(cleanArr) : "[]";
     }
 
+    const targetTable =
+      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
     const existing = await global.db
-      .prepare(
-        `SELECT * FROM ${type === "Anime" ? "Anime" : "Manga"} WHERE id = ? OR folder_name = ?`,
-      )
+      .prepare(`SELECT * FROM ${targetTable} WHERE id = ? OR folder_name = ?`)
       .get(id, id);
 
     if (existing) {
       const updates = [];
       const params = [];
-      if (resolvedMalID) {
-        updates.push("MalID = ?");
-        params.push(resolvedMalID);
-      } else if (existing.MalID) {
-        resolvedMalID = existing.MalID;
-      } else if (MalID !== undefined) {
-        updates.push("MalID = ?");
-        params.push(null);
+      if (type !== "Movies") {
+        if (resolvedMalID) {
+          updates.push("MalID = ?");
+          params.push(resolvedMalID);
+        } else if (existing.MalID) {
+          resolvedMalID = existing.MalID;
+        } else if (MalID !== undefined) {
+          updates.push("MalID = ?");
+          params.push(null);
+        }
       }
       if (CustomTag !== undefined) {
         updates.push("CustomTag = ?");
@@ -345,12 +366,17 @@ router.post("/api/local/tags/add", async (req, res) => {
         params.push(existing.id);
         await global.db
           .prepare(
-            `UPDATE ${type} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
+            `UPDATE ${targetTable} SET ${updates.join(", ")}, last_updated = CURRENT_TIMESTAMP WHERE id = ?`,
           )
           .run(...params);
 
         const targetMalID = resolvedMalID || existing.MalID;
-        if (CustomTag !== undefined && targetMalID && targetMalID !== "") {
+        if (
+          type !== "Movies" &&
+          CustomTag !== undefined &&
+          targetMalID &&
+          targetMalID !== ""
+        ) {
           await global.db
             .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
             .run(tagValue, targetMalID);
@@ -397,6 +423,31 @@ router.post("/api/local/tags/add", async (req, res) => {
                 MalID: resolvedMalID,
               };
             }
+          } else if (type === "Movies") {
+            const movieData = await movieInfo(
+              resolvedProvider,
+              config?.CustomDownloadLocationMovies,
+              id,
+            );
+            if (movieData) {
+              values = {
+                ...values,
+                title: movieData.title || "",
+                provider: resolvedProvider.provider_name,
+                type: movieData.type ?? "Movie",
+                description: movieData.description ?? null,
+                status: movieData.status ?? null,
+                genres:
+                  movieData?.genres?.length > 0
+                    ? Array.isArray(movieData.genres)
+                      ? movieData.genres.join(",")
+                      : movieData.genres
+                    : "",
+                aired: movieData?.aired || movieData?.released || null,
+                ImageUrl: movieData?.image_url || movieData?.image,
+                MalID: null,
+              };
+            }
           } else if (type === "Manga") {
             const mangainfo = await MangaInfo(resolvedProvider, id);
             if (mangainfo) {
@@ -428,19 +479,27 @@ router.post("/api/local/tags/add", async (req, res) => {
       }
 
       await MetadataAdd(type, values);
-      await global.db
-        .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
-        .run(resolvedMalID, tagValue, id);
-
-      if (resolvedMalID && resolvedMalID !== "") {
+      if (type === "Movies") {
         await global.db
-          .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
-          .run(tagValue, resolvedMalID);
+          .prepare(`UPDATE Movies SET CustomTag = ? WHERE id = ?`)
+          .run(tagValue, id);
+      } else {
+        await global.db
+          .prepare(`UPDATE ${type} SET MalID = ?, CustomTag = ? WHERE id = ?`)
+          .run(resolvedMalID, tagValue, id);
+
+        if (resolvedMalID && resolvedMalID !== "") {
+          await global.db
+            .prepare(`UPDATE ${type} SET CustomTag = ? WHERE MalID = ?`)
+            .run(tagValue, resolvedMalID);
+        }
       }
     }
 
-    const targetMalID = MalID ? String(MalID) : existing?.MalID;
+    const targetMalID =
+      type !== "Movies" ? (MalID ? String(MalID) : existing?.MalID) : null;
     if (
+      type !== "Movies" &&
       CustomTag !== undefined &&
       (tagValue === "" || tagValue === "[]") &&
       targetMalID &&
@@ -494,16 +553,19 @@ router.post("/api/local/tags/add", async (req, res) => {
 
       if (req.body.deleteFiles && global.db) {
         try {
-          const malIdStr = resolvedMalID ? String(resolvedMalID) : null;
+          const malIdStr =
+            type !== "Movies" && resolvedMalID ? String(resolvedMalID) : null;
           await run(
             `DELETE FROM ${type} WHERE id = ? OR folder_name = ?${malIdStr ? " OR MalID = ?" : ""}`,
             malIdStr ? [id, id, malIdStr] : [id, id],
           );
 
-          await run(
-            `DELETE FROM unlinked_mal_ids WHERE id = ?${malIdStr ? " OR malid = ?" : ""}`,
-            malIdStr ? [id, malIdStr] : [id],
-          );
+          if (type !== "Movies") {
+            await run(
+              `DELETE FROM unlinked_mal_ids WHERE id = ?${malIdStr ? " OR malid = ?" : ""}`,
+              malIdStr ? [id, malIdStr] : [id],
+            );
+          }
 
           if (type === "Anime") {
             await run(
@@ -591,7 +653,8 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
       return res.json({ success: true, message: "No change needed" });
     }
 
-    const table = type === "Anime" ? "Anime" : "Manga";
+    const table =
+      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
     const existing = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [
       oldId,
     ]);
@@ -609,7 +672,7 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
         `INSERT OR REPLACE INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`,
         values,
       );
-      if (type === "Anime") {
+      if (type === "Anime" || type === "Movies") {
         await run(`UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?`, [
           newId,
           oldId,
@@ -633,8 +696,12 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
 // Delete Local Files
 router.post("/api/local/delete", async (req, res) => {
   try {
-    const { id, type = "Anime", numbers, subdub } = req.body;
-    if (!id || !numbers || !Array.isArray(numbers) || numbers.length === 0) {
+    const { id, type = "Anime", numbers, items, season, subdub } = req.body;
+    if (
+      !id ||
+      ((!numbers || !Array.isArray(numbers) || numbers.length === 0) &&
+        (!items || !Array.isArray(items) || items.length === 0))
+    ) {
       throw new Error("Missing or invalid parameters");
     }
 
@@ -645,45 +712,153 @@ router.post("/api/local/delete", async (req, res) => {
       throw new Error(`${type} folder not found on disk`);
     }
 
-    const files = await fs.promises.readdir(typeDir);
+    // Normalize targets to delete: [{ number, season }]
+    const targets = [];
+    if (Array.isArray(items) && items.length > 0) {
+      for (const it of items) {
+        if (!it) continue;
+        const n = parseFloat(it.number);
+        if (!isNaN(n)) {
+          const s =
+            it.season != null
+              ? parseInt(it.season, 10)
+              : season != null
+                ? parseInt(season, 10)
+                : null;
+          targets.push({ number: n, season: !isNaN(s) ? s : null });
+        }
+      }
+    }
+    if (Array.isArray(numbers) && numbers.length > 0) {
+      for (const num of numbers) {
+        if (num == null) continue;
+        const strNum = String(num).trim();
+        const sKeyMatch = strNum.match(/^s(\d+)_e(\d+(?:\.\d+)?)$/i);
+        if (sKeyMatch) {
+          targets.push({
+            season: parseInt(sKeyMatch[1], 10),
+            number: parseFloat(sKeyMatch[2]),
+          });
+        } else {
+          const n = parseFloat(strNum);
+          if (!isNaN(n)) {
+            const s = season != null ? parseInt(season, 10) : null;
+            // Only push if not already in targets
+            if (!targets.some((t) => t.number === n && t.season === s)) {
+              targets.push({ number: n, season: s });
+            }
+          }
+        }
+      }
+    }
+
+    if (targets.length === 0) {
+      throw new Error("No valid episode or chapter targets specified");
+    }
+
+    // Collect all candidate files: directly in typeDir and in immediate Season subdirectories
+    const candidateFiles = [];
+    const rootEntries = await fs.promises.readdir(typeDir, {
+      withFileTypes: true,
+    });
+
+    for (const entry of rootEntries) {
+      const fullPath = path.join(typeDir, entry.name);
+      if (entry.isDirectory()) {
+        const seasonMatch = entry.name.match(/Season\s*(\d+)/i);
+        const folderSeason = seasonMatch ? parseInt(seasonMatch[1], 10) : null;
+        try {
+          const subEntries = await fs.promises.readdir(fullPath, {
+            withFileTypes: true,
+          });
+          for (const sub of subEntries) {
+            if (sub.isFile()) {
+              candidateFiles.push({
+                name: sub.name,
+                fullPath: path.join(fullPath, sub.name),
+                folderSeason,
+                dirPath: fullPath,
+              });
+            }
+          }
+        } catch (_) {}
+      } else if (entry.isFile()) {
+        candidateFiles.push({
+          name: entry.name,
+          fullPath,
+          folderSeason: null,
+          dirPath: typeDir,
+        });
+      }
+    }
+
     let deletedCount = 0;
+    const modifiedDirs = new Set();
 
-    for (const num of numbers) {
-      const targetNum = parseFloat(num);
-      if (isNaN(targetNum)) continue;
-
-      const filesToDelete = files.filter((file) => {
-        if (type === "Anime") {
-          if (!isVideoFile(file) && !isSubtitleFile(file)) {
+    for (const target of targets) {
+      const filesToDelete = candidateFiles.filter((cand) => {
+        if (type === "Anime" || type === "Movies") {
+          if (!isVideoFile(cand.name) && !isSubtitleFile(cand.name)) {
             return false;
           }
-          return getEpisodeNumberFromFilename(file) === targetNum;
+          const epNum = getEpisodeNumberFromFilename(cand.name);
+          if (epNum !== target.number) return false;
+
+          // If season is known for target, match against filename or folder season
+          if (target.season !== null && target.season !== undefined) {
+            const sMatch = cand.name.match(/\bS(\d{1,3})E(?:p)?(\d+)\b/i);
+            const fileSeason = sMatch
+              ? parseInt(sMatch[1], 10)
+              : cand.folderSeason;
+            if (fileSeason !== null && fileSeason !== target.season) {
+              return false;
+            }
+          }
+          return true;
         } else {
           return (
-            isMangaFile(file) &&
-            getChapterNumberFromFilename(file) === targetNum
+            isMangaFile(cand.name) &&
+            getChapterNumberFromFilename(cand.name) === target.number
           );
         }
       });
 
       for (const fileToDelete of filesToDelete) {
         try {
-          await fs.promises.unlink(path.join(typeDir, fileToDelete));
+          await fs.promises.unlink(fileToDelete.fullPath);
           deletedCount++;
-        } catch (e) {}
+          if (fileToDelete.dirPath !== typeDir) {
+            modifiedDirs.add(fileToDelete.dirPath);
+          }
+        } catch (e) {
+          logger.warn(
+            `Failed to delete file ${fileToDelete.fullPath}: ${e.message}`,
+          );
+        }
       }
 
       if (type === "Anime") {
-        const cleanNum = Number.isInteger(targetNum)
-          ? Math.trunc(targetNum)
-          : targetNum;
+        const cleanNum = Number.isInteger(target.number)
+          ? Math.trunc(target.number)
+          : target.number;
         try {
           await run(
             "DELETE FROM SkipTimes WHERE (anime_id = ? OR anime_id LIKE ?) AND (episode_number = ? OR episode_number = ?)",
-            [id, `${id}-%`, cleanNum, targetNum],
+            [id, `${id}-%`, cleanNum, target.number],
           );
         } catch (_) {}
       }
+    }
+
+    // Clean up empty season subdirectories if all their files were deleted
+    for (const dir of modifiedDirs) {
+      try {
+        const remaining = await fs.promises.readdir(dir);
+        if (remaining.length === 0) {
+          await fs.promises.rmdir(dir);
+          logger.info(`Removed empty season subfolder: ${dir}`);
+        }
+      } catch (_) {}
     }
 
     if (type === "Anime") {
@@ -703,7 +878,12 @@ router.post("/api/local/delete", async (req, res) => {
 
     await cleanupEmptyDownloadFolder(typeDir, type, id);
 
-    const label = type === "Anime" ? "episode(s)" : "chapter(s)";
+    const label =
+      type === "Manga"
+        ? "chapter(s)"
+        : type === "Movies"
+          ? "movie/episode(s)"
+          : "episode(s)";
     return res.json({
       error: false,
       message: `Successfully deleted ${deletedCount} ${label}`,
@@ -783,6 +963,7 @@ router.post("/api/local/open", async (req, res) => {
       subdub,
       action = "open_folder",
       customPath,
+      season = null,
     } = req.body;
     let targetPath = customPath || "";
 
@@ -792,19 +973,47 @@ router.post("/api/local/open", async (req, res) => {
         targetPath = baseDir;
       } else {
         targetPath = await resolveDownloadFolder(type, id, subdub, baseDir);
-        if (number != null && fs.existsSync(targetPath)) {
-          const files = await fs.promises.readdir(targetPath);
+        let searchDir = targetPath;
+        if (season) {
+          const sPad = String(season).padStart(2, "0");
+          const cand1 = path.join(targetPath, `Season ${sPad}`);
+          const cand2 = path.join(targetPath, `Season ${season}`);
+          if (fs.existsSync(cand1)) {
+            searchDir = cand1;
+            targetPath = cand1;
+          } else if (fs.existsSync(cand2)) {
+            searchDir = cand2;
+            targetPath = cand2;
+          } else if (fs.existsSync(targetPath)) {
+            try {
+              const subs = fs.readdirSync(targetPath, { withFileTypes: true });
+              const found = subs.find((d) => {
+                if (!d.isDirectory() || !SEASON_FOLDER_RE.test(d.name))
+                  return false;
+                const m = d.name.match(/\d+/);
+                return m && parseInt(m[0], 10) === Number(season);
+              });
+              if (found) {
+                const sFound = path.join(targetPath, found.name);
+                searchDir = sFound;
+                targetPath = sFound;
+              }
+            } catch (_) {}
+          }
+        }
+        if (number != null && fs.existsSync(searchDir)) {
+          const files = await fs.promises.readdir(searchDir);
           const targetNum = parseFloat(number);
           if (!isNaN(targetNum)) {
             const matchedFile = files.find((file) => {
-              if (type === "Anime") {
+              if (type === "Anime" || type === "Movies") {
                 return getEpisodeNumberFromFilename(file) === targetNum;
               } else {
                 return getChapterNumberFromFilename(file) === targetNum;
               }
             });
             if (matchedFile) {
-              targetPath = path.join(targetPath, matchedFile);
+              targetPath = path.join(searchDir, matchedFile);
             }
           }
         }
@@ -850,6 +1059,8 @@ router.post("/api/history/mark-read", async (req, res) => {
       mediaId,
       type,
       numbers,
+      items,
+      season,
       isCompleted,
       title,
       provider,
@@ -857,7 +1068,19 @@ router.post("/api/history/mark-read", async (req, res) => {
       malid,
       timestamp,
     } = req.body;
-    if (!mediaId || !type || !Array.isArray(numbers) || numbers.length === 0) {
+
+    const targetItems =
+      Array.isArray(items) && items.length > 0
+        ? items
+        : Array.isArray(numbers)
+          ? numbers.map((n) =>
+              typeof n === "object" && n !== null
+                ? n
+                : { number: n, season: season || 1 },
+            )
+          : [];
+
+    if (!mediaId || !type || targetItems.length === 0) {
       throw new Error("Missing parameters for bulk history update");
     }
 
@@ -865,11 +1088,12 @@ router.post("/api/history/mark-read", async (req, res) => {
       ? new Date(timestamp).toISOString()
       : new Date().toISOString();
 
-    for (const num of numbers) {
+    for (const it of targetItems) {
       await updateHistory({
         mediaId,
         type,
-        number: num,
+        number: it.number,
+        season: it.season !== undefined ? it.season : season || 1,
         title,
         provider,
         image,
@@ -882,7 +1106,7 @@ router.post("/api/history/mark-read", async (req, res) => {
       });
     }
 
-    res.json({ success: true, count: numbers.length });
+    res.json({ success: true, count: targetItems.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -908,13 +1132,18 @@ router.post("/api/history/edit-entry", async (req, res) => {
       throw new Error("Missing parameters for history edit");
     }
 
-    const isAnime = type === "Anime";
-    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
-    const idField = isAnime ? "anime_id" : "manga_id";
-    const numberField = isAnime ? "episode_number" : "chapter_number";
-    const currentField = isAnime ? "current_time" : "current_page";
-    const totalField = isAnime ? "duration" : "total_pages";
-    const timeField = isAnime ? "last_watched" : "last_read";
+    const isVideo = type === "Anime" || type === "Movies";
+    const isMovies = type === "Movies";
+    const historyTable = isMovies
+      ? "SeriesMovieWatchHistory"
+      : isVideo
+        ? "WatchHistory"
+        : "ReadHistory";
+    const idField = isMovies ? "movie_id" : isVideo ? "anime_id" : "manga_id";
+    const numberField = isVideo ? "episode_number" : "chapter_number";
+    const currentField = isVideo ? "current_time" : "current_page";
+    const totalField = isVideo ? "duration" : "total_pages";
+    const timeField = isVideo ? "last_watched" : "last_read";
 
     const cur = parseFloat(currentPageOrTime) || (isCompleted ? 1 : 0);
     const tot = parseFloat(totalPagesOrTime) || 1;
@@ -924,9 +1153,19 @@ router.post("/api/history/edit-entry", async (req, res) => {
       : new Date().toISOString();
     const compAt = isCompleted ? timeIso : null;
 
+    const parsedSeason = isMovies
+      ? req.body.season
+        ? parseInt(req.body.season, 10)
+        : 1
+      : null;
+    const seasonClause = isMovies
+      ? ` AND (season = ? OR (? = 1 AND season IS NULL))`
+      : ``;
+    const seasonParams = isMovies ? [parsedSeason, parsedSeason] : [];
+
     const existing = await queryOne(
-      `SELECT id FROM ${historyTable} WHERE ${idField} = ? AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ?) LIMIT 1`,
-      [mediaId, number, number],
+      `SELECT id FROM ${historyTable} WHERE ${idField} = ? AND (${numberField} = ? OR CAST(${numberField} AS REAL) = ?)${seasonClause} LIMIT 1`,
+      [mediaId, number, number, ...seasonParams],
     );
 
     if (existing) {
@@ -950,6 +1189,7 @@ router.post("/api/history/edit-entry", async (req, res) => {
         duration: tot,
         timeSpent: isCompleted ? 10 : 0,
         timestamp: timeIso,
+        season: parsedSeason,
       });
     }
 
@@ -962,8 +1202,18 @@ router.post("/api/history/edit-entry", async (req, res) => {
 // Clear all history records
 router.post("/api/history/clear", async (req, res) => {
   try {
-    await run(`DELETE FROM WatchHistory`);
-    await run(`DELETE FROM ReadHistory`);
+    const { type } = req.body || {};
+    if (type === "Movies") {
+      await run(`DELETE FROM SeriesMovieWatchHistory`);
+    } else if (type === "Anime") {
+      await run(`DELETE FROM WatchHistory`);
+    } else if (type === "Manga") {
+      await run(`DELETE FROM ReadHistory`);
+    } else {
+      await run(`DELETE FROM WatchHistory`);
+      await run(`DELETE FROM ReadHistory`);
+      await run(`DELETE FROM SeriesMovieWatchHistory`);
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -974,7 +1224,12 @@ router.post("/api/history/clear", async (req, res) => {
 router.delete("/api/history/:type/:id", async (req, res) => {
   try {
     const { type, id } = req.params;
-    const historyTable = type === "Anime" ? "WatchHistory" : "ReadHistory";
+    const historyTable =
+      type === "Movies"
+        ? "SeriesMovieWatchHistory"
+        : type === "Anime"
+          ? "WatchHistory"
+          : "ReadHistory";
     await run(`DELETE FROM ${historyTable} WHERE id = ?`, [id]);
     res.json({ success: true });
   } catch (err) {
@@ -990,11 +1245,21 @@ router.post("/api/history/hide", async (req, res) => {
       throw new Error("Missing parameters");
     }
 
-    const isAnime = type === "Anime";
-    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
-    const idField = isAnime ? "anime_id" : "manga_id";
-    const titleField = isAnime ? "anime_title" : "manga_title";
-    const mainTable = isAnime ? "Anime" : "Manga";
+    const isVideo = type === "Anime" || type === "Movies";
+    const isMovies = type === "Movies";
+    const historyTable = isMovies
+      ? "SeriesMovieWatchHistory"
+      : isVideo
+        ? "WatchHistory"
+        : "ReadHistory";
+    const idField = isMovies ? "movie_id" : isVideo ? "anime_id" : "manga_id";
+    const titleField = isMovies
+      ? "title"
+      : isVideo
+        ? "anime_title"
+        : "manga_title";
+    const mainTable =
+      type === "Anime" ? "Anime" : isMovies ? "Movies" : "Manga";
     const hiddenVal = unhide ? 0 : 1;
 
     let queryIds = [mediaId];
@@ -1008,7 +1273,7 @@ router.post("/api/history/hide", async (req, res) => {
       });
     }
 
-    if (isAnime) {
+    if (isVideo) {
       queryIds = Array.from(new Set(queryIds));
     }
 
@@ -1045,15 +1310,24 @@ router.get("/api/history/progress", async (req, res) => {
     const { mediaId, type } = req.query;
     if (!mediaId || !type) throw new Error("Missing parameters");
 
-    const isAnime = type === "Anime";
-    const mainTable = isAnime ? "Anime" : "Manga";
-    const historyTable = isAnime ? "WatchHistory" : "ReadHistory";
-    const idCol = isAnime ? "anime_id" : "manga_id";
-    const titleCol = isAnime ? "anime_title" : "manga_title";
-    const numCol = isAnime ? "episode_number" : "chapter_number";
-    const currentCol = isAnime ? "current_time" : "current_page";
-    const totalCol = isAnime ? "duration" : "total_pages";
-    const dateCol = isAnime ? "last_watched" : "last_read";
+    const isVideo = type === "Anime" || type === "Movies";
+    const isMovies = type === "Movies";
+    const mainTable =
+      type === "Anime" ? "Anime" : isMovies ? "Movies" : "Manga";
+    const historyTable = isMovies
+      ? "SeriesMovieWatchHistory"
+      : isVideo
+        ? "WatchHistory"
+        : "ReadHistory";
+    const idCol = isMovies ? "movie_id" : isVideo ? "anime_id" : "manga_id";
+    const titleCol = isMovies
+      ? "title"
+      : isVideo
+        ? "anime_title"
+        : "manga_title";
+    const numCol = isVideo ? "episode_number" : "chapter_number";
+    const currentCol = isVideo ? "current_time" : "current_page";
+    const dateCol = isVideo ? "last_watched" : "last_read";
 
     let suggestedNumber = null;
     let lastProgress = null;
@@ -1064,10 +1338,13 @@ router.get("/api/history/progress", async (req, res) => {
     let queryIds = [mediaId];
     let resolvedTitle = null;
     try {
-      const localRec = await queryOne(
-        `SELECT MalID, title FROM ${mainTable} WHERE id = ?`,
-        [mediaId],
-      );
+      const localRec =
+        type === "Movies"
+          ? await queryOne(`SELECT title FROM Movies WHERE id = ?`, [mediaId])
+          : await queryOne(
+              `SELECT MalID, title FROM ${mainTable} WHERE id = ?`,
+              [mediaId],
+            );
       if (localRec) {
         if (localRec.MalID) {
           const siblings = await queryAll(
@@ -1103,15 +1380,17 @@ router.get("/api/history/progress", async (req, res) => {
       for (const h of history) {
         const num = Number(h[numCol]);
         if (!isNaN(num)) {
-          if (!numMap.has(num)) {
-            numMap.set(num, h);
+          const key =
+            isVideo && type === "Movies" ? `s${h.season || 1}_e${num}` : num;
+          if (!numMap.has(key)) {
+            numMap.set(key, h);
           } else {
-            const existing = numMap.get(num);
+            const existing = numMap.get(key);
             if (
               new Date(h[dateCol]).getTime() >
               new Date(existing[dateCol]).getTime()
             ) {
-              numMap.set(num, h);
+              numMap.set(key, h);
             }
           }
         }
@@ -1186,9 +1465,13 @@ router.get("/api/history/progress", async (req, res) => {
       }
 
       const latest = targetRecord || history[0];
-      lastProgress = isAnime
+      lastProgress = isVideo
         ? {
             number: latest.episode_number,
+            season:
+              latest.season !== undefined && latest.season !== null
+                ? Number(latest.season)
+                : 1,
             currentTime: latest.current_time,
             duration: latest.duration,
             isCompleted: latest.is_completed === 1,
@@ -1210,10 +1493,14 @@ router.get("/api/history/progress", async (req, res) => {
     }
 
     const mappedStatus = history.map((h) =>
-      isAnime
+      isVideo
         ? {
             id: h.id,
             number: h.episode_number,
+            season:
+              h.season !== undefined && h.season !== null
+                ? Number(h.season)
+                : 1,
             isCompleted: h.is_completed === 1,
             currentTime: h.current_time,
             duration: h.duration,
@@ -1234,7 +1521,7 @@ router.get("/api/history/progress", async (req, res) => {
           },
     );
 
-    if (isAnime) {
+    if (isVideo) {
       episodesStatus = mappedStatus;
     } else {
       chaptersStatus = mappedStatus;
@@ -1256,19 +1543,39 @@ router.get("/api/history/progress", async (req, res) => {
 // Fetch history statistics
 router.get("/api/history/stats", async (req, res) => {
   try {
-    const watchStats = await global.db
+    const watchStats = (await global.db
       .prepare(
         `
       SELECT 
         COALESCE(SUM(time_spent), 0) AS total_seconds,
         COUNT(DISTINCT anime_id) AS distinct_anime,
-        COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_episodes
+        COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_anime_episodes
       FROM WatchHistory
     `,
       )
-      .get();
+      .get()) || {
+      total_seconds: 0,
+      distinct_anime: 0,
+      completed_anime_episodes: 0,
+    };
 
-    const readStats = await global.db
+    const movieStats = (await global.db
+      .prepare(
+        `
+      SELECT 
+        COALESCE(SUM(time_spent), 0) AS total_seconds,
+        COUNT(DISTINCT movie_id) AS distinct_movies_watched,
+        COUNT(CASE WHEN is_completed = 1 THEN 1 END) AS completed_movie_episodes
+      FROM SeriesMovieWatchHistory
+    `,
+      )
+      .get()) || {
+      total_seconds: 0,
+      distinct_movies_watched: 0,
+      completed_movie_episodes: 0,
+    };
+
+    const readStats = (await global.db
       .prepare(
         `
       SELECT 
@@ -1278,15 +1585,36 @@ router.get("/api/history/stats", async (req, res) => {
       FROM ReadHistory
     `,
       )
-      .get();
+      .get()) || { total_seconds: 0, distinct_manga: 0, completed_chapters: 0 };
+
+    let distinctMovies = 0;
+    try {
+      const movieStatsRow = await global.db
+        .prepare(`SELECT COUNT(DISTINCT id) AS distinct_movies FROM Movies`)
+        .get();
+      distinctMovies = movieStatsRow?.distinct_movies || 0;
+    } catch (_) {}
+
+    const animeSeconds = watchStats?.total_seconds || 0;
+    const movieSeconds = movieStats?.total_seconds || 0;
+    const completedAnime = watchStats?.completed_anime_episodes || 0;
+    const completedMovie = movieStats?.completed_movie_episodes || 0;
 
     res.json({
-      watchHours: parseFloat((watchStats.total_seconds / 3600).toFixed(2)),
-      readHours: parseFloat((readStats.total_seconds / 3600).toFixed(2)),
-      completedEpisodes: watchStats.completed_episodes,
-      completedChapters: readStats.completed_chapters,
-      distinctAnime: watchStats.distinct_anime,
-      distinctManga: readStats.distinct_manga,
+      watchHours: parseFloat(((animeSeconds + movieSeconds) / 3600).toFixed(2)),
+      animeWatchHours: parseFloat((animeSeconds / 3600).toFixed(2)),
+      movieWatchHours: parseFloat((movieSeconds / 3600).toFixed(2)),
+      readHours: parseFloat(
+        ((readStats?.total_seconds || 0) / 3600).toFixed(2),
+      ),
+      completedEpisodes: completedAnime + completedMovie,
+      completedAnimeEpisodes: completedAnime,
+      completedMovieEpisodes: completedMovie,
+      completedChapters: readStats?.completed_chapters || 0,
+      distinctAnime: watchStats?.distinct_anime || 0,
+      distinctManga: readStats?.distinct_manga || 0,
+      distinctMovies:
+        distinctMovies || movieStats?.distinct_movies_watched || 0,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1297,7 +1625,7 @@ async function resolveHistoryCoverImage(
   mediaId,
   title,
   type = "Anime",
-  malId = null,
+  _malId = null,
   rawScraperImg = null,
   rawMalImg = null,
 ) {
@@ -1363,6 +1691,9 @@ router.get("/api/history/list", async (req, res) => {
     const watchWhereClause = shelfOnly
       ? "WHERE (w.hidden IS NULL OR w.hidden = 0)"
       : "";
+    const movieWhereClause = shelfOnly
+      ? "WHERE (m.hidden IS NULL OR m.hidden = 0)"
+      : "";
     const readWhereClause = shelfOnly
       ? "WHERE (r.hidden IS NULL OR r.hidden = 0)"
       : "";
@@ -1377,6 +1708,7 @@ router.get("/api/history/list", async (req, res) => {
           w.anime_id AS media_id,
           w.anime_title AS title,
           w.episode_number AS number,
+          1 AS season,
           w.current_time,
           w.duration,
           w.time_spent,
@@ -1386,6 +1718,7 @@ router.get("/api/history/list", async (req, res) => {
           COALESCE(w.hidden, 0) AS hidden,
           a.image_url,
           a.provider,
+          NULL AS episodes_json,
           a.MalID AS mal_id,
           CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
           mal.totalEpisodes AS total_count,
@@ -1395,6 +1728,40 @@ router.get("/api/history/list", async (req, res) => {
         LEFT JOIN MyAnimeList mal ON mal.id = a.MalID
         ${watchWhereClause}
         ORDER BY w.last_watched DESC
+        LIMIT ?
+      `,
+        )
+        .all(limit)) || [];
+
+    const movieLogs =
+      (await global.db
+        .prepare(
+          `
+        SELECT 
+          m.id,
+          'Movies' AS type,
+          m.movie_id AS media_id,
+          m.title AS title,
+          m.episode_number AS number,
+          COALESCE(m.season, 1) AS season,
+          m.current_time,
+          m.duration,
+          m.time_spent,
+          m.is_completed,
+          m.last_watched AS date,
+          m.sub_dub AS subdub,
+          COALESCE(m.hidden, 0) AS hidden,
+          mov.image_url,
+          mov.provider,
+          mov.episodes_json,
+          NULL AS mal_id,
+          CASE WHEN mov.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
+          NULL AS total_count,
+          NULL AS mal_image
+        FROM SeriesMovieWatchHistory m
+        LEFT JOIN Movies mov ON mov.id = m.movie_id
+        ${movieWhereClause}
+        ORDER BY m.last_watched DESC
         LIMIT ?
       `,
         )
@@ -1410,14 +1777,17 @@ router.get("/api/history/list", async (req, res) => {
           r.manga_id AS media_id,
           r.manga_title AS title,
           r.chapter_number AS number,
+          1 AS season,
           r.current_page AS current_time,
           r.total_pages AS duration,
           r.time_spent,
           r.is_completed,
           r.last_read AS date,
+          NULL AS subdub,
           COALESCE(r.hidden, 0) AS hidden,
           m.image_url,
           m.provider,
+          NULL AS episodes_json,
           m.MalID AS mal_id,
           CASE WHEN m.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
           mml.totalChapters AS total_count,
@@ -1432,7 +1802,11 @@ router.get("/api/history/list", async (req, res) => {
         )
         .all(limit)) || [];
 
-    for (const log of [...watchLogs, ...readLogs]) {
+    const combined = [...watchLogs, ...movieLogs, ...readLogs]
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .slice(0, limit);
+
+    for (const log of combined) {
       const coverRes = await resolveHistoryCoverImage(
         log.media_id,
         log.title,
@@ -1443,11 +1817,57 @@ router.get("/api/history/list", async (req, res) => {
       );
       delete log.image_url;
       Object.assign(log, coverRes);
-    }
 
-    const combined = [...watchLogs, ...readLogs]
-      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, limit);
+      if (log.type === "Movies") {
+        let episodes = null;
+        if (log.episodes_json) {
+          try {
+            episodes = JSON.parse(log.episodes_json);
+          } catch (_) {}
+        }
+
+        if (
+          episodes &&
+          typeof episodes === "object" &&
+          !Array.isArray(episodes)
+        ) {
+          const currentSeason = log.season ? Number(log.season) : 1;
+          const currentNum = Number(log.number) || 1;
+
+          // Season count map: { "1": 22, "2": 22 }
+          const seasons = Object.keys(episodes)
+            .map(Number)
+            .filter((n) => !isNaN(n))
+            .sort((a, b) => a - b);
+          const totalForCurrentSeason = Number(episodes[currentSeason]) || 0;
+
+          if (log.is_completed === 1) {
+            if (
+              totalForCurrentSeason > 0 &&
+              currentNum < totalForCurrentSeason
+            ) {
+              log.next_season = currentSeason;
+              log.next_number = currentNum + 1;
+              log.has_next = true;
+            } else {
+              const nextS = seasons.find((s) => s > currentSeason);
+              if (nextS) {
+                log.next_season = nextS;
+                log.next_number = 1;
+                log.has_next = true;
+              } else {
+                log.has_next = false;
+              }
+            }
+          } else {
+            log.next_season = currentSeason;
+            log.next_number = currentNum;
+            log.has_next = true;
+          }
+        }
+      }
+      delete log.episodes_json;
+    }
 
     res.json(combined);
   } catch (err) {

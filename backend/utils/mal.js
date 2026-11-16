@@ -14,7 +14,6 @@ async function clearMalSession() {
   global.malUsername = null;
   MalAcount = null;
   try {
-    const config = (await getKeyValue("Settings", "config")) || {};
     await setKeyValue("Settings", "malToken", null);
     await setKeyValue("Settings", "malUsername", null);
     await setKeyValue("Settings", "malLastSync", null);
@@ -509,6 +508,7 @@ async function MalSearch(query, type = "anime", limit = 10) {
 async function autoTrackMAL(type, mediaId, number) {
   try {
     if (!global.MalLoggedIn) return false;
+    if (type !== "Anime" && type !== "Manga") return false;
     let localRecord = null;
 
     if (type === "Anime") {

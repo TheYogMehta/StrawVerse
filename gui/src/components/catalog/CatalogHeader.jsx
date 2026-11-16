@@ -1,11 +1,11 @@
-import { Search } from "lucide-react";
+import { Search, SlidersHorizontal } from "lucide-react";
+import Dropdown from "../common/Dropdown";
 
 export default function CatalogHeader({
   provider,
   type,
   discoverTab,
   onSubTabChange,
-  linkingMalItem,
   searchQuery,
   onSearchQueryChange,
   onSearchSubmit,
@@ -15,6 +15,10 @@ export default function CatalogHeader({
   installedProviders = [],
   activeProvider = "",
   onProviderChange,
+  isFilterOpen,
+  onToggleFilter,
+  activeFilterCount = 0,
+  showFilterToggle = false,
 }) {
   // Discover only: a provider picker sitting directly left of the
   // Anime/Manga toggle, listing the extensions installed for this type.
@@ -24,7 +28,7 @@ export default function CatalogHeader({
   if (activeProvider && !providerChoices.includes(activeProvider)) {
     providerChoices.unshift(activeProvider);
   }
-  // Show whenever at least one provider exists — with a single provider the
+  // Show whenever at least one provider exists - with a single provider the
   // picker still shows the active extension (it becomes a switcher as soon as
   // more are installed), which is how Android surfaces it too.
   const showProviderPicker =
@@ -39,26 +43,50 @@ export default function CatalogHeader({
     return `${name} (@${owner})`;
   };
 
+  const typeOptions = [
+    { value: "Anime", label: "Anime" },
+    { value: "Manga", label: "Manga" },
+    ...(provider !== "mal"
+      ? [{ value: "Movies", label: "Movies & Series" }]
+      : []),
+  ];
+
   return (
     <header className="catalog-header">
       <div className="header-left-section">
-        {provider === "local" && <h1 className="catalog-title">Home</h1>}
-        {provider === "provider" && <h1 className="catalog-title">Discover</h1>}
-        {provider === "mal" && <h1 className="catalog-title">Filters</h1>}
-        {provider === "provider" && type === "Anime" && (
-          <div className="discover-sub-tabs">
-            <button
-              onClick={() => onSubTabChange && onSubTabChange("latest")}
-              className={`discover-sub-tab ${discoverTab === "latest" ? "active" : ""}`}
-            >
-              Latest
-            </button>
-            <button
-              onClick={() => onSubTabChange && onSubTabChange("calendar")}
-              className={`discover-sub-tab ${discoverTab === "calendar" ? "active" : ""}`}
-            >
-              Airing Calendar
-            </button>
+        <div className="header-title-group">
+          {provider === "local" && <h1 className="catalog-title">Home</h1>}
+          {provider === "provider" && (
+            <h1 className="catalog-title">Discover</h1>
+          )}
+          {provider === "mal" && <h1 className="catalog-title">Filters</h1>}
+          {provider === "provider" && type === "Anime" && (
+            <div className="discover-sub-tabs">
+              <button
+                onClick={() => onSubTabChange && onSubTabChange("latest")}
+                className={`discover-sub-tab ${discoverTab === "latest" ? "active" : ""}`}
+              >
+                Latest
+              </button>
+              <button
+                onClick={() => onSubTabChange && onSubTabChange("calendar")}
+                className={`discover-sub-tab ${discoverTab === "calendar" ? "active" : ""}`}
+              >
+                Airing Calendar
+              </button>
+            </div>
+          )}
+        </div>
+
+        {showTypeToggle && (
+          <div className="mobile-only">
+            <Dropdown
+              value={type}
+              onChange={(val) => onTypeChange && onTypeChange(val)}
+              options={typeOptions}
+              className="header-type-dropdown"
+              minWidth={140}
+            />
           </div>
         )}
       </div>
@@ -71,7 +99,9 @@ export default function CatalogHeader({
               placeholder={
                 provider === "mal" && catalogSource?.startsWith("unique:")
                   ? `Search unmapped ${type.toLowerCase()}...`
-                  : `Search ${type}...`
+                  : type === "Movies"
+                    ? "Search Movies & Series..."
+                    : `Search ${type}...`
               }
               value={searchQuery}
               onChange={(e) => onSearchQueryChange(e.target.value)}
@@ -81,6 +111,20 @@ export default function CatalogHeader({
               <Search size={18} />
             </button>
           </form>
+          {showFilterToggle && onToggleFilter && (
+            <button
+              type="button"
+              onClick={onToggleFilter}
+              className={`catalog-filter-btn ${isFilterOpen ? "active" : ""} ${activeFilterCount > 0 ? "has-filters" : ""}`}
+              title="Toggle filters panel"
+            >
+              <SlidersHorizontal size={16} />
+              <span>Filters</span>
+              {activeFilterCount > 0 && (
+                <span className="filter-badge">{activeFilterCount}</span>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -102,21 +146,14 @@ export default function CatalogHeader({
         )}
 
         {showTypeToggle && (
-          <div className="market-tabs-wrapper">
-            <button
-              type="button"
-              onClick={() => onTypeChange && onTypeChange("Anime")}
-              className={`market-tab-btn ${type === "Anime" ? "active" : ""}`}
-            >
-              Anime
-            </button>
-            <button
-              type="button"
-              onClick={() => onTypeChange && onTypeChange("Manga")}
-              className={`market-tab-btn ${type === "Manga" ? "active" : ""}`}
-            >
-              Manga
-            </button>
+          <div className="desktop-only">
+            <Dropdown
+              value={type}
+              onChange={(val) => onTypeChange && onTypeChange(val)}
+              options={typeOptions}
+              className="header-type-dropdown"
+              minWidth={160}
+            />
           </div>
         )}
       </div>

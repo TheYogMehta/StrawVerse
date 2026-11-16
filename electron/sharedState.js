@@ -14,6 +14,7 @@ const {
   getExtensionRepos,
   addExtensionRepo,
   removeExtensionRepo,
+  restoreDefaultExtensionRepo,
   fetchAggregatedMarketplace,
 } = require(path.join(backendDir, "utils", "settings"));
 const { getEffectiveLogDir } = require(
@@ -80,8 +81,12 @@ function registerSharedStateHandlers() {
     return await addExtensionRepo(url);
   });
 
-  ipcMain.handle("remove-extension-repo", async (event, owner) => {
-    return await removeExtensionRepo(owner);
+  ipcMain.handle("remove-extension-repo", async (event, identifier) => {
+    return await removeExtensionRepo(identifier);
+  });
+
+  ipcMain.handle("restore-default-extension-repo", async () => {
+    return await restoreDefaultExtensionRepo();
   });
 
   ipcMain.handle("get-settings", async (event, keys) => {
@@ -99,6 +104,13 @@ function registerSharedStateHandlers() {
       Manga: Array.from(
         new Set(
           Object.values(global.Manga_providers || {}).map(
+            (p) => p.uniqueId || p.name,
+          ),
+        ),
+      ),
+      Movies: Array.from(
+        new Set(
+          Object.values(global.Movies_providers || {}).map(
             (p) => p.uniqueId || p.name,
           ),
         ),
@@ -141,6 +153,21 @@ function registerSharedStateHandlers() {
       Manga: Array.from(
         new Map(
           Object.values(global.Manga_providers || {}).map((val) => [
+            val.uniqueId || val.name,
+            {
+              name: val.name,
+              repoOwner: val.repoOwner || "TheYogMehta",
+              uniqueId:
+                val.uniqueId || `${val.repoOwner || "TheYogMehta"}/${val.name}`,
+              version: val.version || "1.0.0",
+              icon: getIconUrl(val.name, val),
+            },
+          ]),
+        ).values(),
+      ),
+      Movies: Array.from(
+        new Map(
+          Object.values(global.Movies_providers || {}).map((val) => [
             val.uniqueId || val.name,
             {
               name: val.name,

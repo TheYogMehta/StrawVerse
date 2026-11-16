@@ -39,3 +39,5 @@ app.log
 .DS_Store
 **/.DS_Store
 image_cache/
+graphify-out/
+.agents/

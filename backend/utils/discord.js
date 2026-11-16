@@ -121,6 +121,7 @@ async function UpdateDiscordRPC(
   MediaId = null,
   CurrentTime = null,
   Duration = null,
+  Season = null,
 ) {
   if (!RPC || process.platform === "android") return;
   if (!(await isDiscordRPCEnabled())) {
@@ -225,6 +226,39 @@ async function UpdateDiscordRPC(
     if (Type === "Anime") {
       Activity.details = "Watching Anime";
       const stateStr = `${Title} - Ep ${Number}${downloadSuffix}`;
+      Activity.state =
+        stateStr.length > 125
+          ? `${stateStr.slice(0, 125 - downloadSuffix.length - 3)}...${downloadSuffix}`
+          : stateStr;
+
+      const curTime = parseFloat(CurrentTime || 0);
+      const dur = parseFloat(Duration || 0);
+      if (dur > 0) {
+        Activity.startTimestamp = Math.round(Date.now() - curTime * 1000);
+        Activity.endTimestamp = Math.round(Date.now() + (dur - curTime) * 1000);
+      }
+
+      Activity.largeImageKey =
+        resolvedImage !== "luffy" ? resolvedImage : "luffy";
+      Activity.largeImageText = Title;
+      if (resolvedImage !== "luffy") {
+        Activity.smallImageKey = "luffy";
+        Activity.smallImageText = "StrawVerse";
+      }
+    } else if (Type === "Movies") {
+      Activity.details = "Watching Movies & Series";
+      const seasonPrefix =
+        Season && parseInt(Season, 10) > 1 ? `S${Season} ` : "";
+      const epPrefix =
+        Number !== null &&
+        Number !== undefined &&
+        String(Number) !== "0" &&
+        String(Number) !== ""
+          ? `${seasonPrefix}Ep ${Number}`
+          : "";
+      const stateStr = epPrefix
+        ? `${Title} - ${epPrefix}${downloadSuffix}`
+        : `${Title}${downloadSuffix}`;
       Activity.state =
         stateStr.length > 125
           ? `${stateStr.slice(0, 125 - downloadSuffix.length - 3)}...${downloadSuffix}`
@@ -372,6 +406,17 @@ async function getMediaImage(mediaId, type) {
             .get(String(localRec.MalID));
           return malInfo?.image || null;
         }
+      }
+    } else if (type === "Movies") {
+      localRec = db
+        .prepare(`SELECT image_url FROM Movies WHERE id = ?`)
+        .get(mediaId);
+      if (
+        localRec &&
+        localRec.image_url &&
+        localRec.image_url.startsWith("http")
+      ) {
+        return localRec.image_url;
       }
     }
   } catch (err) {}
