@@ -19,7 +19,7 @@
 
 ### Special Thanks to Contributors
 
-- Special thanks to **@cyber-winner** for isolating the Movie & Series streaming architecture from anime providers and resolving the background media player audio leak!
+- Special thanks to **@cyber-winner** for architecting and developing the Movies & Series section, scraper isolation & routing, multi-repository marketplace support, and media player background audio fixes!
 
 # [12.0.0] - 2026-11-15
 
