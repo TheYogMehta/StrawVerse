@@ -4445,6 +4445,12 @@ router.post("/api/info/bulk-meta", async (req, res) => {
   const meta = {};
   for (const e of entries) meta[e.key] = { status: null, langs: null };
 
+  // A failed pass must be distinguishable from "genuinely unknown": the
+  // frontend marks keys as known after a success, so a null caused by an
+  // outage would otherwise pin missing badges for the whole session.
+  let statusFailed = false;
+  let langsFailed = false;
+
   if (wantStatus) {
     const malids = entries.filter((e) => e.malid !== null).map((e) => e.malid);
     if (malids.length) {
@@ -4458,6 +4464,7 @@ router.post("/api/info/bulk-meta", async (req, res) => {
           if (statuses[e.malid]) meta[e.key].status = statuses[e.malid];
         }
       } catch (err) {
+        statusFailed = true;
         logger.warn(`[bulk-meta] status lookup failed: ${err.message}`);
       }
     }
@@ -4479,22 +4486,30 @@ router.post("/api/info/bulk-meta", async (req, res) => {
 
   if (wantLangs) {
     await runPool(entries, BULK_META_CONCURRENCY, async (e) => {
-      let langs =
-        e.malid !== null ? await resolveBulkLangs(e.malid, e.title) : null;
-      // The mapping's malid→id lookup often has no row for the card's own
-      // provider, but the card already carries a working provider id — read
-      // the episode languages straight from it instead of giving up.
-      if (!langs && e.provider && e.id) {
-        langs = await resolveProviderLangs(e.provider, e.id, {
-          title: e.title,
-          malid: e.malid,
-        });
+      try {
+        let langs =
+          e.malid !== null ? await resolveBulkLangs(e.malid, e.title) : null;
+        // The mapping's malid→id lookup often has no row for the card's own
+        // provider, but the card already carries a working provider id — read
+        // the episode languages straight from it instead of giving up.
+        if (!langs && e.provider && e.id) {
+          langs = await resolveProviderLangs(e.provider, e.id, {
+            title: e.title,
+            malid: e.malid,
+          });
+        }
+        meta[e.key].langs = langs;
+      } catch (_) {
+        langsFailed = true;
       }
-      meta[e.key].langs = langs;
     });
   }
 
-  res.json({ meta });
+  res.json({
+    meta,
+    ...(statusFailed ? { statusFailed: true } : {}),
+    ...(langsFailed ? { langsFailed: true } : {}),
+  });
 });
 
 // Fetches Anime Episodes, Movies/Series Episodes, or Manga Chapters

@@ -75,14 +75,24 @@ async function anilistPost(query, variables = {}) {
       },
     );
   let resp;
-  try {
-    resp = await post();
-  } catch (err) {
-    // Rate-limit bursts clear within seconds — one retry keeps a blip from
-    // failing the whole batch (which would strip every status badge).
-    if (err?.response?.status !== 429) throw err;
-    await new Promise((r) => setTimeout(r, 2000));
-    resp = await post();
+  // Rate-limit bursts clear within seconds — retrying a 429 keeps a blip from
+  // failing the whole batch (which would strip every status badge, because a
+  // null answer is cached as "known" by the caller and never re-fetched).
+  let delayMs = 2000;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      resp = await post();
+      break;
+    } catch (err) {
+      if (err?.response?.status !== 429 || attempt >= 2) throw err;
+      const retryAfter = Number(err.response.headers?.["retry-after"]);
+      const waitMs =
+        Number.isFinite(retryAfter) && retryAfter > 0
+          ? Math.min(retryAfter, 15) * 1000
+          : delayMs;
+      delayMs *= 2.5;
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
   }
   const body = resp.data || {};
   if (Array.isArray(body.errors) && body.errors.length) {

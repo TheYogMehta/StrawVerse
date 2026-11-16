@@ -398,6 +398,9 @@ export default function Catalog({
   const [cardMeta, setCardMeta] = useState({});
   const cardMetaStatusReqRef = useRef(new Set());
   const cardMetaLangsReqRef = useRef(new Set());
+  // Failed passes are retried on a later render (the key is unmarked), so we
+  // count attempts per key+field to give up after 3 instead of looping.
+  const cardMetaAttemptRef = useRef(new Map());
   const tagChipsRef = useRef(null);
 
   const filteredProviders = useMemo(() => {
@@ -627,6 +630,19 @@ export default function Catalog({
             }
             return next;
           });
+          // The backend flags a pass that failed (outage/rate limit) as
+          // distinct from "genuinely unknown" — unmark those keys so a later
+          // render retries them instead of pinning null badges all session.
+          const failed =
+            field === "status" ? payload?.statusFailed : payload?.langsFailed;
+          if (failed) {
+            batch.forEach(({ key }) => {
+              const id = `${field}:${key}`;
+              const attempts = (cardMetaAttemptRef.current.get(id) || 0) + 1;
+              cardMetaAttemptRef.current.set(id, attempts);
+              if (attempts < 3) ref.current.delete(key);
+            });
+          }
         } catch (err) {
           console.error(`Failed to load card ${field}:`, err);
           batch.forEach(({ key }) => ref.current.delete(key));

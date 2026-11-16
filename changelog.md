@@ -6,6 +6,7 @@
 
 - **Echo Ids Refused:** Linking now rejects a provider id that just echoes the MAL id, so a failed auto-learn can no longer write a fake mapping row that dead-ends every future lookup; poison rows are ignored by the resolver and deleted on re-link.
 - **Honest Unmapped State:** A title with no confident provider match now stays unmapped and says so instead of failing later with a 404, and every auto-learn decline is logged.
+- **Badges Survive Rate Limits:** The AniList status lookup now backs off and retries on HTTP 429 (honoring Retry-After), and catalog cards re-try a failed status/sub-dub pass (up to 3 times) instead of pinning "no badge" for the whole session — the cause of cards missing their Complete/Currently Airing and SUB/DUB labels.
 
 ### Merged Upstream
 
