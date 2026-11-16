@@ -1579,10 +1579,18 @@ router.post(
     "/api/list/:AnimeManga/:repoOwner/:provider",
   ],
   async (req, res) => {
-    const { AnimeManga } = req.params;
+    let { AnimeManga } = req.params;
     let provider = req.params.repoOwner
       ? `${req.params.repoOwner}/${req.params.provider}`
       : req.params.provider;
+
+    if (AnimeManga === "Movies" || isMovieProvider(provider)) {
+      AnimeManga = "Movies";
+    } else if (AnimeManga === "Manga") {
+      AnimeManga = "Manga";
+    } else {
+      AnimeManga = "Anime";
+    }
     let filters = {};
 
     if (req?.body?.filters && typeof req.body.filters === "object") {
@@ -1905,10 +1913,18 @@ router.post(
     "/api/list/:AnimeManga/:repoOwner/:provider/count",
   ],
   async (req, res) => {
-    const { AnimeManga } = req.params;
+    let { AnimeManga } = req.params;
     let provider = req.params.repoOwner
       ? `${req.params.repoOwner}/${req.params.provider}`
       : req.params.provider;
+
+    if (AnimeManga === "Movies" || isMovieProvider(provider)) {
+      AnimeManga = "Movies";
+    } else if (AnimeManga === "Manga") {
+      AnimeManga = "Manga";
+    } else {
+      AnimeManga = "Anime";
+    }
 
     let filters = {};
     if (req?.body?.filters && typeof req.body.filters === "object") {
@@ -2090,12 +2106,16 @@ router.post(
     let { id } = req.body;
 
     if (
-      AnimeManga !== "Movies" &&
-      (isMovieProvider(LocalMalProvider) ||
-        (typeof id === "string" &&
-          (id.startsWith("tv:") || id.startsWith("movie:"))))
+      AnimeManga === "Movies" ||
+      isMovieProvider(LocalMalProvider) ||
+      (typeof id === "string" &&
+        (id.startsWith("tv:") || id.startsWith("movie:")))
     ) {
       AnimeManga = "Movies";
+    } else if (AnimeManga === "Manga") {
+      AnimeManga = "Manga";
+    } else {
+      AnimeManga = "Anime";
     }
 
     const data = {
@@ -3498,9 +3518,10 @@ router.post(
 
         const targetMalId = AnimeManga !== "Movies" ? data?.malid : null;
         if (!tagRow?.CustomTag && targetMalId) {
+          const malTable = AnimeManga === "Manga" ? "Manga" : "Anime";
           const malRow = await global.db
             .prepare(
-              `SELECT CustomTag FROM ${AnimeManga} WHERE MalID = ? AND CustomTag IS NOT NULL AND CustomTag != ''`,
+              `SELECT CustomTag FROM ${malTable} WHERE MalID = ? AND CustomTag IS NOT NULL AND CustomTag != ''`,
             )
             .get(String(targetMalId));
           if (malRow && malRow.CustomTag) {
@@ -3753,8 +3774,14 @@ router.post(
       let localTag = data?.CustomTag || "";
       if (!localTag) {
         try {
+          const validTable =
+            AnimeManga === "Movies"
+              ? "Movies"
+              : AnimeManga === "Manga"
+                ? "Manga"
+                : "Anime";
           const row = await global.db
-            .prepare(`SELECT CustomTag FROM ${AnimeManga} WHERE id = ?`)
+            .prepare(`SELECT CustomTag FROM ${validTable} WHERE id = ?`)
             .get(id);
           if (row) localTag = row.CustomTag || "";
         } catch (_) {}

@@ -74,6 +74,15 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 os.homedir = () => "/data/data/app.strawverse.android/files";
+
+process.on("uncaughtException", (err) => {
+  if (err && (err.code === "EIO" || err.code === "EPIPE")) return;
+  console.error("[android-node fatal] UncaughtException:", err?.stack || err?.message || err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[android-node fatal] UnhandledRejection:", reason?.stack || reason?.message || reason);
+});
 const cheerio = require("cheerio");
 const axios = require("axios");
 const got = require("got");

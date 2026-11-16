@@ -118,8 +118,15 @@ export default function VideoPlayer({
   onBack,
   malid,
   hideExit = false,
-  type = "Anime",
+  type: propType = "Anime",
 }) {
+  const type =
+    typeof id === "string" && (id.startsWith("tv:") || id.startsWith("movie:"))
+      ? "Movies"
+      : propType === "Movies"
+        ? "Movies"
+        : "Anime";
+
   const videoRef = useRef(null);
   const loadedSubMapRef = useRef({});
   const hlsRef = useRef(null);

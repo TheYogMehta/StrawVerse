@@ -1,5 +1,20 @@
 # Changelog
 
+# [12.0.2] - 2026-11-16
+
+### Anime Format & Category Routing Fixes
+
+- **Anime Media Format Normalization:** Fixed an issue where anime items with release format `type: "TV"` (such as titles from `@cyber-winner/animesalt` or AniList) inadvertently passed `"TV"` as the category parameter instead of `"Anime"`.
+- **Database Table Whitelisting:** Prevented SQLite fatal errors (`no such table: TV`) and route rejections (`Invalid type parameter`) by strictly validating and whitelisting table names across `/api/info`, `/api/list`, `/api/count`, `/api/download`, and `/api/local/tags` routes.
+- **Consistent Player & History Tracking:** Ensured watch progress reporting across the Android player, Web player, and MPV player always resolves to `"Anime"` or `"Movies"` so episode progress is properly recorded in `WatchHistory`.
+
+### Crash Diagnostics & Application Stability
+
+- **Persistent Session Logs:** Resolved an issue where `app.log` was wiped on application launch, erasing crash diagnostics. The previous session is now archived to `app-previous.log` and visible in the in-app Logs tab under `PREVIOUS SESSION`.
+- **Fatal Process Exception Trapping:** Added synchronous crash logging for uncaught Node.js exceptions and unhandled promise rejections to prevent silent background process terminations.
+- **Android Native Crash Handler:** Installed a global uncaught exception handler in `MainActivity.java` that records native Android runtime crash logs to disk (`Strawverse/data/crash.log`).
+- **OutOfMemory (OOM) Prevention:** Enabled `android:largeHeap="true"` in `AndroidManifest.xml` to provide higher heap capacity for heavy video streaming and manga reader rendering.
+
 # [12.0.1] - 2026-11-16
 
 ### Media Player & Background Audio Fixes

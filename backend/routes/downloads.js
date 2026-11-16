@@ -22,10 +22,18 @@ const router = express.Router();
 
 // Download API for anime & manga
 router.post("/api/download/:AnimeManga/:singleMulti", async (req, res) => {
-  const { AnimeManga, singleMulti } = req.params;
+  let { AnimeManga, singleMulti } = req.params;
 
   try {
     let MessageData = null;
+
+    if (AnimeManga === "Movies") {
+      AnimeManga = "Movies";
+    } else if (AnimeManga === "Manga") {
+      AnimeManga = "Manga";
+    } else {
+      AnimeManga = "Anime";
+    }
 
     const isAnime = AnimeManga === "Anime";
     const isMovies = AnimeManga === "Movies";
