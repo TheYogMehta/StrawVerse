@@ -114,6 +114,7 @@ export default function InfoView({
   onWatch: propOnWatch,
   onRead: propOnRead,
   title: propTitle,
+  onSearchFallback,
   onIdChange,
   onOpenExtra,
 }) {
