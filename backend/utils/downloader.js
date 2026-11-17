@@ -600,6 +600,17 @@ class downloader {
         (this.streamUrl.toLowerCase().includes(".mp4") &&
           !Playlist.includes("#EXTINF"))
       ) {
+        const trimmed = typeof Playlist === "string" ? Playlist.trim() : "";
+        if (
+          trimmed.startsWith("<") ||
+          trimmed.startsWith("{") ||
+          /<html/i.test(trimmed) ||
+          /<!DOCTYPE/i.test(trimmed)
+        ) {
+          throw new Error(
+            "SCRAPER_TEMPORARY_ERROR: Stream URL returned non-media HTML/JSON error page",
+          );
+        }
         this.isDirectVideo = true;
         this.totalSegments = 1;
         this.currentSegments = 0;
@@ -979,6 +990,20 @@ class downloader {
             return reject(err);
           }
 
+          const ct = (res.headers["content-type"] || "").toLowerCase();
+          if (
+            ct.includes("text/html") ||
+            ct.includes("application/json") ||
+            ct.includes("text/plain")
+          ) {
+            res.resume();
+            const err = new Error(
+              `SCRAPER_TEMPORARY_ERROR: Direct stream returned non-media content-type: ${ct}`,
+            );
+            err.statusCode = 415;
+            return reject(err);
+          }
+
           resolve({
             status: statusCode,
             headers: res.headers,
@@ -1082,6 +1107,11 @@ class downloader {
 
     // Case A: Multi-Part Range Download
     if (supportsRange && totalBytes > 0) {
+      if (totalBytes < 500 * 1024) {
+        throw new Error(
+          `SCRAPER_TEMPORARY_ERROR: Direct video stream size too small (${totalBytes} bytes), expected media file`,
+        );
+      }
       if (!fs.existsSync(tempDir)) {
         fs.mkdirSync(tempDir, { recursive: true });
       }
@@ -1263,6 +1293,19 @@ class downloader {
       }
       await fs.promises.rmdir(tempDir).catch(() => {});
 
+      try {
+        const stats = fs.statSync(tempVideoFile);
+        if (stats.size < 500 * 1024) {
+          await fs.promises.unlink(tempVideoFile).catch(() => {});
+          throw new Error(
+            `SCRAPER_TEMPORARY_ERROR: Concatenated video payload too small (${stats.size} bytes), likely an error or expired link`,
+          );
+        }
+      } catch (statErr) {
+        await fs.promises.unlink(tempVideoFile).catch(() => {});
+        throw statErr;
+      }
+
       if (fs.existsSync(targetFile)) {
         await fs.promises.unlink(targetFile).catch(() => {});
       }
@@ -1350,6 +1393,19 @@ class downloader {
       });
     });
 
+    try {
+      const stats = fs.statSync(tempVideoFile);
+      if (stats.size < 500 * 1024) {
+        await fs.promises.unlink(tempVideoFile).catch(() => {});
+        throw new Error(
+          `SCRAPER_TEMPORARY_ERROR: Downloaded video payload too small (${stats.size} bytes), likely an error or expired link`,
+        );
+      }
+    } catch (statErr) {
+      await fs.promises.unlink(tempVideoFile).catch(() => {});
+      throw statErr;
+    }
+
     if (fs.existsSync(targetFile)) {
       await fs.promises.unlink(targetFile).catch(() => {});
     }
@@ -1396,6 +1452,7 @@ class downloader {
     const speedSamples = [];
     let isBoosting = false;
     let boostStartTime = 0;
+    let hasTokenExpiredErrors = false;
 
     const downloadSingleSegment = async (index, retryCount = 0) => {
       if (
@@ -1496,7 +1553,13 @@ class downloader {
         if (stopDownloading || (global.isQueuePaused && global.isQueuePaused()))
           throw err;
 
-        const status = err?.response?.statusCode ?? err?.response?.status;
+        const status =
+          err?.response?.statusCode ??
+          err?.response?.status ??
+          err?.statusCode;
+        if (status === 404 || status === 403 || status === 410) {
+          hasTokenExpiredErrors = true;
+        }
         const isServerRateOrError =
           status === 429 || status === 502 || status === 503 || status === 530;
         const RETRY_DELAYS = isServerRateOrError
@@ -1711,10 +1774,17 @@ class downloader {
         try {
           host = new URL(trackUrl).hostname;
         } catch (_) {}
+        const isExpired =
+          hasTokenExpiredErrors &&
+          (completedCount > 0 || segments.length > 20);
         const abortErr = new Error(
-          `SCRAPER_TEMPORARY_ERROR: segment host ${host} unreachable (${failedIndices.length}/${segments.length} segments failed)`,
+          isExpired
+            ? `SCRAPER_TEMPORARY_ERROR: stream session or token expired for ${host} (${failedIndices.length}/${segments.length} segments failed)`
+            : `SCRAPER_TEMPORARY_ERROR: segment host ${host} unreachable (${failedIndices.length}/${segments.length} segments failed)`,
         );
-        abortErr.failedHost = host;
+        if (!isExpired) {
+          abortErr.failedHost = host;
+        }
         throw abortErr;
       }
       this.logProgress(
@@ -1755,10 +1825,17 @@ class downloader {
         try {
           host = new URL(trackUrl).hostname;
         } catch (_) {}
+        const isExpired =
+          hasTokenExpiredErrors &&
+          (completedCount > 0 || segments.length > 20);
         const finalErr = new Error(
-          `SCRAPER_TEMPORARY_ERROR: ${failedIndices.length} segment(s) failed after retries (e.g. #${failedIndices[0]})`,
+          isExpired
+            ? `SCRAPER_TEMPORARY_ERROR: stream session or token expired for ${host} (${failedIndices.length} segment(s) failed after retries)`
+            : `SCRAPER_TEMPORARY_ERROR: ${failedIndices.length} segment(s) failed after retries (e.g. #${failedIndices[0]})`,
         );
-        finalErr.failedHost = host;
+        if (!isExpired) {
+          finalErr.failedHost = host;
+        }
         throw finalErr;
       }
     }

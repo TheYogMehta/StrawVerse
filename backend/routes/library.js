@@ -806,7 +806,15 @@ router.post("/api/local/delete", async (req, res) => {
           if (!isVideoFile(cand.name) && !isSubtitleFile(cand.name)) {
             return false;
           }
-          const epNum = getEpisodeNumberFromFilename(cand.name);
+          let epNum = getEpisodeNumberFromFilename(cand.name);
+          if (
+            epNum === null &&
+            type === "Movies" &&
+            target.number === 1 &&
+            !cand.name.match(/[Ss]\d+[Ee]\d+/i)
+          ) {
+            epNum = 1;
+          }
           if (epNum !== target.number) return false;
 
           // If season is known for target, match against filename or folder season
@@ -830,15 +838,19 @@ router.post("/api/local/delete", async (req, res) => {
 
       for (const fileToDelete of filesToDelete) {
         try {
-          await fs.promises.unlink(fileToDelete.fullPath);
-          deletedCount++;
-          if (fileToDelete.dirPath !== typeDir) {
-            modifiedDirs.add(fileToDelete.dirPath);
+          if (fs.existsSync(fileToDelete.fullPath)) {
+            await fs.promises.unlink(fileToDelete.fullPath);
+            deletedCount++;
+            if (fileToDelete.dirPath !== typeDir) {
+              modifiedDirs.add(fileToDelete.dirPath);
+            }
           }
         } catch (e) {
-          logger.warn(
-            `Failed to delete file ${fileToDelete.fullPath}: ${e.message}`,
-          );
+          if (e.code !== "ENOENT") {
+            logger.warn(
+              `Failed to delete file ${fileToDelete.fullPath}: ${e.message}`,
+            );
+          }
         }
       }
 
@@ -1011,13 +1023,22 @@ router.post("/api/local/open", async (req, res) => {
           const files = await fs.promises.readdir(searchDir);
           const targetNum = parseFloat(number);
           if (!isNaN(targetNum)) {
-            const matchedFile = files.find((file) => {
+            let matchedFile = files.find((file) => {
               if (type === "Anime" || type === "Movies") {
                 return getEpisodeNumberFromFilename(file) === targetNum;
               } else {
                 return getChapterNumberFromFilename(file) === targetNum;
               }
             });
+            if (!matchedFile && type === "Movies" && targetNum === 1) {
+              matchedFile = files.find(
+                (file) =>
+                  !file.startsWith(".") &&
+                  !file.includes(".temp") &&
+                  isVideoFile(file) &&
+                  !file.match(/[Ss]\d+[Ee]\d+/i),
+              );
+            }
             if (matchedFile) {
               targetPath = path.join(searchDir, matchedFile);
             }

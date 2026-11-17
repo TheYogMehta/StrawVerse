@@ -1195,12 +1195,25 @@ async function getAllMetadata(
               withFileTypes: true,
             });
 
-            if (type === "Anime") {
+            if (type === "Anime" || type === "Movies") {
               content = filesAndFolders
-                .filter((file) => file.isFile())
+                .filter((file) => file.isFile() && isVideoFile(file.name))
                 .map((file) => getEpisodeNumberFromFilename(file.name))
                 .filter((num) => num !== null && !isNaN(num))
                 .sort((a, b) => a - b);
+              if (
+                type === "Movies" &&
+                content.length === 0 &&
+                filesAndFolders.some(
+                  (file) =>
+                    file.isFile() &&
+                    isVideoFile(file.name) &&
+                    !file.name.startsWith(".") &&
+                    !file.name.includes(".temp"),
+                )
+              ) {
+                content = [1];
+              }
             } else if (type === "Manga") {
               content = filesAndFolders
                 .filter((file) => file.isFile() && isMangaFile(file.name))
@@ -1447,6 +1460,29 @@ async function getSourceById(type, baseDir, id, number, subdub, season = null) {
           const num = getEpisodeNumberFromFilename(f);
           return num !== null && num === targetNum;
         });
+        if (
+          !match &&
+          type === "Movies" &&
+          targetNum === 1 &&
+          (targetSeason === null || targetSeason === 1)
+        ) {
+          const validVideos = files.filter(
+            (f) =>
+              !f.startsWith(".") &&
+              !f.includes(".temp") &&
+              !f.endsWith(".tmp") &&
+              !f.endsWith(".part") &&
+              isVideoFile(f) &&
+              !f.match(/[Ss]\d+[Ee]\d+/i),
+          );
+          if (validVideos.length > 0) {
+            const folderBase = path.basename(fPath).toLowerCase();
+            const titleMatch = validVideos.find((v) =>
+              v.toLowerCase().startsWith(folderBase),
+            );
+            return path.join(fPath, titleMatch || validVideos[0]);
+          }
+        }
         return match ? path.join(fPath, match) : null;
       } else if (type === "Manga") {
         const files = fs.readdirSync(fPath);

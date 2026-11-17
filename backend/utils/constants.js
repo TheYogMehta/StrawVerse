@@ -138,24 +138,45 @@ function getEpisodeNumberFromFilename(filename) {
   match = filename.match(/(?:ep|episode)\s*(\d+(?:\.\d+)?)/i);
   if (match) return parseFloat(match[1]);
 
+  // Clean out common 4-digit release years (1900-2099) in brackets/parentheses or separated by spaces/dots/dashes
+  // and resolutions (e.g. 1080p, 720p, 4k) so movie years/resolutions are not mistaken for episode numbers.
+  const cleanedName = filename
+    .replace(/[\(\[\{]?(?:19|20)\d{2}[\)\]\}]?/g, " ")
+    .replace(/\b(?:480|720|1080|2160)p?\b/gi, " ")
+    .replace(/\b4k\b/gi, " ");
+
   // 4. Trailing episode number before extension: "One Piece - 1052.mp4"
-  match = filename.match(/[-_ ](\d+(?:\.\d+)?)\.[a-z0-9]+$/i);
+  match = cleanedName.match(/[-_ ](\d+(?:\.\d+)?)\.[a-z0-9]+$/i);
   if (match) return parseFloat(match[1]);
 
   // 5. Fallback: match first standalone number
-  match = filename.match(/\b(\d+(?:\.\d+)?)\b/);
+  match = cleanedName.match(/\b(\d+(?:\.\d+)?)\b/);
   return match ? parseFloat(match[1]) : null;
 }
 
 // "Show - S02E05 [1080p]" (no extension), the Jellyfin/Plex episode scheme.
 // Series and season come from the "<Show>/Season NN" folder the file goes in.
-function mediaServerFileBase(directory, episode, quality) {
+function mediaServerFileBase(
+  directory,
+  episode,
+  quality,
+  isSingleMovie = false,
+  movieTitle = null,
+  year = null,
+) {
   const pad = (n, len = 2) => String(n).padStart(len, "0");
   const dirName = path.basename(directory);
   const m = dirName.match(/^Season (\d+)$/i);
   const series = m ? path.basename(path.dirname(directory)) : dirName;
   const season = m ? parseInt(m[1], 10) : 1;
   const q = quality ? ` [${quality}]` : "";
+
+  if (isSingleMovie) {
+    const title = movieTitle || series;
+    const cleanTitle = sanitizeFolderName(title || "Movie");
+    const yearStr = year ? ` (${year})` : "";
+    return `${cleanTitle}${yearStr}${q}`;
+  }
 
   const epNum = parseFloat(episode);
   let epStr;
@@ -402,6 +423,10 @@ function formatEpisodeFilename(
     season = seasonArg !== undefined ? seasonArg : 1;
   }
 
+  if (optsOrTitle?.isMovie || optsOrTitle?.isSingleMovie || namingScheme === "title_only") {
+    return formatMovieFilename(optsOrTitle, namingSchemeArg, extArg);
+  }
+
   const num = parseFloat(epNum) || 0;
   const maxEp = Math.max(Number(totalEpisodes) || 0, num);
   const padLen = maxEp >= 1000 ? 4 : maxEp >= 100 ? 3 : 2;
@@ -421,6 +446,71 @@ function formatEpisodeFilename(
   }
 
   return `${baseName}${ext.startsWith(".") ? ext : `.${ext}`}`;
+}
+
+function formatMovieFilename(
+  optsOrTitle = {},
+  namingSchemeArg,
+  extArg,
+  qualityArg,
+  yearArg,
+) {
+  let title, namingScheme, ext, quality, year, isSingleMovie, epNum, season;
+
+  if (typeof optsOrTitle === "object" && optsOrTitle !== null) {
+    title = optsOrTitle.title || "";
+    namingScheme = optsOrTitle.namingScheme || "default";
+    ext = optsOrTitle.ext !== undefined ? optsOrTitle.ext : ".mp4";
+    quality = optsOrTitle.quality || null;
+    year = optsOrTitle.year || null;
+    isSingleMovie = optsOrTitle.isSingleMovie !== false;
+    epNum = optsOrTitle.epNum !== undefined ? optsOrTitle.epNum : 1;
+    season = optsOrTitle.season !== undefined ? optsOrTitle.season : 1;
+  } else {
+    title = optsOrTitle || "";
+    namingScheme = namingSchemeArg || "default";
+    ext = extArg !== undefined ? extArg : ".mp4";
+    quality = qualityArg || null;
+    year = yearArg || null;
+    isSingleMovie = true;
+    epNum = 1;
+    season = 1;
+  }
+
+  const cleanTitle = sanitizeFolderName(title || "Movie");
+  const yearStr = year ? ` (${year})` : "";
+  const qStr = quality ? ` [${quality}]` : "";
+
+  let baseName;
+  if (isSingleMovie) {
+    if (namingScheme === "plex_jellyfin" || namingScheme === "title_s01e01") {
+      baseName = `${cleanTitle}${yearStr}${qStr}`;
+    } else if (namingScheme === "title_only") {
+      baseName = cleanTitle;
+    } else {
+      // Default / Standard for single movies: clean movie title
+      baseName = cleanTitle;
+    }
+  } else {
+    // Multi-episode series under Movies & Series
+    const num = parseFloat(epNum) || 1;
+    const paddedEp = String(num).padStart(2, "0");
+    const paddedSeason = String(season || 1).padStart(2, "0");
+
+    if (namingScheme === "title_s01e01" || namingScheme === "plex_jellyfin") {
+      baseName = `${cleanTitle} - S${paddedSeason}E${paddedEp}${qStr}`;
+    } else if (namingScheme === "title_ep") {
+      baseName = `${cleanTitle} - Episode ${num}`;
+    } else if (namingScheme === "title_only") {
+      baseName = `${cleanTitle} - ${paddedEp}`;
+    } else {
+      // default: "Title - 01"
+      baseName = `${cleanTitle} - ${paddedEp}`;
+    }
+  }
+
+  const cleanExt = ext ? (ext.startsWith(".") ? ext : `.${ext}`) : "";
+  return `${baseName}${cleanExt}`;
 }
 
 function formatChapterFilename(
@@ -461,6 +551,7 @@ function formatChapterFilename(
 
 module.exports = {
   formatEpisodeFilename,
+  formatMovieFilename,
   formatChapterFilename,
   VIDEO_EXTENSIONS,
   SUBTITLE_EXTENSIONS,
