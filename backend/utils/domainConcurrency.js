@@ -403,9 +403,9 @@ function recordDomainBatchSuccess(domain, batchThroughput = null) {
 
 async function syncDomainConcurrencyFromMappingDb() {
   try {
-    const { mappingQueryAll } = require("./db");
-    const rows = await mappingQueryAll(
-      "SELECT domain, current_concurrency, max_concurrency FROM domain_concurrency",
+    const { queryAll } = require("./db");
+    const rows = await queryAll(
+      "SELECT domain, current_concurrency, max_concurrency FROM DomainConcurrency",
     );
     if (rows && rows.length > 0) {
       for (const r of rows) {

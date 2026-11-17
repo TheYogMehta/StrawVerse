@@ -75,8 +75,11 @@ public class CloudflareBypassPlugin extends Plugin {
 
     public static String cleanUserAgent(String ua) {
         if (ua == null) return null;
-        return ua.replaceAll("(?i)\\s*;?\\s*wv\\b", "")
+        String cleaned = ua.replaceAll("(?i)\\s*;?\\s*wv\\b", "")
                  .replaceAll("(?i)Version/[0-9.]+\\s+", "");
+        // Normalize custom build tags that trigger Cloudflare bot heuristics (standardize to Chromium's 'Android 10; K' or '; K')
+        cleaned = cleaned.replaceAll(";\\s*[^;)]+Build/[^;)]+", "; K");
+        return cleaned;
     }
 
     @PluginMethod
@@ -892,6 +895,7 @@ public class CloudflareBypassPlugin extends Plugin {
 
     @PluginMethod
     public void playVideo(PluginCall call) {
+        final String mediaType = call.getString("type", "Anime");
         final String animeId = call.getString("animeId", "");
         final String episodeId = call.getString("episodeId", "");
         final double episodeNumber = call.getDouble("episodeNumber", 0.0);
@@ -914,6 +918,7 @@ public class CloudflareBypassPlugin extends Plugin {
                 try {
                     Context context = getActivity();
                     Intent intent = new Intent(context, PlayerActivity.class);
+                    intent.putExtra("type", mediaType);
                     intent.putExtra("animeId", animeId);
                     intent.putExtra("episodeId", episodeId);
                     intent.putExtra("episodeNumber", episodeNumber);
@@ -941,111 +946,127 @@ public class CloudflareBypassPlugin extends Plugin {
 
     @PluginMethod
     public void nativeRequest(final PluginCall call) {
-        String url = call.getString("url");
-        JSObject headers = call.getObject("headers");
-
-        boolean isMedia = false;
-        boolean isDownloadServiceRunning = DownloadForegroundService.isRunning();
-        if (url != null) {
-            String lowerUrl = url.toLowerCase();
-            isMedia = lowerUrl.contains(".m3u8") || lowerUrl.contains(".ts") || lowerUrl.contains("owocdn.top") || lowerUrl.contains("uwucdn.top") || lowerUrl.contains("kotocdn.site") || lowerUrl.contains("megaplay.buzz")
-                || lowerUrl.contains(".webp") || lowerUrl.contains(".jpg") || lowerUrl.contains(".jpeg") || lowerUrl.contains(".png") || lowerUrl.contains(".gif") || lowerUrl.contains(".svg");
-        }
-
-        if (!isMedia && !isDownloadServiceRunning) {
-            executeWebViewRequest(url, call.getString("method"), headers, call.getString("body"), call);
+        String rawUrl = call.getString("url");
+        if (rawUrl == null || (!rawUrl.startsWith("http://") && !rawUrl.startsWith("https://"))) {
+            String reqId = call.getString("requestId", call.getCallbackId());
+            String errMsg = "Invalid URL for native request: " + rawUrl;
+            call.reject(errMsg);
+            sendNativeResponseToNode(reqId, false, null, errMsg);
             return;
         }
 
-
+        final JSObject headers = call.getObject("headers");
 
         new Thread(new Runnable() {
             @Override
             public void run() {
-                String url = call.getString("url");
+                final String initialUrl = call.getString("url");
+                String currentUrl = initialUrl;
                 String method = call.getString("method");
                 if (method == null) method = "GET";
-                JSObject headers = call.getObject("headers");
                 String body = call.getString("body");
 
                 java.net.HttpURLConnection conn = null;
                 java.io.InputStream is = null;
+                int responseCode = 0;
                 try {
-                    Log.i("StrawVerseBypass", "nativeRequest: " + method + " -> " + url);
-                    java.net.URL urlObj = new java.net.URL(url);
-                    conn = (java.net.HttpURLConnection) urlObj.openConnection();
-                    conn.setRequestMethod(method.toUpperCase());
-                    conn.setConnectTimeout(30000);
-                    conn.setReadTimeout(30000);
-                    conn.setDoInput(true);
-                    conn.setRequestProperty("Accept-Encoding", "identity");
+                    int redirectCount = 0;
+                    final int MAX_REDIRECTS = 5;
 
-                    String webViewUA = android.webkit.WebSettings.getDefaultUserAgent(getContext());
-                    boolean hasUA = false;
-                    String explicitCookies = null;
-                    if (headers != null) {
-                        java.util.Iterator<String> keys = headers.keys();
-                        while (keys.hasNext()) {
-                            String key = keys.next();
-                            String value = headers.getString(key);
-                            if (key.equalsIgnoreCase("user-agent")) {
-                                hasUA = true;
-                                value = cleanUserAgent(value);
+                    while (redirectCount < MAX_REDIRECTS) {
+                        Log.i("StrawVerseBypass", "nativeRequest: " + method + " -> " + currentUrl);
+                        java.net.URL urlObj = new java.net.URL(currentUrl);
+                        conn = (java.net.HttpURLConnection) urlObj.openConnection();
+                        conn.setRequestMethod(method.toUpperCase());
+                        conn.setConnectTimeout(25000);
+                        conn.setReadTimeout(30000);
+                        conn.setDoInput(true);
+                        conn.setInstanceFollowRedirects(false); // Manually handle cross-protocol & cookie updates
+                        conn.setRequestProperty("Accept-Encoding", "identity");
+
+                        String webViewUA = android.webkit.WebSettings.getDefaultUserAgent(getContext());
+                        boolean hasUA = false;
+                        String explicitCookies = null;
+                        if (headers != null) {
+                            java.util.Iterator<String> keys = headers.keys();
+                            while (keys.hasNext()) {
+                                String key = keys.next();
+                                String value = headers.getString(key);
+                                if (key.equalsIgnoreCase("user-agent")) {
+                                    hasUA = true;
+                                    value = cleanUserAgent(value);
+                                }
+                                if (key.equalsIgnoreCase("cookie")) {
+                                    explicitCookies = value;
+                                    continue;
+                                }
+                                if (key.equalsIgnoreCase("accept-encoding")) continue;
+                                conn.setRequestProperty(key, value);
                             }
-                            if (key.equalsIgnoreCase("cookie")) {
-                                explicitCookies = value;
+                        }
+                        if (!hasUA) conn.setRequestProperty("User-Agent", cleanUserAgent(webViewUA));
+                        if (conn.getRequestProperty("Accept") == null) {
+                            conn.setRequestProperty("Accept", "*/*");
+                        }
+                        if (conn.getRequestProperty("Accept-Language") == null) {
+                            conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
+                        }
+
+                        String reqReferer = headers != null ? headers.optString("Referer", headers.optString("referer", "")) : "";
+                        String browserCookies = CookieManager.getInstance().getCookie(currentUrl);
+                        String refererCookies = (!reqReferer.isEmpty() && (reqReferer.startsWith("http://") || reqReferer.startsWith("https://")))
+                                ? CookieManager.getInstance().getCookie(reqReferer)
+                                : null;
+                        String allBrowserCookies = AppDatabase.mergeCookies(browserCookies, refererCookies);
+                        String mergedCookies = AppDatabase.mergeCookies(explicitCookies, allBrowserCookies);
+                        if (!mergedCookies.isEmpty()) {
+                            conn.setRequestProperty("Cookie", mergedCookies);
+                            Log.i("StrawVerseBypass", "nativeRequest cookies: " + AppDatabase.cookieNames(mergedCookies));
+                        }
+                        if (("POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method)) && redirectCount == 0) {
+                            if (body != null) {
+                                conn.setDoOutput(true);
+                                try (java.io.OutputStream os = conn.getOutputStream()) {
+                                    byte[] input = body.getBytes("utf-8");
+                                    os.write(input, 0, input.length);
+                                }
+                            }
+                        }
+
+                        responseCode = conn.getResponseCode();
+                        String contentType = conn.getContentType();
+                        int contentLength = conn.getContentLength();
+                        Log.i("StrawVerseBypass", "nativeRequest response code: " + responseCode + ", type: " + contentType + ", length: " + contentLength);
+
+                        // Save any Set-Cookie headers
+                        java.util.List<String> setCookies = conn.getHeaderFields().get("Set-Cookie");
+                        if (setCookies != null) {
+                            for (String sc : setCookies) {
+                                CookieManager.getInstance().setCookie(currentUrl, sc);
+                            }
+                            CookieManager.getInstance().flush();
+                        }
+
+                        // Check for redirect (301, 302, 303, 307, 308)
+                        if (responseCode == 301 || responseCode == 302 || responseCode == 303 || responseCode == 307 || responseCode == 308) {
+                            String location = conn.getHeaderField("Location");
+                            if (location != null && !location.isEmpty()) {
+                                java.net.URL targetUrl = new java.net.URL(urlObj, location);
+                                currentUrl = targetUrl.toString();
+                                if (responseCode == 303) {
+                                    method = "GET";
+                                }
+                                redirectCount++;
+                                conn.disconnect();
                                 continue;
                             }
-                            if (key.equalsIgnoreCase("accept-encoding")) continue;
-                            conn.setRequestProperty(key, value);
                         }
-                    }
-                    if (!hasUA) conn.setRequestProperty("User-Agent", cleanUserAgent(webViewUA));
-                    if (conn.getRequestProperty("Accept") == null) {
-                        conn.setRequestProperty("Accept", "*/*");
-                    }
-                    if (conn.getRequestProperty("Accept-Language") == null) {
-                        conn.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
-                    }
 
-                    String reqReferer = headers != null ? headers.optString("Referer", headers.optString("referer", "")) : "";
-                    String browserCookies = CookieManager.getInstance().getCookie(url);
-                    String refererCookies = (!reqReferer.isEmpty() && (reqReferer.startsWith("http://") || reqReferer.startsWith("https://")))
-                            ? CookieManager.getInstance().getCookie(reqReferer)
-                            : null;
-                    String allBrowserCookies = AppDatabase.mergeCookies(browserCookies, refererCookies);
-                    String mergedCookies = AppDatabase.mergeCookies(explicitCookies, allBrowserCookies);
-                    if (!mergedCookies.isEmpty()) {
-                        conn.setRequestProperty("Cookie", mergedCookies);
-                        Log.i("StrawVerseBypass", "nativeRequest cookies: " + AppDatabase.cookieNames(mergedCookies));
+                        is = (responseCode >= 200 && responseCode < 400) 
+                            ? conn.getInputStream() 
+                            : conn.getErrorStream();
+                        break;
                     }
-                    if ("POST".equalsIgnoreCase(method) || "PUT".equalsIgnoreCase(method)) {
-                        if (body != null) {
-                            conn.setDoOutput(true);
-                            try (java.io.OutputStream os = conn.getOutputStream()) {
-                                byte[] input = body.getBytes("utf-8");
-                                os.write(input, 0, input.length);
-                            }
-                        }
-                    }
-                    int responseCode = conn.getResponseCode();
-                    String contentType = conn.getContentType();
-                    int contentLength = conn.getContentLength();
-                    Log.i("StrawVerseBypass", "nativeRequest response code: " + responseCode + ", type: " + contentType + ", length: " + contentLength);
-                    
-                    boolean isCloudflareHtmlChallenge = (responseCode == 403 || responseCode == 503)
-                        && contentType != null
-                        && contentType.toLowerCase().contains("text/html");
-
-                    if (isCloudflareHtmlChallenge) {
-                        Log.i("StrawVerseBypass", "Cloudflare status " + responseCode + " HTML challenge detected on native request, falling back to WebView for: " + url);
-                        executeWebViewRequest(url, method, headers, body, call);
-                        return;
-                    }
-                    
-                    is = (responseCode >= 200 && responseCode < 300) 
-                        ? conn.getInputStream() 
-                        : conn.getErrorStream();
                         
                     byte[] responseBytes;
                     if (is != null) {
@@ -1072,7 +1093,7 @@ public class CloudflareBypassPlugin extends Plugin {
                             resHeaders.put(key, String.join(", ", entries.getValue()));
                             if (key.equalsIgnoreCase("set-cookie")) {
                                 for (String setCookie : entries.getValue()) {
-                                    CookieManager.getInstance().setCookie(url, setCookie);
+                                    CookieManager.getInstance().setCookie(currentUrl, setCookie);
                                 }
                             }
                         }
@@ -1089,7 +1110,7 @@ public class CloudflareBypassPlugin extends Plugin {
                     sendNativeResponseToNode(reqId, true, ret, null);
 
                 } catch (Exception e) {
-                    Log.e("StrawVerseBypass", "nativeRequest failed for " + url, e);
+                    Log.e("StrawVerseBypass", "nativeRequest failed for " + currentUrl, e);
                     String errMsg = "Native request failed: " + e.getMessage();
                     call.reject(errMsg);
                     String reqId = call.getString("requestId", call.getCallbackId());
@@ -1149,23 +1170,25 @@ public class CloudflareBypassPlugin extends Plugin {
                     public void onPageFinished(WebView view, String url) {
                         super.onPageFinished(view, url);
                         view.evaluateJavascript("window.location.origin", value -> {
-                            String actualOrigin = value == null ? "" : value.replace("\"", "");
-                            if (expectedWebViewOrigin == null || !expectedWebViewOrigin.equals(actualOrigin)) {
+                            String actualOrigin = value == null ? "" : value.replace("\"", "").trim();
+                            String normExpected = expectedWebViewOrigin == null ? "" : expectedWebViewOrigin.trim().replaceAll("/+$", "");
+                            String normActual = actualOrigin.replaceAll("/+$", "");
+                            if (expectedWebViewOrigin == null || !normExpected.equalsIgnoreCase(normActual)) {
                                 failPendingTasks("Background WebView origin mismatch: expected "
                                         + expectedWebViewOrigin + ", got " + actualOrigin);
-                                    return;
-                                }
-                                Log.i("StrawVerseBypass", "Background WebView origin ready: " + actualOrigin);
-                                isWebViewLoading = false;
-                                runPendingTasks();
-                            });
-                        }
+                                return;
+                            }
+                            Log.i("StrawVerseBypass", "Background WebView origin ready: " + actualOrigin);
+                            isWebViewLoading = false;
+                            runPendingTasks();
+                        });
+                    }
                     
-                        @Override
-                        public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
-                            failPendingTasks("Background WebView failed to initialize: " + description);
-                        }
-                    });
+                    @Override
+                    public void onReceivedError(WebView view, int errorCode, String description, String failingUrl) {
+                        failPendingTasks("Background WebView failed to initialize: " + description);
+                    }
+                });
             }
         });
     }
@@ -1198,8 +1221,11 @@ public class CloudflareBypassPlugin extends Plugin {
         pendingTasks.clear();
         pendingTaskCalls.clear();
         for (PluginCall pendingCall : calls) {
+            String reqId = pendingCall.getString("requestId", pendingCall.getCallbackId());
+            activeFetchCalls.remove(reqId);
             activeFetchCalls.remove(pendingCall.getCallbackId());
             pendingCall.reject(message);
+            sendNativeResponseToNode(reqId, false, null, message);
         }
     }
 
@@ -1305,6 +1331,14 @@ public class CloudflareBypassPlugin extends Plugin {
     }
 
     private void executeWebViewRequest(final String url, final String method, final JSObject headers, final String body, final PluginCall call) {
+        if (url == null || (!url.startsWith("http://") && !url.startsWith("https://"))) {
+            String errMsg = "Invalid URL for WebView request: " + url;
+            Log.e("StrawVerseBypass", errMsg);
+            String reqId = call.getString("requestId", call.getCallbackId());
+            call.reject(errMsg);
+            sendNativeResponseToNode(reqId, false, null, errMsg);
+            return;
+        }
         initBackgroundWebView();
         
         getActivity().runOnUiThread(new Runnable() {

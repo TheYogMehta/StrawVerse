@@ -102,7 +102,7 @@ const ExtrasCardBadges = ({ media, langs }) => {
 
 export default function InfoView({
   id: propId,
-  type,
+  type: rawType,
   localMalProvider: propLocalMalProvider,
   backText,
   autoPlay,
@@ -118,6 +118,16 @@ export default function InfoView({
   onIdChange,
   onOpenExtra,
 }) {
+  const type =
+    typeof propId === "string" &&
+    (propId.startsWith("tv:") || propId.startsWith("movie:"))
+      ? "Movies"
+      : rawType === "Movies"
+        ? "Movies"
+        : rawType === "Manga"
+          ? "Manga"
+          : "Anime";
+
   const [id, setId] = useState(propId);
   const [localMalProvider, setLocalMalProvider] =
     useState(propLocalMalProvider);
@@ -328,7 +338,20 @@ export default function InfoView({
         } catch (_) {}
       }
 
+      const isMovieStream =
+        type === "Movies" ||
+        (typeof animeId === "string" &&
+          (animeId.startsWith("tv:") || animeId.startsWith("movie:"))) ||
+        (typeof epIdOrNum === "string" &&
+          (epIdOrNum.startsWith("tv:") || epIdOrNum.startsWith("movie:")));
+      const finalType = isMovieStream
+        ? "Movies"
+        : type === "Movies"
+          ? "Movies"
+          : "Anime";
+
       window.Capacitor.Plugins.CloudflareBypass.playVideo({
+        type: finalType,
         animeId: animeId,
         episodeId:
           typeof epIdOrNum === "string"

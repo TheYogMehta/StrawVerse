@@ -1338,6 +1338,36 @@ function cleanupLegacyRootScrapers() {
       );
     }
   }
+
+  // Also clean up duplicate scrapers misplaced in ScraperAnime if they exist in ScraperMovies
+  try {
+    if (fs.existsSync(ScraperAnime) && fs.existsSync(ScraperMovies)) {
+      const animeOwners = fs.readdirSync(ScraperAnime);
+      for (const owner of animeOwners) {
+        const animeOwnerDir = path.join(ScraperAnime, owner);
+        const moviesOwnerDir = path.join(ScraperMovies, owner);
+        if (fs.existsSync(animeOwnerDir) && fs.statSync(animeOwnerDir).isDirectory()) {
+          const files = fs.readdirSync(animeOwnerDir);
+          for (const file of files) {
+            if (file.endsWith(".js")) {
+              const moviesFile = path.join(moviesOwnerDir, file);
+              const animeFile = path.join(animeOwnerDir, file);
+              if (fs.existsSync(moviesFile)) {
+                try {
+                  fs.unlinkSync(animeFile);
+                  logger.info(
+                    `[Cleanup] Auto-deleted duplicate misplaced movie extension from Anime: ${owner}/${file}`,
+                  );
+                } catch (e) {}
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    logger.warn(`[Cleanup] Error checking misplaced scrapers: ${err.message}`);
+  }
 }
 
 // load scrapers from scoped directories

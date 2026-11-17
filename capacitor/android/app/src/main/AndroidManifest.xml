@@ -10,6 +10,7 @@
         android:usesCleartextTraffic="true"
         android:requestLegacyExternalStorage="true"
         android:extractNativeLibs="true"
+        android:largeHeap="true"
         android:theme="@style/AppTheme">
 
         <activity

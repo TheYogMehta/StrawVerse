@@ -510,22 +510,33 @@ export default function App() {
             onTypeChange={setContentType}
             onSelectMedia={(
               id,
-              _prov,
+              prov,
               backText,
               autoPlay,
               targetNum,
               targetSeason,
-            ) =>
+              mediaItemType,
+            ) => {
+              const itemType =
+                typeof id === "string" &&
+                (id.startsWith("tv:") || id.startsWith("movie:"))
+                  ? "Movies"
+                  : mediaItemType === "Movies" ||
+                      mediaItemType === "Manga" ||
+                      mediaItemType === "Anime"
+                    ? mediaItemType
+                    : contentType;
               navigateTo("info", {
                 id,
-                type: contentType,
-                provider: "local",
+                type: itemType,
+                provider:
+                  prov || (itemType === "Movies" ? "provider" : "local"),
                 backText,
                 autoPlay,
                 targetNum,
                 targetSeason,
-              })
-            }
+              });
+            }}
           />
         );
 
@@ -550,12 +561,13 @@ export default function App() {
         );
 
       case "filters": {
-        const filterType = contentType === "Movies" ? "Anime" : contentType;
+        const isMovies = contentType === "Movies";
+        const catalogProvider = isMovies ? "provider" : "mal";
         return (
           <Catalog
-            key={`filters-${filterType}-${reloadCounter}`}
-            type={filterType}
-            provider="mal"
+            key={`filters-${contentType}-${reloadCounter}`}
+            type={contentType}
+            provider={catalogProvider}
             onTypeChange={setContentType}
             initialSearchQuery={current.params?.searchQuery || ""}
             malLoggedIn={malLoggedIn}
@@ -563,8 +575,8 @@ export default function App() {
             onSelectMedia={(id, prov, backText, autoPlay) =>
               navigateTo("info", {
                 id,
-                type: filterType,
-                provider: prov,
+                type: contentType,
+                provider: prov || (isMovies ? "provider" : "mal"),
                 backText,
                 autoPlay,
               })
@@ -670,6 +682,16 @@ export default function App() {
                 }),
               );
 
+              const isMovieItem =
+                current.params.type === "Movies" ||
+                (typeof animeId === "string" &&
+                  (animeId.startsWith("tv:") || animeId.startsWith("movie:"))) ||
+                (typeof epIdOrNum === "string" &&
+                  (epIdOrNum.startsWith("tv:") || epIdOrNum.startsWith("movie:")));
+              const detectedType = isMovieItem
+                ? "Movies"
+                : current.params.type || contentType;
+
               setActivePlayerParams({
                 id: animeId,
                 ep: epIdOrNum,
@@ -681,7 +703,7 @@ export default function App() {
                 provider,
                 image,
                 malid,
-                type: current.params.type,
+                type: detectedType,
                 season: season || 1,
               });
             }}
@@ -762,14 +784,21 @@ export default function App() {
             onMarketplaceOpen={(initialType) =>
               navigateTo("marketplace", { type: initialType })
             }
-            onSelectMedia={(id, type, prov, backText) =>
+            onSelectMedia={(id, type, prov, backText) => {
+              const safeType =
+                typeof id === "string" &&
+                (id.startsWith("tv:") || id.startsWith("movie:"))
+                  ? "Movies"
+                  : type === "Movies" || type === "Manga" || type === "Anime"
+                    ? type
+                    : "Anime";
               navigateTo("info", {
                 id,
-                type,
+                type: safeType,
                 provider: prov,
                 backText,
-              })
-            }
+              });
+            }}
             onSettingsSaved={() => syncSettings()}
           />
         );

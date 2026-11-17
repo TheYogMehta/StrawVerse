@@ -55,6 +55,18 @@ async function updateHistory({
   const rawNum = parseFloat(number);
   const parsedNum =
     !isNaN(rawNum) && Number.isInteger(rawNum) ? Math.trunc(rawNum) : rawNum;
+
+  const normalizedType =
+    typeof mediaId === "string" &&
+    (mediaId.startsWith("tv:") || mediaId.startsWith("movie:"))
+      ? "Movies"
+      : type === "Movies"
+        ? "Movies"
+        : type === "Manga"
+          ? "Manga"
+          : "Anime";
+  type = normalizedType;
+
   const isVideo = type === "Anime" || type === "Movies";
   const isAnime = type === "Anime";
   const isMovies = type === "Movies";

@@ -45,12 +45,44 @@ const { getUserDataPath } = require("./constants");
 const logDir = getUserDataPath();
 
 const LogFilePath = path.join(logDir, "app.log");
+const PrevLogFilePath = path.join(logDir, "app-previous.log");
+const CrashLogFilePath = path.join(logDir, "crash.log");
 
 try {
   if (fs.existsSync(LogFilePath)) {
+    try {
+      fs.copyFileSync(LogFilePath, PrevLogFilePath);
+    } catch (_) {}
     fs.unlinkSync(LogFilePath);
   }
 } catch (_) {}
+
+process.on("uncaughtException", (err) => {
+  if (err && (err.code === "EIO" || err.code === "EPIPE")) return;
+  const msg = `[FATAL UNCAUGHT EXCEPTION] ${err?.stack || err?.message || err}`;
+  try {
+    if (logger && typeof logger.error === "function") {
+      logger.error(msg);
+    }
+  } catch (_) {}
+  try {
+    fs.appendFileSync(LogFilePath, `\n${new Date().toISOString()} [fatal]: ${msg}\n`);
+    fs.appendFileSync(CrashLogFilePath, `\n${new Date().toISOString()} [fatal]: ${msg}\n`);
+  } catch (_) {}
+});
+
+process.on("unhandledRejection", (reason) => {
+  const msg = `[FATAL UNHANDLED REJECTION] ${reason?.stack || reason?.message || reason}`;
+  try {
+    if (logger && typeof logger.error === "function") {
+      logger.error(msg);
+    }
+  } catch (_) {}
+  try {
+    fs.appendFileSync(LogFilePath, `\n${new Date().toISOString()} [fatal]: ${msg}\n`);
+    fs.appendFileSync(CrashLogFilePath, `\n${new Date().toISOString()} [fatal]: ${msg}\n`);
+  } catch (_) {}
+});
 
 function formatLogMessage(info) {
   if (info.message instanceof Error) {
@@ -123,31 +155,87 @@ logger.on("error", (err) => {
 });
 
 function getLogs() {
-  return new Promise((resolve, reject) => {
-    const activePath = getCurrentLogPath();
-    if (fs.existsSync(activePath)) {
-      fs.readFile(activePath, "utf8", (err, data) => {
-        if (err) {
-          reject("Error reading log file");
-        } else {
-          resolve(data);
+  return new Promise((resolve) => {
+    try {
+      const activePath = getCurrentLogPath();
+      let currentLogs = "";
+      if (fs.existsSync(activePath)) {
+        try {
+          currentLogs = fs.readFileSync(activePath, "utf8");
+        } catch (_) {}
+      }
+
+      let crashLogs = "";
+      const crashCandidates = [
+        CrashLogFilePath,
+        path.join(os.homedir(), "Strawverse", "data", "crash.log"),
+        "/sdcard/Strawverse/data/crash.log",
+      ];
+      for (const cp of crashCandidates) {
+        if (fs.existsSync(cp)) {
+          try {
+            const content = fs.readFileSync(cp, "utf8");
+            if (content && content.trim()) {
+              crashLogs += `\n[CRASH REPORT: ${cp}]\n${content.trim()}\n`;
+            }
+          } catch (_) {}
         }
-      });
-    } else {
-      resolve("No logs found.");
+      }
+
+      let prevLogs = "";
+      if (fs.existsSync(PrevLogFilePath)) {
+        try {
+          const content = fs.readFileSync(PrevLogFilePath, "utf8");
+          if (content && content.trim()) {
+            prevLogs = content.trim();
+          }
+        } catch (_) {}
+      }
+
+      let combined = "";
+      if (crashLogs.trim()) {
+        combined += `=======================================================\n${crashLogs.trim()}\n=======================================================\n\n`;
+      }
+      if (prevLogs) {
+        combined += `=== PREVIOUS SESSION (BEFORE LAST RESTART / CRASH) ===\n${prevLogs}\n\n=== CURRENT SESSION ===\n`;
+      }
+      combined += currentLogs || "No current session log messages available.";
+      resolve(combined);
+    } catch (err) {
+      resolve("Error reading log file: " + err.message);
     }
   });
 }
 
 function clearLogs() {
   return new Promise((resolve, reject) => {
-    fs.writeFile(getCurrentLogPath(), "", "utf8", (err) => {
-      if (err) {
-        reject("Error clearing log file");
-      } else {
-        resolve();
+    try {
+      fs.writeFileSync(getCurrentLogPath(), "", "utf8");
+      if (fs.existsSync(PrevLogFilePath)) {
+        try {
+          fs.unlinkSync(PrevLogFilePath);
+        } catch (_) {}
       }
-    });
+      if (fs.existsSync(CrashLogFilePath)) {
+        try {
+          fs.unlinkSync(CrashLogFilePath);
+        } catch (_) {}
+      }
+      const publicCrash = path.join(
+        os.homedir(),
+        "Strawverse",
+        "data",
+        "crash.log",
+      );
+      if (fs.existsSync(publicCrash)) {
+        try {
+          fs.unlinkSync(publicCrash);
+        } catch (_) {}
+      }
+      resolve();
+    } catch (err) {
+      reject(err);
+    }
   });
 }
 

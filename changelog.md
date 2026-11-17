@@ -8,9 +8,43 @@
 - **Honest Unmapped State:** A title with no confident provider match now stays unmapped and says so instead of failing later with a 404, and every auto-learn decline is logged.
 - **Badges Survive Rate Limits:** The AniList status lookup now backs off and retries on HTTP 429 (honoring Retry-After), and catalog cards re-try a failed status/sub-dub pass (up to 3 times) instead of pinning "no badge" for the whole session — the cause of cards missing their Complete/Currently Airing and SUB/DUB labels.
 
-### Merged Upstream
+### Scroll Restoration Fix
 
-- **Incorporated upstream v12.0.0:** Movies & Series, video quality selection, multi-repository marketplace, download queue stability fixes and UI refinements.
+- **Back Preserves Position:** Returning from a title page to Discover now restores the exact scroll position again under infinite scroll; the card-click handler no longer overwrites the tracked active page with the pagination counter (which stays at 1 when infinite scroll is on).
+
+### Anime Format & Category Routing Fixes
+
+- **Anime Media Format Normalization:** Fixed an issue where anime items with release format `type: "TV"` (such as titles from `@cyber-winner/animesalt` or AniList) inadvertently passed `"TV"` as the category parameter instead of `"Anime"`.
+- **Database Table Whitelisting:** Prevented SQLite fatal errors (`no such table: TV`) and route rejections (`Invalid type parameter`) by strictly validating and whitelisting table names across `/api/info`, `/api/list`, `/api/count`, `/api/download`, and `/api/local/tags` routes.
+- **Consistent Player & History Tracking:** Ensured watch progress reporting across the Android player, Web player, and MPV player always resolves to `"Anime"` or `"Movies"` so episode progress is properly recorded in `WatchHistory`.
+
+### Crash Diagnostics & Application Stability
+
+- **Persistent Session Logs:** Resolved an issue where `app.log` was wiped on application launch, erasing crash diagnostics. The previous session is now archived to `app-previous.log` and visible in the in-app Logs tab under `PREVIOUS SESSION`.
+- **Fatal Process Exception Trapping:** Added synchronous crash logging for uncaught Node.js exceptions and unhandled promise rejections to prevent silent background process terminations.
+- **Android Native Crash Handler:** Installed a global uncaught exception handler in `MainActivity.java` that records native Android runtime crash logs to disk (`Strawverse/data/crash.log`).
+- **OutOfMemory (OOM) Prevention:** Enabled `android:largeHeap="true"` in `AndroidManifest.xml` to provide higher heap capacity for heavy video streaming and manga reader rendering.
+
+# [12.0.1] - 2026-11-16
+
+### Media Player & Background Audio Fixes
+
+- **Instant Audio Termination on Close:** Fixed a critical bug where audio or video streams continued playing in the background after closing the player, which previously forced users to close the entire application to stop playback.
+- **Android ExoPlayer Lifecycle Management:** Overrode `finish()`, `onBackPressed()`, `onPause()`, `onStop()`, and `onDestroy()` in `PlayerActivity` to immediately detach `PlayerView`, pause, clear media items, and release both `ExoPlayer` and `ForwardingPlayer` instances.
+- **Asynchronous Stream Guarding:** Added lifecycle status guards across all background stream resolution threads, AniSkip lookups, server fallback loops, and UI handlers in `PlayerActivity` to ensure background tasks abort cleanly if the activity is terminating instead of spawning detached player instances.
+- **Desktop MPV Exit Hook:** Added an unmount cleanup hook in `MpvPlayer.jsx` to dispatch a `quit` command to MPV when exiting playback, and enhanced `electron/gui.js` IPC handler to safely write the quit command to the socket and terminate any lingering MPV processes.
+
+### Movie & TV Series Scraper Isolation
+
+- **Scraper Cross-Contamination Prevention:** Fixed an issue where Movies and TV series streams and metadata were inadvertently routed through active Anime scrapers (such as `animesalt` or `reanime`), resulting in 404 stream resolution errors.
+- **Backend Stream Routing:** Added `isMovieProvider()` validation and automatic `tv:` / `movie:` ID prefix detection in `/api/watch` and `/api/watch/server` to strictly route requests to registered movie scrapers and call `fetchMovieSources()`.
+- **Database Mapping & History Resolution:** Registered `global.Movies_providers` in `mappingResolver.js` with `media_type: "Movies"`, and corrected `/api/info` to query `SeriesMovieWatchHistory` and `movie_id` when loading series data.
+- **Automatic Startup Migration:** Added an automated startup database migration in `backend/utils/db.js` that inspects and moves any misplaced movie/series entries from `Anime` / `WatchHistory` into `Movies` / `SeriesMovieWatchHistory` across both Desktop and Android.
+- **Preserved Content Types in Navigation:** Updated `InfoView.jsx`, `WebPlayer.jsx`, `RecentHistory.jsx`, and `Catalog.jsx` to explicitly pass and preserve `type: "Movies"`, `episodeId`, and `episodesList` when starting playback or selecting items from Continue Watching shelves.
+
+### Special Thanks to Contributors
+
+- Special thanks to **@cyber-winner** for architecting and developing the Movies & Series section, scraper isolation & routing, multi-repository marketplace support, and media player background audio fixes!
 
 # [12.0.0] - 2026-11-15
 

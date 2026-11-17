@@ -17,8 +17,15 @@ export default function VideoPlayer({
   onBack,
   playerSubDub = "sub",
   subdub,
-  type = "Anime",
+  type: propType = "Anime",
 }) {
+  const type =
+    typeof id === "string" && (id.startsWith("tv:") || id.startsWith("movie:"))
+      ? "Movies"
+      : propType === "Movies"
+        ? "Movies"
+        : "Anime";
+
   const [loading, setLoading] = useState(true);
   const [statusMsg, setStatusMsg] = useState("Initializing MPV player...");
   const [currentEpNumOrId, setCurrentEpNumOrId] = useState(episodeNumOrId);
@@ -297,6 +304,11 @@ export default function VideoPlayer({
     );
 
     return () => {
+      try {
+        if (window.sharedStateAPI?.controlMpv) {
+          window.sharedStateAPI.controlMpv("quit", []);
+        }
+      } catch (_) {}
       removeMpvStartedListener();
       removeMpvLoadingListener();
       removeMpvActionListener();

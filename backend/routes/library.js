@@ -44,14 +44,31 @@ const { resolveMalIdFromMapping } = require("../utils/mappingResolver");
 
 const router = express.Router();
 
+function normalizeLibraryType(rawType, id = null) {
+  if (
+    typeof id === "string" &&
+    (id.startsWith("tv:") || id.startsWith("movie:"))
+  ) {
+    return "Movies";
+  }
+  if (!rawType) return "Anime";
+  const s = String(rawType).trim();
+  if (
+    s === "Movies" ||
+    s.toLowerCase() === "movies" ||
+    s.toLowerCase() === "movie"
+  ) {
+    return "Movies";
+  }
+  if (s === "Manga" || s.toLowerCase() === "manga") {
+    return "Manga";
+  }
+  return "Anime";
+}
+
 // View tags for Anime/Manga/Movies in custom user order
 router.get("/api/local/tags", (req, res) => {
-  const type =
-    req.query.type === "Manga"
-      ? "Manga"
-      : req.query.type === "Movies"
-        ? "Movies"
-        : "Anime";
+  const type = normalizeLibraryType(req.query.type);
   res.redirect(
     `/api/local/tags/view/${type}${req.query.includeHidden ? "?includeHidden=true" : ""}`,
   );
@@ -59,10 +76,7 @@ router.get("/api/local/tags", (req, res) => {
 
 router.get("/api/local/tags/view/:type", async (req, res) => {
   try {
-    const { type } = req.params;
-    if (type !== "Anime" && type !== "Manga" && type !== "Movies") {
-      throw new Error("Invalid type parameter");
-    }
+    const type = normalizeLibraryType(req.params.type);
     const includeHidden = req.query.includeHidden === "true";
     const defaultTags = getReservedTags(type);
     let savedOrder = (await getKeyValue("Settings", `tag_order_${type}`)) || [
@@ -130,12 +144,9 @@ router.get("/api/local/tags/view/:type", async (req, res) => {
 // Create custom tag in settings
 router.post("/api/local/tags/create", async (req, res) => {
   try {
-    const { type, tag } = req.body;
-    if (
-      !type ||
-      !tag ||
-      (type !== "Anime" && type !== "Manga" && type !== "Movies")
-    ) {
+    let { type, tag } = req.body;
+    type = normalizeLibraryType(type);
+    if (!type || !tag) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -179,12 +190,9 @@ router.post("/api/local/tags/create", async (req, res) => {
 // Reorder tags in settings
 router.post("/api/local/tags/reorder", async (req, res) => {
   try {
-    const { type, tags } = req.body;
-    if (
-      !type ||
-      !Array.isArray(tags) ||
-      (type !== "Anime" && type !== "Manga" && type !== "Movies")
-    ) {
+    let { type, tags } = req.body;
+    type = normalizeLibraryType(type);
+    if (!type || !Array.isArray(tags)) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -203,12 +211,9 @@ router.post("/api/local/tags/reorder", async (req, res) => {
 // Toggle tag visibility (hide / unhide)
 router.post("/api/local/tags/toggle-visibility", async (req, res) => {
   try {
-    const { type, tag, hidden } = req.body;
-    if (
-      !type ||
-      !tag ||
-      (type !== "Anime" && type !== "Manga" && type !== "Movies")
-    ) {
+    let { type, tag, hidden } = req.body;
+    type = normalizeLibraryType(type);
+    if (!type || !tag) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -239,12 +244,9 @@ router.post("/api/local/tags/toggle-visibility", async (req, res) => {
 // Delete custom tag from settings and library items
 router.post("/api/local/tags/delete-tag", async (req, res) => {
   try {
-    const { type, tag } = req.body;
-    if (
-      !type ||
-      !tag ||
-      (type !== "Anime" && type !== "Manga" && type !== "Movies")
-    ) {
+    let { type, tag } = req.body;
+    type = normalizeLibraryType(type);
+    if (!type || !tag) {
       return res.status(400).json({ error: "Invalid parameters" });
     }
 
@@ -306,6 +308,7 @@ router.post("/api/local/tags/add", async (req, res) => {
     if (!type || !id) {
       throw new Error("Missing type or id");
     }
+    type = normalizeLibraryType(type, id);
 
     if (provider === "provider" || provider === "local source") {
       provider = null;
@@ -606,8 +609,9 @@ router.post("/api/local/tags/add", async (req, res) => {
 // Delete Local Tag / Library Entry
 router.post("/api/local/tags/remove", async (req, res) => {
   try {
-    const { id, type } = req.body;
+    let { id, type } = req.body;
     if (!id || !type) throw new Error("ID or Type is missing");
+    type = normalizeLibraryType(type, id);
 
     const baseDir = await getBaseDownloadDir(type);
     let typeDir = await resolveDownloadFolder(type, id, null, baseDir);
@@ -696,7 +700,8 @@ router.post("/api/metadata/switch-provider", async (req, res) => {
 // Delete Local Files
 router.post("/api/local/delete", async (req, res) => {
   try {
-    const { id, type = "Anime", numbers, items, season, subdub } = req.body;
+    let { id, type = "Anime", numbers, items, season, subdub } = req.body;
+    type = normalizeLibraryType(type, id);
     if (
       !id ||
       ((!numbers || !Array.isArray(numbers) || numbers.length === 0) &&
@@ -956,7 +961,7 @@ async function openPathInSystem(targetPath, openFolder = false) {
 // Open Local File or Folder in File Explorer / OS viewer
 router.post("/api/local/open", async (req, res) => {
   try {
-    const {
+    let {
       type = "Anime",
       id,
       number,
@@ -965,6 +970,7 @@ router.post("/api/local/open", async (req, res) => {
       customPath,
       season = null,
     } = req.body;
+    type = normalizeLibraryType(type, id);
     let targetPath = customPath || "";
 
     if (!targetPath) {
@@ -1041,10 +1047,11 @@ router.post("/api/local/open", async (req, res) => {
 // Update history progress
 router.post("/api/history/update", async (req, res) => {
   try {
-    const { mediaId, type, number } = req.body;
+    let { mediaId, type, number } = req.body;
     if (!mediaId || !type || number === undefined || number === null) {
       throw new Error("Missing parameters for history update");
     }
+    req.body.type = normalizeLibraryType(type, mediaId);
     await updateHistory(req.body);
     res.json({ success: true });
   } catch (err) {
@@ -1055,7 +1062,7 @@ router.post("/api/history/update", async (req, res) => {
 // Bulk mark items as read or unread
 router.post("/api/history/mark-read", async (req, res) => {
   try {
-    const {
+    let {
       mediaId,
       type,
       numbers,
@@ -1068,6 +1075,8 @@ router.post("/api/history/mark-read", async (req, res) => {
       malid,
       timestamp,
     } = req.body;
+
+    type = normalizeLibraryType(type, mediaId);
 
     const targetItems =
       Array.isArray(items) && items.length > 0
@@ -1115,7 +1124,7 @@ router.post("/api/history/mark-read", async (req, res) => {
 // Edit specific history entry (timestamp, progress, completion)
 router.post("/api/history/edit-entry", async (req, res) => {
   try {
-    const {
+    let {
       mediaId,
       type,
       number,
@@ -1131,6 +1140,7 @@ router.post("/api/history/edit-entry", async (req, res) => {
     if (!mediaId || !type || number === undefined) {
       throw new Error("Missing parameters for history edit");
     }
+    type = normalizeLibraryType(type, mediaId);
 
     const isVideo = type === "Anime" || type === "Movies";
     const isMovies = type === "Movies";
@@ -1223,7 +1233,8 @@ router.post("/api/history/clear", async (req, res) => {
 // Delete specific tracking history record
 router.delete("/api/history/:type/:id", async (req, res) => {
   try {
-    const { type, id } = req.params;
+    let { type, id } = req.params;
+    type = normalizeLibraryType(type, id);
     const historyTable =
       type === "Movies"
         ? "SeriesMovieWatchHistory"
@@ -1240,10 +1251,11 @@ router.delete("/api/history/:type/:id", async (req, res) => {
 // Hide tracking record from shelf
 router.post("/api/history/hide", async (req, res) => {
   try {
-    const { mediaId, type, malId, title, unhide } = req.body;
+    let { mediaId, type, malId, title, unhide } = req.body;
     if (!mediaId || !type) {
       throw new Error("Missing parameters");
     }
+    type = normalizeLibraryType(type, mediaId);
 
     const isVideo = type === "Anime" || type === "Movies";
     const isMovies = type === "Movies";
@@ -1307,8 +1319,9 @@ router.post("/api/history/unhide", async (req, res) => {
 // Fetch progress history for specific title
 router.get("/api/history/progress", async (req, res) => {
   try {
-    const { mediaId, type } = req.query;
+    let { mediaId, type } = req.query;
     if (!mediaId || !type) throw new Error("Missing parameters");
+    type = normalizeLibraryType(type, mediaId);
 
     const isVideo = type === "Anime" || type === "Movies";
     const isMovies = type === "Movies";

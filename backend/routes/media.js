@@ -60,6 +60,40 @@ const { buildExtras, fetchStatuses } = require("../utils/anilistExtras");
 
 const router = express.Router();
 
+function isMovieProvider(prov) {
+  if (!prov) return false;
+  const pStr = String(prov).toLowerCase().trim();
+  const clean = pStr.split("/").pop().replace(/^@/, "");
+  if (
+    clean === "movies" ||
+    clean === "movie" ||
+    clean === "bingr" ||
+    clean === "cinejoy" ||
+    clean === "hdhub4u" ||
+    clean === "dramacool" ||
+    clean === "kaidrama"
+  ) {
+    return true;
+  }
+  if (global.Movies_providers) {
+    if (
+      global.Movies_providers[pStr] ||
+      global.Movies_providers[clean] ||
+      global.Movies_providers[`@${clean}`]
+    ) {
+      return true;
+    }
+    for (const [k, p] of Object.entries(global.Movies_providers)) {
+      const kClean = k.toLowerCase().split("/").pop().replace(/^@/, "");
+      const pName = (p?.name || "").toLowerCase().replace(/^@/, "");
+      if (kClean === clean || pName === clean || k.toLowerCase() === pStr) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 function generateNormalizedTitleCandidates(rawTitle) {
   if (!rawTitle || typeof rawTitle !== "string") return [];
   const candidates = new Set();
@@ -1909,10 +1943,18 @@ router.post(
     "/api/list/:AnimeManga/:repoOwner/:provider",
   ],
   async (req, res) => {
-    const { AnimeManga } = req.params;
+    let { AnimeManga } = req.params;
     let provider = req.params.repoOwner
       ? `${req.params.repoOwner}/${req.params.provider}`
       : req.params.provider;
+
+    if (AnimeManga === "Movies" || isMovieProvider(provider)) {
+      AnimeManga = "Movies";
+    } else if (AnimeManga === "Manga") {
+      AnimeManga = "Manga";
+    } else {
+      AnimeManga = "Anime";
+    }
     let filters = {};
 
     if (req?.body?.filters && typeof req.body.filters === "object") {
@@ -2235,10 +2277,18 @@ router.post(
     "/api/list/:AnimeManga/:repoOwner/:provider/count",
   ],
   async (req, res) => {
-    const { AnimeManga } = req.params;
+    let { AnimeManga } = req.params;
     let provider = req.params.repoOwner
       ? `${req.params.repoOwner}/${req.params.provider}`
       : req.params.provider;
+
+    if (AnimeManga === "Movies" || isMovieProvider(provider)) {
+      AnimeManga = "Movies";
+    } else if (AnimeManga === "Manga") {
+      AnimeManga = "Manga";
+    } else {
+      AnimeManga = "Anime";
+    }
 
     let filters = {};
     if (req?.body?.filters && typeof req.body.filters === "object") {
@@ -2531,11 +2581,24 @@ router.post(
     "/api/info/:AnimeManga/:repoOwner/:LocalMalProvider",
   ],
   async (req, res) => {
-    const { AnimeManga } = req.params;
+    let { AnimeManga } = req.params;
     let LocalMalProvider = req.params.repoOwner
       ? `${req.params.repoOwner}/${req.params.LocalMalProvider}`
       : req.params.LocalMalProvider;
     let { id } = req.body;
+
+    if (
+      AnimeManga === "Movies" ||
+      isMovieProvider(LocalMalProvider) ||
+      (typeof id === "string" &&
+        (id.startsWith("tv:") || id.startsWith("movie:")))
+    ) {
+      AnimeManga = "Movies";
+    } else if (AnimeManga === "Manga") {
+      AnimeManga = "Manga";
+    } else {
+      AnimeManga = "Anime";
+    }
 
     const data = {
       MalLoggedIn: !!global?.MalLoggedIn,
@@ -2595,17 +2658,23 @@ router.post(
                   .get(id, id, id);
                 if (!localRow) {
                   const histTable =
-                    AnimeManga === "Anime" || AnimeManga === "Movies"
-                      ? "WatchHistory"
-                      : "ReadHistory";
+                    AnimeManga === "Movies"
+                      ? "SeriesMovieWatchHistory"
+                      : AnimeManga === "Anime"
+                        ? "WatchHistory"
+                        : "ReadHistory";
                   const idCol =
-                    AnimeManga === "Anime" || AnimeManga === "Movies"
-                      ? "anime_id"
-                      : "manga_id";
+                    AnimeManga === "Movies"
+                      ? "movie_id"
+                      : AnimeManga === "Anime"
+                        ? "anime_id"
+                        : "manga_id";
                   const titleCol =
-                    AnimeManga === "Anime" || AnimeManga === "Movies"
-                      ? "anime_title"
-                      : "manga_title";
+                    AnimeManga === "Movies"
+                      ? "title"
+                      : AnimeManga === "Anime"
+                        ? "anime_title"
+                        : "manga_title";
                   const histRow = await global.db
                     .prepare(
                       `SELECT ${titleCol} FROM ${histTable} WHERE ${idCol} = ? LIMIT 1`,
@@ -2654,7 +2723,9 @@ router.post(
                 const preferred = (
                   AnimeManga === "Anime"
                     ? setting.Animeprovider || "pahe"
-                    : setting.Mangaprovider || "weebcentral"
+                    : AnimeManga === "Movies"
+                      ? setting.Moviesprovider || "provider"
+                      : setting.Mangaprovider || "weebcentral"
                 ).toLowerCase();
                 const best = await getBestProviderForMalId(
                   resolvedMalId,
@@ -2749,83 +2820,96 @@ router.post(
         } else if (LocalMalProvider === "mal") {
           let resolvedId = null;
           let resolvedProvider = null;
-          let targetMalId = Number(id);
+          if (AnimeManga === "Movies") {
+            const activeProvName =
+              setting?.Moviesprovider ||
+              (await reconcileActiveProvider("Movies"));
+            resolvedId = id;
+            resolvedProvider = activeProvName || "provider";
+            LocalMalProvider = resolvedProvider;
+            provider = resolvedProvider;
+            data.id = String(id);
+            data.provider = resolvedProvider;
+            data.malid = null;
+          } else {
+            let targetMalId = Number(id);
 
-          if (isNaN(targetMalId)) {
-            try {
-              const found = await resolveMalIdFromMapping({
-                id,
-                mediaType: AnimeManga,
-              });
-              if (found) {
-                targetMalId = Number(found);
-              }
-            } catch (_) {}
-          }
-
-          const preferred = (
-            AnimeManga === "Anime"
-              ? setting.Animeprovider || "pahe"
-              : setting.Mangaprovider || "weebcentral"
-          ).toLowerCase();
-
-          if (targetMalId && !isNaN(targetMalId)) {
-            const best = await getBestProviderForMalId(
-              targetMalId,
-              AnimeManga,
-              preferred,
-            );
-            if (best) {
-              resolvedId = best.id;
-              resolvedProvider = best.provider;
+            if (isNaN(targetMalId)) {
+              try {
+                const found = await resolveMalIdFromMapping({
+                  id,
+                  mediaType: AnimeManga,
+                });
+                if (found) {
+                  targetMalId = Number(found);
+                }
+              } catch (_) {}
             }
-          }
 
-          if (!resolvedId && global.mappingDb && id) {
-            try {
-              const unmapped = await global.mappingDb
-                .prepare(
-                  "SELECT provider FROM unmapped_items WHERE id = ? LIMIT 1",
-                )
-                .get(id);
-              if (unmapped?.provider) {
-                resolvedId = id;
-                resolvedProvider = unmapped.provider;
-              }
-            } catch (_) {}
-          }
+            const preferred = (
+              AnimeManga === "Anime"
+                ? setting.Animeprovider || "pahe"
+                : setting.Mangaprovider || "weebcentral"
+            ).toLowerCase();
 
-          if (!resolvedId && !isNaN(targetMalId)) {
-            try {
-              const learned = await autoLearnProviderLink(
+            if (targetMalId && !isNaN(targetMalId)) {
+              const best = await getBestProviderForMalId(
                 targetMalId,
                 AnimeManga,
                 preferred,
               );
-              if (learned) {
-                resolvedId = learned.id;
-                resolvedProvider = learned.provider;
+              if (best) {
+                resolvedId = best.id;
+                resolvedProvider = best.provider;
               }
-            } catch (err) {
-              logger.warn(
-                `[autoMapping] Info-route auto-learn failed for malid ${targetMalId}: ${err.message}`,
+            }
+
+            if (!resolvedId && global.mappingDb && id) {
+              try {
+                const unmapped = await global.mappingDb
+                  .prepare(
+                    "SELECT provider FROM unmapped_items WHERE id = ? LIMIT 1",
+                  )
+                  .get(id);
+                if (unmapped?.provider) {
+                  resolvedId = id;
+                  resolvedProvider = unmapped.provider;
+                }
+              } catch (_) {}
+            }
+
+            if (!resolvedId && !isNaN(targetMalId)) {
+              try {
+                const learned = await autoLearnProviderLink(
+                  targetMalId,
+                  AnimeManga,
+                  preferred,
+                );
+                if (learned) {
+                  resolvedId = learned.id;
+                  resolvedProvider = learned.provider;
+                }
+              } catch (err) {
+                logger.warn(
+                  `[autoMapping] Info-route auto-learn failed for malid ${targetMalId}: ${err.message}`,
+                );
+              }
+            }
+
+            if (resolvedId && resolvedProvider) {
+              resolvedId = String(resolvedId);
+              id = resolvedId;
+              LocalMalProvider = resolvedProvider;
+              provider = resolvedProvider;
+              data.id = resolvedId;
+              data.provider = resolvedProvider;
+              data.malid =
+                targetMalId && !isNaN(targetMalId) ? targetMalId : null;
+            } else {
+              throw new Error(
+                `This ${AnimeManga.toLowerCase()} is not mapped to any provider yet.`,
               );
             }
-          }
-
-          if (resolvedId && resolvedProvider) {
-            resolvedId = String(resolvedId);
-            id = resolvedId;
-            LocalMalProvider = resolvedProvider;
-            provider = resolvedProvider;
-            data.id = resolvedId;
-            data.provider = resolvedProvider;
-            data.malid =
-              targetMalId && !isNaN(targetMalId) ? targetMalId : null;
-          } else {
-            throw new Error(
-              `This ${AnimeManga.toLowerCase()} is not mapped to any provider yet.`,
-            );
           }
         }
       }
@@ -3519,7 +3603,9 @@ router.post(
           } else if (AnimeManga === "Movies") {
             const Moviesprovider = await providerFetch(
               "Movies",
-              (LocalMalProvider !== "local" && LocalMalProvider !== "provider"
+              (LocalMalProvider !== "local" &&
+              LocalMalProvider !== "provider" &&
+              LocalMalProvider !== "mal"
                 ? LocalMalProvider
                 : provider) ?? null,
             );
@@ -3962,9 +4048,10 @@ router.post(
 
         const targetMalId = AnimeManga !== "Movies" ? data?.malid : null;
         if (!tagRow?.CustomTag && targetMalId) {
+          const malTable = AnimeManga === "Manga" ? "Manga" : "Anime";
           const malRow = await global.db
             .prepare(
-              `SELECT CustomTag FROM ${AnimeManga} WHERE MalID = ? AND CustomTag IS NOT NULL AND CustomTag != ''`,
+              `SELECT CustomTag FROM ${malTable} WHERE MalID = ? AND CustomTag IS NOT NULL AND CustomTag != ''`,
             )
             .get(String(targetMalId));
           if (malRow && malRow.CustomTag) {
@@ -4234,8 +4321,14 @@ router.post(
       let localTag = data?.CustomTag || "";
       if (!localTag) {
         try {
+          const validTable =
+            AnimeManga === "Movies"
+              ? "Movies"
+              : AnimeManga === "Manga"
+                ? "Manga"
+                : "Anime";
           const row = await global.db
-            .prepare(`SELECT CustomTag FROM ${AnimeManga} WHERE id = ?`)
+            .prepare(`SELECT CustomTag FROM ${validTable} WHERE id = ?`)
             .get(id);
           if (row) localTag = row.CustomTag || "";
         } catch (_) {}
@@ -4681,12 +4774,24 @@ router.post("/api/info/items", async (req, res) => {
 
 // Play Video From m3u8 url
 router.post("/api/watch", async (req, res) => {
-  const { ep, epNum, Downloaded, provider = null, subdub, type } = req.body;
+  let { ep, epNum, Downloaded, provider = null, subdub, type } = req.body;
   try {
     if (!Downloaded) {
       if (!ep) throw new Error("Episode ID Not Found");
-      const mediaType = type === "Movies" ? "Movies" : "Anime";
-      const Animeprovider = await providerFetch(mediaType, provider);
+      const isMovieEp =
+        typeof ep === "string" &&
+        (ep.startsWith("tv:") || ep.startsWith("movie:"));
+      const isMovieProv = isMovieProvider(provider);
+      const isMovie =
+        type === "Movies" || isMovieEp || isMovieProv;
+      const mediaType = isMovie
+        ? "Movies"
+        : type === "Manga"
+          ? "Manga"
+          : "Anime";
+      const safeProvider =
+        mediaType === "Movies" && !isMovieProv ? null : provider;
+      const Animeprovider = await providerFetch(mediaType, safeProvider);
       let sourcesArray =
         mediaType === "Movies"
           ? await fetchMovieSources(Animeprovider, ep, subdub)
@@ -4834,11 +4939,13 @@ router.post("/api/watch", async (req, res) => {
 
 // Resolve specific server stream on demand (lazy loading)
 router.post("/api/watch/server", async (req, res) => {
-  const { provider = null, server, type } = req.body;
+  let { provider = null, server, type } = req.body;
   try {
     if (!server) throw new Error("Server payload missing");
-    const mediaType = type === "Movies" ? "Movies" : "Anime";
-    const Animeprovider = await providerFetch(mediaType, provider);
+    const isMovieProv = isMovieProvider(provider);
+    const mediaType = (type === "Movies" || isMovieProv) ? "Movies" : "Anime";
+    const safeProvider = mediaType === "Movies" && !isMovieProv ? null : provider;
+    const Animeprovider = await providerFetch(mediaType, safeProvider);
     const resolved = await processServer(Animeprovider, server);
     if (!resolved) {
       return res.json({ error: true, message: "Failed to resolve server" });

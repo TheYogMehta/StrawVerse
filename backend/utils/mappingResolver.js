@@ -87,6 +87,25 @@ async function getMappingProviders(
             }
           }
         }
+        if (global.Movies_providers) {
+          for (const [key, scraper] of Object.entries(global.Movies_providers)) {
+            const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+            const cleanName = (scraper?.name || "")
+              .toLowerCase()
+              .replace(/[^a-z0-9]/g, "");
+            if (
+              cleanKey === cleanTbl ||
+              cleanName === cleanTbl ||
+              cleanKey === shortTbl ||
+              cleanName === shortTbl
+            ) {
+              return {
+                media_type: "Movies",
+                display_name: scraper?.name || key,
+              };
+            }
+          }
+        }
         if (global.Manga_providers) {
           for (const [key, scraper] of Object.entries(global.Manga_providers)) {
             const cleanKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");

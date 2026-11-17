@@ -74,6 +74,15 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 os.homedir = () => "/data/data/app.strawverse.android/files";
+
+process.on("uncaughtException", (err) => {
+  if (err && (err.code === "EIO" || err.code === "EPIPE")) return;
+  console.error("[android-node fatal] UncaughtException:", err?.stack || err?.message || err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[android-node fatal] UnhandledRejection:", reason?.stack || reason?.message || reason);
+});
 const cheerio = require("cheerio");
 const axios = require("axios");
 const got = require("got");
@@ -372,6 +381,12 @@ async function boot() {
 
     const nativeAxiosAdapter = async (config) => {
       if (
+        !config.url ||
+        (!config.url.startsWith("http://") && !config.url.startsWith("https://"))
+      ) {
+        return defaultAdapter(config);
+      }
+      if (
         (config.strawverseDirectHttp === true ||
           global.__isBackgroundDownload?.()) &&
         config._forceNativeBridge !== true
@@ -488,8 +503,38 @@ async function boot() {
       (error) => Promise.reject(error),
     );
 
-    const shouldBypassUrl = (urlStr, refererStr) => {
+    const { isBypassableUrl } = require("../../../backend/utils/extensionRegistry");
+
+    const isCloudflareChallenge = (res) => {
+      if (!res) return false;
+      const status = res.status;
+      if (status !== 403 && status !== 503) return false;
+      const server = String(
+        res.headers?.["server"] || res.headers?.server || "",
+      ).toLowerCase();
+      const cfRay = res.headers?.["cf-ray"] || res.headers?.["cf-mitigated"];
+      const body = typeof res.data === "string" ? res.data : "";
+      if (cfRay || server.includes("cloudflare")) return true;
+      if (
+        body.includes("cf-browser-verification") ||
+        body.includes("challenge-platform") ||
+        body.includes("Just a moment...") ||
+        body.includes("Cloudflare")
+      ) {
+        return true;
+      }
+      return false;
+    };
+
+    const shouldBypassUrl = (urlStr, refererStr, res) => {
       if (!urlStr && !refererStr) return false;
+      if (isCloudflareChallenge(res)) return true;
+      if (
+        typeof isBypassableUrl === "function" &&
+        isBypassableUrl(urlStr, refererStr)
+      ) {
+        return true;
+      }
       const url = (urlStr || "").toLowerCase();
       const ref = (refererStr || "").toLowerCase();
       return (
@@ -525,7 +570,7 @@ async function boot() {
           config &&
           !config._retry &&
           global?.cloudflarebypass &&
-          shouldBypassUrl(config.url, reqReferer)
+          shouldBypassUrl(config.url, reqReferer, response)
         ) {
           config._retry = true;
           console.log(

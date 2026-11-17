@@ -76,6 +76,11 @@ public class PlayerActivity extends Activity {
     private PlayerView playerView;
     private Player player;
     private ExoPlayer rawPlayer;
+    private volatile boolean isTerminated = false;
+
+    private boolean isActivityDead() {
+        return isTerminated || isFinishing() || isDestroyed();
+    }
 
     private LinearLayout topBar;
     private TextView titleTextView;
@@ -121,6 +126,7 @@ public class PlayerActivity extends Activity {
     private String preferredQuality = "highest";
 
     // History tracking fields
+    private String mediaType = "Anime";
     private String animeId = "";
     private double episodeNumber = 0.0;
     private String provider = "";
@@ -182,6 +188,7 @@ public class PlayerActivity extends Activity {
     private final Runnable skipCheckRunnable = new Runnable() {
         @Override
         public void run() {
+            if (isActivityDead()) return;
             if (player != null && player.isPlaying()) {
                 long currentSecs = player.getCurrentPosition() / 1000;
                 checkSkipIntervals(currentSecs);
@@ -200,7 +207,9 @@ public class PlayerActivity extends Activity {
                     reportProgress();
                 }
             }
-            skipCheckHandler.postDelayed(this, 500);
+            if (!isActivityDead()) {
+                skipCheckHandler.postDelayed(this, 500);
+            }
         }
     };
 
@@ -223,10 +232,19 @@ public class PlayerActivity extends Activity {
 
         // Read intent data
         Intent intent = getIntent();
+        mediaType = intent.getStringExtra("type");
         animeId = intent.getStringExtra("animeId");
         if (animeId == null) animeId = "";
         currentEpisodeId = intent.getStringExtra("episodeId");
         if (currentEpisodeId == null) currentEpisodeId = "";
+        if (mediaType != null && mediaType.equalsIgnoreCase("Movies")) {
+            mediaType = "Movies";
+        } else if ((currentEpisodeId != null && (currentEpisodeId.startsWith("tv:") || currentEpisodeId.startsWith("movie:")))
+            || (animeId != null && (animeId.startsWith("tv:") || animeId.startsWith("movie:")))) {
+            mediaType = "Movies";
+        } else {
+            mediaType = "Anime";
+        }
         episodeNumber = intent.getDoubleExtra("episodeNumber", 0.0);
         downloaded = intent.getBooleanExtra("downloaded", false);
         subdub = intent.getStringExtra("subdub");
@@ -394,6 +412,7 @@ public class PlayerActivity extends Activity {
         backButton.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                releasePlayer();
                 finish();
             }
         });
@@ -705,6 +724,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void loadNewEpisode(JSONObject ep) {
+        if (isActivityDead()) return;
         try {
             double nextEpNum = ep.optDouble("number", 0.0);
             showLoading("Loading Episode " + formatEpisodeNumber(nextEpNum) + "...");
@@ -713,6 +733,12 @@ public class PlayerActivity extends Activity {
                 player.stop();
                 player.release();
                 player = null;
+            }
+            if (rawPlayer != null) {
+                rawPlayer.pause();
+                rawPlayer.stop();
+                rawPlayer.release();
+                rawPlayer = null;
             }
             
             skipButton.setVisibility(View.GONE);
@@ -756,6 +782,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void fetchSourcesNatively(final String animeId, final String ep, final double epNum, final boolean downloaded, final String subdub, final String provider) {
+        if (isActivityDead()) return;
         android.util.Log.d("PlayerActivity", "fetchSourcesNatively: ep=" + ep + ", provider=" + provider + ", downloaded=" + downloaded);
         showLoading("Fetching video sources...");
         hudTextView.setVisibility(View.GONE);
@@ -765,7 +792,16 @@ public class PlayerActivity extends Activity {
             @Override
             public void run() {
                 try {
+                    if (isActivityDead()) return;
+                    if (mediaType == null || mediaType.isEmpty() || mediaType.equalsIgnoreCase("Anime")) {
+                        if ((ep != null && (ep.startsWith("tv:") || ep.startsWith("movie:")))
+                            || (currentEpisodeId != null && (currentEpisodeId.startsWith("tv:") || currentEpisodeId.startsWith("movie:")))
+                            || (animeId != null && (animeId.startsWith("tv:") || animeId.startsWith("movie:")))) {
+                            mediaType = "Movies";
+                        }
+                    }
                     JSONObject body = new JSONObject();
+                    body.put("type", mediaType);
                     if (downloaded) {
                         body.put("ep", animeId);
                         body.put("epNum", epNum);
@@ -775,7 +811,9 @@ public class PlayerActivity extends Activity {
                         body.put("ep", ep);
                         body.put("Downloaded", false);
                         body.put("subdub", subdub);
-                        body.put("provider", provider);
+                        if (provider != null && !provider.isEmpty() && !provider.equalsIgnoreCase("Anime") && !provider.equalsIgnoreCase("Movies")) {
+                            body.put("provider", provider);
+                        }
                     }
 
                     URL url = new URL("http://127.0.0.1:9545/api/watch");
@@ -806,6 +844,7 @@ public class PlayerActivity extends Activity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                if (isActivityDead()) return;
                                 onSourcesFetched(data);
                             }
                         });
@@ -817,6 +856,7 @@ public class PlayerActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            if (isActivityDead()) return;
                             hideLoading();
                             hudTextView.setVisibility(View.GONE);
                             showErrorAndFinish("Failed to load video player resources: " + e.getMessage());
@@ -1015,6 +1055,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void onSourcesFetched(JSONObject data) {
+        if (isActivityDead()) return;
         try {
             hudTextView.setVisibility(View.GONE);
 
@@ -1054,6 +1095,7 @@ public class PlayerActivity extends Activity {
 
     private void showErrorAndFinish(String message) {
         hideLoading();
+        releasePlayer();
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         builder.setMessage(message);
         builder.setPositiveButton("OK", new DialogInterface.OnClickListener() {
@@ -1096,6 +1138,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void resolveServerWithFallback(final int startIndex) {
+        if (isActivityDead()) return;
         if (sourcesArray == null || startIndex >= sourcesArray.length()) {
             showErrorAndFinish("No video sources found for this episode.");
             return;
@@ -1129,8 +1172,18 @@ public class PlayerActivity extends Activity {
             @Override
             public void run() {
                 try {
+                    if (isActivityDead()) return;
+                    if (mediaType == null || mediaType.isEmpty() || mediaType.equalsIgnoreCase("Anime")) {
+                        if ((currentEpisodeId != null && (currentEpisodeId.startsWith("tv:") || currentEpisodeId.startsWith("movie:")))
+                            || (animeId != null && (animeId.startsWith("tv:") || animeId.startsWith("movie:")))) {
+                            mediaType = "Movies";
+                        }
+                    }
                     JSONObject body = new JSONObject();
-                    body.put("provider", provider != null && !provider.isEmpty() ? provider : "Anime");
+                    body.put("type", mediaType);
+                    if (provider != null && !provider.isEmpty() && !provider.equalsIgnoreCase("Anime") && !provider.equalsIgnoreCase("Movies")) {
+                        body.put("provider", provider);
+                    }
                     body.put("server", sourceObj);
                     if (subdub != null) {
                         body.put("subdub", subdub);
@@ -1167,6 +1220,7 @@ public class PlayerActivity extends Activity {
                             runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
+                                    if (isActivityDead()) return;
                                     if (hudTextView != null) hudTextView.setVisibility(View.GONE);
                                     showLoading("Connecting stream...");
                                     try {
@@ -1199,6 +1253,7 @@ public class PlayerActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            if (isActivityDead()) return;
                             if (startIndex + 1 < sourcesArray.length()) {
                                 Log.i("PlayerActivity", "Falling back to next server #" + (startIndex + 2));
                                 showLoading("Trying server #" + (startIndex + 2) + "...");
@@ -1216,12 +1271,16 @@ public class PlayerActivity extends Activity {
     }
 
     private void initializePlayer(String videoUrl, final Map<String, String> headers) {
+        if (isActivityDead()) return;
         try {
             if (videoUrl != null && videoUrl.startsWith("/")) {
                 videoUrl = "http://127.0.0.1:9545" + videoUrl;
             }
             if (player != null) {
                 player.release();
+            }
+            if (rawPlayer != null) {
+                rawPlayer.release();
             }
 
             Log.d("PlayerActivity", "initializePlayer: videoUrl=" + videoUrl + ", headers=" + headers.toString());
@@ -1294,11 +1353,12 @@ public class PlayerActivity extends Activity {
                             break;
                         case androidx.media3.common.Player.STATE_ENDED:
                             stateString = "STATE_ENDED";
-                            if (autoPlayNextEpisode && nextEpisode != null) {
+                            if (autoPlayNextEpisode && nextEpisode != null && !isActivityDead()) {
                                 Log.i("PlayerActivity", "Auto-play next episode triggered: EP " + nextEpisode.optDouble("number", 0.0));
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
+                                        if (isActivityDead()) return;
                                         loadNewEpisode(nextEpisode);
                                     }
                                 });
@@ -1319,11 +1379,13 @@ public class PlayerActivity extends Activity {
                 @Override
                 public void onPlayerError(androidx.media3.common.PlaybackException error) {
                     Log.e("PlayerActivity", "ExoPlayer playback error: " + error.getMessage(), error);
+                    if (isActivityDead()) return;
                     if (sourcesArray != null && currentSourceIndex + 1 < sourcesArray.length()) {
                         Log.i("PlayerActivity", "Playback error on source " + currentSourceIndex + ", switching to fallback source...");
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
+                                if (isActivityDead()) return;
                                 Toast.makeText(PlayerActivity.this, "Stream error, switching to fallback server...", Toast.LENGTH_SHORT).show();
                                 switchSource(currentSourceIndex + 1);
                             }
@@ -1429,6 +1491,11 @@ public class PlayerActivity extends Activity {
 
             MediaSource mediaSource = new DefaultMediaSourceFactory(kwikFactory)
                     .createMediaSource(mediaItem);
+
+            if (isActivityDead()) {
+                releasePlayer();
+                return;
+            }
 
             rawPlayer.setMediaSource(mediaSource);
             applyResumePosition();
@@ -1634,6 +1701,7 @@ public class PlayerActivity extends Activity {
     }
 
     private void switchSource(int index) {
+        if (isActivityDead()) return;
         if (sourcesArray == null || index < 0 || index >= sourcesArray.length()) return;
         try {
             currentSourceIndex = index;
@@ -1738,6 +1806,11 @@ public class PlayerActivity extends Activity {
 
             MediaSource mediaSource = new DefaultMediaSourceFactory(kwikFactory)
                     .createMediaSource(mediaItem);
+
+            if (isActivityDead()) {
+                releasePlayer();
+                return;
+            }
 
             rawPlayer.setMediaSource(mediaSource);
             player.prepare();
@@ -2666,7 +2739,7 @@ public class PlayerActivity extends Activity {
 
                     JSONObject payload = new JSONObject();
                     payload.put("mediaId", animeId);
-                    payload.put("type", "Anime");
+                    payload.put("type", (mediaType != null && !mediaType.isEmpty()) ? mediaType : "Anime");
                     payload.put("title", animeTitle);
                     payload.put("number", episodeNumber);
                     payload.put("currentTime", currentSecs);
@@ -2805,6 +2878,7 @@ public class PlayerActivity extends Activity {
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
+                                        if (isActivityDead()) return;
                                         if (rawSubtitlesArray != null && rawSubtitlesArray.length() > 0) {
                                             JSONArray filtered = filterSubtitlesByPreference(rawSubtitlesArray);
                                             if (filtered.length() > 0 || (preferredSubtitleLanguagesExplicitlyLoaded && preferredSubtitleLanguagesList.isEmpty())) {
@@ -2832,6 +2906,7 @@ public class PlayerActivity extends Activity {
                                             runOnUiThread(new Runnable() {
                                                 @Override
                                                 public void run() {
+                                                    if (isActivityDead()) return;
                                                     if (player != null) {
                                                         player.setPlaybackSpeed(savedSpeed);
                                                     }
@@ -2856,6 +2931,7 @@ public class PlayerActivity extends Activity {
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
+                                        if (isActivityDead()) return;
                                         applySubtitleStyle();
                                     }
                                 });
@@ -2870,8 +2946,9 @@ public class PlayerActivity extends Activity {
                 // 2. Fetch watch history progress
                 if (animeId != null && !animeId.isEmpty()) {
                     try {
+                        String progressType = (mediaType != null && !mediaType.isEmpty()) ? mediaType : "Anime";
                         String urlStr = "http://127.0.0.1:9545/api/history/progress?mediaId=" 
-                            + Uri.encode(animeId) + "&type=Anime";
+                            + Uri.encode(animeId) + "&type=" + Uri.encode(progressType);
                         URL url = new URL(urlStr);
                         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                         conn.setRequestMethod("GET");
@@ -2903,6 +2980,7 @@ public class PlayerActivity extends Activity {
                                     runOnUiThread(new Runnable() {
                                         @Override
                                         public void run() {
+                                            if (isActivityDead()) return;
                                             applyResumePosition();
                                         }
                                     });
@@ -2976,6 +3054,7 @@ public class PlayerActivity extends Activity {
                                 runOnUiThread(new Runnable() {
                                     @Override
                                     public void run() {
+                                        if (isActivityDead()) return;
                                         skipTimesArray = normalizedList;
                                         setupSeekbarHighlights();
                                     }
@@ -2993,36 +3072,77 @@ public class PlayerActivity extends Activity {
         }).start();
     }
 
+    private synchronized void releasePlayer() {
+        if (isTerminated && player == null && rawPlayer == null) return;
+        isTerminated = true;
+
+        try {
+            skipCheckHandler.removeCallbacks(skipCheckRunnable);
+        } catch (Exception ignored) {}
+        try {
+            hudHandler.removeCallbacks(hudRunnable);
+        } catch (Exception ignored) {}
+
+        if (playerView != null) {
+            try {
+                playerView.setPlayer(null);
+            } catch (Exception ignored) {}
+        }
+
+        if (player != null) {
+            try {
+                reportProgress();
+            } catch (Exception ignored) {}
+            try {
+                player.pause();
+            } catch (Exception ignored) {}
+            try {
+                player.stop();
+            } catch (Exception ignored) {}
+            try {
+                player.clearMediaItems();
+            } catch (Exception ignored) {}
+            try {
+                player.release();
+            } catch (Exception ignored) {}
+            player = null;
+        }
+
+        if (rawPlayer != null) {
+            try {
+                rawPlayer.pause();
+            } catch (Exception ignored) {}
+            try {
+                rawPlayer.stop();
+            } catch (Exception ignored) {}
+            try {
+                rawPlayer.clearMediaItems();
+            } catch (Exception ignored) {}
+            try {
+                rawPlayer.release();
+            } catch (Exception ignored) {}
+            rawPlayer = null;
+        }
+    }
+
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (player != null) {
-            try {
-                reportProgress();
-                player.stop();
-                player.release();
-                player = null;
-            } catch (Exception e) {
-                Log.e("PlayerActivity", "Error releasing player on new intent: " + e.getMessage());
-            }
-        }
+        releasePlayer();
+        isTerminated = false;
         recreate();
     }
 
     @Override
+    public void finish() {
+        releasePlayer();
+        super.finish();
+    }
+
+    @Override
     public void onBackPressed() {
-        if (player != null) {
-            try {
-                reportProgress();
-                player.pause();
-                player.stop();
-                player.release();
-                player = null;
-            } catch (Exception e) {
-                Log.e("PlayerActivity", "Error releasing player on back press: " + e.getMessage());
-            }
-        }
+        releasePlayer();
         super.onBackPressed();
         finish();
     }
@@ -3030,17 +3150,24 @@ public class PlayerActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        if (player != null) {
-            reportProgress();
-            player.pause();
-        }
         skipCheckHandler.removeCallbacks(skipCheckRunnable);
+        if (isFinishing() || isDestroyed() || isTerminated) {
+            releasePlayer();
+        } else if (player != null) {
+            try {
+                reportProgress();
+                player.pause();
+            } catch (Exception ignored) {}
+        }
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        if (player != null) {
+        skipCheckHandler.removeCallbacks(skipCheckRunnable);
+        if (isFinishing() || isDestroyed() || isTerminated) {
+            releasePlayer();
+        } else if (player != null) {
             try {
                 reportProgress();
                 player.pause();
@@ -3052,15 +3179,7 @@ public class PlayerActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        skipCheckHandler.removeCallbacks(skipCheckRunnable);
-        if (player != null) {
-            try {
-                reportProgress();
-                player.stop();
-                player.release();
-                player = null;
-            } catch (Exception e) {}
-        }
+        releasePlayer();
         super.onDestroy();
     }
 }

@@ -64,11 +64,12 @@ export default function RecentHistory({
               onClick={() =>
                 onSelectMedia(
                   item.media_id,
-                  "local",
+                  item.provider || "local",
                   "Back to Collection",
                   true,
                   nextNum,
                   nextSeason,
+                  item.type || type,
                 )
               }
             >

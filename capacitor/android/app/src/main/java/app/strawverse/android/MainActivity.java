@@ -91,6 +91,41 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        final Thread.UncaughtExceptionHandler defaultHandler = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
+            @Override
+            public void uncaughtException(Thread thread, Throwable throwable) {
+                Log.e("StrawVerse", "FATAL JAVA CRASH on thread " + thread.getName(), throwable);
+                try {
+                    java.io.File extStorage = android.os.Environment.getExternalStorageDirectory();
+                    java.io.File publicRoot = new java.io.File(extStorage, "Strawverse");
+                    java.io.File dataDir = new java.io.File(publicRoot, "data");
+                    dataDir.mkdirs();
+                    java.io.File logFile = new java.io.File(dataDir, "crash.log");
+                    java.io.FileWriter fw = new java.io.FileWriter(logFile, true);
+                    java.io.PrintWriter pw = new java.io.PrintWriter(fw);
+                    pw.println("\n--- FATAL JAVA CRASH [" + new java.util.Date() + "] thread: " + thread.getName() + " ---");
+                    throwable.printStackTrace(pw);
+                    pw.flush();
+                    pw.close();
+                } catch (Exception ignored) {}
+
+                try {
+                    java.io.File internalLog = new java.io.File(getFilesDir(), "crash.log");
+                    java.io.FileWriter fw = new java.io.FileWriter(internalLog, true);
+                    java.io.PrintWriter pw = new java.io.PrintWriter(fw);
+                    pw.println("\n--- FATAL JAVA CRASH [" + new java.util.Date() + "] thread: " + thread.getName() + " ---");
+                    throwable.printStackTrace(pw);
+                    pw.flush();
+                    pw.close();
+                } catch (Exception ignored) {}
+
+                if (defaultHandler != null) {
+                    defaultHandler.uncaughtException(thread, throwable);
+                }
+            }
+        });
+
         registerPlugin(CloudflareBypassPlugin.class);
         super.onCreate(savedInstanceState);
 
