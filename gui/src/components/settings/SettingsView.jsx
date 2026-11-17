@@ -177,6 +177,7 @@ export default function SettingsView({
   const [logDirectory, setLogDirectory] = useState("");
   const [autoSkipIntro, setAutoSkipIntro] = useState(true);
   const [syncingMapping, setSyncingMapping] = useState(null);
+  const [mappingSyncInterval, setMappingSyncInterval] = useState(1);
   const [infoRecCount, setInfoRecCount] = useState(4);
   const [subFontSize, setSubFontSize] = useState(46);
   const [subColor, setSubColor] = useState("#FFFFFF");
@@ -797,6 +798,14 @@ export default function SettingsView({
         setMaxLogFiles(
           s.maxLogFiles !== undefined ? parseInt(s.maxLogFiles, 10) || 5 : 5,
         );
+        {
+          const intervalVal = parseInt(s.mappingSyncIntervalHours, 10);
+          setMappingSyncInterval(
+            Number.isFinite(intervalVal) && intervalVal >= 0
+              ? intervalVal
+              : 1,
+          );
+        }
         setAutoSkipIntro(s.autoSkipIntro);
         {
           const recCountVal = parseInt(s.infoRecCount, 10);
@@ -991,6 +1000,33 @@ export default function SettingsView({
         await window.sharedStateAPI.updateSetting(key, value);
       } else {
         const res = await apiPost("/api/settings/update", { [key]: value });
+        if (res && res.success === false) {
+          throw new Error(res.error || "Save failed");
+        }
+      }
+    } catch (err) {
+      swalError("Error Saving Settings", err.message);
+    }
+  };
+
+  const handleMappingIntervalChange = async (raw) => {
+    const n = parseInt(raw, 10);
+    const clean = Number.isFinite(n) && n >= 0 ? n : 1;
+    setMappingSyncInterval(clean);
+    setSettings((prev) => ({
+      ...(prev || {}),
+      mappingSyncIntervalHours: clean,
+    }));
+    try {
+      if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
+        await window.sharedStateAPI.updateSetting(
+          "mappingSyncIntervalHours",
+          clean,
+        );
+      } else {
+        const res = await apiPost("/api/settings/update", {
+          mappingSyncIntervalHours: clean,
+        });
         if (res && res.success === false) {
           throw new Error(res.error || "Save failed");
         }
@@ -1573,7 +1609,7 @@ export default function SettingsView({
                 </SettingsRow>
                 <SettingsRow
                   label="Anime Mapping Auto-Sync"
-                  desc="Refresh anime title-to-MAL mappings when the app starts, at most once a day. Turn off to keep the current anime mapping data and skip the sync entirely."
+                  desc="Sync anime title-to-MAL mappings when the app starts, skipped when the data is already fresh. Off skips the startup sync only — the background interval below and Sync now still work."
                 >
                   <div
                     style={{ display: "flex", gap: 8, alignItems: "center" }}
@@ -1604,7 +1640,7 @@ export default function SettingsView({
                 </SettingsRow>
                 <SettingsRow
                   label="Manga Mapping Auto-Sync"
-                  desc="Refresh manga title-to-MAL mappings when the app starts, at most once a day. Turn off to keep the current manga mapping data and skip the sync entirely."
+                  desc="Sync manga title-to-MAL mappings when the app starts, skipped when the data is already fresh. Off skips the startup sync only — the background interval below and Sync now still work."
                 >
                   <div
                     style={{ display: "flex", gap: 8, alignItems: "center" }}
@@ -1633,6 +1669,37 @@ export default function SettingsView({
                     </button>
                   </div>
                 </SettingsRow>
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Mapping Sync Interval
+                    </div>
+                    <div className="settings-row-hint">
+                      Hours between automatic background mapping syncs while
+                      the app is running. 0 disables the timer; startup sync
+                      and Sync now still follow the settings above.
+                    </div>
+                  </div>
+                  <div className="settings-row-control u-style-72">
+                    <input
+                      type="number"
+                      min={0}
+                      value={mappingSyncInterval}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value, 10);
+                        setMappingSyncInterval(isNaN(val) ? "" : val);
+                      }}
+                      onBlur={(e) =>
+                        handleMappingIntervalChange(e.target.value)
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                      className="settings-text-input settings-number-input u-style-73"
+                    />
+                    <span className="u-style-74">hours</span>
+                  </div>
+                </div>
               </div>
               {/* MyAnimeList Connection */}
               <div className="settings-section glass-panel">

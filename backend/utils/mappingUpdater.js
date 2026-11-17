@@ -35,28 +35,54 @@ const MAPPING_API_BASE =
 // Remembered here so later requests skip only the broken table.
 const syncFailedTables = new Set();
 
-// The mapping sync runs once at boot. Each side (anime / manga) has its own
-// toggle and freshness stamp: skip it when that side's auto-sync is off in
-// settings, or when its last successful sync is newer than this — a no-op
-// round trip on every launch buys nothing.
-const MAPPING_SYNC_TTL_MS = 24 * 60 * 60 * 1000;
+// Hours between scheduled background syncs (settings key
+// mappingSyncIntervalHours): 0 = timer off, missing/garbage = 1 hour.
+function parseSyncIntervalHours(raw) {
+  if (raw === null || raw === undefined || raw === "") return 1;
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v < 0) return 1;
+  return Math.floor(v);
+}
 
-async function shouldAutoSyncMapping(type = "Anime") {
+async function getSyncIntervalHours() {
+  try {
+    return parseSyncIntervalHours(
+      await getKeyValue("Settings", "mappingSyncIntervalHours"),
+    );
+  } catch (_) {
+    return 1;
+  }
+}
+
+// Freshness window for skipping a sync: the configured interval (a restart
+// right after a run must not sync twice), or a day when the timer is off.
+async function getFreshTtlMs() {
+  const hours = await getSyncIntervalHours();
+  return (hours > 0 ? hours : 24) * 60 * 60 * 1000;
+}
+
+async function shouldAutoSyncMapping(type = "Anime", opts = {}) {
   const isManga = type === "Manga";
   try {
-    const toggle = await getKeyValue(
-      "Settings",
-      isManga ? "mappingAutoSyncManga" : "mappingAutoSyncAnime",
-    );
-    // Pre-split builds stored one combined toggle; honor it until each side
-    // has been set explicitly.
-    const legacy = await getKeyValue("Settings", "mappingAutoSync");
-    if (toggle === false || (toggle === null && legacy === false)) {
-      logger.info(
-        `[mappingUpdater] ${type} auto-sync disabled in settings; skipping.`,
+    // Scheduled (watchdog) runs ignore the startup toggle — the interval
+    // is the only switch for those — and stay quiet, because the watchdog
+    // re-evaluates them every minute.
+    if (!opts.scheduled) {
+      const toggle = await getKeyValue(
+        "Settings",
+        isManga ? "mappingAutoSyncManga" : "mappingAutoSyncAnime",
       );
-      return false;
+      // Pre-split builds stored one combined toggle; honor it until each side
+      // has been set explicitly.
+      const legacy = await getKeyValue("Settings", "mappingAutoSync");
+      if (toggle === false || (toggle === null && legacy === false)) {
+        logger.info(
+          `[mappingUpdater] ${type} auto-sync disabled in settings; skipping.`,
+        );
+        return false;
+      }
     }
+    const ttl = await getFreshTtlMs();
     let last =
       Number(
         await getKeyValue(
@@ -67,10 +93,12 @@ async function shouldAutoSyncMapping(type = "Anime") {
     if (!last) {
       last = Number(await getKeyValue("Settings", "mappingLastSync")) || 0;
     }
-    if (last && Date.now() - last < MAPPING_SYNC_TTL_MS) {
-      logger.info(
-        `[mappingUpdater] ${type} mapping data is fresh; skipping sync.`,
-      );
+    if (last && Date.now() - last < ttl) {
+      if (!opts.scheduled) {
+        logger.info(
+          `[mappingUpdater] ${type} mapping data is fresh; skipping sync.`,
+        );
+      }
       return false;
     }
   } catch (_) {
@@ -645,7 +673,49 @@ async function checkCanaries(osName) {
   } catch (_) {}
 }
 
-async function checkForMappingUpdates(force = false, type = null) {
+// The watchdog wakes once a minute, re-reads the interval setting (so a
+// change — including 0 = off — takes effect within a minute, with no
+// reschedule plumbing in the settings save paths) and runs a scheduled
+// sync once the interval has elapsed since the last attempt. Attempts are
+// tracked in memory: a failed sync retries next interval instead of every
+// minute, and a restart starts clean (the boot sync covers that run).
+let lastMappingSyncAttempt = 0;
+let watchdogTimer = null;
+
+function armMappingWatchdog() {
+  if (watchdogTimer) return;
+  watchdogTimer = setInterval(runMappingWatchdogTick, 60 * 1000);
+  // Never keep the process alive just for the timer.
+  if (typeof watchdogTimer.unref === "function") watchdogTimer.unref();
+}
+
+async function runMappingWatchdogTick() {
+  try {
+    const hours = await getSyncIntervalHours();
+    if (hours === 0) return; // 0 = no scheduled sync
+    if (Date.now() - lastMappingSyncAttempt < hours * 60 * 60 * 1000) return;
+    await checkForMappingUpdates(false, null, { scheduled: true });
+  } catch (e) {
+    logger.error(`[mappingUpdater] Scheduled sync failed: ${e.message}`);
+  }
+}
+
+// Never two syncs at once: a watchdog tick or a manual "Sync now" that
+// lands mid-run joins the in-flight run instead of starting a second one
+// (shortcut: a forced sync during an in-flight run resolves with that run
+// rather than forcing a fresh one — rare, and a sync is happening either way).
+let activeMappingSync = null;
+
+async function checkForMappingUpdates(force = false, type = null, opts = {}) {
+  armMappingWatchdog();
+  if (activeMappingSync) return activeMappingSync;
+  activeMappingSync = runMappingSyncCheck(force, type, opts).finally(() => {
+    activeMappingSync = null;
+  });
+  return activeMappingSync;
+}
+
+async function runMappingSyncCheck(force, type, opts) {
   const scope =
     type === "Anime"
       ? ["Anime"]
@@ -654,9 +724,12 @@ async function checkForMappingUpdates(force = false, type = null) {
         : ["Anime", "Manga"];
   const enabled = [];
   for (const t of scope) {
-    if (force || (await shouldAutoSyncMapping(t))) enabled.push(t);
+    if (force || (await shouldAutoSyncMapping(t, opts))) enabled.push(t);
   }
   if (enabled.length === 0) return;
+  // Any run that actually starts anchors the next scheduled run: the
+  // watchdog will not fire another one for a full interval.
+  lastMappingSyncAttempt = Date.now();
   const syncAnime = enabled.includes("Anime");
   const syncManga = enabled.includes("Manga");
   logger.info(
@@ -1471,6 +1544,7 @@ async function syncLibraryIdsWithMapping() {
 
 module.exports = {
   checkForMappingUpdates,
+  parseSyncIntervalHours,
   applyDeltaUpdates,
   syncExtensionMapping,
   cleanupExtensionMapping,

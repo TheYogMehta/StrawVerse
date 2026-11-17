@@ -1,5 +1,14 @@
 # Changelog
 
+# [12.0.5] - 2026-11-17
+
+### Mapping Sync Timer
+
+- **Hourly Background Sync:** The mapping database (anime, manga and every provider table) now refreshes automatically while the app is running instead of only once at launch. The cadence is configurable in Settings → Mapping Sync Interval: `0` disables the timer, `1, 2, 3…` set the hours between syncs, and changes apply within a minute.
+- **Startup Toggle Scope:** The Anime/Manga Mapping Auto-Sync dropdowns now only control whether a sync runs at startup (skipped anyway when the data is already fresher than the interval); "Sync now" still forces an immediate sync.
+- **No Duplicate Syncs or Rows:** Only one mapping sync can run at a time (startup, timer and manual runs coalesce), a failed run backs off by the full interval instead of retrying every minute, and every mapping table keeps its primary key with `INSERT OR REPLACE`, so repeated syncs can never duplicate anime, manga or provider rows.
+- Version bump to 12.0.5 (versionCode 29).
+
 # [12.0.2] - 2026-11-16
 
 ### Mapping Poison Fixes
