@@ -4130,7 +4130,7 @@ export default function InfoView({
               <div className="section-header">
                 <h2>Seasons</h2>
               </div>
-              <div className="extras-grid">
+              <div className="extras-grid extras-row">
                 {extras.seasons.map((season) => (
                   <button
                     key={season.id}
