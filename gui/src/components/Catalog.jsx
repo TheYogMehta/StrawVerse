@@ -2498,7 +2498,8 @@ export default function Catalog({
       loadedPageStart: loadedPageStart || 1,
       loadedPageEnd: loadedPageEnd || currentPage,
       scrollPosition: currentScroll,
-      lastActivePage: currentPage,
+      // no lastActivePage here: keep handleScroll's computed value —
+      // currentPage stays 1 under infinite scroll and would send restore to page 1
     };
     onSelectMedia(id, prov, backText, autoPlay, targetNum, targetSeason);
   };
