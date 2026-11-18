@@ -8,6 +8,8 @@ const {
   getEpisodeNumberFromFilename,
   mediaServerFileBase,
   hasLocalMediaFiles,
+  formatMovieFilename,
+  formatEpisodeFilename,
 } = require("./constants");
 
 test("episode number from both naming schemes", () => {
@@ -59,4 +61,107 @@ test("show folder holding only season folders is not empty", () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("single movie naming conversion and formatting", () => {
+  // Single movie formats to clean title with default and title_only
+  assert.strictEqual(
+    formatMovieFilename({ title: "Inception", isSingleMovie: true }),
+    "Inception.mp4",
+  );
+  assert.strictEqual(
+    formatMovieFilename({
+      title: "Inception",
+      isSingleMovie: true,
+      namingScheme: "title_only",
+    }),
+    "Inception.mp4",
+  );
+
+  // Single movie with plex_jellyfin naming includes year and quality if provided
+  assert.strictEqual(
+    formatMovieFilename({
+      title: "Inception",
+      isSingleMovie: true,
+      namingScheme: "plex_jellyfin",
+      quality: "1080p",
+      year: "2010",
+    }),
+    "Inception (2010) [1080p].mp4",
+  );
+  assert.strictEqual(
+    formatMovieFilename({
+      title: "Inception",
+      isSingleMovie: true,
+      namingScheme: "plex_jellyfin",
+      quality: "1080p",
+    }),
+    "Inception [1080p].mp4",
+  );
+
+  // Series under Movies & Series formats with season and episode numbers
+  assert.strictEqual(
+    formatMovieFilename({
+      title: "Breaking Bad",
+      isSingleMovie: false,
+      epNum: 1,
+      season: 1,
+      namingScheme: "default",
+    }),
+    "Breaking Bad - 01.mp4",
+  );
+  assert.strictEqual(
+    formatMovieFilename({
+      title: "Breaking Bad",
+      isSingleMovie: false,
+      epNum: 1,
+      season: 1,
+      namingScheme: "title_s01e01",
+    }),
+    "Breaking Bad - S01E01.mp4",
+  );
+  assert.strictEqual(
+    formatMovieFilename({
+      title: "Breaking Bad",
+      isSingleMovie: false,
+      epNum: 2,
+      season: 1,
+      namingScheme: "title_ep",
+    }),
+    "Breaking Bad - Episode 2.mp4",
+  );
+
+  // formatEpisodeFilename delegates appropriately for movies
+  assert.strictEqual(
+    formatEpisodeFilename({
+      title: "Spirited Away",
+      isSingleMovie: true,
+      namingScheme: "default",
+    }),
+    "Spirited Away.mp4",
+  );
+
+  // mediaServerFileBase supports single movies
+  assert.strictEqual(
+    mediaServerFileBase(
+      path.join("dl", "MoviesSeries", "Inception"),
+      1,
+      "1080p",
+      true,
+      "Inception",
+      "2010",
+    ),
+    "Inception (2010) [1080p]",
+  );
+});
+
+test("movie filenames do not false-positive as episode numbers", () => {
+  assert.strictEqual(getEpisodeNumberFromFilename("Inception.mp4"), null);
+  assert.strictEqual(getEpisodeNumberFromFilename("Inception (2010).mp4"), null);
+  assert.strictEqual(
+    getEpisodeNumberFromFilename("Inception (2010) [1080p].mp4"),
+    null,
+  );
+  assert.strictEqual(getEpisodeNumberFromFilename("Inception [1080p].mp4"), null);
+  assert.strictEqual(getEpisodeNumberFromFilename("Fight Club (1999).mkv"), null);
 });

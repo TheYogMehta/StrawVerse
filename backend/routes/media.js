@@ -1179,9 +1179,9 @@ async function enrichResultsWithDownloads(results, AnimeManga) {
       try {
         const files = await fs.promises.readdir(fPath, { withFileTypes: true });
         let eps = [];
-        if (isAnime) {
+        if (isAnime || isMovies) {
           eps = files
-            .filter((f) => f.isFile())
+            .filter((f) => f.isFile() && isVideoFile(f.name))
             .map((f) => getEpisodeNumberFromFilename(f.name))
             .filter((n) => n !== null && !isNaN(n));
 
@@ -1211,6 +1211,19 @@ async function enrichResultsWithDownloads(results, AnimeManga) {
                 }
               }
             } catch (_) {}
+          }
+          if (
+            isMovies &&
+            eps.length === 0 &&
+            files.some(
+              (f) =>
+                f.isFile() &&
+                isVideoFile(f.name) &&
+                !f.name.startsWith(".") &&
+                !f.name.includes(".temp"),
+            )
+          ) {
+            eps.push(1);
           }
           eps = Array.from(new Set(eps));
         } else {
@@ -4240,6 +4253,19 @@ router.post(
                   }
                 }
               } catch (_) {}
+            }
+
+            if (
+              scanned.length === 0 &&
+              filesAndFolders.some(
+                (f) =>
+                  f.isFile() &&
+                  isVideoFile(f.name) &&
+                  !f.name.startsWith(".") &&
+                  !f.name.includes(".temp"),
+              )
+            ) {
+              scanned.push(1);
             }
 
             if (scanned.length > 0) {

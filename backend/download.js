@@ -558,6 +558,47 @@ async function downloadMovieSingle(
       // ignore
     }
 
+    // Determine whether this download represents a single movie or a series episode
+    let isSingleMovie = false;
+    const isTvEpisodeId =
+      /tv:[^:]+:(\d+):\d+/i.test(String(episodeid)) ||
+      /[Ss]\d+[Ee]\d+/i.test(String(episodeid));
+
+    if (
+      !isTvEpisodeId &&
+      (resolvedSeason === null ||
+        resolvedSeason === undefined ||
+        Number(resolvedSeason) === 1)
+    ) {
+      const num = parseFloat(number);
+      if (isNaN(num) || num === 1) {
+        try {
+          const row = await queryOne(
+            "SELECT type, episodes_json FROM Movies WHERE id = ?",
+            [movieid],
+          );
+          if (!row || !row.type || String(row.type).toLowerCase() === "movie") {
+            if (!row?.episodes_json) {
+              isSingleMovie = true;
+            } else {
+              try {
+                const counts = JSON.parse(row.episodes_json);
+                const totalEps = Object.values(counts).reduce(
+                  (a, b) => a + Number(b),
+                  0,
+                );
+                if (totalEps <= 1) isSingleMovie = true;
+              } catch (_) {
+                isSingleMovie = true;
+              }
+            }
+          }
+        } catch (_) {
+          isSingleMovie = true;
+        }
+      }
+    }
+
     const queueItem = {
       Type: "Movies",
       EpNum: number,
@@ -565,7 +606,8 @@ async function downloadMovieSingle(
       Title: Title,
       SubDub: resolvedSubDub,
       malid: null,
-      season: resolvedSeason,
+      season: isSingleMovie ? null : resolvedSeason,
+      isSingleMovie: isSingleMovie,
       config: {
         Animeprovider: Moviesprovider?.provider_name,
         Moviesprovider: Moviesprovider?.provider_name,
@@ -576,6 +618,8 @@ async function downloadMovieSingle(
         CustomDownloadLocationMovies: config?.CustomDownloadLocationMovies,
         jellyfinCompatibility: config?.jellyfinCompatibility,
         animeNamingScheme: config?.animeNamingScheme || "default",
+        moviesNamingScheme: config?.moviesNamingScheme || "default",
+        isSingleMovie: isSingleMovie,
       },
       epid: episodeid,
       totalSegments: 0,
@@ -866,14 +910,34 @@ async function cleanupEmptyDownloadFolder(folderPath, type, id) {
             } catch (_) {}
           }
           try {
-            const dbRecord = await queryOne(
-              `SELECT MalID FROM ${type} WHERE id = ?`,
-              [id],
-            );
-            if (!dbRecord || !dbRecord.MalID) {
-              await run(`DELETE FROM ${type} WHERE id = ?`, [id]);
-              logger.info(`Cleaned up DB entry for ${type}: ${id}`);
-              await removeIdFromCustomOrders(id);
+            if (type === "Movies") {
+              const hasHistory = await queryOne(
+                "SELECT id FROM SeriesMovieWatchHistory WHERE movie_id = ? LIMIT 1",
+                [id],
+              );
+              const movieRec = await queryOne(
+                "SELECT CustomTag FROM Movies WHERE id = ?",
+                [id],
+              );
+              const hasTag =
+                movieRec?.CustomTag &&
+                movieRec.CustomTag !== "[]" &&
+                movieRec.CustomTag !== "";
+              if (!hasHistory && !hasTag) {
+                await run("DELETE FROM Movies WHERE id = ?", [id]);
+                logger.info(`Cleaned up DB entry for Movies: ${id}`);
+                await removeIdFromCustomOrders(id);
+              }
+            } else {
+              const dbRecord = await queryOne(
+                `SELECT MalID FROM ${type} WHERE id = ?`,
+                [id],
+              );
+              if (!dbRecord || !dbRecord.MalID) {
+                await run(`DELETE FROM ${type} WHERE id = ?`, [id]);
+                logger.info(`Cleaned up DB entry for ${type}: ${id}`);
+                await removeIdFromCustomOrders(id);
+              }
             }
           } catch (_) {}
         }

@@ -30,6 +30,8 @@ const {
 const {
   sortSourcesByPreferredQuality,
   mediaServerFileBase,
+  formatMovieFilename,
+  formatEpisodeFilename,
   formatChapterFilename,
   isAndroid,
 } = require("./constants");
@@ -655,7 +657,12 @@ async function continuousExecution() {
             } = currentTask;
             if (config && Title && EpNum && epid && SubDub) {
               await downloadep(
-                { ...config, Type, season: currentTask.season },
+                {
+                  ...config,
+                  Type,
+                  season: currentTask.season,
+                  isSingleMovie: currentTask.isSingleMovie,
+                },
                 Title,
                 EpNum,
                 epid,
@@ -908,7 +915,21 @@ async function downloadep(
         Videoconfig?.CustomDownloadLocationAnime) ||
     Videoconfig?.CustomDownloadLocation;
 
-  if (liveSettings.mediaServerNaming === true) {
+  const isSingleMovie =
+    Boolean(Videoconfig?.isSingleMovie) ||
+    (isMovie &&
+      (Videoconfig?.season === null ||
+        Videoconfig?.season === undefined ||
+        Number(Videoconfig?.season) === 1) &&
+      (EpNum === null ||
+        EpNum === undefined ||
+        Number(EpNum) === 1 ||
+        String(EpNum).toLowerCase() === "movie" ||
+        String(EpNum).toLowerCase() === "full movie") &&
+      !String(AnimeEpId).match(/tv:[^:]+:(\d+):\d+/i) &&
+      !String(AnimeEpId).match(/[Ss]\d+[Ee]\d+/i));
+
+  if (liveSettings.mediaServerNaming === true && !isSingleMovie) {
     // Season and show folder picked on the show's page (default: S1, title)
     const show = liveSettings.mediaServerShows?.[String(animeId)] || {};
     const taskSeason =
@@ -955,8 +976,11 @@ async function downloadep(
         ? Videoconfig.season
         : null;
     const seasonPrefix =
-      taskSeason !== undefined && taskSeason !== null ? `S${taskSeason} ` : "";
-    const initialCaption = `Resolving ${seasonPrefix}EP ${cleanEp} ${Title}${qualStr}...`;
+      taskSeason !== undefined && taskSeason !== null && !isSingleMovie
+        ? `S${taskSeason} `
+        : "";
+    const epPrefix = isSingleMovie ? "Movie" : `EP ${cleanEp}`;
+    const initialCaption = `Resolving ${seasonPrefix}${epPrefix} ${Title}${qualStr}...`;
     await updateQueue(AnimeEpId, 0, 0, initialCaption);
     global.sendToRenderer("request-battery-optimization", {});
     global.sendToRenderer("download-logger", {
@@ -1477,6 +1501,68 @@ async function downloadEpisodeByQuality(
       });
     }
 
+    const isSingleMovie =
+      Boolean(config?.isSingleMovie) ||
+      (isMovie &&
+        (config?.season === null ||
+          config?.season === undefined ||
+          Number(config?.season) === 1) &&
+        (episodeNumber === null ||
+          episodeNumber === undefined ||
+          Number(episodeNumber) === 1 ||
+          String(episodeNumber).toLowerCase() === "movie" ||
+          String(episodeNumber).toLowerCase() === "full movie") &&
+        !String(epid).match(/tv:[^:]+:(\d+):\d+/i) &&
+        !String(epid).match(/[Ss]\d+[Ee]\d+/i));
+
+    const movieScheme =
+      currentSettings?.moviesNamingScheme ||
+      config?.moviesNamingScheme ||
+      "default";
+    let fileBase = null;
+
+    if (isMovie) {
+      let movieYear = null;
+      try {
+        const row = await queryOne(
+          "SELECT aired FROM Movies WHERE id = ? OR title = ? LIMIT 1",
+          [animeId || epid, Title],
+        );
+        if (row && row.aired) {
+          const yMatch = String(row.aired).match(/\b(19\d\d|20\d\d)\b/);
+          if (yMatch) movieYear = yMatch[1];
+        }
+      } catch (_) {}
+
+      fileBase = formatMovieFilename({
+        title: Title,
+        epNum: episodeNumber,
+        season: config?.season || 1,
+        namingScheme:
+          currentSettings.mediaServerNaming === true
+            ? "plex_jellyfin"
+            : movieScheme,
+        quality:
+          currentSettings.mediaServerNaming === true ? dlQuality : null,
+        year: movieYear,
+        isSingleMovie,
+        ext: "",
+      });
+    } else if (currentSettings.mediaServerNaming === true) {
+      fileBase = mediaServerFileBase(directoryName, episodeNumber, dlQuality);
+    } else if (
+      currentSettings.animeNamingScheme &&
+      currentSettings.animeNamingScheme !== "default"
+    ) {
+      fileBase = formatEpisodeFilename({
+        title: Title,
+        epNum: episodeNumber,
+        season: config?.season || 1,
+        namingScheme: currentSettings.animeNamingScheme,
+        ext: "",
+      });
+    }
+
     await downloadVideo(
       selectedSource.url,
       directoryName,
@@ -1493,13 +1579,12 @@ async function downloadEpisodeByQuality(
       (config?.subtitleFormat ?? "vtt") === "srt",
       selectedSource.headers ?? {},
       selectedSource.isM3U8,
-      currentSettings.mediaServerNaming === true
-        ? mediaServerFileBase(directoryName, episodeNumber, dlQuality)
-        : null,
+      fileBase,
       config?.season,
       config?.permissiveMode
         ? "0"
         : currentSettings.minDownloadSpeed || "300 KB/s",
+      isSingleMovie,
     );
     hostSkipByEpid.delete(epid);
     run("DELETE FROM Settings WHERE key = ?", [
@@ -1583,6 +1668,7 @@ async function downloadVideo(
   fileBase = null,
   season = null,
   minDownloadSpeed = null,
+  isSingleMovie = false,
 ) {
   try {
     const qualStr = quality ? ` ( ${quality} )` : "";
@@ -1593,14 +1679,19 @@ async function downloadVideo(
         ? String(Number(episodeNumber))
         : episodeNumber;
     const seasonPrefix =
-      season !== undefined && season !== null ? `S${season} ` : "";
+      season !== undefined && season !== null && !isSingleMovie
+        ? `S${season} `
+        : "";
+    const epPrefix = isSingleMovie ? "Movie" : `EP ${cleanEp}`;
 
     await download({
       directory: directoryPath,
       Epnum: episodeNumber,
       streamUrl: Url,
       quality: quality,
-      caption: `Downloading ${seasonPrefix}EP ${cleanEp} ${Title}${qualStr}`,
+      caption: isSingleMovie
+        ? `Downloading Movie ${Title}${qualStr}`
+        : `Downloading ${seasonPrefix}${epPrefix} ${Title}${qualStr}`,
       EpID: epid,
       subtitles: subtitles,
       MergeSubtitles: MergeSubtitles,

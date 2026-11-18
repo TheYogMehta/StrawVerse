@@ -2600,7 +2600,12 @@ export default function InfoView({
               ? singleItem.season
               : selectedSeason !== "all"
                 ? Number(selectedSeason)
-                : 1,
+                : type === "Movies" &&
+                    (details?.type === "Movie" ||
+                      (!availableSeasons.length &&
+                        episodesOrChapters.length <= 1))
+                  ? null
+                  : 1,
         };
       } else {
         const itemsToDownload = [];

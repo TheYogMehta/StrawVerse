@@ -2742,24 +2742,27 @@ export default function SettingsView({
 
                 <SettingsRow
                   label="Video Download Naming Scheme"
-                  desc="Naming scheme for downloaded movie and series video files."
+                  desc="Naming scheme for downloaded movie and series video files. Single movies are saved as Title.mp4 (or Title (Year) with Plex/Jellyfin)."
                 >
                   <Dropdown
                     value={moviesNamingScheme}
                     onChange={setMoviesNamingScheme}
                     options={[
-                      { value: "default", label: "Default (Title - 01.mp4)" },
+                      {
+                        value: "default",
+                        label: "Default (Title.mp4 / Title - 01.mp4)",
+                      },
                       {
                         value: "title_s01e01",
-                        label: "Plex / Jellyfin (Title - S01E01.mp4)",
+                        label: "Plex / Jellyfin (Title.mp4 / Title - S01E01.mp4)",
                       },
                       {
                         value: "title_ep",
-                        label: "Standard (Title - Episode 1.mp4)",
+                        label: "Standard (Title.mp4 / Title - Episode 1.mp4)",
                       },
                       {
                         value: "title_only",
-                        label: "Movie Only (Title.mp4)",
+                        label: "Title Only (Title.mp4)",
                       },
                     ]}
                     minWidth={240}

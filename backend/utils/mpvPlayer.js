@@ -651,6 +651,9 @@ async function playInMpv(window, options) {
             logger.warn(
               `[MPV] Ignoring local file for Ep ${episode} because size is too small (${fStat.size} bytes): ${localData.filepath}`,
             );
+            try {
+              fs.unlinkSync(localData.filepath);
+            } catch (_) {}
             return false;
           }
         } catch (_) {}

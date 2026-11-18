@@ -134,15 +134,19 @@ async function getInitialDomainConcurrency(domain, defaultInitial = 4) {
 
   try {
     const row = await queryOne(
-      "SELECT current_concurrency, max_concurrency, failed_requests FROM DomainConcurrency WHERE domain = ? LIMIT 1",
+      "SELECT current_concurrency, max_concurrency, failed_requests, updated_at FROM DomainConcurrency WHERE domain = ? LIMIT 1",
       [domain],
     );
     if (row && row.failed_requests > 0 && row.current_concurrency) {
       // Floor restored caps at 4 so one old throttled session doesn't pin
       // future downloads to 1-2 threads forever; the adaptive loop still
       // backs off fast on real 429s/cooling-down.
-      const restored = Math.max(4, Number(row.current_concurrency));
-      domainMaxCap[domain] = restored;
+      // If the record is older than 30 minutes, ignore stale penalty.
+      const ageMs = Date.now() - (Number(row.updated_at) || 0);
+      if (ageMs < 30 * 60 * 1000) {
+        const restored = Math.max(4, Number(row.current_concurrency));
+        domainMaxCap[domain] = restored;
+      }
     }
   } catch (e) {}
 
@@ -173,7 +177,7 @@ function setDomainErrorCap(domain, failedAtConcurrency) {
   delete throughputCache[domain];
   if (shouldLog) {
     logger.warn(
-      `[DomainConcurrency] 404/Rate-limit hit! Setting max speed limit for '${domain}' to ${domainMaxCap[domain]} (failed at ${failedAtConcurrency})`,
+      `[DomainConcurrency] Concurrency backoff on error for '${domain}' to ${domainMaxCap[domain]} (failed at ${failedAtConcurrency})`,
     );
   }
   try {
@@ -228,7 +232,7 @@ function setRecoveryCap(domain) {
   delete throughputCache[domain];
 
   logger.warn(
-    `[DomainConcurrency] 404/Rate-limit hit! Setting max speed limit for '${domain}' to ${newCap}`,
+    `[DomainConcurrency] Concurrency backoff hit. Setting max speed limit for '${domain}' to ${newCap}`,
   );
 
   try {
@@ -268,7 +272,7 @@ function recordDomainFailure(domain, currentVal, _statusCode = null) {
 
   if (shouldLog) {
     logger.warn(
-      `[DomainConcurrency] 404/Rate-limit hit! Setting max speed limit for '${domain}' to ${newConcurrency}`,
+      `[DomainConcurrency] Concurrency backoff hit. Setting max speed limit for '${domain}' to ${newConcurrency}`,
     );
   }
 

@@ -381,6 +381,7 @@ async function SettingsLoad() {
             jellyfinCompatibility: false,
             animeNamingScheme: "default",
             mangaNamingScheme: "default",
+            moviesNamingScheme: "default",
             minDownloadSpeed: "300 KB/s",
           };
 
@@ -453,6 +454,10 @@ async function SettingsLoad() {
 
     if (config && !config.hasOwnProperty("mangaNamingScheme")) {
       config.mangaNamingScheme = "default";
+    }
+
+    if (config && !config.hasOwnProperty("moviesNamingScheme")) {
+      config.moviesNamingScheme = "default";
     }
 
     if (config && !config.hasOwnProperty("minDownloadSpeed")) {

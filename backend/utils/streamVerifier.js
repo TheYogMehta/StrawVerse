@@ -34,6 +34,39 @@ async function verifyStreamReachability(
       };
     }
 
+    const contentType = (
+      probeRes.headers?.["content-type"] || ""
+    ).toLowerCase();
+    const dataStr = typeof probeRes.data === "string" ? probeRes.data : "";
+
+    const isHtml =
+      contentType.includes("text/html") ||
+      dataStr.includes("<html") ||
+      dataStr.includes("<!DOCTYPE");
+
+    if (isHtml) {
+      return {
+        ok: false,
+        status: probeRes.status,
+        isProtected: false,
+        message: "Stream URL returned HTML page instead of media",
+      };
+    }
+
+    if (isDirect) {
+      if (
+        contentType.includes("application/json") ||
+        (dataStr && dataStr.trim().startsWith("{"))
+      ) {
+        return {
+          ok: false,
+          status: probeRes.status,
+          isProtected: false,
+          message: "Direct video URL returned JSON error response",
+        };
+      }
+    }
+
     if (
       typeof probeRes.data === "string" &&
       probeRes.data.includes("#EXTM3U")

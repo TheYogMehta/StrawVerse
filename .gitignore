@@ -41,3 +41,9 @@ app.log
 image_cache/
 graphify-out/
 .agents/
+*.log
+*.tar.gz
+*.pkg
+*.dmg
+*.deb
+*.snap
