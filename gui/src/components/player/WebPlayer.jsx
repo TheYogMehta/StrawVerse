@@ -101,6 +101,9 @@ import {
   PictureInPicture,
   AlertTriangle,
   Check,
+  Tv,
+  RefreshCw,
+  X,
 } from "lucide-react";
 import "../css/VideoPlayer.css";
 
@@ -263,6 +266,143 @@ export default function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
 
+  // Cast state
+  const [showCastModal, setShowCastModal] = useState(false);
+  const [castDevices, setCastDevices] = useState([]);
+  const [isScanningCast, setIsScanningCast] = useState(false);
+  const [isCasting, setIsCasting] = useState(false);
+  const [activeCastDevice, setActiveCastDevice] = useState(null);
+  const [castConnecting, setCastConnecting] = useState(false);
+
+  const scanCastDevices = async (timeout = 3500) => {
+    setIsScanningCast(true);
+    try {
+      const res = await fetch(`/api/cast/devices?timeout=${timeout}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.devices)) {
+        setCastDevices(data.devices);
+      }
+    } catch (e) {
+      console.error("[WebPlayer] Error scanning cast devices:", e);
+    } finally {
+      setIsScanningCast(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showCastModal) {
+      scanCastDevices(3000);
+    }
+  }, [showCastModal]);
+
+  const handleStartCast = async (device) => {
+    setCastConnecting(true);
+    try {
+      const currentPos = videoRef.current ? videoRef.current.currentTime : currentTime;
+      const payload = {
+        deviceId: device.id,
+        title: animeTitle || (type === "Movies" ? "Movie Stream" : "Anime Stream"),
+        position: currentPos || 0,
+        poster: image || "",
+      };
+
+      if (isCurrentDownloaded && selectedSource?.url) {
+        if (selectedSource.url.startsWith("/video?path=")) {
+          payload.filePath = decodeURIComponent(selectedSource.url.replace("/video?path=", ""));
+        } else {
+          payload.filePath = selectedSource.url;
+        }
+      } else {
+        payload.url = typeof selectedSource?.url === "string" ? selectedSource.url : sourceUrl;
+        payload.headers = selectedSource?.headers || {};
+      }
+
+      const res = await fetch("/api/cast/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        videoRef.current?.pause();
+        setIsPlaying(false);
+        setIsCasting(true);
+        setActiveCastDevice(device);
+        setShowCastModal(false);
+      } else {
+        alert("Failed to start casting: " + (data.error || "Unknown error"));
+      }
+    } catch (err) {
+      console.error("[WebPlayer] Error starting cast:", err);
+      alert("Error starting cast: " + err.message);
+    } finally {
+      setCastConnecting(false);
+    }
+  };
+
+  const handleStopCast = async () => {
+    try {
+      await fetch("/api/cast/stop", { method: "POST" });
+    } catch (_) {}
+    setIsCasting(false);
+    setActiveCastDevice(null);
+    if (videoRef.current) {
+      videoRef.current.currentTime = currentTime;
+      videoRef.current.play().catch(() => {});
+      setIsPlaying(true);
+    }
+  };
+
+  const handleCastPlayPause = async () => {
+    if (isPlaying) {
+      await fetch("/api/cast/pause", { method: "POST" }).catch(() => {});
+      setIsPlaying(false);
+    } else {
+      await fetch("/api/cast/play", { method: "POST" }).catch(() => {});
+      setIsPlaying(true);
+    }
+  };
+
+  const handleCastSeek = async (newTime) => {
+    setCurrentTime(newTime);
+    if (timelineRef.current) {
+      timelineRef.current.value = newTime;
+    }
+    try {
+      await fetch("/api/cast/seek", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: newTime }),
+      });
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    if (!isCasting) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/cast/status");
+        const status = await res.json();
+        if (status.isCasting && status.media) {
+          if (typeof status.media.position === "number") {
+            setCurrentTime(status.media.position);
+            if (timelineRef.current) {
+              timelineRef.current.value = status.media.position;
+            }
+          }
+          if (typeof status.media.duration === "number" && status.media.duration > 0) {
+            setDuration(status.media.duration);
+          }
+          setIsPlaying(status.media.state === "PLAYING");
+        } else if (!status.isCasting) {
+          setIsCasting(false);
+          setActiveCastDevice(null);
+        }
+      } catch (_) {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [isCasting]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (video) {
@@ -387,6 +527,10 @@ export default function VideoPlayer({
   };
 
   const togglePlay = () => {
+    if (isCasting) {
+      handleCastPlayPause();
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -427,6 +571,10 @@ export default function VideoPlayer({
     const val = parseFloat(e.target.value);
     currentTimeRef.current = val;
     setCurrentTime(val);
+    if (isCasting) {
+      handleCastSeek(val);
+      return;
+    }
     if (videoRef.current) {
       videoRef.current.currentTime = val;
     }
@@ -1736,9 +1884,24 @@ export default function VideoPlayer({
             </video>
 
             {/* Custom Big Play Button Overlay */}
-            {!isPlaying && !loading && !errorMsg && (
+            {!isPlaying && !loading && !errorMsg && !isCasting && (
               <div className="player-big-play-btn" onClick={togglePlay}>
                 <Play size={28} fill="#fff" color="#fff" />
+              </div>
+            )}
+
+            {/* Casting Active Overlay */}
+            {isCasting && (
+              <div className="player-casting-overlay">
+                <Tv size={56} className="casting-icon-pulse" />
+                <h3>Casting to {activeCastDevice?.name || "TV"}</h3>
+                <p>{animeTitle || "StrawVerse Stream"}</p>
+                <span className="casting-status-badge">
+                  {isPlaying ? "Playing on TV" : "Paused on TV"}
+                </span>
+                <button onClick={handleStopCast} className="stop-cast-btn">
+                  <X size={15} /> Disconnect
+                </button>
               </div>
             )}
 
@@ -1936,6 +2099,20 @@ export default function VideoPlayer({
                     )}
                   </div>
 
+                  {/* Cast to TV Button */}
+                  <button
+                    onClick={() => setShowCastModal(true)}
+                    className={`player-control-btn ${isCasting ? "active" : ""}`}
+                    aria-label="Cast to TV"
+                    title={
+                      isCasting
+                        ? `Casting to ${activeCastDevice?.name || "TV"}`
+                        : "Cast to TV"
+                    }
+                  >
+                    <Tv size={16} style={isCasting ? { color: "#3b82f6" } : {}} />
+                  </button>
+
                   {/* Picture-in-Picture Button */}
                   {pipSupported && (
                     <button
@@ -2009,6 +2186,127 @@ export default function VideoPlayer({
           </div>
         )}
       </div>
+
+      {/* Cast to TV Selection Modal */}
+      {showCastModal && (
+        <div
+          className="player-cast-modal-backdrop"
+          onClick={() => setShowCastModal(false)}
+        >
+          <div
+            className="player-cast-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="player-cast-header">
+              <div className="player-cast-title">
+                <Tv size={18} className="player-cast-header-icon" />
+                <span>Cast to TV Device</span>
+              </div>
+              <div className="player-cast-header-actions">
+                <button
+                  onClick={() => scanCastDevices()}
+                  disabled={isScanningCast}
+                  className="player-cast-btn-icon"
+                  title="Rescan for devices"
+                >
+                  <RefreshCw
+                    size={15}
+                    className={isScanningCast ? "spin" : ""}
+                  />
+                </button>
+                <button
+                  onClick={() => setShowCastModal(false)}
+                  className="player-cast-btn-icon"
+                  title="Close"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            </div>
+
+            <div className="player-cast-body">
+              {isScanningCast && castDevices.length === 0 ? (
+                <div className="player-cast-loading">
+                  <div className="player-cast-spinner" />
+                  <p>Searching for TVs on Wi-Fi...</p>
+                  <span>
+                    Scanning for Samsung Tizen, LG webOS, Sony, Roku, and DLNA devices
+                  </span>
+                </div>
+              ) : castDevices.length === 0 ? (
+                <div className="player-cast-empty">
+                  <Tv size={42} opacity={0.4} />
+                  <p>No TV devices detected on Wi-Fi</p>
+                  <span>
+                    Make sure your TV and this device are connected to the same Wi-Fi network with DLNA / casting enabled.
+                  </span>
+                  <button
+                    onClick={() => scanCastDevices()}
+                    className="player-cast-rescan-btn"
+                  >
+                    <RefreshCw size={13} /> Scan Again
+                  </button>
+                </div>
+              ) : (
+                <div className="player-cast-list">
+                  <div className="player-cast-list-header">
+                    <span>Available Devices ({castDevices.length})</span>
+                    {isScanningCast && (
+                      <span className="scanning-tag">Scanning...</span>
+                    )}
+                  </div>
+                  {castDevices.map((device) => {
+                    const isCurrent =
+                      activeCastDevice?.id === device.id && isCasting;
+                    return (
+                      <div
+                        key={device.id}
+                        className={`player-cast-item ${isCurrent ? "active" : ""}`}
+                      >
+                        <div className="player-cast-item-icon">
+                          <Tv size={22} />
+                        </div>
+                        <div className="player-cast-item-info">
+                          <div className="player-cast-item-name">
+                            {device.name}
+                          </div>
+                          <div className="player-cast-item-details">
+                            {device.manufacturer !== "Unknown"
+                              ? device.manufacturer
+                              : "Smart TV"}
+                            {device.model ? ` • ${device.model}` : ""}
+                            <span className="player-cast-badge">
+                              {device.type.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="player-cast-item-action">
+                          {isCurrent ? (
+                            <button
+                              onClick={handleStopCast}
+                              className="player-cast-disconnect-btn"
+                            >
+                              Disconnect
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleStartCast(device)}
+                              disabled={castConnecting}
+                              className="player-cast-connect-btn"
+                            >
+                              {castConnecting ? "Connecting..." : "Cast"}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

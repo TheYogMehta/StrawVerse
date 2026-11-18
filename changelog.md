@@ -1,5 +1,17 @@
 # Changelog
 
+# [12.0.3] - 2026-11-18
+
+### Universal Smart TV & DLNA / UPnP Casting
+
+- **Cast to Any Smart TV:** Added native support to cast streaming video directly to any TV connected to the same Wi-Fi / local network. Supports Samsung Tizen TVs, LG webOS TVs, Sony Bravia, Roku TVs, Hisense, Philips, Panasonic, Chromecast / Android TV, and all DLNA/UPnP MediaRenderer devices.
+- **SSDP Auto-Discovery Engine:** Implemented a multi-interface SSDP UDP multicast discovery engine that automatically discovers network TV devices across all active physical network interfaces.
+- **LAN Media Proxy & Anti-Scraper Header Bypass:** Resolved the limitation where Smart TVs reject CDN video streams due to missing `Referer`, `Origin`, or `User-Agent` headers. The integrated proxy (`/api/cast/stream` and `/api/cast/segment`) proxies chunks upstream with all provider headers, dynamically rewrites HLS playlists (`.m3u8`), and supports byte-range streaming for local files.
+- **Android Native Player Remote Controls:** Added a dedicated Cast button to `PlayerActivity`, a Wi-Fi device discovery picker, a full-screen cast overlay with dark-mode styling, play/pause controls, +/-10s seek buttons, and a disconnect button.
+- **Unified Web Player Casting:** Added a Cast button, device selection modal, active casting overlay, and full remote control synchronization to `WebPlayer.jsx`.
+- **Playback Synchronization & Audio Guarding:** Local video players automatically pause when casting begins to prevent dual audio/video playback, and sync playback states (play, pause, seek, stop) in real time via background polling.
+- **Capacitor LAN Binding:** Configured the internal Express server in the Android runtime to listen on `0.0.0.0:9545`, allowing TVs on the local subnet to pull proxied media streams directly from the mobile device.
+
 # [12.0.2] - 2026-11-16
 
 ### Anime Format & Category Routing Fixes

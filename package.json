@@ -1,6 +1,6 @@
 {
   "name": "strawverse-root",
-  "version": "12.0.2",
+  "version": "12.0.3",
   "private": true,
   "description": "StrawVerse - Download anime & manga in batches, unified across Desktop & Android",
   "scripts": {
@@ -16,8 +16,8 @@
     "build:android": "npm run sync:android && cd capacitor/android && ./gradlew assembleRelease",
     "lint": "npm run lint --prefix gui",
     "lint:fix": "npm run lint --prefix gui -- --fix",
-    "test": "node --test backend/utils/constants.test.js",
-    "test:watch": "node --test --watch backend/utils/constants.test.js",
+    "test": "node --test backend/utils/*.test.js",
+    "test:watch": "node --test --watch backend/utils/*.test.js",
     "release": "bash release.sh"
   }
 }

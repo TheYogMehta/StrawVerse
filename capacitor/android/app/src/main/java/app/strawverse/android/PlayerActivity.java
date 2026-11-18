@@ -82,6 +82,7 @@ public class PlayerActivity extends Activity {
         return isTerminated || isFinishing() || isDestroyed();
     }
 
+    private FrameLayout rootLayout;
     private LinearLayout topBar;
     private TextView titleTextView;
 
@@ -182,6 +183,19 @@ public class PlayerActivity extends Activity {
     private JSONObject prevEpisode;
     private JSONObject nextEpisode;
     private HighlightsOverlayView highlightsOverlayView;
+
+    // Cast to TV fields
+    private ImageView btnCastIcon;
+    private boolean isCastingToTv = false;
+    private String castingDeviceName = null;
+    private FrameLayout castOverlayLayout;
+    private TextView castStatusTv;
+    private TextView castTitleTv;
+    private ImageView castPlayPauseBtn;
+    private boolean isCastPlaying = false;
+    private Map<String, String> currentHeaders = null;
+    private final Handler castPollHandler = new Handler(Looper.getMainLooper());
+    private Runnable castPollRunnable = null;
 
     // Timer for skip check
     private final Handler skipCheckHandler = new Handler(Looper.getMainLooper());
@@ -365,7 +379,7 @@ public class PlayerActivity extends Activity {
             }
         });
 
-        FrameLayout rootLayout = new FrameLayout(this);
+        rootLayout = new FrameLayout(this);
         rootLayout.setLayoutParams(new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
@@ -475,9 +489,30 @@ public class PlayerActivity extends Activity {
         });
         topBar.addView(nextButton);
 
+        int iconSize = (int) (36 * getResources().getDisplayMetrics().density);
+
+        // Cast to TV icon
+        btnCastIcon = new ImageView(this);
+        LinearLayout.LayoutParams castParams = new LinearLayout.LayoutParams(iconSize, iconSize);
+        castParams.setMargins(15, 0, 10, 0);
+        btnCastIcon.setLayoutParams(castParams);
+        btnCastIcon.setImageResource(R.drawable.ic_cast);
+        btnCastIcon.setColorFilter(0xFFFFFFFF);
+        btnCastIcon.setPadding(6, 6, 6, 6);
+        btnCastIcon.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if (isCastingToTv) {
+                    showCastActiveDialog();
+                } else {
+                    showCastDialog();
+                }
+            }
+        });
+        topBar.addView(btnCastIcon);
+
         // Settings gear icon
         ImageView btnSettingsIcon = new ImageView(this);
-        int iconSize = (int) (36 * getResources().getDisplayMetrics().density);
         LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(iconSize, iconSize);
         iconParams.setMargins(15, 0, 20, 0);
         btnSettingsIcon.setLayoutParams(iconParams);
@@ -569,6 +604,9 @@ public class PlayerActivity extends Activity {
         loadingLayout.setLayoutParams(loadingOverlayParams);
         loadingLayout.setVisibility(View.GONE);
         rootLayout.addView(loadingLayout);
+
+        // Cast full-screen overlay view
+        initCastOverlayView();
 
         setContentView(rootLayout);
 
@@ -1272,6 +1310,8 @@ public class PlayerActivity extends Activity {
 
     private void initializePlayer(String videoUrl, final Map<String, String> headers) {
         if (isActivityDead()) return;
+        this.currentVideoUrl = videoUrl;
+        this.currentHeaders = headers;
         try {
             if (videoUrl != null && videoUrl.startsWith("/")) {
                 videoUrl = "http://127.0.0.1:9545" + videoUrl;
@@ -2801,6 +2841,604 @@ public class PlayerActivity extends Activity {
         hasSeekedToProgress = true;
     }
 
+    private void initCastOverlayView() {
+        castOverlayLayout = new FrameLayout(this);
+        FrameLayout.LayoutParams overlayParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+        );
+        castOverlayLayout.setLayoutParams(overlayParams);
+        castOverlayLayout.setBackgroundColor(0xF00A0F1D); // Deep dark background with high opacity
+        castOverlayLayout.setVisibility(View.GONE);
+        castOverlayLayout.setClickable(true); // Intercept touches behind
+
+        float density = getResources().getDisplayMetrics().density;
+
+        LinearLayout centerLayout = new LinearLayout(this);
+        centerLayout.setOrientation(LinearLayout.VERTICAL);
+        centerLayout.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams centerParams = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+        );
+        centerParams.gravity = Gravity.CENTER;
+        centerLayout.setLayoutParams(centerParams);
+
+        // TV / Cast Icon
+        ImageView castBigIcon = new ImageView(this);
+        int iconPx = (int) (64 * density);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(iconPx, iconPx);
+        iconParams.gravity = Gravity.CENTER_HORIZONTAL;
+        castBigIcon.setLayoutParams(iconParams);
+        castBigIcon.setImageResource(R.drawable.ic_cast_connected);
+        castBigIcon.setColorFilter(0xFF38BDF8); // Sky blue
+        centerLayout.addView(castBigIcon);
+
+        // Casting to <Device>
+        castTitleTv = new TextView(this);
+        castTitleTv.setTextSize(18);
+        castTitleTv.setTypeface(Typeface.DEFAULT_BOLD);
+        castTitleTv.setTextColor(0xFFFFFFFF);
+        castTitleTv.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        titleParams.gravity = Gravity.CENTER_HORIZONTAL;
+        titleParams.topMargin = (int) (16 * density);
+        castTitleTv.setLayoutParams(titleParams);
+        centerLayout.addView(castTitleTv);
+
+        // Status (Media Title)
+        castStatusTv = new TextView(this);
+        castStatusTv.setTextSize(14);
+        castStatusTv.setTextColor(0xFF94A3B8);
+        castStatusTv.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        statusParams.gravity = Gravity.CENTER_HORIZONTAL;
+        statusParams.topMargin = (int) (8 * density);
+        castStatusTv.setLayoutParams(statusParams);
+        centerLayout.addView(castStatusTv);
+
+        // Control buttons bar (Rewind 10s, Play/Pause, Forward 10s, Disconnect)
+        LinearLayout controlsBar = new LinearLayout(this);
+        controlsBar.setOrientation(LinearLayout.HORIZONTAL);
+        controlsBar.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams controlsParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        controlsParams.gravity = Gravity.CENTER_HORIZONTAL;
+        controlsParams.topMargin = (int) (28 * density);
+        controlsBar.setLayoutParams(controlsParams);
+
+        // Rewind 10s button
+        TextView btnRewind = new TextView(this);
+        btnRewind.setText("-10s");
+        btnRewind.setTextColor(0xFFE2E8F0);
+        btnRewind.setTextSize(14);
+        btnRewind.setTypeface(Typeface.DEFAULT_BOLD);
+        btnRewind.setGravity(Gravity.CENTER);
+        int pad = (int) (12 * density);
+        btnRewind.setPadding(pad, pad, pad, pad);
+        GradientDrawable rwdBg = new GradientDrawable();
+        rwdBg.setColor(0x33FFFFFF);
+        rwdBg.setCornerRadius(10 * density);
+        btnRewind.setBackground(rwdBg);
+        LinearLayout.LayoutParams rwdParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        rwdParams.rightMargin = (int) (16 * density);
+        btnRewind.setLayoutParams(rwdParams);
+        btnRewind.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                seekCastRelative(-10000);
+            }
+        });
+        controlsBar.addView(btnRewind);
+
+        // Play/Pause button
+        castPlayPauseBtn = new ImageView(this);
+        int playBtnSize = (int) (52 * density);
+        LinearLayout.LayoutParams playParams = new LinearLayout.LayoutParams(playBtnSize, playBtnSize);
+        castPlayPauseBtn.setLayoutParams(playParams);
+        castPlayPauseBtn.setImageResource(android.R.drawable.ic_media_pause);
+        castPlayPauseBtn.setColorFilter(0xFFFFFFFF);
+        GradientDrawable playBg = new GradientDrawable();
+        playBg.setColor(0xFF2563EB); // Royal blue
+        playBg.setCornerRadius(26 * density);
+        castPlayPauseBtn.setBackground(playBg);
+        int playPad = (int) (12 * density);
+        castPlayPauseBtn.setPadding(playPad, playPad, playPad, playPad);
+        castPlayPauseBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleCastPlayPause();
+            }
+        });
+        controlsBar.addView(castPlayPauseBtn);
+
+        // Forward 10s button
+        TextView btnForward = new TextView(this);
+        btnForward.setText("+10s");
+        btnForward.setTextColor(0xFFE2E8F0);
+        btnForward.setTextSize(14);
+        btnForward.setTypeface(Typeface.DEFAULT_BOLD);
+        btnForward.setGravity(Gravity.CENTER);
+        btnForward.setPadding(pad, pad, pad, pad);
+        GradientDrawable fwdBg = new GradientDrawable();
+        fwdBg.setColor(0x33FFFFFF);
+        fwdBg.setCornerRadius(10 * density);
+        btnForward.setBackground(fwdBg);
+        LinearLayout.LayoutParams fwdParams = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        fwdParams.leftMargin = (int) (16 * density);
+        fwdParams.rightMargin = (int) (20 * density);
+        btnForward.setLayoutParams(fwdParams);
+        btnForward.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                seekCastRelative(10000);
+            }
+        });
+        controlsBar.addView(btnForward);
+
+        // Disconnect button
+        Button btnDisconnect = new Button(this);
+        btnDisconnect.setText("Disconnect");
+        btnDisconnect.setTextColor(0xFFFFFFFF);
+        btnDisconnect.setTextSize(13);
+        GradientDrawable discBg = new GradientDrawable();
+        discBg.setColor(0xFFDC2626); // Crimson red
+        discBg.setCornerRadius(10 * density);
+        btnDisconnect.setBackground(discBg);
+        btnDisconnect.setPadding((int) (16 * density), (int) (8 * density), (int) (16 * density), (int) (8 * density));
+        btnDisconnect.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                stopCasting();
+            }
+        });
+        controlsBar.addView(btnDisconnect);
+
+        centerLayout.addView(controlsBar);
+        castOverlayLayout.addView(centerLayout);
+
+        rootLayout.addView(castOverlayLayout);
+    }
+
+    private void showCastDialog() {
+        if (isActivityDead()) return;
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert);
+        builder.setTitle("Cast to TV / Device");
+
+        float density = getResources().getDisplayMetrics().density;
+        LinearLayout contentLayout = new LinearLayout(this);
+        contentLayout.setOrientation(LinearLayout.VERTICAL);
+        int pad = (int) (20 * density);
+        contentLayout.setPadding(pad, pad, pad, pad);
+
+        final TextView statusTv = new TextView(this);
+        statusTv.setText("Searching for TV devices on local Wi-Fi...\n(Samsung, LG, Sony, Roku, Chromecast)");
+        statusTv.setTextColor(0xFFCCCCCC);
+        statusTv.setTextSize(14);
+        contentLayout.addView(statusTv);
+
+        final ProgressBar spinner = new ProgressBar(this);
+        spinner.setIndeterminate(true);
+        LinearLayout.LayoutParams spinParams = new LinearLayout.LayoutParams(
+                (int) (36 * density), (int) (36 * density));
+        spinParams.gravity = Gravity.CENTER_HORIZONTAL;
+        spinParams.topMargin = (int) (16 * density);
+        spinner.setLayoutParams(spinParams);
+        contentLayout.addView(spinner);
+
+        final LinearLayout listLayout = new LinearLayout(this);
+        listLayout.setOrientation(LinearLayout.VERTICAL);
+        listLayout.setVisibility(View.GONE);
+        contentLayout.addView(listLayout);
+
+        builder.setView(contentLayout);
+        builder.setNegativeButton("Cancel", null);
+        final AlertDialog dialog = builder.create();
+        dialog.show();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL("http://127.0.0.1:9545/api/cast/devices");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("GET");
+                    conn.setConnectTimeout(8000);
+                    conn.setReadTimeout(8000);
+
+                    int code = conn.getResponseCode();
+                    if (code == 200) {
+                        BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) sb.append(line);
+                        br.close();
+
+                        JSONObject res = new JSONObject(sb.toString());
+                        final JSONArray devices = res.optJSONArray("devices");
+
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (isActivityDead() || !dialog.isShowing()) return;
+                                spinner.setVisibility(View.GONE);
+
+                                if (devices == null || devices.length() == 0) {
+                                    statusTv.setText("No TV devices found on this Wi-Fi network.\n\nMake sure your TV is on and connected to the same Wi-Fi as this phone.");
+                                    return;
+                                }
+
+                                statusTv.setText("Select a TV device to begin casting:");
+                                listLayout.setVisibility(View.VISIBLE);
+                                listLayout.removeAllViews();
+
+                                for (int i = 0; i < devices.length(); i++) {
+                                    final JSONObject dev = devices.optJSONObject(i);
+                                    if (dev == null) continue;
+
+                                    String name = dev.optString("friendlyName", "Unknown TV");
+                                    String type = dev.optString("type", "DLNA / UPnP");
+                                    String ip = dev.optString("ip", "");
+
+                                    LinearLayout item = new LinearLayout(PlayerActivity.this);
+                                    item.setOrientation(LinearLayout.VERTICAL);
+                                    item.setPadding((int) (12 * density), (int) (12 * density), (int) (12 * density), (int) (12 * density));
+                                    GradientDrawable itemBg = new GradientDrawable();
+                                    itemBg.setColor(0x22FFFFFF);
+                                    itemBg.setCornerRadius(8 * density);
+                                    item.setBackground(itemBg);
+                                    LinearLayout.LayoutParams itemParams = new LinearLayout.LayoutParams(
+                                            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+                                    itemParams.topMargin = (int) (10 * density);
+                                    item.setLayoutParams(itemParams);
+
+                                    TextView titleTv = new TextView(PlayerActivity.this);
+                                    titleTv.setText(name);
+                                    titleTv.setTextColor(0xFFFFFFFF);
+                                    titleTv.setTextSize(16);
+                                    titleTv.setTypeface(Typeface.DEFAULT_BOLD);
+                                    item.addView(titleTv);
+
+                                    TextView subTv = new TextView(PlayerActivity.this);
+                                    subTv.setText(type + (!ip.isEmpty() ? " • " + ip : ""));
+                                    subTv.setTextColor(0xFF94A3B8);
+                                    subTv.setTextSize(12);
+                                    subTv.setPadding(0, (int) (4 * density), 0, 0);
+                                    item.addView(subTv);
+
+                                    item.setOnClickListener(new View.OnClickListener() {
+                                        @Override
+                                        public void onClick(View v) {
+                                            dialog.dismiss();
+                                            startCastingToTv(dev);
+                                        }
+                                    });
+
+                                    listLayout.addView(item);
+                                }
+                            }
+                        });
+                    } else {
+                        throw new Exception("HTTP " + code);
+                    }
+                } catch (final Exception e) {
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (isActivityDead() || !dialog.isShowing()) return;
+                            spinner.setVisibility(View.GONE);
+                            statusTv.setText("Scan failed: " + e.getMessage() + "\nEnsure local server is running.");
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    private void showCastActiveDialog() {
+        if (isActivityDead()) return;
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert);
+        builder.setTitle("Casting to " + (castingDeviceName != null ? castingDeviceName : "TV"));
+        builder.setMessage("Media is currently streaming to your TV screen.");
+        builder.setPositiveButton("Disconnect", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface d, int w) {
+                stopCasting();
+            }
+        });
+        builder.setNeutralButton(isCastPlaying ? "Pause" : "Play", new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface d, int w) {
+                toggleCastPlayPause();
+            }
+        });
+        builder.setNegativeButton("Close", null);
+        builder.show();
+    }
+
+    private void startCastingToTv(final JSONObject dev) {
+        if (isActivityDead()) return;
+
+        // Pause local player
+        if (player != null && player.isPlaying()) {
+            player.pause();
+        }
+
+        final long currentPosMs = player != null ? Math.max(0, player.getCurrentPosition()) : 0;
+        isCastingToTv = true;
+        castingDeviceName = dev.optString("friendlyName", "TV");
+        isCastPlaying = true;
+
+        if (btnCastIcon != null) {
+            btnCastIcon.setImageResource(R.drawable.ic_cast_connected);
+        }
+        if (castOverlayLayout != null) {
+            castOverlayLayout.setVisibility(View.VISIBLE);
+        }
+        if (castTitleTv != null) {
+            castTitleTv.setText("Casting to " + castingDeviceName);
+        }
+        if (castStatusTv != null) {
+            castStatusTv.setText(animeTitle);
+        }
+        if (castPlayPauseBtn != null) {
+            castPlayPauseBtn.setImageResource(android.R.drawable.ic_media_pause);
+        }
+
+        Toast.makeText(this, "Connecting to " + castingDeviceName + "...", Toast.LENGTH_SHORT).show();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL("http://127.0.0.1:9545/api/cast/start");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                    conn.setDoOutput(true);
+                    conn.setConnectTimeout(15000);
+                    conn.setReadTimeout(15000);
+
+                    JSONObject payload = new JSONObject();
+                    payload.put("device", dev);
+                    payload.put("deviceId", dev.optString("id", dev.optString("location", "")));
+                    payload.put("videoUrl", currentVideoUrl != null ? currentVideoUrl : "");
+                    payload.put("url", currentVideoUrl != null ? currentVideoUrl : "");
+                    payload.put("title", animeTitle != null ? animeTitle : "StrawVerse Stream");
+                    payload.put("positionMs", currentPosMs);
+                    payload.put("position", currentPosMs / 1000.0);
+
+                    JSONObject headersObj = new JSONObject();
+                    if (currentHeaders != null) {
+                        for (Map.Entry<String, String> entry : currentHeaders.entrySet()) {
+                            headersObj.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                    payload.put("headers", headersObj);
+
+                    try (OutputStream os = conn.getOutputStream()) {
+                        byte[] bytes = payload.toString().getBytes("utf-8");
+                        os.write(bytes, 0, bytes.length);
+                    }
+
+                    int code = conn.getResponseCode();
+                    if (code == 200) {
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (isActivityDead()) return;
+                                Toast.makeText(PlayerActivity.this, "Casting to " + castingDeviceName, Toast.LENGTH_SHORT).show();
+                                startCastPolling();
+                            }
+                        });
+                    } else {
+                        BufferedReader br = new BufferedReader(new InputStreamReader(
+                                conn.getErrorStream() != null ? conn.getErrorStream() : conn.getInputStream(), "utf-8"));
+                        StringBuilder sb = new StringBuilder();
+                        String line;
+                        while ((line = br.readLine()) != null) sb.append(line);
+                        br.close();
+                        throw new Exception("HTTP " + code + ": " + sb.toString());
+                    }
+                } catch (final Exception e) {
+                    Log.e("PlayerActivity", "startCastingToTv failed: " + e.getMessage());
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            if (isActivityDead()) return;
+                            Toast.makeText(PlayerActivity.this, "Failed to cast: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            stopCasting();
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+
+    private void toggleCastPlayPause() {
+        final boolean nextState = !isCastPlaying;
+        isCastPlaying = nextState;
+        if (castPlayPauseBtn != null) {
+            castPlayPauseBtn.setImageResource(nextState ? android.R.drawable.ic_media_pause : android.R.drawable.ic_media_play);
+        }
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String endpoint = nextState ? "http://127.0.0.1:9545/api/cast/play" : "http://127.0.0.1:9545/api/cast/pause";
+                    URL url = new URL(endpoint);
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(5000);
+                    conn.getResponseCode();
+                } catch (Exception e) {
+                    Log.w("PlayerActivity", "toggleCastPlayPause error: " + e.getMessage());
+                }
+            }
+        }).start();
+    }
+
+    private void seekCastRelative(final long deltaMs) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL statusUrl = new URL("http://127.0.0.1:9545/api/cast/status");
+                    HttpURLConnection sConn = (HttpURLConnection) statusUrl.openConnection();
+                    sConn.setRequestMethod("GET");
+                    sConn.setConnectTimeout(5000);
+                    sConn.setReadTimeout(5000);
+                    if (sConn.getResponseCode() == 200) {
+                        BufferedReader br = new BufferedReader(new InputStreamReader(sConn.getInputStream(), "utf-8"));
+                        StringBuilder sb = new StringBuilder();
+                        String l;
+                        while ((l = br.readLine()) != null) sb.append(l);
+                        br.close();
+                        JSONObject sObj = new JSONObject(sb.toString());
+                        long curPos = sObj.optLong("positionMs", 0);
+                        long targetPos = Math.max(0, curPos + deltaMs);
+
+                        URL seekUrl = new URL("http://127.0.0.1:9545/api/cast/seek");
+                        HttpURLConnection conn = (HttpURLConnection) seekUrl.openConnection();
+                        conn.setRequestMethod("POST");
+                        conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+                        conn.setDoOutput(true);
+                        JSONObject payload = new JSONObject();
+                        payload.put("positionMs", targetPos);
+                        try (OutputStream os = conn.getOutputStream()) {
+                            byte[] b = payload.toString().getBytes("utf-8");
+                            os.write(b, 0, b.length);
+                        }
+                        conn.getResponseCode();
+                    }
+                } catch (Exception e) {
+                    Log.w("PlayerActivity", "seekCastRelative error: " + e.getMessage());
+                }
+            }
+        }).start();
+    }
+
+    private void stopCasting() {
+        stopCastPolling();
+        isCastingToTv = false;
+        castingDeviceName = null;
+        isCastPlaying = false;
+
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (btnCastIcon != null) {
+                    btnCastIcon.setImageResource(R.drawable.ic_cast);
+                }
+                if (castOverlayLayout != null) {
+                    castOverlayLayout.setVisibility(View.GONE);
+                }
+            }
+        });
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    URL url = new URL("http://127.0.0.1:9545/api/cast/stop");
+                    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                    conn.setRequestMethod("POST");
+                    conn.setConnectTimeout(5000);
+                    conn.setReadTimeout(5000);
+                    conn.getResponseCode();
+                } catch (Exception e) {
+                    Log.w("PlayerActivity", "stopCasting error: " + e.getMessage());
+                }
+            }
+        }).start();
+    }
+
+    private void startCastPolling() {
+        stopCastPolling();
+        castPollRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (isActivityDead() || !isCastingToTv) return;
+
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            URL url = new URL("http://127.0.0.1:9545/api/cast/status");
+                            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                            conn.setRequestMethod("GET");
+                            conn.setConnectTimeout(4000);
+                            conn.setReadTimeout(4000);
+                            if (conn.getResponseCode() == 200) {
+                                BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "utf-8"));
+                                StringBuilder sb = new StringBuilder();
+                                String line;
+                                while ((line = br.readLine()) != null) sb.append(line);
+                                br.close();
+
+                                JSONObject st = new JSONObject(sb.toString());
+                                final String state = st.optString("state", "");
+                                final boolean active = st.optBoolean("isCasting", true);
+
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (isActivityDead() || !isCastingToTv) return;
+                                        if (!active) {
+                                            stopCasting();
+                                            return;
+                                        }
+                                        if ("PLAYING".equalsIgnoreCase(state)) {
+                                            isCastPlaying = true;
+                                            if (castPlayPauseBtn != null) {
+                                                castPlayPauseBtn.setImageResource(android.R.drawable.ic_media_pause);
+                                            }
+                                        } else if ("PAUSED_PLAYBACK".equalsIgnoreCase(state) || "PAUSED".equalsIgnoreCase(state)) {
+                                            isCastPlaying = false;
+                                            if (castPlayPauseBtn != null) {
+                                                castPlayPauseBtn.setImageResource(android.R.drawable.ic_media_play);
+                                            }
+                                        }
+                                    }
+                                });
+                            }
+                        } catch (Exception ignored) {}
+
+                        if (!isActivityDead() && isCastingToTv) {
+                            castPollHandler.postDelayed(castPollRunnable, 3000);
+                        }
+                    }
+                }).start();
+            }
+        };
+        castPollHandler.postDelayed(castPollRunnable, 3000);
+    }
+
+    private void stopCastPolling() {
+        if (castPollRunnable != null) {
+            castPollHandler.removeCallbacks(castPollRunnable);
+            castPollRunnable = null;
+        }
+    }
+
     private void fetchHistoryAndSettings() {
         new Thread(new Runnable() {
             @Override
@@ -3076,6 +3714,9 @@ public class PlayerActivity extends Activity {
         if (isTerminated && player == null && rawPlayer == null) return;
         isTerminated = true;
 
+        try {
+            stopCastPolling();
+        } catch (Exception ignored) {}
         try {
             skipCheckHandler.removeCallbacks(skipCheckRunnable);
         } catch (Exception ignored) {}
