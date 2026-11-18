@@ -140,6 +140,15 @@ export default function InfoView({
   // How many recommendations to render (Settings → Anime Settings, 1-10)
   const [recCount, setRecCount] = useState(4);
 
+  // Collapsible state for Seasons and Recommendations (collapsed by default)
+  const [seasonsCollapsed, setSeasonsCollapsed] = useState(true);
+  const [recommendationsCollapsed, setRecommendationsCollapsed] = useState(true);
+
+  useEffect(() => {
+    setSeasonsCollapsed(true);
+    setRecommendationsCollapsed(true);
+  }, [id]);
+
   // Media-server naming: season + show folder this show downloads into,
   // picked by the user and remembered per show (null = setting off)
   const [msShow, setMsShow] = useState(null);
@@ -4131,11 +4140,45 @@ export default function InfoView({
       {type === "Anime" && extras && (
         <>
           {(extras.seasons?.length || 0) > 1 && (
-            <div className="extras-section">
-              <div className="section-header">
-                <h2>Seasons</h2>
+            <div
+              className={`extras-section${
+                seasonsCollapsed ? " is-collapsed" : ""
+              }`}
+            >
+              <div
+                className="section-header extras-section-header"
+                onClick={() => setSeasonsCollapsed((prev) => !prev)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSeasonsCollapsed((prev) => !prev);
+                  }
+                }}
+                aria-expanded={!seasonsCollapsed}
+                aria-label={`Toggle Seasons (currently ${
+                  seasonsCollapsed ? "collapsed" : "expanded"
+                })`}
+                title={seasonsCollapsed ? "Expand Seasons" : "Collapse Seasons"}
+              >
+                <div className="extras-title-row">
+                  <h2>Seasons</h2>
+                  <span
+                    className={`extras-collapse-chevron${
+                      !seasonsCollapsed ? " is-open" : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <ChevronDown size={20} />
+                  </span>
+                </div>
               </div>
-              <div className="extras-grid extras-row">
+              <div
+                className={`extras-grid extras-row${
+                  seasonsCollapsed ? " is-collapsed" : ""
+                }`}
+              >
                 {extras.seasons.map((season) => (
                   <button
                     key={season.id}
@@ -4193,13 +4236,51 @@ export default function InfoView({
           )}
 
           {(extras.recommendations?.length || 0) > 0 && (
-            <div className="extras-section">
-              <div className="section-header">
-                <h2>Recommendations</h2>
+            <div
+              className={`extras-section${
+                recommendationsCollapsed ? " is-collapsed" : ""
+              }`}
+            >
+              <div
+                className="section-header extras-section-header"
+                onClick={() => setRecommendationsCollapsed((prev) => !prev)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setRecommendationsCollapsed((prev) => !prev);
+                  }
+                }}
+                aria-expanded={!recommendationsCollapsed}
+                aria-label={`Toggle Recommendations (currently ${
+                  recommendationsCollapsed ? "collapsed" : "expanded"
+                })`}
+                title={
+                  recommendationsCollapsed
+                    ? "Expand Recommendations"
+                    : "Collapse Recommendations"
+                }
+              >
+                <div className="extras-title-row">
+                  <h2>Recommendations</h2>
+                  <span
+                    className={`extras-collapse-chevron${
+                      !recommendationsCollapsed ? " is-open" : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <ChevronDown size={20} />
+                  </span>
+                </div>
               </div>
               {/* One horizontal row (no wrapping grid); the count comes from
                   Settings → Anime Settings (1-10, default 4). */}
-              <div className="extras-grid extras-row">
+              <div
+                className={`extras-grid extras-row${
+                  recommendationsCollapsed ? " is-collapsed" : ""
+                }`}
+              >
                 {extras.recommendations.slice(0, recCount).map((rec) => (
                   <button
                     key={rec.id}

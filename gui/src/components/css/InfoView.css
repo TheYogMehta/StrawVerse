@@ -598,10 +598,75 @@
   padding: 0 30px;
 }
 
+.extras-section.is-collapsed {
+  margin-top: 24px;
+}
+
+.extras-section:not(.is-collapsed) + .extras-section {
+  margin-top: 40px;
+}
+
+.extras-section.is-collapsed + .extras-section.is-collapsed {
+  margin-top: 16px;
+}
+
+.extras-section-header {
+  cursor: pointer;
+  user-select: none;
+  width: fit-content;
+  outline: none;
+  margin-bottom: 12px;
+}
+
+.extras-section.is-collapsed .extras-section-header {
+  margin-bottom: 0;
+}
+
+.extras-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity 0.15s ease;
+}
+
+.extras-section-header:hover .extras-title-row {
+  opacity: 0.85;
+}
+
+.extras-section-header:focus-visible {
+  outline: 2px solid var(--accent, #e50914);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.extras-title-row h2 {
+  margin: 0;
+}
+
+.extras-collapse-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary, rgba(255, 255, 255, 0.7));
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), color 0.15s ease;
+}
+
+.extras-section-header:hover .extras-collapse-chevron {
+  color: var(--text-primary, #fff);
+}
+
+.extras-collapse-chevron.is-open {
+  transform: rotate(180deg);
+}
+
 .extras-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 15px;
+}
+
+.extras-grid.is-collapsed {
+  display: none !important;
 }
 
 /* Recommendations render as one horizontal-only row: cards keep a fixed width
