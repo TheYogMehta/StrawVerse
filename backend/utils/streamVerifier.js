@@ -1,4 +1,5 @@
 const axios = require("axios");
+const { countPlayableSegments } = require("./adSegments");
 
 async function verifyStreamReachability(
   streamUrl,
@@ -65,6 +66,25 @@ async function verifyStreamReachability(
               status: subRes.status,
               message: `sub-playlist HTTP ${subRes.status}`,
             };
+          }
+          // Reject decoy playlists that are 100% ad-image segments — no real
+          // video to play. The caller falls back to the next server.
+          if (typeof subRes.data === "string") {
+            const mediaBase = mediaPlaylistUrl.substring(
+              0,
+              mediaPlaylistUrl.lastIndexOf("/") + 1,
+            );
+            const { playable, total } = countPlayableSegments(
+              subRes.data,
+              mediaBase,
+            );
+            if (total > 0 && playable === 0) {
+              return {
+                ok: false,
+                isProtected: false,
+                message: `all ${total} segments are ad placeholders (no real video)`,
+              };
+            }
           }
         } catch (subErr) {
           return {

@@ -63,7 +63,7 @@ function resolveUrl(relativeUrl, baseUrl) {
 }
 
 function stripPngHeader(buffer) {
-  if (!buffer || buffer.length < 8) return buffer;
+  if (!buffer || buffer.length <= 376) return buffer;
 
   if (
     buffer[0] === 0x89 &&
@@ -75,9 +75,18 @@ function stripPngHeader(buffer) {
     buffer[6] === 0x1a &&
     buffer[7] === 0x0a
   ) {
-    const iendOffset = buffer.indexOf(Buffer.from([0x49, 0x45, 0x4e, 0x44]));
-    if (iendOffset !== -1 && iendOffset < 1024) {
-      return buffer.subarray(iendOffset + 8);
+    // MPEG-TS packets are 188 bytes starting with sync byte 0x47: slice from
+    // the first offset with 3 consecutive syncs. Handles wrappers of any size;
+    // untouched when no sync pattern is found.
+    const maxScan = Math.min(buffer.length - 376, 65536);
+    for (let i = 0; i <= maxScan; i++) {
+      if (
+        buffer[i] === 0x47 &&
+        buffer[i + 188] === 0x47 &&
+        buffer[i + 376] === 0x47
+      ) {
+        return i === 0 ? buffer : buffer.subarray(i);
+      }
     }
   }
   return buffer;
@@ -95,17 +104,32 @@ async function getFfmpegPath() {
       candidateNativeDirs.push(process.env.NATIVE_LIB_DIR);
     }
 
+    // nodejs-mobile/capacitor-nodejs often places the node binary next to
+    // the extracted native libs — cheap and frequently correct.
+    try {
+      if (process.execPath) {
+        candidateNativeDirs.push(path.dirname(process.execPath));
+      }
+    } catch (_) {}
+
+    // Collect every mapped .so directory plus any strawverse path: on modern
+    // Android the libs live under split-APK mounts whose shape varies, so
+    // match liberally instead of assuming /data/app/<pkg>/lib/<arch>.
+    let mapsSoDirs = 0;
     try {
       const maps = fs.readFileSync("/proc/self/maps", "utf-8");
-      const soMatch = maps.match(/\s(\/data\/app\/[^\s]+\/lib\/[^\s/]+)\//);
-      if (soMatch && soMatch[1]) {
-        candidateNativeDirs.push(soMatch[1]);
-      }
-      const soMatch2 = maps.match(
-        /\s(\/data\/app\/~~[^/]+\/app\.strawverse\.android-[^/]+\/lib\/[^\s/]+)\//,
-      );
-      if (soMatch2 && soMatch2[1]) {
-        candidateNativeDirs.push(soMatch2[1]);
+      for (const line of maps.split("\n")) {
+        const soMatch = line.match(/(\/[^\s]+\.so(?:\.\d+)*)\s*$/);
+        if (soMatch && soMatch[1]) {
+          candidateNativeDirs.push(path.dirname(soMatch[1]));
+          mapsSoDirs++;
+        }
+        if (line.includes("strawverse")) {
+          const pathMatch = line.match(/(\/data\/[^\s]+)/);
+          if (pathMatch && pathMatch[1]) {
+            candidateNativeDirs.push(path.dirname(pathMatch[1]));
+          }
+        }
       }
     } catch (e) {
       logger.warn(`[FFmpeg] Could not read /proc/self/maps: ${e.message}`);
@@ -117,20 +141,39 @@ async function getFfmpegPath() {
     const userDataDir = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
     candidateNativeDirs.push(path.join(userDataDir, "bin"));
 
+    const foundIn = (dir) => {
+      try {
+        const direct = path.join(dir, "libffmpeg.so");
+        if (fs.existsSync(direct)) return direct;
+        // One-level arch-subdir scan (e.g. <lib>/arm64/libffmpeg.so).
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          if (!entry.isDirectory()) continue;
+          const nested = path.join(dir, entry.name, "libffmpeg.so");
+          if (fs.existsSync(nested)) return nested;
+        }
+      } catch (_) {}
+      return null;
+    };
+
     const seen = new Set();
+    const tried = [];
     for (const dir of candidateNativeDirs) {
       if (!dir || seen.has(dir)) continue;
       seen.add(dir);
-      const ffmpegPath = path.join(dir, "libffmpeg.so");
-      if (fs.existsSync(ffmpegPath)) {
-        logger.info(
-          `FFmpeg binary found in native library directory: ${ffmpegPath}`,
-        );
-        resolvedFfmpegPath = ffmpegPath;
+      tried.push(dir);
+      const hit = foundIn(dir);
+      if (hit) {
+        logger.info(`FFmpeg binary found in native library directory: ${hit}`);
+        resolvedFfmpegPath = hit;
         return resolvedFfmpegPath;
       }
     }
 
+    logger.warn(
+      `[FFmpeg] libffmpeg.so not found. Tried ${tried.length} dir(s)` +
+        ` (maps .so dirs: ${mapsSoDirs}, execPath: ${process.execPath || "n/a"}): ` +
+        tried.slice(0, 12).join(" | "),
+    );
     throw new Error(
       "FFmpeg binary (libffmpeg.so) not found in APK. " +
         "Rebuild the app with 'node capacitor/scripts/fetch-ffmpeg.mjs' " +
@@ -216,27 +259,57 @@ async function getFfmpegPath() {
   return binaryName;
 }
 
-// Tracks the last vault-clearance refresh so parallel segment workers
-// share one solver run instead of stampeding it.
-const clearanceRefresh = { at: 0, pending: null };
+// Tracks CDN-clearance refreshes so parallel segment workers share one
+// solver run instead of stampeding it. Successes are reused for 60s;
+// failures are negatively cached for 15s so segments fail fast and the
+// queue can rotate to another server instead of grinding stale headers.
+const clearanceRefresh = { successAt: 0, failAt: 0, pending: null };
+
+// Segment CDN hosts (e.g. cdnx.aniwatchtv.site) only serve media bytes and
+// answer the bypass probe with a non-challenge error page. Refresh against
+// the site root that actually issues clearance instead.
+function resolveClearanceTarget(targetUrl) {
+  const raw = String(targetUrl || "");
+  if (/owocdn|uwucdn|kwik/i.test(raw)) return "https://kwik.cx/";
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.toLowerCase();
+    if (
+      host === "aniwatchtv.site" ||
+      host.endsWith(".aniwatchtv.site") ||
+      /megaplay|megacloud|vidplay|vidstream/.test(host)
+    ) {
+      return "https://aniwatchtv.site/";
+    }
+    return `${u.origin}/`;
+  } catch (_) {
+    return targetUrl;
+  }
+}
 
 async function refreshCdnClearance(targetUrl, referer = null) {
   try {
     if (typeof global.cloudflarebypass !== "function") return false;
-    if (Date.now() - clearanceRefresh.at < 10000 && !clearanceRefresh.pending) {
-      return true;
-    }
+    const now = Date.now();
+    if (now - clearanceRefresh.successAt < 60000) return true;
+    if (now - clearanceRefresh.failAt < 15000) return false;
     if (!clearanceRefresh.pending) {
-      const target = referer || targetUrl;
-      clearanceRefresh.pending = (async () => {
-        await global.cloudflarebypass(target, true);
-        clearanceRefresh.at = Date.now();
-        return true;
-      })()
+      const target = resolveClearanceTarget(targetUrl);
+      clearanceRefresh.pending = global
+        .cloudflarebypass(target, true, referer || null)
+        .then((ok) => {
+          if (ok === false) {
+            clearanceRefresh.failAt = Date.now();
+            return false;
+          }
+          clearanceRefresh.successAt = Date.now();
+          return true;
+        })
         .catch((err) => {
           logger.warn(
-            `[Downloader] Clearance bypass failed for ${target}: ${err.message}`,
+            `[Downloader] Clearance bypass failed for ${target}: ${err?.message || err}`,
           );
+          clearanceRefresh.failAt = Date.now();
           return false;
         })
         .finally(() => {
@@ -1533,6 +1606,13 @@ class downloader {
     let sampleBytesDownloaded = 0;
     let sampleStartTime = Date.now();
     let failedIndices = [];
+    // Dead-mirror fast abort: a run of auth rejections (403/401/404) with
+    // almost nothing downloaded means the mirror link itself is rejected.
+    // Abort now so the queue rotates to another server instead of grinding
+    // every segment through 3 retries each (~minutes of doomed 403s).
+    let authFailCount = 0;
+    let deadHostAborted = false;
+    const DEAD_HOST_FAST_ABORT = 8;
 
     await new Promise((resolve, reject) => {
       const checkDone = () => {
@@ -1690,6 +1770,36 @@ class downloader {
               completedCount++;
               failedIndices.push(idx);
               setDomainErrorCap(domainName, CONCURRENCY);
+              const failStatus =
+                err?.response?.statusCode ?? err?.response?.status;
+              if (
+                failStatus === 403 ||
+                failStatus === 401 ||
+                failStatus === 404
+              ) {
+                authFailCount++;
+              }
+              if (
+                !deadHostAborted &&
+                authFailCount >= DEAD_HOST_FAST_ABORT &&
+                freshCount < 16
+              ) {
+                deadHostAborted = true;
+                stopDownloading = true;
+                let deadHost = domainName;
+                try {
+                  deadHost = new URL(trackUrl).hostname;
+                } catch (_) {}
+                const abortErr = new Error(
+                  `SCRAPER_TEMPORARY_ERROR: mirror ${deadHost} is rejecting every segment (${failStatus || 403} x${authFailCount}) - dead mirror, trying another server`,
+                );
+                abortErr.failedHost = deadHost;
+                this.logProgress(
+                  `Mirror ${deadHost} dead (${failStatus || 403}s) - switching server...`,
+                );
+                reject(abortErr);
+                return;
+              }
               this.logProgress(
                 `Segment ${idx} failed, will retry after the rest finish...`,
                 CONCURRENCY,

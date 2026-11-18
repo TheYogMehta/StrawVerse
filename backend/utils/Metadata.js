@@ -11,6 +11,7 @@ const {
   run,
   batchRun,
   mappingQueryAll,
+  useLegacyUpserts,
 } = require("./db");
 const ImageCacheManager = require("./ImageCacheManager");
 const { sanitizeFolderName, getDownloadsFolder } = require("./DirectoryMaker");
@@ -1802,6 +1803,13 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           }
         }
 
+        // Poison guard: a row whose id is just the MalID echoed back has no
+        // real provider id (fetching it 404s) — drop it so the caller falls
+        // through to unmapped handling instead of a dead-end provider link.
+        Downloads = (Downloads || []).filter(
+          (d) => String(d.id) !== String(d.MalID || ""),
+        );
+
         if (Downloads?.length > 0) {
           const mainDownload =
             Downloads.find(
@@ -2002,6 +2010,12 @@ async function FindMapping(type, AnimeMangaid, malid, dir) {
           downloadsList = [mainRecord];
         }
 
+        // Poison guard: same as Anime — id === MalID rows carry no real
+        // provider id, so drop them instead of serving a dead-end link.
+        downloadsList = (downloadsList || []).filter(
+          (d) => String(d.id) !== String(d.MalID || ""),
+        );
+
         if (downloadsList.length > 0) {
           const firstRecord =
             downloadsList.find(
@@ -2128,7 +2142,12 @@ async function syncMalCache(mediaType, data = []) {
       }
 
       operations.push({
-        sql: `
+        sql: useLegacyUpserts()
+          ? `
+          INSERT OR REPLACE INTO ${tableName} (id, title, image, ${totalCol}, ${progCol}, status, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `
+          : `
           INSERT INTO ${tableName} (id, title, image, ${totalCol}, ${progCol}, status, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET 

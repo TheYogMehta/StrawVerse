@@ -1,4 +1,4 @@
-const { queryOne, run } = require("./db");
+const { queryOne, run, runUpsertCompat } = require("./db");
 const { logger } = require("./AppLogger");
 const { getCanonicalDomain } = require("./extensionRegistry");
 
@@ -177,7 +177,7 @@ function setDomainErrorCap(domain, failedAtConcurrency) {
     );
   }
   try {
-    run(
+    runUpsertCompat(
       `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
        VALUES (?, ?, ?, 1, 1, ?)
        ON CONFLICT(domain) DO UPDATE SET
@@ -185,7 +185,19 @@ function setDomainErrorCap(domain, failedAtConcurrency) {
          failed_requests = DomainConcurrency.failed_requests + 1,
          updated_at = excluded.updated_at`,
       [domain, domainMaxCap[domain], domainMaxCap[domain], Date.now()],
-    );
+      async () => {
+        const now = Date.now();
+        await run(
+          `UPDATE DomainConcurrency SET current_concurrency = ?, failed_requests = failed_requests + 1, updated_at = ? WHERE domain = ?`,
+          [domainMaxCap[domain], now, domain],
+        );
+        await run(
+          `INSERT OR IGNORE INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
+           VALUES (?, ?, ?, 1, 1, ?)`,
+          [domain, domainMaxCap[domain], domainMaxCap[domain], now],
+        );
+      },
+    ).catch(() => {});
   } catch (e) {}
 }
 
@@ -220,7 +232,7 @@ function setRecoveryCap(domain) {
   );
 
   try {
-    run(
+    runUpsertCompat(
       `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
        VALUES (?, ?, ?, 1, 0, ?)
        ON CONFLICT(domain) DO UPDATE SET
@@ -228,7 +240,19 @@ function setRecoveryCap(domain) {
          max_concurrency = excluded.max_concurrency,
          updated_at = excluded.updated_at`,
       [domain, newCap, newCap, Date.now()],
-    );
+      async () => {
+        const now = Date.now();
+        await run(
+          `UPDATE DomainConcurrency SET current_concurrency = ?, max_concurrency = ?, updated_at = ? WHERE domain = ?`,
+          [newCap, newCap, now, domain],
+        );
+        await run(
+          `INSERT OR IGNORE INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
+           VALUES (?, ?, ?, 1, 0, ?)`,
+          [domain, newCap, newCap, now],
+        );
+      },
+    ).catch(() => {});
   } catch (e) {}
 }
 
@@ -249,7 +273,7 @@ function recordDomainFailure(domain, currentVal, _statusCode = null) {
   }
 
   try {
-    run(
+    runUpsertCompat(
       `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
        VALUES (?, ?, ?, 1, 1, ?)
        ON CONFLICT(domain) DO UPDATE SET
@@ -258,7 +282,19 @@ function recordDomainFailure(domain, currentVal, _statusCode = null) {
          failed_requests = DomainConcurrency.failed_requests + 1,
          updated_at = excluded.updated_at`,
       [domain, newConcurrency, newConcurrency, Date.now()],
-    );
+      async () => {
+        const now = Date.now();
+        await run(
+          `UPDATE DomainConcurrency SET current_concurrency = ?, total_requests = total_requests + 1, failed_requests = failed_requests + 1, updated_at = ? WHERE domain = ?`,
+          [newConcurrency, now, domain],
+        );
+        await run(
+          `INSERT OR IGNORE INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
+           VALUES (?, ?, ?, 1, 1, ?)`,
+          [domain, newConcurrency, newConcurrency, now],
+        );
+      },
+    ).catch(() => {});
   } catch (e) {
     logger.error(
       `[DomainConcurrency] Error saving failure for ${domain}: ${e.message}`,
@@ -340,7 +376,7 @@ function recordDomainBatchSuccess(domain, batchThroughput = null) {
   cache[domain] = Math.max(1, newConcurrency);
 
   try {
-    run(
+    runUpsertCompat(
       `INSERT INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
        VALUES (?, ?, ?, 1, 0, ?)
        ON CONFLICT(domain) DO UPDATE SET
@@ -349,7 +385,19 @@ function recordDomainBatchSuccess(domain, batchThroughput = null) {
          total_requests = DomainConcurrency.total_requests + 1,
          updated_at = excluded.updated_at`,
       [domain, newConcurrency, newConcurrency, Date.now()],
-    );
+      async () => {
+        const now = Date.now();
+        await run(
+          `UPDATE DomainConcurrency SET current_concurrency = ?, max_concurrency = MAX(max_concurrency, ?), total_requests = total_requests + 1, updated_at = ? WHERE domain = ?`,
+          [newConcurrency, newConcurrency, now, domain],
+        );
+        await run(
+          `INSERT OR IGNORE INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
+           VALUES (?, ?, ?, 1, 0, ?)`,
+          [domain, newConcurrency, newConcurrency, now],
+        );
+      },
+    ).catch(() => {});
   } catch (e) {}
 }
 

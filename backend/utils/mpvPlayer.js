@@ -388,6 +388,34 @@ const toProxyUrl = (url, customHeaders, prefQuality = "") => {
   return `${base}/segment.ts?url=${encodeURIComponent(url)}${refParam}`;
 };
 
+// mpv/ffmpeg wraps --http-header-fields values longer than ~78 chars into a
+// folded second line. Modern HTTP parsers (llhttp — Node, Chromium, Go)
+// reject folded headers with HPE_INVALID_HEADER_TOKEN and answer 400 before
+// any route runs, which made every proxied MPV request fail instantly with
+// "Failed to open" and zero app log lines. Referer/User-Agent must use mpv's
+// dedicated options (never wrapped); any other header too long to fit on one
+// short line is dropped — the stream proxy re-attaches upstream headers
+// server-side anyway.
+const MAX_HEADER_LINE = 70;
+const sanitizeMpvHeaderFields = (headers) => {
+  const fields = [];
+  if (!headers || typeof headers !== "object") return fields;
+  for (const [hk, hv] of Object.entries(headers)) {
+    const hkl = hk.toLowerCase();
+    if (hkl === "referer" || hkl === "user-agent") continue;
+    if (typeof hv !== "string") continue;
+    const clean = hv.replace(/[\r\n]+/g, " ").trim();
+    if (!clean) continue;
+    // mpv parses --http-header-fields as a comma-separated list, so a comma
+    // inside a value splits the entry - escape it (upstream anikoto fix)
+    // before applying the length guard.
+    const line = `${hk}: ${clean.replace(/,/g, "%2C")}`;
+    if (line.length > MAX_HEADER_LINE) continue;
+    fields.push(line);
+  }
+  return fields;
+};
+
 async function playInMpv(window, options) {
   if (!app || process.platform === "android") {
     throw new Error("MPV player is only supported on Desktop");
@@ -433,6 +461,26 @@ async function playInMpv(window, options) {
   let provider = options.provider || "";
   let subdub = options.subdub || "sub";
   let url = options.url || "";
+
+  // Duplicate-launch guard: identical play requests arriving within
+  // milliseconds (double clicks / double code paths with different id forms)
+  // used to spawn two MPV processes. Same title + language with either the
+  // episode id OR number matching within 3s reuses the in-flight launch.
+  const __launchKey = `${mediaId || ""}|${subdub || "sub"}`;
+  const __epA = String(episodeId ?? "");
+  const __epB = String(episode ?? "");
+  const __now = Date.now();
+  const __prev = global.__inFlightMpvLaunch;
+  if (
+    __prev &&
+    __prev.key === __launchKey &&
+    (__prev.epA === __epA || __prev.epB === __epB) &&
+    __now - __prev.at < 3000
+  ) {
+    logger.info(`[MPV] Duplicate launch suppressed for ${__launchKey} ${__epB}`);
+    return { reused: true, suppressedDuplicate: true };
+  }
+  global.__inFlightMpvLaunch = { key: __launchKey, epA: __epA, epB: __epB, at: __now };
 
   function formatMpvColor(hex, defaultHex = "#ffffffff") {
     if (!hex || hex === "transparent" || hex === "none") return "#00000000";
@@ -1150,18 +1198,18 @@ async function playInMpv(window, options) {
     activeSources[0]?.headers?.["user-agent"] ||
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
+  // Referer/User-Agent go through mpv's dedicated options — passing them via
+  // --http-header-fields triggers the 78-char wrap bug (see
+  // sanitizeMpvHeaderFields) that made every proxied request 400.
   if (activeReferer) {
     args.push(`--referrer=${activeReferer}`);
   }
   args.push(`--user-agent=${activeUserAgent}`);
 
-  if (activeSources[0]?.headers) {
-    for (const [hk, hv] of Object.entries(activeSources[0].headers)) {
-      const hkl = hk.toLowerCase();
-      if (hkl !== "referer" && hkl !== "user-agent" && typeof hv === "string") {
-        args.push(`--http-header-fields=${hk}: ${hv.replace(/,/g, "%2C")}`);
-      }
-    }
+  for (const headerLine of sanitizeMpvHeaderFields(
+    activeSources[0]?.headers,
+  )) {
+    args.push(`--http-header-fields=${headerLine}`);
   }
 
   if (options.hasNext === undefined || options.hasPrev === undefined) {
@@ -1659,19 +1707,7 @@ async function playInMpv(window, options) {
           command: ["set_property", "user-agent", activeUserAgent],
         }) + "\n",
       );
-      const headerFields = [];
-      if (activeSources[0]?.headers) {
-        for (const [hk, hv] of Object.entries(activeSources[0].headers)) {
-          const hkl = hk.toLowerCase();
-          if (
-            hkl !== "referer" &&
-            hkl !== "user-agent" &&
-            typeof hv === "string"
-          ) {
-            headerFields.push(`${hk}: ${hv}`);
-          }
-        }
-      }
+      const headerFields = sanitizeMpvHeaderFields(activeSources[0]?.headers);
       if (headerFields.length > 0) {
         client.write(
           JSON.stringify({
@@ -1884,6 +1920,10 @@ async function playInMpv(window, options) {
   let client = null;
   let duration = 0;
   let currentTime = startSeek;
+  // Genuinely-played seconds: sum of small positive position advances.
+  // Broken streams park time-pos at 0 or jump straight to duration, which
+  // used to fake "video end" and cascade auto-next through every episode.
+  let advancedSecs = 0;
   let lastSavedTime = startSeek;
   let lastSyncTime = Date.now();
   let paused = false;
@@ -2058,6 +2098,16 @@ async function playInMpv(window, options) {
       const alreadyTriggered = sess
         ? sess.hasTriggeredAutoNext
         : hasTriggeredAutoNext;
+
+      // Only advance after genuinely watching something: a single jump
+      // straight to the end (broken stream) must not count. Require 30s of
+      // accumulated real playback; seeks contribute at most 10s per jump.
+      if (advancedSecs <= 30) {
+        logger.info(
+          `[MPV] Not auto-playing next (${reason}): only ${Math.round(advancedSecs)}s actually played.`,
+        );
+        return;
+      }
 
       if (isAutoPlay && hasNextEp && !alreadyTriggered) {
         if (sess) sess.hasTriggeredAutoNext = true;
@@ -2342,34 +2392,25 @@ async function playInMpv(window, options) {
                           finalServer.headers?.referer ||
                           activeReferer ||
                           "";
-                        const sHeaderFields = [];
                         if (sReferer) {
                           client.write(
                             JSON.stringify({
                               command: ["set_property", "referrer", sReferer],
                             }) + "\n",
                           );
-                          sHeaderFields.push(`Referer: ${sReferer}`);
                         }
                         const sUserAgent =
                           finalServer.headers?.["User-Agent"] ||
                           finalServer.headers?.["user-agent"] ||
                           activeUserAgent;
-                        sHeaderFields.push(`User-Agent: ${sUserAgent}`);
-                        if (finalServer.headers) {
-                          for (const [hk, hv] of Object.entries(
-                            finalServer.headers,
-                          )) {
-                            const hkl = hk.toLowerCase();
-                            if (
-                              hkl !== "referer" &&
-                              hkl !== "user-agent" &&
-                              typeof hv === "string"
-                            ) {
-                              sHeaderFields.push(`${hk}: ${hv}`);
-                            }
-                          }
-                        }
+                        client.write(
+                          JSON.stringify({
+                            command: ["set_property", "user-agent", sUserAgent],
+                          }) + "\n",
+                        );
+                        const sHeaderFields = sanitizeMpvHeaderFields(
+                          finalServer.headers,
+                        );
                         client.write(
                           JSON.stringify({
                             command: [
@@ -2516,6 +2557,9 @@ async function playInMpv(window, options) {
           } else if (msg.name === "time-pos" && typeof msg.data === "number") {
             const prevTime = currentTime;
             currentTime = msg.data;
+            if (prevTime > 0 && msg.data > prevTime) {
+              advancedSecs += Math.min(msg.data - prevTime, 10);
+            }
             sendStarted();
 
             const now = Date.now();

@@ -289,7 +289,7 @@ async function fetchEpisodeSources(provider, episodeId, category = null) {
   }
 
   const cacheKey = CreateHashKey(
-    `animeepisodesources_${provider.provider_name}_${cleanEpisodeId}_${category ? String(category).toLowerCase() : "all"}`,
+    `animeepisodesources_${provider.provider_name || provider.name || provider?.provider?.name || "provider"}_${cleanEpisodeId}_${category ? String(category).toLowerCase() : "all"}`,
   );
 
   let sources = cache.get(cacheKey);
@@ -353,7 +353,7 @@ async function latestMangas(provider, Page = 1, filters = {}) {
     );
 
   const cacheKey = CreateHashKey(
-    `latestmanga_${provider.provider_name}_${Page}_${JSON.stringify(filters)}`,
+    `latestmanga_${provider.provider_name || provider.name || provider?.provider?.name || "provider"}_${Page}_${JSON.stringify(filters)}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -381,7 +381,7 @@ async function MangaSearch(provider, MANGA_NAME, PAGE = 1, filters = {}) {
 
   try {
     const cacheKey = CreateHashKey(
-      `mangasearch_${provider.provider_name}_${MANGA_NAME}_${PAGE}_${JSON.stringify(filters)}`,
+      `mangasearch_${provider.provider_name || provider.name || provider?.provider?.name || "provider"}_${MANGA_NAME}_${PAGE}_${JSON.stringify(filters)}`,
     );
 
     const cachedData = cache.get(cacheKey);
@@ -412,7 +412,7 @@ async function MangaInfo(provider, MANGA_ID) {
     );
 
   const cacheKey = CreateHashKey(
-    `mangainfo${provider.provider_name}_${MANGA_ID}`,
+    `mangainfo_${provider.provider_name || provider.name || provider?.provider?.name || "provider"}_${MANGA_ID}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -434,7 +434,7 @@ async function fetchChapters(provider, MANGA_ID, page = 1) {
     );
 
   const cacheKey = CreateHashKey(
-    `mangachapters${provider.provider_name}_${MANGA_ID}_${page}`,
+    `mangachapters_${provider.provider_name || provider.name || provider?.provider?.name || "provider"}_${MANGA_ID}_${page}`,
   );
 
   const cachedData = cache.get(cacheKey);
@@ -456,7 +456,7 @@ async function MangaChapterFetch(provider, MangaChapterID) {
     );
 
   const cacheKey = CreateHashKey(
-    `mangachapterfetch_${provider.provider_name}_${MangaChapterID}`,
+    `mangachapterfetch_${provider.provider_name || provider.name || provider?.provider?.name || "provider"}_${MangaChapterID}`,
   );
 
   const cachedData = cache.get(cacheKey);

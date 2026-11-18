@@ -35,7 +35,9 @@ app.log
 *.db-journal
 *.db-wal
 *.db-shm
+**/libffmpeg.so
 .DS_Store
 **/.DS_Store
+image_cache/
 graphify-out/
 .agents/

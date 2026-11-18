@@ -270,7 +270,7 @@ function listExternalLogFiles(dir) {
 
 function clampLogFileCount(n) {
   const v = parseInt(n, 10);
-  if (isNaN(v)) return 5;
+  if (isNaN(v)) return 3;
   return Math.min(Math.max(v, 1), MAX_LOG_FILES_HARD_LIMIT);
 }
 
@@ -304,7 +304,12 @@ function pruneExternalLogs(dir, maxFiles) {
 function buildSessionLogPath(dir) {
   const d = new Date();
   const pad = (n) => String(n).padStart(2, "0");
-  const stamp = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  // Human-readable stamp: YYYY-MM-DD-HH-MMAM/PM. Slashes and colons are
+  // illegal in Windows filenames, so dashes stand in for both.
+  const hour24 = d.getHours();
+  const ampm = hour24 >= 12 ? "PM" : "AM";
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}-${pad(hour12)}-${pad(d.getMinutes())}${ampm}`;
   let p = path.join(dir, `strawverse-${stamp}.log`);
   let i = 1;
   while (fs.existsSync(p)) {
@@ -351,6 +356,12 @@ function configureExternalLogs(opts = {}) {
     if (!externalLogActive || !currentExternalLogPath) {
       currentExternalLogPath = buildSessionLogPath(dir);
     }
+    // Create this session's file before pruning so it counts toward the
+    // cap; pruning first keeps `max` old files and the new session then
+    // leaves the folder at max + 1 forever.
+    try {
+      fs.closeSync(fs.openSync(currentExternalLogPath, "a"));
+    } catch (_) {}
     if (!externalFileTransport) {
       externalFileTransport = new winston.transports.File({
         filename: currentExternalLogPath,
