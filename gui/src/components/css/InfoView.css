@@ -1531,3 +1531,384 @@
   color: #f87171;
   transform: scale(1.08);
 }
+
+/* ================================================
+   Cast to TV Controls & Dock - InfoView.css
+   ================================================ */
+
+.btn-action-base.btn-cast {
+  background: rgba(59, 130, 246, 0.14);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  color: #60a5fa;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.btn-action-base.btn-cast:hover {
+  background: rgba(59, 130, 246, 0.25);
+  border-color: #3b82f6;
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.btn-action-base.btn-cast.active {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #ffffff;
+}
+
+.badge-cast-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  letter-spacing: 0.5px;
+  transition: all 0.15s ease;
+}
+
+.badge-cast-btn:hover {
+  background: #2563eb;
+  border-color: #3b82f6;
+  color: #ffffff;
+  transform: scale(1.05);
+}
+
+/* Cast Modal Backdrop */
+.infoview-cast-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: castFadeIn 0.2s ease-out;
+}
+
+@keyframes castFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.infoview-cast-modal {
+  width: 100%;
+  max-width: 440px;
+  background: #151824;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.75);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: castModalSlide 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes castModalSlide {
+  from { transform: translateY(12px) scale(0.97); opacity: 0; }
+  to { transform: translateY(0) scale(1); opacity: 1; }
+}
+
+.infoview-cast-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.infoview-cast-header-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.infoview-cast-header-icon {
+  color: #3b82f6;
+}
+
+.infoview-cast-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.infoview-cast-btn-icon {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.infoview-cast-btn-icon:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.infoview-cast-btn-icon:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.infoview-cast-body {
+  padding: 18px 20px;
+  min-height: 180px;
+  display: flex;
+  flex-direction: column;
+}
+
+.infoview-cast-loading,
+.infoview-cast-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px 16px;
+  gap: 12px;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.infoview-cast-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid rgba(59, 130, 246, 0.2);
+  border-top-color: #3b82f6;
+  border-radius: 50%;
+  animation: castSpin 0.8s linear infinite;
+}
+
+@keyframes castSpin {
+  to { transform: rotate(360deg); }
+}
+
+.infoview-cast-rescan-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.infoview-cast-rescan-btn:hover {
+  background: #1d4ed8;
+}
+
+.infoview-cast-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.infoview-cast-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 4px;
+}
+
+.infoview-cast-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 12px 14px;
+  transition: all 0.2s ease;
+}
+
+.infoview-cast-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+.infoview-cast-item.active {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.12);
+}
+
+.infoview-cast-item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.infoview-cast-item-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.infoview-cast-item-details {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.infoview-cast-badge {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.infoview-cast-connect-btn {
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.infoview-cast-connect-btn:hover {
+  background: #1d4ed8;
+}
+
+.infoview-cast-connect-btn:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Floating Cast Dock (during active casting) */
+.infoview-cast-dock {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  background: #0f172a;
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  border-radius: 16px;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.7);
+  color: #ffffff;
+  animation: castDockSlide 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes castDockSlide {
+  from { transform: translate(-50%, 20px); opacity: 0; }
+  to { transform: translate(-50%, 0); opacity: 1; }
+}
+
+.infoview-cast-dock-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.infoview-cast-dock-icon {
+  color: #38bdf8;
+  animation: castPulseGlow 2s infinite ease-in-out;
+}
+
+@keyframes castPulseGlow {
+  0% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.1); opacity: 1; filter: drop-shadow(0 0 10px #38bdf8); }
+  100% { transform: scale(1); opacity: 0.85; }
+}
+
+.infoview-cast-dock-text h4 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.infoview-cast-dock-text p {
+  margin: 2px 0 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.infoview-cast-dock-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.infoview-cast-dock-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.infoview-cast-dock-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.infoview-cast-dock-disconnect {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #f87171;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.infoview-cast-dock-disconnect:hover {
+  background: rgba(239, 68, 68, 0.35);
+  color: #ffffff;
+}
