@@ -22,6 +22,8 @@ const RPC = require("discord-rpc");
 const { getKeyValue } = require("./db");
 const { logger } = require("./AppLogger");
 
+const isDiscordSupported = Boolean(process.versions?.electron && !isAndroid);
+
 let rpcClient = null;
 let rpcConnected = false;
 
@@ -30,14 +32,23 @@ async function isDiscordRPCEnabled() {
   try {
     return (await getKeyValue("Settings", "enableDiscordRPC")) === true;
   } catch (err) {
+    logger.error("[DiscordRPC] Error reading enableDiscordRPC: " + err.message);
     return false;
   }
 }
 
 async function StartDiscordRPC() {
-  if (!isDiscordSupported || !RPC) return false;
+  if (!isDiscordSupported || !RPC) {
+    logger.warn(
+      "[DiscordRPC] Discord RPC is not supported in this environment.",
+    );
+    return false;
+  }
   const running = await isDiscordRunning();
   if (!running) {
+    logger.warn(
+      "[DiscordRPC] Discord desktop app is not running in background.",
+    );
     throw new Error("Discord is not open in the background!");
   }
 
@@ -49,6 +60,7 @@ async function StartDiscordRPC() {
   return new Promise(async (resolve, reject) => {
     rpcClient.once("ready", () => {
       rpcConnected = true;
+      logger.info("[DiscordRPC] Discord Rich Presence connected successfully.");
       UpdateDiscordRPC();
       resolve(true);
     });
@@ -57,6 +69,7 @@ async function StartDiscordRPC() {
       await rpcClient.login({ clientId: DISCORD_CLIENT_ID });
     } catch (err) {
       rpcConnected = false;
+      logger.error("[DiscordRPC] Failed to login to Discord: " + err.message);
       reject(
         new Error("Failed to login to Discord Rich Presence: " + err.message),
       );
@@ -66,36 +79,96 @@ async function StartDiscordRPC() {
 
 function isDiscordRunning() {
   return new Promise((resolve) => {
-    let socketPath;
+    let resolved = false;
+    const markFound = (sock) => {
+      if (resolved) return;
+      resolved = true;
+      if (sock) sock.destroy();
+      resolve(true);
+    };
+
     if (os.platform() === "win32") {
-      socketPath = "\\\\?\\pipe\\discord-ipc-0";
-    } else {
-      socketPath = path.join(
-        process.env.XDG_RUNTIME_DIR || process.env.TMPDIR || "/tmp",
-        "discord-ipc-0",
-      );
+      let pending = 0;
+      for (let i = 0; i < 10; i++) {
+        pending++;
+        const socketPath = `\\\\?\\pipe\\discord-ipc-${i}`;
+        try {
+          const socket = net.connect(socketPath, () => markFound(socket));
+          socket.setTimeout(600);
+          socket.on("timeout", () => {
+            socket.destroy();
+            pending--;
+            if (pending <= 0 && !resolved) resolve(false);
+          });
+          socket.on("error", () => {
+            pending--;
+            if (pending <= 0 && !resolved) resolve(false);
+          });
+        } catch (_) {
+          pending--;
+        }
+      }
+      setTimeout(() => {
+        if (!resolved) resolve(false);
+      }, 700);
+      return;
     }
 
-    if (!fs.existsSync(socketPath)) {
+    const baseDirs = [
+      process.env.XDG_RUNTIME_DIR,
+      process.env.TMPDIR,
+      process.env.TMP,
+      process.env.TEMP,
+      "/tmp",
+      process.env.XDG_RUNTIME_DIR
+        ? path.join(
+            process.env.XDG_RUNTIME_DIR,
+            "app",
+            "com.discordapp.Discord",
+          )
+        : null,
+      process.env.XDG_RUNTIME_DIR
+        ? path.join(process.env.XDG_RUNTIME_DIR, "snap.discord")
+        : null,
+    ].filter(Boolean);
+
+    let candidates = [];
+    for (const dir of baseDirs) {
+      for (let i = 0; i < 10; i++) {
+        const socketPath = path.join(dir, `discord-ipc-${i}`);
+        if (fs.existsSync(socketPath)) {
+          candidates.push(socketPath);
+        }
+      }
+    }
+
+    if (candidates.length === 0) {
       return resolve(false);
     }
 
-    const socket = net.connect(socketPath, () => {
-      socket.destroy();
-      resolve(true);
-    });
+    let pending = candidates.length;
+    for (const socketPath of candidates) {
+      try {
+        const socket = net.connect(socketPath, () => markFound(socket));
+        socket.setTimeout(600);
+        socket.on("timeout", () => {
+          socket.destroy();
+          pending--;
+          if (pending <= 0 && !resolved) resolve(false);
+        });
+        socket.on("error", () => {
+          pending--;
+          if (pending <= 0 && !resolved) resolve(false);
+        });
+      } catch (_) {
+        pending--;
+        if (pending <= 0 && !resolved) resolve(false);
+      }
+    }
 
-    socket.setTimeout(1000);
-
-    socket.on("timeout", () => {
-      socket.destroy();
-      resolve(false);
-    });
-
-    socket.on("error", () => {
-      socket.destroy();
-      resolve(false);
-    });
+    setTimeout(() => {
+      if (!resolved) resolve(false);
+    }, 700);
   });
 }
 

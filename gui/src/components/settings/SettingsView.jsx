@@ -185,6 +185,8 @@ export default function SettingsView({
   const [subBorderSize, setSubBorderSize] = useState(3.0);
   const [subBgColor, setSubBgColor] = useState("transparent");
   const [playerSpeed, setPlayerSpeed] = useState(1.0);
+  const [enableDiscordRPC, setEnableDiscordRPC] = useState(false);
+  const [malDiscordProfile, setMalDiscordProfile] = useState(false);
   const [mangaReaderLayout, setMangaReaderLayout] = useState("long-strip");
   const [mangaReaderWidth, setMangaReaderWidth] = useState(800);
   const [catalogTitleFontSize, setCatalogTitleFontSize] = useState(14);
@@ -801,12 +803,12 @@ export default function SettingsView({
         {
           const intervalVal = parseInt(s.mappingSyncIntervalHours, 10);
           setMappingSyncInterval(
-            Number.isFinite(intervalVal) && intervalVal >= 0
-              ? intervalVal
-              : 1,
+            Number.isFinite(intervalVal) && intervalVal >= 0 ? intervalVal : 1,
           );
         }
         setAutoSkipIntro(s.autoSkipIntro);
+        setEnableDiscordRPC(s.enableDiscordRPC === true);
+        setMalDiscordProfile(s.malDiscordProfile === true);
         {
           const recCountVal = parseInt(s.infoRecCount, 10);
           setInfoRecCount(
@@ -988,18 +990,19 @@ export default function SettingsView({
 
   // Mapping auto-sync saves directly instead of through the debounced form
   // state: it only affects the backend's boot-time sync, not a form field.
-  const mappingToggleKey = (type) =>
-    type === "Manga" ? "mappingAutoSyncManga" : "mappingAutoSyncAnime";
-
-  const handleMappingAutoSyncChange = async (val, type) => {
+  const handleMappingAutoSyncChange = async (val) => {
     const value = val === "true";
-    const key = mappingToggleKey(type);
-    setSettings((prev) => ({ ...(prev || {}), [key]: value }));
+    setSettings((prev) => ({
+      ...(prev || {}),
+      mappingAutoSync: value,
+    }));
     try {
       if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
-        await window.sharedStateAPI.updateSetting(key, value);
+        await window.sharedStateAPI.updateSetting("mappingAutoSync", value);
       } else {
-        const res = await apiPost("/api/settings/update", { [key]: value });
+        const res = await apiPost("/api/settings/update", {
+          mappingAutoSync: value,
+        });
         if (res && res.success === false) {
           throw new Error(res.error || "Save failed");
         }
@@ -1036,17 +1039,14 @@ export default function SettingsView({
     }
   };
 
-  const handleSyncMappingNow = async (type) => {
-    setSyncingMapping(type);
+  const handleSyncMappingNow = async () => {
+    setSyncingMapping("all");
     try {
-      const res = await apiPost("/api/mapping/refresh", { type });
+      const res = await apiPost("/api/mapping/refresh", {});
       if (res && res.success === false) {
         throw new Error(res.error || "Sync failed");
       }
-      swalSuccess(
-        "Mapping Updated",
-        `The ${type.toLowerCase()} mapping database is up to date.`,
-      );
+      swalSuccess("Mapping Updated", "The mapping database is up to date.");
     } catch (err) {
       swalError("Sync Failed", err.message);
     } finally {
@@ -1151,6 +1151,10 @@ export default function SettingsView({
     }
     if (autoSkipIntro !== settings.autoSkipIntro)
       dirty.autoSkipIntro = autoSkipIntro;
+    if (enableDiscordRPC !== (settings.enableDiscordRPC === true))
+      dirty.enableDiscordRPC = enableDiscordRPC;
+    if (malDiscordProfile !== (settings.malDiscordProfile === true))
+      dirty.malDiscordProfile = malDiscordProfile;
     if (
       infoRecCount !==
       (settings.infoRecCount !== undefined
@@ -1308,6 +1312,8 @@ export default function SettingsView({
           : true) ||
       (parseInt(maxLogFiles, 10) || 5) !== (settings.maxLogFiles || 5) ||
       autoSkipIntro !== settings.autoSkipIntro ||
+      enableDiscordRPC !== (settings.enableDiscordRPC === true) ||
+      malDiscordProfile !== (settings.malDiscordProfile === true) ||
       (settings.infoRecCount !== undefined
         ? parseInt(settings.infoRecCount, 10)
         : 4) !== infoRecCount ||
@@ -1368,6 +1374,8 @@ export default function SettingsView({
     externalLogEnabled,
     maxLogFiles,
     autoSkipIntro,
+    enableDiscordRPC,
+    malDiscordProfile,
     infoRecCount,
     mangaReaderLayout,
     mangaReaderWidth,
@@ -1607,21 +1615,32 @@ export default function SettingsView({
                     minWidth={200}
                   />
                 </SettingsRow>
+                {!isMobileApp() && (
+                  <SettingsRow
+                    label="Discord Rich Presence"
+                    desc="Display your current anime, manga, movie, or series activity on your Discord profile."
+                  >
+                    <Dropdown
+                      value={String(enableDiscordRPC)}
+                      onChange={(val) => setEnableDiscordRPC(val === "true")}
+                      options={[
+                        { value: "true", label: "Enabled" },
+                        { value: "false", label: "Disabled" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </SettingsRow>
+                )}
                 <SettingsRow
-                  label="Anime Mapping Auto-Sync"
-                  desc="Sync anime title-to-MAL mappings when the app starts, skipped when the data is already fresh. Off skips the startup sync only — the background interval below and Sync now still work."
+                  label="Mapping Auto-Sync"
+                  desc="Sync anime and manga title-to-MAL mappings when the app starts, skipped when the data is already fresh. Off skips the startup sync only — the background interval below and Sync now still work."
                 >
                   <div
                     style={{ display: "flex", gap: 8, alignItems: "center" }}
                   >
                     <Dropdown
-                      value={String(
-                        settings?.mappingAutoSyncAnime ??
-                          (settings?.mappingAutoSync !== false),
-                      )}
-                      onChange={(val) =>
-                        handleMappingAutoSyncChange(val, "Anime")
-                      }
+                      value={String(settings?.mappingAutoSync !== false)}
+                      onChange={(val) => handleMappingAutoSyncChange(val)}
                       options={[
                         { value: "true", label: "On" },
                         { value: "false", label: "Off" },
@@ -1631,41 +1650,10 @@ export default function SettingsView({
                     <button
                       type="button"
                       className="settings-market-btn"
-                      disabled={syncingMapping === "Anime"}
-                      onClick={() => handleSyncMappingNow("Anime")}
+                      disabled={syncingMapping === "all"}
+                      onClick={() => handleSyncMappingNow()}
                     >
-                      {syncingMapping === "Anime" ? "Syncing..." : "Sync now"}
-                    </button>
-                  </div>
-                </SettingsRow>
-                <SettingsRow
-                  label="Manga Mapping Auto-Sync"
-                  desc="Sync manga title-to-MAL mappings when the app starts, skipped when the data is already fresh. Off skips the startup sync only — the background interval below and Sync now still work."
-                >
-                  <div
-                    style={{ display: "flex", gap: 8, alignItems: "center" }}
-                  >
-                    <Dropdown
-                      value={String(
-                        settings?.mappingAutoSyncManga ??
-                          (settings?.mappingAutoSync !== false),
-                      )}
-                      onChange={(val) =>
-                        handleMappingAutoSyncChange(val, "Manga")
-                      }
-                      options={[
-                        { value: "true", label: "On" },
-                        { value: "false", label: "Off" },
-                      ]}
-                      minWidth={110}
-                    />
-                    <button
-                      type="button"
-                      className="settings-market-btn"
-                      disabled={syncingMapping === "Manga"}
-                      onClick={() => handleSyncMappingNow("Manga")}
-                    >
-                      {syncingMapping === "Manga" ? "Syncing..." : "Sync now"}
+                      {syncingMapping === "all" ? "Syncing..." : "Sync now"}
                     </button>
                   </div>
                 </SettingsRow>
@@ -1675,9 +1663,9 @@ export default function SettingsView({
                       Mapping Sync Interval
                     </div>
                     <div className="settings-row-hint">
-                      Hours between automatic background mapping syncs while
-                      the app is running. 0 disables the timer; startup sync
-                      and Sync now still follow the settings above.
+                      Hours between automatic background mapping syncs while the
+                      app is running. 0 disables the timer; startup sync and
+                      Sync now still follow the setting above.
                     </div>
                   </div>
                   <div className="settings-row-control u-style-72">
@@ -1749,6 +1737,24 @@ export default function SettingsView({
                         />
                       </div>
                     </div>
+                    {!isMobileApp() && (
+                      <SettingsRow
+                        label="Discord Profile Button"
+                        desc="Add a clickable button linking to your MyAnimeList profile on your Discord Rich Presence activity."
+                      >
+                        <Dropdown
+                          value={String(malDiscordProfile)}
+                          onChange={(val) =>
+                            setMalDiscordProfile(val === "true")
+                          }
+                          options={[
+                            { value: "true", label: "Enabled" },
+                            { value: "false", label: "Disabled" },
+                          ]}
+                          minWidth={200}
+                        />
+                      </SettingsRow>
+                    )}
                     <div className="settings-row-item">
                       <div className="settings-row-info">
                         <div className="settings-row-label">
@@ -2754,7 +2760,8 @@ export default function SettingsView({
                       },
                       {
                         value: "title_s01e01",
-                        label: "Plex / Jellyfin (Title.mp4 / Title - S01E01.mp4)",
+                        label:
+                          "Plex / Jellyfin (Title.mp4 / Title - S01E01.mp4)",
                       },
                       {
                         value: "title_ep",

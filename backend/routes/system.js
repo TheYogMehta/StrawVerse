@@ -51,14 +51,8 @@ router.get("/api/changelog", (req, res) => {
 // Force-refresh the mapping database (Settings → General → Sync now)
 router.post("/api/mapping/refresh", async (req, res) => {
   try {
-    const type =
-      req.body?.type === "Anime"
-        ? "Anime"
-        : req.body?.type === "Manga"
-          ? "Manga"
-          : null;
-    await checkForMappingUpdates(true, type); // force bypasses the auto-sync gate
-    res.json({ success: true, type: type || "all" });
+    await checkForMappingUpdates(true);
+    res.json({ success: true, type: "all" });
   } catch (err) {
     logger.error("Mapping refresh failed: " + err.message);
     res.status(500).json({ success: false, error: err.message });

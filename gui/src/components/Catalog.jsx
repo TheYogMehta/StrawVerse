@@ -389,6 +389,7 @@ export default function Catalog({
     () => provider === "mal" && type !== "Movies",
   );
   const [installedProvidersList, setInstalledProvidersList] = useState([]);
+  const [installedExtensionsList, setInstalledExtensionsList] = useState([]);
   const [providerMetadataList, setProviderMetadataList] = useState([]);
   const [activeProviderName, setActiveProviderName] = useState("");
   const [catalogSource, setCatalogSource] = useState(() => {
@@ -446,7 +447,9 @@ export default function Catalog({
             "Mangaprovider",
           ]);
           const pList = res?.settings?.providers?.[type] || [];
+          const extList = res?.settings?.installedExtensions?.[type] || [];
           setInstalledProvidersList(pList);
+          setInstalledExtensionsList(extList);
           setActiveProviderName(res?.settings?.[settingKey] || "");
           return;
         }
@@ -456,6 +459,8 @@ export default function Catalog({
         if (resp.ok) {
           const data = await resp.json();
           const s = data?.settings || data || {};
+          const extList = s?.installedExtensions?.[type] || [];
+          setInstalledExtensionsList(extList);
           setActiveProviderName(s[settingKey] || "");
         }
       } catch (_) {}
@@ -579,22 +584,22 @@ export default function Catalog({
         break;
       }
     }
-          // Skip if cardMeta already has all the needed data (from previous filter changes)
-      if (cardMeta && Object.keys(cardMeta).length >= displayResults.length) {
-        const hasAllStatus = displayResults.every((item) => {
-          const key = getItemMetaKey(item);
-          return cardMeta[key]?.status !== null;
-        });
-        const hasAllLangs = displayResults.every((item) => {
-          const key = getItemMetaKey(item);
-          return cardMeta[key]?.langs !== null;
-        });
-        if (hasAllStatus && hasAllLangs) {
-          setCardMeta((prev) => prev);
-          return;
-        }
+    // Skip if cardMeta already has all the needed data (from previous filter changes)
+    if (cardMeta && Object.keys(cardMeta).length >= displayResults.length) {
+      const hasAllStatus = displayResults.every((item) => {
+        const key = getItemMetaKey(item);
+        return cardMeta[key]?.status !== null;
+      });
+      const hasAllLangs = displayResults.every((item) => {
+        const key = getItemMetaKey(item);
+        return cardMeta[key]?.langs !== null;
+      });
+      if (hasAllStatus && hasAllLangs) {
+        setCardMeta((prev) => prev);
+        return;
       }
-      const langsBatch = type === "Anime" ? needLangs : [];
+    }
+    const langsBatch = type === "Anime" ? needLangs : [];
     if (!needStatus.length && !langsBatch.length) return;
 
     const timer = setTimeout(async () => {
@@ -624,8 +629,10 @@ export default function Catalog({
               const got = payload?.meta?.[key];
               const existing = prev[key] || { status: null, langs: null };
               next[key] = {
-                status: field === "status" ? got?.status ?? null : existing.status,
-                langs: field === "langs" ? got?.langs ?? null : existing.langs,
+                status:
+                  field === "status" ? (got?.status ?? null) : existing.status,
+                langs:
+                  field === "langs" ? (got?.langs ?? null) : existing.langs,
               };
             }
             return next;
@@ -2803,12 +2810,15 @@ export default function Catalog({
         onToggleFilter={() => setIsFilterPanelOpen((prev) => !prev)}
         activeFilterCount={activeFilterCount}
         showFilterToggle={
-          type !== "Movies" && (provider === "mal" || provider === "provider")
+          type !== "Movies" &&
+          (provider === "mal" ||
+            (provider === "provider" && Boolean(availableFilters)))
         }
         catalogSource={catalogSource}
         onCatalogSourceChange={handleCatalogSourceChange}
         availableProviders={providerMetadataList}
         installedProviders={installedProvidersList}
+        installedExtensions={installedExtensionsList}
         activeProvider={activeProviderName}
         onProviderChange={handleProviderChange}
       />
@@ -3036,73 +3046,73 @@ export default function Catalog({
         type !== "Movies" &&
         isFilterPanelOpen &&
         availableFilters && (
-        <div className="filter-panel">
-          <div className="filter-panel-header">
-            <div className="filter-panel-left">
-              <div className="filter-panel-title">
-                <SlidersHorizontal size={15} />
-                <span>Filters</span>
+          <div className="filter-panel">
+            <div className="filter-panel-header">
+              <div className="filter-panel-left">
+                <div className="filter-panel-title">
+                  <SlidersHorizontal size={15} />
+                  <span>Filters</span>
+                  {activeFilterCount > 0 && (
+                    <span className="filter-count-label">
+                      ({activeFilterCount} active)
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="filter-panel-actions">
                 {activeFilterCount > 0 && (
-                  <span className="filter-count-label">
-                    ({activeFilterCount} active)
-                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="filter-reset-btn"
+                    title="Clear all filters"
+                  >
+                    <RotateCcw size={13} />
+                    <span>Reset All</span>
+                  </button>
                 )}
+                {filterToggleBtn}
               </div>
             </div>
-            <div className="filter-panel-actions">
-              {activeFilterCount > 0 && (
-                <button
-                  type="button"
-                  onClick={handleResetFilters}
-                  className="filter-reset-btn"
-                  title="Clear all filters"
+            <div
+              className={`filter-grid${isFilterPanelOpen ? "" : " is-collapsed"}`}
+            >
+              <div className="filter-group">
+                <label className="filter-label">Downloads</label>
+                <select
+                  value={activeFilters.downloadStatus || ""}
+                  onChange={(e) =>
+                    handleFilterChange("downloadStatus", e.target.value)
+                  }
+                  className={`filter-select ${activeFilters.downloadStatus ? "is-active" : ""}`}
                 >
-                  <RotateCcw size={13} />
-                  <span>Reset All</span>
-                </button>
-              )}
-              {filterToggleBtn}
+                  <option value="">All</option>
+                  <option value="downloaded">Downloaded Only</option>
+                  <option value="not_downloaded">Not Downloaded</option>
+                </select>
+              </div>
+              {availableFilters &&
+                Object.entries(availableFilters).map(([key, filter]) => (
+                  <div key={key} className="filter-group">
+                    <label className="filter-label">{filter.label}</label>
+                    <select
+                      value={activeFilters[key] || ""}
+                      onChange={(e) => handleFilterChange(key, e.target.value)}
+                      className={`filter-select ${activeFilters[key] ? "is-active" : ""}`}
+                    >
+                      {Object.entries(filter.options).map(
+                        ([optLabel, optVal]) => (
+                          <option key={optLabel} value={optVal}>
+                            {optLabel}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </div>
+                ))}
             </div>
           </div>
-          <div
-            className={`filter-grid${isFilterPanelOpen ? "" : " is-collapsed"}`}
-          >
-            <div className="filter-group">
-              <label className="filter-label">Downloads</label>
-              <select
-                value={activeFilters.downloadStatus || ""}
-                onChange={(e) =>
-                  handleFilterChange("downloadStatus", e.target.value)
-                }
-                className={`filter-select ${activeFilters.downloadStatus ? "is-active" : ""}`}
-              >
-                <option value="">All</option>
-                <option value="downloaded">Downloaded Only</option>
-                <option value="not_downloaded">Not Downloaded</option>
-              </select>
-            </div>
-            {availableFilters &&
-              Object.entries(availableFilters).map(([key, filter]) => (
-                <div key={key} className="filter-group">
-                  <label className="filter-label">{filter.label}</label>
-                  <select
-                    value={activeFilters[key] || ""}
-                    onChange={(e) => handleFilterChange(key, e.target.value)}
-                    className={`filter-select ${activeFilters[key] ? "is-active" : ""}`}
-                  >
-                    {Object.entries(filter.options).map(
-                      ([optLabel, optVal]) => (
-                        <option key={optLabel} value={optVal}>
-                          {optLabel}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
+        )}
 
       {/* Local Tag Filter panel */}
       {provider === "local" && !linkingMalItem && (

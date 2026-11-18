@@ -61,43 +61,25 @@ async function getFreshTtlMs() {
   return (hours > 0 ? hours : 24) * 60 * 60 * 1000;
 }
 
-async function shouldAutoSyncMapping(type = "Anime", opts = {}) {
-  const isManga = type === "Manga";
+async function shouldAutoSyncMapping(opts = {}) {
   try {
     // Scheduled (watchdog) runs ignore the startup toggle — the interval
     // is the only switch for those — and stay quiet, because the watchdog
     // re-evaluates them every minute.
     if (!opts.scheduled) {
-      const toggle = await getKeyValue(
-        "Settings",
-        isManga ? "mappingAutoSyncManga" : "mappingAutoSyncAnime",
-      );
-      // Pre-split builds stored one combined toggle; honor it until each side
-      // has been set explicitly.
-      const legacy = await getKeyValue("Settings", "mappingAutoSync");
-      if (toggle === false || (toggle === null && legacy === false)) {
+      const toggle = await getKeyValue("Settings", "mappingAutoSync");
+      if (toggle === false) {
         logger.info(
-          `[mappingUpdater] ${type} auto-sync disabled in settings; skipping.`,
+          "[mappingUpdater] Auto-sync disabled in settings; skipping.",
         );
         return false;
       }
     }
     const ttl = await getFreshTtlMs();
-    let last =
-      Number(
-        await getKeyValue(
-          "Settings",
-          isManga ? "mappingLastSyncManga" : "mappingLastSyncAnime",
-        ),
-      ) || 0;
-    if (!last) {
-      last = Number(await getKeyValue("Settings", "mappingLastSync")) || 0;
-    }
+    const last = Number(await getKeyValue("Settings", "mappingLastSync")) || 0;
     if (last && Date.now() - last < ttl) {
       if (!opts.scheduled) {
-        logger.info(
-          `[mappingUpdater] ${type} mapping data is fresh; skipping sync.`,
-        );
+        logger.info("[mappingUpdater] Mapping data is fresh; skipping sync.");
       }
       return false;
     }
@@ -424,7 +406,11 @@ async function applySyncResponse(data) {
                 const targetIds = [row.id, row.uuid]
                   .filter(Boolean)
                   .map(String);
-                if (unlinkedIds && unlinkedIds.size > 0 && targetIds.length > 0) {
+                if (
+                  unlinkedIds &&
+                  unlinkedIds.size > 0 &&
+                  targetIds.length > 0
+                ) {
                   for (const tid of targetIds) {
                     if (!unlinkedIds.has(tid)) continue;
                     try {
@@ -694,7 +680,7 @@ async function runMappingWatchdogTick() {
     const hours = await getSyncIntervalHours();
     if (hours === 0) return; // 0 = no scheduled sync
     if (Date.now() - lastMappingSyncAttempt < hours * 60 * 60 * 1000) return;
-    await checkForMappingUpdates(false, null, { scheduled: true });
+    await checkForMappingUpdates(false, { scheduled: true });
   } catch (e) {
     logger.error(`[mappingUpdater] Scheduled sync failed: ${e.message}`);
   }
@@ -706,65 +692,49 @@ async function runMappingWatchdogTick() {
 // rather than forcing a fresh one — rare, and a sync is happening either way).
 let activeMappingSync = null;
 
-async function checkForMappingUpdates(force = false, type = null, opts = {}) {
+async function checkForMappingUpdates(force = false, opts = {}) {
   armMappingWatchdog();
   if (activeMappingSync) return activeMappingSync;
-  activeMappingSync = runMappingSyncCheck(force, type, opts).finally(() => {
+  activeMappingSync = runMappingSyncCheck(force, opts).finally(() => {
     activeMappingSync = null;
   });
   return activeMappingSync;
 }
 
-async function runMappingSyncCheck(force, type, opts) {
-  const scope =
-    type === "Anime"
-      ? ["Anime"]
-      : type === "Manga"
-        ? ["Manga"]
-        : ["Anime", "Manga"];
-  const enabled = [];
-  for (const t of scope) {
-    if (force || (await shouldAutoSyncMapping(t, opts))) enabled.push(t);
-  }
-  if (enabled.length === 0) return;
+async function runMappingSyncCheck(force = false, opts = {}) {
+  if (!force && !(await shouldAutoSyncMapping(opts))) return;
+
   // Any run that actually starts anchors the next scheduled run: the
   // watchdog will not fire another one for a full interval.
   lastMappingSyncAttempt = Date.now();
-  const syncAnime = enabled.includes("Anime");
-  const syncManga = enabled.includes("Manga");
-  logger.info(
-    `[mappingUpdater] Checking for mapping database updates (${enabled.join(", ")})...`,
-  );
+  logger.info("[mappingUpdater] Checking for mapping database updates...");
 
   await dropAllTriggers();
   await ensureMappingTablesExist();
 
-  const animeProviders = new Set();
-  const mangaProviders = new Set();
-  const collect = (map, target) => {
+  const installedProviders = new Set();
+  const collect = (map) => {
     if (!map) return;
     for (const p of Object.values(map)) {
       if (p?.name) {
         const clean = String(p.name).toLowerCase().trim().split("/").pop();
-        if (clean) target.add(clean);
+        if (clean) installedProviders.add(clean);
       }
     }
   };
-  collect(global.Anime_providers, animeProviders);
-  collect(global.Manga_providers, mangaProviders);
-
-  const installedProviders = new Set();
-  if (syncAnime) for (const prov of animeProviders) installedProviders.add(prov);
-  if (syncManga) for (const prov of mangaProviders) installedProviders.add(prov);
+  collect(global.Anime_providers);
+  collect(global.Manga_providers);
 
   for (const prov of installedProviders) {
     await ensureProviderTable(prov);
   }
 
-  const tablesToSync = [];
-  if (syncAnime) tablesToSync.push("anime", "next_episodes");
-  if (syncManga) tablesToSync.push("manga");
-  for (const prov of installedProviders) tablesToSync.push(prov);
+  const tablesToSync = [
+    "anime",
+    "manga",
+    "next_episodes",
+    ...Array.from(installedProviders),
+  ];
   const reqTables = {};
 
   for (const tbl of tablesToSync) {
@@ -846,13 +816,8 @@ async function runMappingSyncCheck(force, type, opts) {
   };
 
   let syncSucceeded = false;
-  const scopeLabel =
-    syncAnime && syncManga
-      ? "Mapping database"
-      : syncAnime
-        ? "Anime mapping"
-        : "Manga mapping";
-  const applyData = async (data, label) => {
+  const scopeLabel = "Mapping database";
+  const applyData = async (data, label = scopeLabel) => {
     if (!data) return;
     if (
       data.upToDate &&
@@ -873,10 +838,7 @@ async function runMappingSyncCheck(force, type, opts) {
 
   // Fast path: one combined request for everything.
   try {
-    await applyData(
-      await postSync(liveTables, liveUnmapped),
-      scopeLabel,
-    );
+    await applyData(await postSync(liveTables, liveUnmapped), scopeLabel);
   } catch (err) {
     const status = err.response && err.response.status;
     logger.error(
@@ -944,12 +906,7 @@ async function runMappingSyncCheck(force, type, opts) {
 
   if (syncSucceeded) {
     try {
-      if (syncAnime) {
-        await setKeyValue("Settings", "mappingLastSyncAnime", Date.now());
-      }
-      if (syncManga) {
-        await setKeyValue("Settings", "mappingLastSyncManga", Date.now());
-      }
+      await setKeyValue("Settings", "mappingLastSync", Date.now());
     } catch (_) {}
   }
 
