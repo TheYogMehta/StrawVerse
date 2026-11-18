@@ -7,6 +7,7 @@ const castService = require("../utils/castService");
 const { logger } = require("../utils/AppLogger");
 const { isVideoFile, ALLOWED_VIDEO_EXTENSIONS } = require("../utils/constants");
 const { isLanguagePreferred, settingfetch } = require("../utils/settings");
+const { getExtensionHeaderRules } = require("../utils/extensionRegistry");
 
 const router = express.Router();
 
@@ -209,8 +210,73 @@ let activeCastStream = {
   timestamp: 0,
 };
 
+function resolveCdnHeaders(targetUrl, incomingHeaders = {}) {
+  let resolved = {};
+
+  // 1. Inherit from activeCastStream headers if available
+  if (
+    activeCastStream &&
+    activeCastStream.headers &&
+    typeof activeCastStream.headers === "object"
+  ) {
+    resolved = { ...activeCastStream.headers };
+  }
+
+  // 2. Overlay incomingHeaders if provided
+  if (incomingHeaders && typeof incomingHeaders === "object") {
+    for (const [k, v] of Object.entries(incomingHeaders)) {
+      if (v) resolved[k] = v;
+    }
+  }
+
+  // 3. Fallback to extension registry rules
+  try {
+    const extRules = getExtensionHeaderRules(targetUrl);
+    if (extRules && extRules.headers) {
+      for (const [k, v] of Object.entries(extRules.headers)) {
+        if (!resolved[k]) resolved[k] = v;
+      }
+    }
+  } catch (_) {}
+
+  // 4. Domain-specific CDN heuristics (critical for Flixcloud/Megacloud/Rabbitstream CDN mirrors)
+  const lower = String(targetUrl || "").toLowerCase();
+  if (
+    lower.includes("rundowncdn.top") ||
+    lower.includes("phantomcdn.top") ||
+    lower.includes("flixcloud.cc") ||
+    lower.includes("megacloud.tv") ||
+    lower.includes("rabbitstream.net") ||
+    lower.includes("dokicloud.one")
+  ) {
+    if (!resolved.Referer && !resolved.referer) {
+      resolved.Referer = "https://flixcloud.cc/";
+    }
+    if (!resolved.Origin && !resolved.origin) {
+      resolved.Origin = "https://flixcloud.cc";
+    }
+  } else if (lower.includes("kwik.cx") || lower.includes("owocdn.top")) {
+    if (!resolved.Referer && !resolved.referer) {
+      resolved.Referer = "https://kwik.cx/";
+    }
+  } else if (lower.includes("megaplay.buzz")) {
+    if (!resolved.Referer && !resolved.referer) {
+      resolved.Referer = "https://megaplay.buzz/";
+    }
+  }
+
+  // Ensure default modern Chrome User-Agent if missing
+  if (!resolved["User-Agent"] && !resolved["user-agent"]) {
+    resolved["User-Agent"] =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36";
+  }
+
+  return resolved;
+}
+
 function rewriteHlsPlaylist(playlistContent, baseUrl, customHeaders, localIp, port, subtitles = []) {
-  const encodedHeaders = encodeURIComponent(JSON.stringify(customHeaders || {}));
+  const effectiveHeaders = resolveCdnHeaders(baseUrl, customHeaders);
+  const encodedHeaders = encodeURIComponent(JSON.stringify(effectiveHeaders));
   const isMaster =
     playlistContent.includes("#EXT-X-STREAM-INF") ||
     playlistContent.includes("#EXT-X-MEDIA:TYPE");
@@ -262,6 +328,11 @@ function rewriteHlsPlaylist(playlistContent, baseUrl, customHeaders, localIp, po
       continue;
     }
 
+    // Filter out broken relative audio tracks pointing outside ephemeral server
+    if (trimmed.startsWith("#EXT-X-MEDIA:TYPE=AUDIO") && trimmed.includes('URI="../')) {
+      continue;
+    }
+
     // Inject subtitle tags before the first stream variant or media tag in master
     if (isMaster && subTags.length > 0 && !subTagsInjected) {
       if (trimmed.startsWith("#EXT-X-STREAM-INF") || trimmed.startsWith("#EXT-X-MEDIA")) {
@@ -291,7 +362,9 @@ function rewriteHlsPlaylist(playlistContent, baseUrl, customHeaders, localIp, po
             const absSubUri = new URL(subUri, baseUrl).toString();
             const isMediaSub = trimmed.startsWith("#EXT-X-MEDIA");
             const route = isMediaSub || isPlaylistUrl(absSubUri) ? "stream" : "segment";
-            const proxyUri = `http://${localIp}:${port}/api/cast/${route}?url=${encodeURIComponent(absSubUri)}&headers=${encodedHeaders}`;
+            const subHeaders = resolveCdnHeaders(absSubUri, effectiveHeaders);
+            const encSubHeaders = encodeURIComponent(JSON.stringify(subHeaders));
+            const proxyUri = `http://${localIp}:${port}/api/cast/${route}?url=${encodeURIComponent(absSubUri)}&headers=${encSubHeaders}`;
             return `URI="${proxyUri}"`;
           } catch (_) {
             return match;
@@ -312,8 +385,10 @@ function rewriteHlsPlaylist(playlistContent, baseUrl, customHeaders, localIp, po
       nextLineIsStream = false;
 
       const route = isChildPlaylist ? "stream" : "segment";
+      const itemHeaders = resolveCdnHeaders(absoluteUrl, effectiveHeaders);
+      const encItemHeaders = encodeURIComponent(JSON.stringify(itemHeaders));
       resultLines.push(
-        `http://${localIp}:${port}/api/cast/${route}?url=${encodeURIComponent(absoluteUrl)}&headers=${encodedHeaders}`
+        `http://${localIp}:${port}/api/cast/${route}?url=${encodeURIComponent(absoluteUrl)}&headers=${encItemHeaders}`
       );
     } catch (_) {
       nextLineIsStream = false;
@@ -392,8 +467,31 @@ router.post("/api/cast/start", async (req, res) => {
       }
     } catch (_) {}
 
-    const subtitles = prepareSubtitlesForCast(rawSubtitles, prefLangs);
-    const activeSubtitle = subtitles.find((s) => s.default) || subtitles[0] || null;
+    const isSubDisabled =
+      req.body.subtitlesDisabled === true ||
+      req.body.selectedSubtitleUrl === "none" ||
+      req.body.activeSubtitle === null;
+
+    let subtitles = [];
+    let activeSubtitle = null;
+
+    if (!isSubDisabled) {
+      subtitles = prepareSubtitlesForCast(rawSubtitles, prefLangs);
+      if (req.body.selectedSubtitleUrl) {
+        const chosenIdx = subtitles.findIndex(
+          (s) => s.url === req.body.selectedSubtitleUrl
+        );
+        if (chosenIdx >= 0) {
+          subtitles = subtitles.map((s, idx) => ({
+            ...s,
+            default: idx === chosenIdx,
+          }));
+        }
+      }
+      activeSubtitle = subtitles.find((s) => s.default) || subtitles[0] || null;
+    }
+
+    const effectiveHeaders = resolveCdnHeaders(mediaUrl || filePath, headers);
 
     let streamProxyUrl;
     let mimeType = "video/mp4";
@@ -409,14 +507,7 @@ router.post("/api/cast/start", async (req, res) => {
       // Pre-warm the HLS master playlist in memory so the TV gets an instant <5ms response
       if (isPlaylistUrl(mediaUrl)) {
         try {
-          const upstreamHeaders = {
-            "User-Agent":
-              headers["User-Agent"] ||
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-            Referer: headers.Referer || headers.referer || mediaUrl,
-            Origin: headers.Origin || headers.origin || new URL(mediaUrl).origin,
-            ...headers,
-          };
+          const upstreamHeaders = resolveCdnHeaders(mediaUrl, effectiveHeaders);
           const preRes = await axios.get(mediaUrl, {
             headers: upstreamHeaders,
             responseType: "text",
@@ -430,7 +521,7 @@ router.post("/api/cast/start", async (req, res) => {
             const rewritten = rewriteHlsPlaylist(
               preRes.data,
               mediaUrl,
-              headers,
+              effectiveHeaders,
               localIp,
               port,
               subtitles,
@@ -460,7 +551,7 @@ router.post("/api/cast/start", async (req, res) => {
     activeCastStream = {
       mediaUrl: mediaUrl || "",
       filePath: filePath || "",
-      headers: headers || {},
+      headers: effectiveHeaders,
       subtitles,
       activeSubtitle,
       mimeType,
@@ -703,6 +794,7 @@ router.all(["/api/cast/stream", "/api/cast/stream.mp4"], async (req, res) => {
     } else if (!req.query.url && activeCastStream.headers) {
       customHeaders = activeCastStream.headers;
     }
+    const effectiveHeaders = resolveCdnHeaders(remoteUrl, customHeaders);
 
     const isHls =
       isPlaylistUrl(remoteUrl) ||
@@ -711,14 +803,7 @@ router.all(["/api/cast/stream", "/api/cast/stream.mp4"], async (req, res) => {
 
     if (isHls) {
       try {
-        const upstreamHeaders = {
-          "User-Agent":
-            customHeaders["User-Agent"] ||
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-          Referer: customHeaders.Referer || customHeaders.referer || remoteUrl,
-          Origin: customHeaders.Origin || customHeaders.origin || new URL(remoteUrl).origin,
-          ...customHeaders,
-        };
+        const upstreamHeaders = resolveCdnHeaders(remoteUrl, effectiveHeaders);
 
         const playlistRes = await axios.get(remoteUrl, {
           headers: upstreamHeaders,
@@ -729,7 +814,7 @@ router.all(["/api/cast/stream", "/api/cast/stream.mp4"], async (req, res) => {
         const rewrittenPlaylist = rewriteHlsPlaylist(
           playlistRes.data,
           remoteUrl,
-          customHeaders,
+          effectiveHeaders,
           localIp,
           port,
           subtitles
@@ -750,14 +835,7 @@ router.all(["/api/cast/stream", "/api/cast/stream.mp4"], async (req, res) => {
     } else {
       // Direct video file (e.g. .mp4, .ts)
       try {
-        const upstreamHeaders = {
-          "User-Agent":
-            customHeaders["User-Agent"] ||
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-          Referer: customHeaders.Referer || customHeaders.referer || remoteUrl,
-          Origin: customHeaders.Origin || customHeaders.origin || new URL(remoteUrl).origin,
-          ...customHeaders,
-        };
+        const upstreamHeaders = resolveCdnHeaders(remoteUrl, effectiveHeaders);
 
         if (req.headers.range) {
           upstreamHeaders.Range = req.headers.range;
@@ -817,6 +895,7 @@ router.all("/api/cast/segment", async (req, res) => {
       customHeaders = JSON.parse(req.query.headers);
     } catch (_) {}
   }
+  const effectiveHeaders = resolveCdnHeaders(segmentUrl, customHeaders);
 
   const localIp = castService.getLocalIpAddress();
   const port = global.PORT || 9545;
@@ -836,14 +915,7 @@ router.all("/api/cast/segment", async (req, res) => {
 
   if (isPlaylistUrl(segmentUrl)) {
     try {
-      const upstreamHeaders = {
-        "User-Agent":
-          customHeaders["User-Agent"] ||
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        Referer: customHeaders.Referer || customHeaders.referer || segmentUrl,
-        Origin: customHeaders.Origin || customHeaders.origin || new URL(segmentUrl).origin,
-        ...customHeaders,
-      };
+      const upstreamHeaders = resolveCdnHeaders(segmentUrl, effectiveHeaders);
 
       const playlistRes = await axios.get(segmentUrl, {
         headers: upstreamHeaders,
@@ -854,7 +926,7 @@ router.all("/api/cast/segment", async (req, res) => {
       const rewritten = rewriteHlsPlaylist(
         playlistRes.data,
         segmentUrl,
-        customHeaders,
+        effectiveHeaders,
         localIp,
         port
       );
@@ -875,14 +947,7 @@ router.all("/api/cast/segment", async (req, res) => {
 
   // Case 2: Binary chunk, AES-128 key, or media segment
   try {
-    const upstreamHeaders = {
-      "User-Agent":
-        customHeaders["User-Agent"] ||
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-      Referer: customHeaders.Referer || customHeaders.referer || segmentUrl,
-      Origin: customHeaders.Origin || customHeaders.origin || new URL(segmentUrl).origin,
-      ...customHeaders,
-    };
+    const upstreamHeaders = resolveCdnHeaders(segmentUrl, effectiveHeaders);
 
     if (req.headers.range) {
       upstreamHeaders.Range = req.headers.range;
@@ -1020,13 +1085,7 @@ router.all("/api/cast/subtitle", async (req, res) => {
       subContent = fs.readFileSync(subUrl, "utf8");
     } else if (subUrl.startsWith("http://") || subUrl.startsWith("https://")) {
       // 2. Remote subtitle URL
-      const upstreamHeaders = {
-        "User-Agent":
-          customHeaders["User-Agent"] ||
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        Referer: customHeaders.Referer || customHeaders.referer || subUrl,
-        ...customHeaders,
-      };
+      const upstreamHeaders = resolveCdnHeaders(subUrl, customHeaders);
 
       const resp = await axios.get(subUrl, {
         headers: upstreamHeaders,
@@ -1095,14 +1154,7 @@ router.all(
       } else if (subUrl.startsWith("/") && fs.existsSync(subUrl)) {
         subContent = fs.readFileSync(subUrl, "utf8");
       } else if (subUrl.startsWith("http://") || subUrl.startsWith("https://")) {
-        const customHeaders = activeCastStream.headers || {};
-        const upstreamHeaders = {
-          "User-Agent":
-            customHeaders["User-Agent"] ||
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-          Referer: customHeaders.Referer || customHeaders.referer || subUrl,
-          ...customHeaders,
-        };
+        const upstreamHeaders = resolveCdnHeaders(subUrl, activeCastStream.headers || {});
 
         const resp = await axios.get(subUrl, {
           headers: upstreamHeaders,
@@ -1139,6 +1191,7 @@ router.all(
 
 module.exports = router;
 module.exports.activeCastStream = activeCastStream;
+module.exports.resolveCdnHeaders = resolveCdnHeaders;
 module.exports.rewriteHlsPlaylist = rewriteHlsPlaylist;
 module.exports.isPlaylistUrl = isPlaylistUrl;
 module.exports.getMimeType = getMimeType;

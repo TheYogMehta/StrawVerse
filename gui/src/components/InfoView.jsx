@@ -1420,6 +1420,14 @@ export default function InfoView({
   const [castConnectingStep, setCastConnectingStep] = useState("");
   const [isCastPlaying, setIsCastPlaying] = useState(true);
 
+  // Cast configuration states: Quality and Subtitles
+  const [castSources, setCastSources] = useState([]);
+  const [castSubtitles, setCastSubtitles] = useState([]);
+  const [isLoadingCastOptions, setIsLoadingCastOptions] = useState(false);
+  const [castSelectedDevice, setCastSelectedDevice] = useState(null);
+  const [castSelectedSource, setCastSelectedSource] = useState(null);
+  const [castSelectedSubtitleUrl, setCastSelectedSubtitleUrl] = useState("none");
+
   const scanCastDevices = async (timeout = 3500) => {
     setIsScanningCast(true);
     try {
@@ -1427,6 +1435,9 @@ export default function InfoView({
       const data = await res.json();
       if (data.success && Array.isArray(data.devices)) {
         setCastDevices(data.devices);
+        if (data.devices.length === 1 && !castSelectedDevice) {
+          setCastSelectedDevice(data.devices[0]);
+        }
       }
     } catch (e) {
       console.error("[InfoView] Error scanning cast devices:", e);
@@ -1441,20 +1452,13 @@ export default function InfoView({
     }
   }, [showCastModal]);
 
-  const handleOpenCastModal = (targetItem) => {
-    const item = targetItem || nextToPlayItem || allSortedEpisodes[0];
-    if (!item) {
-      swalInfo("No Episode Available", "Please select an episode to cast.");
-      return;
-    }
-    setCastTargetEp(item);
-    setShowCastModal(true);
-  };
-
-  const handleStartCast = async (device) => {
-    if (!castTargetEp || !device) return;
-    setIsCastConnecting(true);
-    setCastConnectingStep("Resolving video stream...");
+  const loadCastOptions = async (epItem) => {
+    if (!epItem) return;
+    setIsLoadingCastOptions(true);
+    setCastSources([]);
+    setCastSubtitles([]);
+    setCastSelectedSource(null);
+    setCastSelectedSubtitleUrl("none");
 
     try {
       const activeSubDub = historyProgress?.lastSubDub || dubSelect || "sub";
@@ -1462,37 +1466,48 @@ export default function InfoView({
       const isDownloaded = Boolean(
         dl &&
           (Array.isArray(dl)
-            ? dl.map(Number).includes(Number(castTargetEp.number))
-            : (dl[activeSubDub] || []).map(Number).includes(Number(castTargetEp.number)))
+            ? dl.map(Number).includes(Number(epItem.number))
+            : (dl[activeSubDub] || []).map(Number).includes(Number(epItem.number)))
       );
 
-      let streamUrl = "";
-      let streamHeaders = {};
-      let streamSubtitles = [];
-
       if (isDownloaded) {
-        setCastConnectingStep("Loading local video...");
         const watchRes = await apiPost("/api/watch", {
           ep: details?.id || id,
-          epNum: castTargetEp.number,
+          epNum: epItem.number,
           Downloaded: true,
           subdub: activeSubDub,
           type: type || "Anime",
         });
-        const firstSrc =
-          watchRes?.sources?.[0] || watchRes?.[activeSubDub]?.sources?.[0] || watchRes?.[activeSubDub]?.[0];
-        streamUrl = typeof firstSrc?.url === "string" ? firstSrc.url : firstSrc?.url?.url || "";
-        streamHeaders = firstSrc?.headers || {};
-        streamSubtitles =
+        const srcs =
+          watchRes?.sources ||
+          watchRes?.[activeSubDub]?.sources ||
+          (Array.isArray(watchRes?.[activeSubDub]) ? watchRes[activeSubDub] : []) ||
+          [];
+        const subs =
           watchRes?.subtitles ||
           watchRes?.[activeSubDub]?.subtitles ||
           watchRes?.sub?.subtitles ||
           [];
+
+        const formattedSrcs = srcs.map((s, idx) => ({
+          ...s,
+          label: s.quality || s.name || `Downloaded Video ${idx + 1}`,
+          isDownloaded: true,
+        }));
+
+        setCastSources(formattedSrcs);
+        setCastSubtitles(subs);
+        setCastSelectedSource(formattedSrcs[0] || null);
+
+        const defaultSub =
+          subs.find((s) => s.default) ||
+          subs.find((s) => (s.lang || s.label || "").toLowerCase().includes("english")) ||
+          subs[0];
+        setCastSelectedSubtitleUrl(defaultSub?.url || "none");
       } else {
-        setCastConnectingStep("Fetching stream servers...");
         const watchRes = await apiPost("/api/watch", {
-          ep: castTargetEp.id || castTargetEp.number,
-          epNum: castTargetEp.number,
+          ep: epItem.id || epItem.number,
+          epNum: epItem.number,
           animeId: details?.id || id,
           Downloaded: false,
           subdub: activeSubDub,
@@ -1500,7 +1515,7 @@ export default function InfoView({
           type: type || "Anime",
         });
 
-        streamSubtitles =
+        const subs =
           watchRes?.subtitles ||
           watchRes?.[activeSubDub]?.subtitles ||
           watchRes?.sub?.subtitles ||
@@ -1517,44 +1532,87 @@ export default function InfoView({
           srcs = watchRes.sub.sources;
         }
 
-        if (!srcs || srcs.length === 0) {
-          throw new Error("No stream sources found for this episode.");
-        }
+        const formattedSrcs = srcs.map((s, idx) => {
+          const q = s.quality || s.name || `Source ${idx + 1}`;
+          const srv = s.name && s.name !== s.quality ? ` (${s.name})` : "";
+          return {
+            ...s,
+            label: `${q}${srv}`,
+          };
+        });
 
-        let chosen =
-          srcs.find((s) => s.quality === "1080p") ||
-          srcs.find((s) => s.quality === "720p") ||
-          srcs[0];
-        let rawUrl = typeof chosen.url === "string" ? chosen.url : chosen.url?.url || "";
-        streamHeaders = chosen.headers || {};
+        setCastSources(formattedSrcs);
+        setCastSubtitles(subs);
 
-        if (chosen.isUnresolved || !rawUrl) {
-          setCastConnectingStep("Resolving video server...");
-          const srvRes = await apiPost("/api/watch/server", {
-            animeId: details?.id || id,
-            episodeId: castTargetEp.id || castTargetEp.number,
-            serverId: chosen.id,
-            serverName: chosen.name,
-            subdub: activeSubDub,
-            type: type || "Anime",
-            provider: details?.provider || "",
-          });
-          if (srvRes?.url) {
-            rawUrl = typeof srvRes.url === "string" ? srvRes.url : srvRes.url.url;
-            streamHeaders = srvRes.headers || streamHeaders;
-          }
-          if (Array.isArray(srvRes?.subtitles) && srvRes.subtitles.length > 0) {
-            streamSubtitles = srvRes.subtitles;
-          }
+        const preferredSrc =
+          formattedSrcs.find((s) => s.quality === "1080p" || s.label?.includes("1080p")) ||
+          formattedSrcs.find((s) => s.quality === "720p" || s.label?.includes("720p")) ||
+          formattedSrcs[0] ||
+          null;
+        setCastSelectedSource(preferredSrc);
+
+        const defaultSub =
+          subs.find((s) => s.default) ||
+          subs.find((s) => (s.lang || s.label || "").toLowerCase().includes("english")) ||
+          subs[0];
+        setCastSelectedSubtitleUrl(defaultSub?.url || "none");
+      }
+    } catch (err) {
+      console.error("[InfoView] Error loading cast options:", err);
+    } finally {
+      setIsLoadingCastOptions(false);
+    }
+  };
+
+  const handleOpenCastModal = (targetItem) => {
+    const item = targetItem || nextToPlayItem || allSortedEpisodes[0];
+    if (!item) {
+      swalInfo("No Episode Available", "Please select an episode to cast.");
+      return;
+    }
+    setCastTargetEp(item);
+    setShowCastModal(true);
+    loadCastOptions(item);
+  };
+
+  const handleStartCast = async (targetDevice = null) => {
+    const device = targetDevice || castSelectedDevice;
+    if (!castTargetEp || !device || !castSelectedSource) return;
+    setIsCastConnecting(true);
+    setCastConnectingStep("Resolving video stream...");
+
+    try {
+      const activeSubDub = historyProgress?.lastSubDub || dubSelect || "sub";
+      let chosen = castSelectedSource;
+      let rawUrl = typeof chosen.url === "string" ? chosen.url : chosen.url?.url || "";
+      let streamHeaders = chosen.headers || {};
+      let streamSubtitles = castSubtitles;
+
+      if (chosen.isUnresolved || !rawUrl) {
+        setCastConnectingStep("Resolving video server...");
+        const srvRes = await apiPost("/api/watch/server", {
+          animeId: details?.id || id,
+          episodeId: castTargetEp.id || castTargetEp.number,
+          serverId: chosen.id,
+          serverName: chosen.name,
+          subdub: activeSubDub,
+          type: type || "Anime",
+          provider: details?.provider || "",
+        });
+        if (srvRes?.url) {
+          rawUrl = typeof srvRes.url === "string" ? srvRes.url : srvRes.url.url;
+          streamHeaders = srvRes.headers || streamHeaders;
         }
-        streamUrl = rawUrl;
+        if (Array.isArray(srvRes?.subtitles) && srvRes.subtitles.length > 0) {
+          streamSubtitles = srvRes.subtitles;
+        }
       }
 
-      if (!streamUrl) {
+      if (!rawUrl) {
         throw new Error("Could not resolve video stream URL for casting.");
       }
 
-      setCastConnectingStep("Connecting to TV...");
+      setCastConnectingStep(`Connecting to ${device.name || "TV"}...`);
       const epLabel = `Episode ${castTargetEp.number}`;
       const castTitle = `${details?.title || "Stream"} - ${epLabel}`;
 
@@ -1564,10 +1622,12 @@ export default function InfoView({
         body: JSON.stringify({
           deviceId: device.id,
           device: device,
-          url: streamUrl,
+          url: rawUrl,
           headers: streamHeaders,
-          filePath: isDownloaded ? streamUrl : undefined,
+          filePath: chosen.isDownloaded ? rawUrl : undefined,
           subtitles: streamSubtitles,
+          selectedSubtitleUrl: castSelectedSubtitleUrl,
+          subtitlesDisabled: castSelectedSubtitleUrl === "none",
           title: castTitle,
           position: 0,
           poster: details?.image || "",
@@ -5173,92 +5233,239 @@ export default function InfoView({
             </div>
 
             <div className="infoview-cast-body">
-              {isScanningCast && castDevices.length === 0 ? (
-                <div className="infoview-cast-loading">
-                  <div className="infoview-cast-spinner" />
-                  <p>Searching for Smart TVs and streaming devices on your Wi-Fi...</p>
-                  <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)" }}>
-                    Make sure your TV (Samsung, LG, Sony, Roku, Chromecast) is turned on and on the same Wi-Fi.
-                  </span>
-                </div>
-              ) : castDevices.length === 0 ? (
-                <div className="infoview-cast-empty">
-                  <Tv size={42} style={{ color: "rgba(255,255,255,0.3)" }} />
-                  <p>No Smart TVs found on local network</p>
-                  <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)" }}>
-                    Ensure your TV is powered on and connected to the same Wi-Fi router.
-                  </span>
-                  <button
-                    className="infoview-cast-rescan-btn"
-                    onClick={() => scanCastDevices(4000)}
-                  >
-                    <RefreshCw size={14} />
-                    <span>Scan Again</span>
-                  </button>
-                </div>
-              ) : (
-                <div className="infoview-cast-list">
-                  <div className="infoview-cast-list-header">
-                    <span>Available Devices ({castDevices.length})</span>
-                    {isScanningCast && (
-                      <span style={{ fontSize: "11px", color: "#60a5fa" }}>
-                        Scanning...
-                      </span>
-                    )}
-                  </div>
-                  {isCastConnecting && castConnectingStep && (
-                    <div
-                      style={{
-                        padding: "8px 12px",
-                        marginBottom: "10px",
-                        borderRadius: "6px",
-                        background: "rgba(59, 130, 246, 0.15)",
-                        border: "1px solid rgba(59, 130, 246, 0.3)",
-                        color: "#93c5fd",
-                        fontSize: "12px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                      }}
-                    >
-                      <div
-                        className="infoview-cast-spinner"
-                        style={{ width: 14, height: 14, borderWidth: 2 }}
-                      />
-                      <span>{castConnectingStep}</span>
-                    </div>
+              {/* Section 1: Device Selection */}
+              <div className="infoview-cast-section">
+                <div className="infoview-cast-list-header">
+                  <span>1. Select Device</span>
+                  {isScanningCast && (
+                    <span style={{ fontSize: "11px", color: "#60a5fa" }}>
+                      Scanning...
+                    </span>
                   )}
-                  {castDevices.map((dev) => {
-                    const isCurrent = activeCastDevice?.id === dev.id;
-                    return (
-                      <div
-                        key={dev.id}
-                        className={`infoview-cast-item ${isCurrent ? "active" : ""}`}
-                      >
-                        <Tv size={22} style={{ color: "#60a5fa" }} />
-                        <div className="infoview-cast-item-info">
-                          <span className="infoview-cast-item-name">
-                            {dev.name || "Smart TV"}
-                          </span>
-                          <div className="infoview-cast-item-details">
-                            <span className="infoview-cast-badge">
-                              {dev.type?.toUpperCase() || "DLNA"}
-                            </span>
-                            <span>{dev.host || dev.address}</span>
-                          </div>
-                        </div>
-                        <button
-                          className="infoview-cast-connect-btn"
-                          disabled={isCastConnecting}
-                          onClick={() => handleStartCast(dev)}
-                        >
-                          {isCastConnecting ? "Connecting..." : "Cast"}
-                        </button>
-                      </div>
-                    );
-                  })}
                 </div>
-              )}
+                {isScanningCast && castDevices.length === 0 ? (
+                  <div className="infoview-cast-loading">
+                    <div className="infoview-cast-spinner" />
+                    <p>Searching for Smart TVs and streaming devices...</p>
+                    <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)" }}>
+                      Make sure your TV is on and connected to the same Wi-Fi.
+                    </span>
+                  </div>
+                ) : castDevices.length === 0 ? (
+                  <div className="infoview-cast-empty">
+                    <Tv size={42} style={{ color: "rgba(255,255,255,0.3)" }} />
+                    <p>No Smart TVs found on local network</p>
+                    <span style={{ fontSize: "12px", color: "rgba(255,255,255,0.5)" }}>
+                      Ensure your TV is powered on and connected to the same Wi-Fi router.
+                    </span>
+                    <button
+                      className="infoview-cast-rescan-btn"
+                      onClick={() => scanCastDevices(4000)}
+                    >
+                      <RefreshCw size={14} />
+                      <span>Scan Again</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="infoview-cast-list">
+                    {castDevices.map((dev) => {
+                      const isSelected = castSelectedDevice?.id === dev.id;
+                      const isCurrent = activeCastDevice?.id === dev.id && isCasting;
+                      return (
+                        <div
+                          key={dev.id}
+                          className={`infoview-cast-item ${isSelected ? "active" : ""}`}
+                          onClick={() => setCastSelectedDevice(dev)}
+                          style={{ cursor: "pointer" }}
+                        >
+                          <Tv
+                            size={22}
+                            style={{ color: isSelected ? "#3b82f6" : "#94a3b8" }}
+                          />
+                          <div className="infoview-cast-item-info">
+                            <span className="infoview-cast-item-name">
+                              {dev.name || "Smart TV"}
+                              {isCurrent ? " (Active)" : ""}
+                            </span>
+                            <div className="infoview-cast-item-details">
+                              <span className="infoview-cast-badge">
+                                {dev.type?.toUpperCase() || "DLNA"}
+                              </span>
+                              <span>{dev.host || dev.address}</span>
+                            </div>
+                          </div>
+                          <input
+                            type="radio"
+                            name="cast-device-select"
+                            checked={isSelected}
+                            onChange={() => setCastSelectedDevice(dev)}
+                            style={{ cursor: "pointer", accentColor: "#3b82f6" }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Section 2: Quality & Subtitles */}
+              <div className="infoview-cast-section" style={{ marginTop: "16px" }}>
+                <div className="infoview-cast-list-header">
+                  <span>2. Stream Quality & Subtitles</span>
+                  {castTargetEp && (
+                    <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)" }}>
+                      Ep {castTargetEp.number}
+                    </span>
+                  )}
+                </div>
+
+                {isLoadingCastOptions ? (
+                  <div
+                    style={{
+                      padding: "16px",
+                      borderRadius: "8px",
+                      background: "rgba(255,255,255,0.03)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      color: "rgba(255,255,255,0.7)",
+                      fontSize: "13px",
+                    }}
+                  >
+                    <div
+                      className="infoview-cast-spinner"
+                      style={{ width: 16, height: 16, borderWidth: 2 }}
+                    />
+                    <span>Loading available qualities and subtitle tracks...</span>
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {/* Quality Selector */}
+                    <div>
+                      <label
+                        style={{
+                          display: "block",
+                          fontSize: "12px",
+                          color: "rgba(255,255,255,0.7)",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        Video Quality / Server
+                      </label>
+                      <select
+                        className="infoview-cast-select"
+                        value={
+                          castSelectedSource
+                            ? castSelectedSource.id ||
+                              castSelectedSource.url ||
+                              castSelectedSource.label
+                            : ""
+                        }
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          const found = castSources.find(
+                            (s) =>
+                              (s.id || s.url || s.label) === val
+                          );
+                          if (found) setCastSelectedSource(found);
+                        }}
+                        disabled={isCastConnecting || castSources.length === 0}
+                      >
+                        {castSources.length === 0 ? (
+                          <option value="">No sources available</option>
+                        ) : (
+                          castSources.map((s, idx) => (
+                            <option
+                              key={s.id || s.url || idx}
+                              value={s.id || s.url || s.label}
+                            >
+                              {s.label || s.quality || `Source ${idx + 1}`}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Subtitle Selector */}
+                    <div>
+                      <label
+                        style={{
+                          display: "block",
+                          fontSize: "12px",
+                          color: "rgba(255,255,255,0.7)",
+                          marginBottom: "4px",
+                        }}
+                      >
+                        Subtitle Track
+                      </label>
+                      <select
+                        className="infoview-cast-select"
+                        value={castSelectedSubtitleUrl}
+                        onChange={(e) => setCastSelectedSubtitleUrl(e.target.value)}
+                        disabled={isCastConnecting}
+                      >
+                        <option value="none">Off (No Subtitles)</option>
+                        {castSubtitles.map((sub, idx) => {
+                          const lang =
+                            sub.lang || sub.label || sub.name || `Track ${idx + 1}`;
+                          const isDef = sub.default ? " [Default]" : "";
+                          return (
+                            <option key={sub.url || idx} value={sub.url}>
+                              {lang}
+                              {isDef}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Section 3: Cast Action Button */}
+              <div style={{ marginTop: "20px" }}>
+                {isCastConnecting && castConnectingStep && (
+                  <div
+                    style={{
+                      padding: "8px 12px",
+                      marginBottom: "12px",
+                      borderRadius: "6px",
+                      background: "rgba(59, 130, 246, 0.15)",
+                      border: "1px solid rgba(59, 130, 246, 0.3)",
+                      color: "#93c5fd",
+                      fontSize: "12px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "8px",
+                    }}
+                  >
+                    <div
+                      className="infoview-cast-spinner"
+                      style={{ width: 14, height: 14, borderWidth: 2 }}
+                    />
+                    <span>{castConnectingStep}</span>
+                  </div>
+                )}
+                <button
+                  className="infoview-cast-start-btn"
+                  disabled={
+                    !castSelectedDevice ||
+                    !castSelectedSource ||
+                    isCastConnecting ||
+                    isLoadingCastOptions
+                  }
+                  onClick={() => handleStartCast()}
+                >
+                  <Tv size={16} />
+                  <span>
+                    {isCastConnecting
+                      ? castConnectingStep || "Connecting..."
+                      : castSelectedDevice
+                      ? `Cast to ${castSelectedDevice.name || "Smart TV"}`
+                      : "Select a Device to Cast"}
+                  </span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

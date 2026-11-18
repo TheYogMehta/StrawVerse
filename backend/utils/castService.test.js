@@ -11,6 +11,7 @@ const {
   convertAssToVtt,
   prepareSubtitlesForCast,
   getLanguageCode,
+  resolveCdnHeaders,
 } = require("../routes/cast");
 
 test("castService: getLocalIpAddress returns valid non-empty IPv4", () => {
@@ -201,4 +202,46 @@ Dialogue: 0,0:01:30.10,0:01:32.20,Default,,0,0,0,,Next dialogue cue.`;
   assert.ok(srt.includes("Hello from ASS!\nSecond line"));
   assert.ok(srt.includes("00:01:30,100 --> 00:01:32,200"));
   assert.ok(srt.includes("Next dialogue cue."));
+});
+
+test("castService: resolveCdnHeaders infers correct Referer and Origin for known CDNs", () => {
+  const rundownHeaders = resolveCdnHeaders(
+    "https://vault-91.rundowncdn.top/_v7/1234/audio/seg-1-f1-a0-a1.png",
+    {}
+  );
+  assert.strictEqual(rundownHeaders.Referer, "https://flixcloud.cc/");
+  assert.strictEqual(rundownHeaders.Origin, "https://flixcloud.cc");
+  assert.ok(rundownHeaders["User-Agent"]);
+
+  const kwikHeaders = resolveCdnHeaders(
+    "https://na-01.owocdn.top/hls2/01/00001/chunk.ts",
+    {}
+  );
+  assert.strictEqual(kwikHeaders.Referer, "https://kwik.cx/");
+
+  // Explicit headers should override
+  const customHeaders = resolveCdnHeaders(
+    "https://vault-91.rundowncdn.top/seg.png",
+    { Referer: "https://megacloud.tv/" }
+  );
+  assert.strictEqual(customHeaders.Referer, "https://megacloud.tv/");
+});
+
+test("castService: rewriteHlsPlaylist filters out broken relative parent audio tracks", () => {
+  const masterWithBrokenAudio = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="audio",LANGUAGE="eng",NAME="English",DEFAULT=YES,AUTOSELECT=YES,URI="../broken/audio.m3u8"
+#EXT-X-STREAM-INF:BANDWIDTH=5184,RESOLUTION=1920x1080
+http://127.0.0.1:4000/reanime/abc/video.m3u8`;
+
+  const rewritten = rewriteHlsPlaylist(
+    masterWithBrokenAudio,
+    "http://127.0.0.1:4000/reanime/abc/master.m3u8",
+    { Referer: "https://flixcloud.cc/" },
+    "192.168.1.55",
+    9545
+  );
+
+  assert.ok(!rewritten.includes("broken/audio.m3u8"));
+  assert.ok(rewritten.includes("video.m3u8"));
 });

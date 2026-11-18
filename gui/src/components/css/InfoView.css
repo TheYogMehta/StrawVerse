@@ -1817,6 +1817,56 @@
   cursor: wait;
 }
 
+.infoview-cast-select {
+  width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: #ffffff;
+  padding: 9px 12px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+  cursor: pointer;
+}
+
+.infoview-cast-select:focus {
+  border-color: #3b82f6;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.infoview-cast-select option {
+  background: #18181b;
+  color: #ffffff;
+}
+
+.infoview-cast-start-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: #2563eb;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  padding: 12px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.infoview-cast-start-btn:hover:not(:disabled) {
+  background: #1d4ed8;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+.infoview-cast-start-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Floating Cast Dock (during active casting) */
 .infoview-cast-dock {
   position: fixed;
