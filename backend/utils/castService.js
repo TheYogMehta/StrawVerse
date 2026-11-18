@@ -357,12 +357,23 @@ class CastService {
       poster = "",
     } = mediaOptions;
 
+    const isHls =
+      mimeType.includes("mpegurl") ||
+      mimeType.includes("apple") ||
+      streamUrl.toLowerCase().includes(".m3u8");
+
+    const resElements = isHls
+      ? `<res protocolInfo="http-get:*:application/vnd.apple.mpegurl:*">${xmlEscape(streamUrl)}</res>
+    <res protocolInfo="http-get:*:application/x-mpegURL:*">${xmlEscape(streamUrl)}</res>
+    <res protocolInfo="http-get:*:video/mp4:*">${xmlEscape(streamUrl)}</res>`
+      : `<res protocolInfo="http-get:*:${mimeType}:*">${xmlEscape(streamUrl)}</res>`;
+
     const didl = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
   <item id="1" parentID="0" restricted="1">
     <dc:title>${xmlEscape(title)}</dc:title>
     <upnp:class>object.item.videoItem</upnp:class>
     ${poster ? `<upnp:albumArtURI>${xmlEscape(poster)}</upnp:albumArtURI>` : ""}
-    <res protocolInfo="http-get:*:${mimeType}:*">${xmlEscape(streamUrl)}</res>
+    ${resElements}
   </item>
 </DIDL-Lite>`;
 

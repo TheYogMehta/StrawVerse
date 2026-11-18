@@ -11,12 +11,55 @@ const router = express.Router();
 
 function getMimeType(filePathOrUrl) {
   const clean = filePathOrUrl ? filePathOrUrl.split("?")[0].toLowerCase() : "";
-  if (clean.endsWith(".m3u8")) return "application/vnd.apple.mpegurl";
+  if (clean.endsWith(".m3u8") || clean.includes(".m3u8")) return "application/vnd.apple.mpegurl";
   if (clean.endsWith(".mp4")) return "video/mp4";
   if (clean.endsWith(".mkv")) return "video/x-matroska";
   if (clean.endsWith(".webm")) return "video/webm";
   if (clean.endsWith(".ts")) return "video/mp2t";
   return "video/mp4";
+}
+
+function isPlaylistUrl(url) {
+  if (!url || typeof url !== "string") return false;
+  const clean = url.split("?")[0].toLowerCase();
+  return clean.endsWith(".m3u8") || clean.includes(".m3u8");
+}
+
+function rewriteHlsPlaylist(playlistContent, baseUrl, customHeaders, localIp, port) {
+  const encodedHeaders = encodeURIComponent(JSON.stringify(customHeaders || {}));
+  return playlistContent
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return line;
+
+      // Handle tags like #EXT-X-KEY:...,URI="..." or #EXT-X-MEDIA:...,URI="..." or #EXT-X-MAP:URI="..."
+      if (trimmed.startsWith("#EXT")) {
+        if (trimmed.includes('URI="')) {
+          return line.replace(/URI="([^"]+)"/, (match, subUri) => {
+            try {
+              const absSubUri = new URL(subUri, baseUrl).toString();
+              const route = isPlaylistUrl(absSubUri) ? "stream" : "segment";
+              const proxyUri = `http://${localIp}:${port}/api/cast/${route}?url=${encodeURIComponent(absSubUri)}&headers=${encodedHeaders}`;
+              return `URI="${proxyUri}"`;
+            } catch (_) {
+              return match;
+            }
+          });
+        }
+        return line;
+      }
+
+      // Non-#EXT lines are URLs: either child playlists (e.g. video.m3u8) or media segments (.ts, .webp, .png, etc.)
+      try {
+        const absoluteUrl = new URL(trimmed, baseUrl).toString();
+        const route = isPlaylistUrl(absoluteUrl) ? "stream" : "segment";
+        return `http://${localIp}:${port}/api/cast/${route}?url=${encodeURIComponent(absoluteUrl)}&headers=${encodedHeaders}`;
+      } catch (_) {
+        return line;
+      }
+    })
+    .join("\n");
 }
 
 // 1. Discover devices on local network
@@ -170,10 +213,15 @@ router.post("/api/cast/volume", async (req, res) => {
 });
 
 // 9. LAN Media Stream Proxy: Handles both local files and remote scraper streams
-router.get("/api/cast/stream", async (req, res) => {
+router.all("/api/cast/stream", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "*");
   res.setHeader("Accept-Ranges", "bytes");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
 
   const localPath = req.query.path;
   const remoteUrl = req.query.url;
@@ -239,58 +287,38 @@ router.get("/api/cast/stream", async (req, res) => {
     }
 
     const cleanUrl = remoteUrl.split("?")[0].toLowerCase();
-    const isHls = cleanUrl.endsWith(".m3u8") || req.query.isM3U8 === "true";
+    const isHls = isPlaylistUrl(remoteUrl) || req.query.isM3U8 === "true";
 
     const localIp = castService.getLocalIpAddress();
     const port = global.PORT || 9545;
 
     if (isHls) {
       try {
-        // Fetch playlist upstream with scraper headers
+        const upstreamHeaders = {
+          "User-Agent":
+            customHeaders["User-Agent"] ||
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          Referer: customHeaders.Referer || customHeaders.referer || remoteUrl,
+          Origin: customHeaders.Origin || customHeaders.origin || new URL(remoteUrl).origin,
+          ...customHeaders,
+        };
+
         const playlistRes = await axios.get(remoteUrl, {
-          headers: {
-            "User-Agent":
-              customHeaders["User-Agent"] ||
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            Referer: customHeaders.Referer || customHeaders.referer || remoteUrl,
-            Origin: customHeaders.Origin || customHeaders.origin || new URL(remoteUrl).origin,
-            ...customHeaders,
-          },
+          headers: upstreamHeaders,
           responseType: "text",
           timeout: 10000,
         });
 
-        let playlistContent = playlistRes.data;
+        const rewrittenPlaylist = rewriteHlsPlaylist(
+          playlistRes.data,
+          remoteUrl,
+          customHeaders,
+          localIp,
+          port
+        );
 
-        // Rewrite segment and child playlist URLs inside the HLS manifest
-        const baseUrl = remoteUrl;
-        const encodedHeaders = encodeURIComponent(JSON.stringify(customHeaders));
-
-        const rewrittenLines = playlistContent.split("\n").map((line) => {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith("#EXT")) {
-            // Check for URI in tags like #EXT-X-KEY or #EXT-X-MAP
-            if (trimmed.includes('URI="')) {
-              return line.replace(/URI="([^"]+)"/, (match, subUri) => {
-                const absSubUri = new URL(subUri, baseUrl).toString();
-                const proxyUri = `http://${localIp}:${port}/api/cast/segment?url=${encodeURIComponent(absSubUri)}&headers=${encodedHeaders}`;
-                return `URI="${proxyUri}"`;
-              });
-            }
-            return line;
-          }
-
-          // Video chunk or child playlist line
-          try {
-            const absoluteChunkUrl = new URL(trimmed, baseUrl).toString();
-            return `http://${localIp}:${port}/api/cast/segment?url=${encodeURIComponent(absoluteChunkUrl)}&headers=${encodedHeaders}`;
-          } catch (_) {
-            return line;
-          }
-        });
-
-        const rewrittenPlaylist = rewrittenLines.join("\n");
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+        if (req.method === "HEAD") return res.end();
         return res.send(rewrittenPlaylist);
       } catch (err) {
         logger.error(`[cast] HLS manifest proxy error for ${remoteUrl}: ${err.message}`);
@@ -302,7 +330,7 @@ router.get("/api/cast/stream", async (req, res) => {
         const upstreamHeaders = {
           "User-Agent":
             customHeaders["User-Agent"] ||
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
           Referer: customHeaders.Referer || customHeaders.referer || remoteUrl,
           Origin: customHeaders.Origin || customHeaders.origin || new URL(remoteUrl).origin,
           ...customHeaders,
@@ -323,11 +351,12 @@ router.get("/api/cast/stream", async (req, res) => {
 
         res.status(upstreamRes.status);
         for (const [key, val] of Object.entries(upstreamRes.headers)) {
+          const lk = key.toLowerCase();
           if (
-            key.toLowerCase() === "content-type" ||
-            key.toLowerCase() === "content-length" ||
-            key.toLowerCase() === "content-range" ||
-            key.toLowerCase() === "accept-ranges"
+            lk === "content-type" ||
+            lk === "content-length" ||
+            lk === "content-range" ||
+            lk === "accept-ranges"
           ) {
             res.setHeader(key, val);
           }
@@ -345,11 +374,16 @@ router.get("/api/cast/stream", async (req, res) => {
   return res.status(400).send("No stream source provided");
 });
 
-// 10. Segment Proxy for HLS chunks
-router.get("/api/cast/segment", async (req, res) => {
+// 10. Segment & Sub-playlist Proxy for HLS chunks and decryption keys
+router.all("/api/cast/segment", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "*");
   res.setHeader("Accept-Ranges", "bytes");
+
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
 
   const segmentUrl = req.query.url;
   if (!segmentUrl) return res.status(400).send("No segment URL provided");
@@ -361,11 +395,50 @@ router.get("/api/cast/segment", async (req, res) => {
     } catch (_) {}
   }
 
+  const localIp = castService.getLocalIpAddress();
+  const port = global.PORT || 9545;
+
+  // Case 1: If the requested segment URL is actually a sub-playlist (.m3u8):
+  if (isPlaylistUrl(segmentUrl)) {
+    try {
+      const upstreamHeaders = {
+        "User-Agent":
+          customHeaders["User-Agent"] ||
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        Referer: customHeaders.Referer || customHeaders.referer || segmentUrl,
+        Origin: customHeaders.Origin || customHeaders.origin || new URL(segmentUrl).origin,
+        ...customHeaders,
+      };
+
+      const playlistRes = await axios.get(segmentUrl, {
+        headers: upstreamHeaders,
+        responseType: "text",
+        timeout: 10000,
+      });
+
+      const rewritten = rewriteHlsPlaylist(
+        playlistRes.data,
+        segmentUrl,
+        customHeaders,
+        localIp,
+        port
+      );
+
+      res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+      if (req.method === "HEAD") return res.end();
+      return res.send(rewritten);
+    } catch (err) {
+      logger.error(`[cast] Sub-playlist proxy error for ${segmentUrl}: ${err.message}`);
+      return res.status(502).send(`Error fetching sub-playlist: ${err.message}`);
+    }
+  }
+
+  // Case 2: Binary chunk, AES-128 key, or media segment
   try {
     const upstreamHeaders = {
       "User-Agent":
         customHeaders["User-Agent"] ||
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
       Referer: customHeaders.Referer || customHeaders.referer || segmentUrl,
       Origin: customHeaders.Origin || customHeaders.origin || new URL(segmentUrl).origin,
       ...customHeaders,
@@ -386,21 +459,51 @@ router.get("/api/cast/segment", async (req, res) => {
 
     res.status(upstreamRes.status);
     for (const [key, val] of Object.entries(upstreamRes.headers)) {
+      const lk = key.toLowerCase();
       if (
-        key.toLowerCase() === "content-type" ||
-        key.toLowerCase() === "content-length" ||
-        key.toLowerCase() === "content-range" ||
-        key.toLowerCase() === "accept-ranges"
+        lk === "content-length" ||
+        lk === "content-range" ||
+        lk === "accept-ranges"
       ) {
         res.setHeader(key, val);
       }
     }
 
+    // Determine correct MIME type for TV media engines
+    const lowerSeg = segmentUrl.split("?")[0].toLowerCase();
+    if (
+      lowerSeg.endsWith(".bin") ||
+      lowerSeg.endsWith(".key") ||
+      lowerSeg.includes("key.bin")
+    ) {
+      res.setHeader("Content-Type", "application/octet-stream");
+    } else if (
+      lowerSeg.endsWith(".mp4") ||
+      lowerSeg.endsWith(".m4s") ||
+      lowerSeg.endsWith(".fmp4")
+    ) {
+      res.setHeader("Content-Type", "video/mp4");
+    } else if (lowerSeg.endsWith(".vtt")) {
+      res.setHeader("Content-Type", "text/vtt");
+    } else if (lowerSeg.endsWith(".srt")) {
+      res.setHeader("Content-Type", "application/x-subrip");
+    } else if (lowerSeg.endsWith(".aac")) {
+      res.setHeader("Content-Type", "audio/aac");
+    } else {
+      // MPEG-TS video chunks or segments disguised with .png/.webp extensions:
+      // Always use video/mp2t so TV video player does not treat them as static images
+      res.setHeader("Content-Type", "video/mp2t");
+    }
+
     if (req.method === "HEAD") return res.end();
     return upstreamRes.data.pipe(res);
   } catch (err) {
+    logger.error(`[cast] Segment fetch error for ${segmentUrl}: ${err.message}`);
     return res.status(502).send(`Error fetching segment: ${err.message}`);
   }
 });
 
 module.exports = router;
+module.exports.rewriteHlsPlaylist = rewriteHlsPlaylist;
+module.exports.isPlaylistUrl = isPlaylistUrl;
+module.exports.getMimeType = getMimeType;
