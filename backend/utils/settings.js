@@ -365,7 +365,6 @@ async function SettingsLoad() {
             jellyfinCompatibility: false,
             animeNamingScheme: "default",
             mangaNamingScheme: "default",
-            desktopPlayer: "web",
             minDownloadSpeed: "300 KB/s",
           };
 
@@ -392,9 +391,6 @@ async function SettingsLoad() {
       config.imageCacheSizeLimit = 5;
     }
 
-    if (config && !config.hasOwnProperty("desktopPlayer")) {
-      config.desktopPlayer = "web";
-    }
     if (config && !config.hasOwnProperty("externalLogEnabled")) {
       config.externalLogEnabled = true;
     }
