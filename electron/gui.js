@@ -1030,27 +1030,35 @@ ipcMain.handle("play-in-mpv", async (event, options) => {
 
 ipcMain.handle("control-mpv", (event, command, args) => {
   if (command === "quit") {
-    if (global.activeMpvClient && !global.activeMpvClient.destroyed) {
+    const procToKill = global.activeMpvProcess;
+    const clientToDestroy = global.activeMpvClient;
+    if (clientToDestroy && !clientToDestroy.destroyed) {
       try {
-        global.activeMpvClient.write(
+        clientToDestroy.write(
           JSON.stringify({ command: ["quit"] }) + "\n",
         );
       } catch (err) {}
     }
     setTimeout(() => {
-      if (global.activeMpvProcess && !global.activeMpvProcess.killed) {
+      if (procToKill && !procToKill.killed) {
         try {
-          global.activeMpvProcess.kill("SIGKILL");
+          procToKill.kill("SIGKILL");
         } catch (_) {}
       }
-      if (global.activeMpvClient) {
+      if (clientToDestroy && !clientToDestroy.destroyed) {
         try {
-          global.activeMpvClient.destroy();
+          clientToDestroy.destroy();
         } catch (_) {}
+      }
+      if (global.activeMpvProcess === procToKill) {
+        global.activeMpvProcess = null;
+      }
+      if (global.activeMpvClient === clientToDestroy) {
         global.activeMpvClient = null;
       }
-      global.activeMpvProcess = null;
-      global.activeMpvSession = null;
+      if (global.activeMpvSession) {
+        global.activeMpvSession = null;
+      }
     }, 150);
     return { success: true };
   }

@@ -1,5 +1,5 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Swal from "sweetalert2";
 import { Loader2 } from "lucide-react";
 
@@ -30,6 +30,18 @@ export default function VideoPlayer({
   const [statusMsg, setStatusMsg] = useState("Initializing MPV player...");
   const [currentEpNumOrId, setCurrentEpNumOrId] = useState(episodeNumOrId);
   const [currentSeason, setCurrentSeason] = useState(season);
+  const lastNavTimeRef = useRef(0);
+
+  // Ensure MPV process is terminated only when VideoPlayer unmounts (closing player)
+  useEffect(() => {
+    return () => {
+      try {
+        if (window.sharedStateAPI?.controlMpv) {
+          window.sharedStateAPI.controlMpv("quit", []);
+        }
+      } catch (_) {}
+    };
+  }, []);
 
   useEffect(() => {
     setCurrentEpNumOrId(episodeNumOrId);
@@ -182,6 +194,12 @@ export default function VideoPlayer({
       });
 
     const handleNextEpisode = () => {
+      const now = Date.now();
+      if (now - lastNavTimeRef.current < 2000) {
+        return;
+      }
+      lastNavTimeRef.current = now;
+
       let nextEp;
       if (currentIdx !== -1 && currentIdx < sortedEpisodes.length - 1) {
         nextEp = sortedEpisodes[currentIdx + 1];
@@ -208,6 +226,12 @@ export default function VideoPlayer({
     };
 
     const handlePrevEpisode = () => {
+      const now = Date.now();
+      if (now - lastNavTimeRef.current < 2000) {
+        return;
+      }
+      lastNavTimeRef.current = now;
+
       let prevEp = null;
       if (currentIdx > 0) {
         prevEp = sortedEpisodes[currentIdx - 1];
@@ -297,11 +321,6 @@ export default function VideoPlayer({
     );
 
     return () => {
-      try {
-        if (window.sharedStateAPI?.controlMpv) {
-          window.sharedStateAPI.controlMpv("quit", []);
-        }
-      } catch (_) {}
       removeMpvStartedListener();
       removeMpvLoadingListener();
       removeMpvActionListener();

@@ -2155,7 +2155,37 @@ async function playInMpv(window, options) {
           ) {
             pendingAction = msg.data;
             if (pendingAction === "next") {
+              const sess = global.activeMpvSession;
+              const alreadyTriggered = sess
+                ? sess.hasTriggeredAutoNext
+                : hasTriggeredAutoNext;
+              if (alreadyTriggered) {
+                logger.info(
+                  `[MPV] Ignoring redundant "next" action, auto-next already in progress.`,
+                );
+                try {
+                  if (client && !client.destroyed) {
+                    client.write(
+                      JSON.stringify({
+                        command: [
+                          "set_property",
+                          "user-data/strawverse-action",
+                          "",
+                        ],
+                      }) + "\n",
+                    );
+                  }
+                } catch (_) {}
+                pendingAction = null;
+                return;
+              }
+              if (sess) sess.hasTriggeredAutoNext = true;
               hasTriggeredAutoNext = true;
+            } else if (pendingAction === "prev") {
+              hasTriggeredAutoNext = false;
+              if (global.activeMpvSession) {
+                global.activeMpvSession.hasTriggeredAutoNext = false;
+              }
             }
             if (pendingAction === "open-subtitle-settings") {
               logger.info(`[MPV IPC] Received open-subtitle-settings request`);
@@ -2418,6 +2448,7 @@ async function playInMpv(window, options) {
               action: actionName,
               url: actionUrl,
             });
+            pendingAction = null;
           } else if (
             msg.name === "user-data/strawverse-episode" &&
             msg.data !== undefined &&
