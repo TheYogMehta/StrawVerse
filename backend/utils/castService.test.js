@@ -1,5 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert");
+const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
 const castService = require("./castService");
 const {
   rewriteHlsPlaylist,
@@ -12,6 +15,9 @@ const {
   prepareSubtitlesForCast,
   getLanguageCode,
   resolveCdnHeaders,
+  activeCastBurnSession,
+  startBurnSession,
+  cleanupBurnSession,
 } = require("../routes/cast");
 
 test("castService: getLocalIpAddress returns valid non-empty IPv4", () => {
@@ -244,4 +250,23 @@ http://127.0.0.1:4000/reanime/abc/video.m3u8`;
 
   assert.ok(!rewritten.includes("broken/audio.m3u8"));
   assert.ok(rewritten.includes("video.m3u8"));
+});
+
+test("castService: cleanupBurnSession cleans up active process and directory", () => {
+  const dummyDir = path.join(os.tmpdir(), `dummy_hls_${Date.now()}`);
+  const dummySub = path.join(os.tmpdir(), `dummy_sub_${Date.now()}.srt`);
+  fs.mkdirSync(dummyDir, { recursive: true });
+  fs.writeFileSync(dummySub, "1\n00:00:00,000 --> 00:00:01,000\nTest\n");
+
+  activeCastBurnSession.hlsDir = dummyDir;
+  activeCastBurnSession.subFilePath = dummySub;
+  activeCastBurnSession.sessionId = 99999;
+
+  cleanupBurnSession();
+
+  assert.strictEqual(activeCastBurnSession.hlsDir, null);
+  assert.strictEqual(activeCastBurnSession.subFilePath, null);
+  assert.strictEqual(activeCastBurnSession.sessionId, null);
+  assert.strictEqual(fs.existsSync(dummyDir), false);
+  assert.strictEqual(fs.existsSync(dummySub), false);
 });

@@ -1,6 +1,8 @@
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
+const { spawn } = require("child_process");
 const axios = require("axios");
 
 const castService = require("../utils/castService");
@@ -8,6 +10,7 @@ const { logger } = require("../utils/AppLogger");
 const { isVideoFile, ALLOWED_VIDEO_EXTENSIONS } = require("../utils/constants");
 const { isLanguagePreferred, settingfetch } = require("../utils/settings");
 const { getExtensionHeaderRules } = require("../utils/extensionRegistry");
+const { getFfmpegPath } = require("../utils/downloader");
 
 const router = express.Router();
 
@@ -209,6 +212,182 @@ let activeCastStream = {
   title: "",
   timestamp: 0,
 };
+
+// In-memory active cast burn session for hardsubbing
+let activeCastBurnSession = {
+  process: null,
+  hlsDir: null,
+  subFilePath: null,
+  sessionId: null,
+  mediaUrl: "",
+  filePath: "",
+  headers: {},
+  position: 0,
+};
+
+let isNvencAvailable = null;
+async function checkNvenc() {
+  if (isNvencAvailable !== null) return isNvencAvailable;
+  try {
+    const ffmpegBin = await getFfmpegPath();
+    await new Promise((resolve, reject) => {
+      const p = spawn(ffmpegBin, [
+        "-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.1",
+        "-c:v", "h264_nvenc", "-f", "null", "-"
+      ]);
+      p.on("close", (code) => (code === 0 ? resolve(true) : reject(new Error("nvenc failed"))));
+      p.on("error", reject);
+    });
+    isNvencAvailable = true;
+    logger.info("[cast-burn] NVIDIA NVENC hardware acceleration detected and enabled");
+  } catch (_) {
+    isNvencAvailable = false;
+    logger.info("[cast-burn] NVENC not available, using libx264 ultrafast");
+  }
+  return isNvencAvailable;
+}
+
+function cleanupBurnSession() {
+  if (activeCastBurnSession.process) {
+    try {
+      activeCastBurnSession.process.kill("SIGKILL");
+    } catch (_) {}
+    activeCastBurnSession.process = null;
+  }
+  if (activeCastBurnSession.hlsDir && fs.existsSync(activeCastBurnSession.hlsDir)) {
+    try {
+      fs.rmSync(activeCastBurnSession.hlsDir, { recursive: true, force: true });
+    } catch (_) {}
+    activeCastBurnSession.hlsDir = null;
+  }
+  if (activeCastBurnSession.subFilePath && fs.existsSync(activeCastBurnSession.subFilePath)) {
+    try {
+      fs.unlinkSync(activeCastBurnSession.subFilePath);
+    } catch (_) {}
+    activeCastBurnSession.subFilePath = null;
+  }
+  activeCastBurnSession.sessionId = null;
+  activeCastBurnSession.mediaUrl = "";
+  activeCastBurnSession.filePath = "";
+  activeCastBurnSession.headers = {};
+  activeCastBurnSession.position = 0;
+}
+
+async function startBurnSession({ mediaUrl, filePath, subFilePath, headers = {}, position = 0 }) {
+  cleanupBurnSession();
+
+  const sessionId = Date.now();
+  const hlsDir = path.join(os.tmpdir(), `strawverse_cast_${sessionId}`);
+  fs.mkdirSync(hlsDir, { recursive: true });
+
+  const ffmpegBin = await getFfmpegPath();
+  const args = [
+    "-y",
+    "-nostdin",
+    "-hide_banner",
+    "-loglevel", "warning",
+    "-allowed_extensions", "ALL",
+    "-allowed_segment_extensions", "ALL",
+    "-extension_picky", "0",
+  ];
+
+  const inputSource = filePath || mediaUrl;
+  const effectiveHeaders = resolveCdnHeaders(mediaUrl || filePath, headers);
+
+  // If remote URL, pass HTTP headers
+  if (mediaUrl && (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://"))) {
+    const headerLines = Object.entries(effectiveHeaders)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join("\r\n") + "\r\n";
+    args.push("-headers", headerLines);
+  }
+
+  // Fast seek if starting from a non-zero timestamp
+  if (position > 0) {
+    args.push("-ss", String(position));
+  }
+
+  args.push("-i", inputSource);
+
+  // Subtitle filter escaping (replace \ with /, : with \:, ' with \')
+  const escapedSubPath = subFilePath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
+  args.push("-vf", `subtitles='${escapedSubPath}':force_style='FontSize=22,Outline=2,Shadow=1,MarginV=25'`);
+
+  // Detect and use NVENC hardware acceleration if available for maximum speed
+  const hasNvenc = await checkNvenc();
+  if (hasNvenc) {
+    args.push(
+      "-c:v", "h264_nvenc",
+      "-preset", "p1",
+      "-tune", "ll",
+      "-zerolatency", "1"
+    );
+  } else {
+    args.push(
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-tune", "zerolatency",
+      "-crf", "22"
+    );
+  }
+
+  // Audio: direct stream copy for zero latency
+  args.push("-c:a", "copy");
+
+  // HLS stream generation tuned for fast first segment
+  args.push(
+    "-f", "hls",
+    "-hls_time", "2",
+    "-hls_list_size", "25",
+    "-hls_flags", "delete_segments",
+    "-hls_segment_filename", path.join(hlsDir, "seg_%04d.ts"),
+    path.join(hlsDir, "index.m3u8")
+  );
+
+  logger.info(`[cast-burn] Spawning FFmpeg hardsubbing (nvenc=${hasNvenc}): ${ffmpegBin} -i ${inputSource} -vf subtitles='${subFilePath}'`);
+  const proc = spawn(ffmpegBin, args, { stdio: ["ignore", "pipe", "pipe"] });
+
+  proc.stderr.on("data", (data) => {
+    const str = data.toString();
+    if (str.includes("Error") || str.includes("fatal") || str.includes("error")) {
+      logger.warn(`[cast-burn] FFmpeg: ${str.trim()}`);
+    }
+  });
+
+  proc.on("exit", (code, signal) => {
+    logger.info(`[cast-burn] FFmpeg process exited with code ${code}, signal ${signal}`);
+  });
+
+  activeCastBurnSession = {
+    process: proc,
+    hlsDir,
+    subFilePath,
+    sessionId,
+    mediaUrl: mediaUrl || "",
+    filePath: filePath || "",
+    headers,
+    position,
+  };
+
+  // Wait up to 15 seconds for index.m3u8 to be written with first segment
+  const m3u8Path = path.join(hlsDir, "index.m3u8");
+  const startWait = Date.now();
+  while (Date.now() - startWait < 15000) {
+    if (fs.existsSync(m3u8Path)) {
+      try {
+        const c = fs.readFileSync(m3u8Path, "utf8");
+        if (c.includes("seg_")) {
+          logger.info(`[cast-burn] Burned HLS stream ready in ${Date.now() - startWait}ms`);
+          return true;
+        }
+      } catch (_) {}
+    }
+    await new Promise((r) => setTimeout(r, 80));
+  }
+
+  logger.warn(`[cast-burn] Timeout waiting for index.m3u8, proceeding anyway`);
+  return false;
+}
 
 function resolveCdnHeaders(targetUrl, incomingHeaders = {}) {
   let resolved = {};
@@ -495,57 +674,109 @@ router.post("/api/cast/start", async (req, res) => {
 
     let streamProxyUrl;
     let mimeType = "video/mp4";
+    const shouldBurnSubtitle =
+      !isSubDisabled &&
+      activeSubtitle &&
+      Boolean(activeSubtitle.url) &&
+      req.body.selectedSubtitleUrl !== "none";
 
-    if (filePath) {
-      streamProxyUrl = `http://${localIp}:${port}/api/cast/stream.mp4`;
-      mimeType = getMimeType(filePath);
-    } else if (mediaUrl) {
-      // Short, clean stream URL (< 45 chars) without 8KB query bloat that breaks Smart TV microhttpd
-      streamProxyUrl = `http://${localIp}:${port}/api/cast/stream.mp4`;
-      mimeType = getMimeType(mediaUrl);
-
-      // Pre-warm the HLS master playlist in memory so the TV gets an instant <5ms response
-      if (isPlaylistUrl(mediaUrl)) {
-        try {
-          const upstreamHeaders = resolveCdnHeaders(mediaUrl, effectiveHeaders);
-          const preRes = await axios.get(mediaUrl, {
-            headers: upstreamHeaders,
+    if (shouldBurnSubtitle) {
+      const subUrl = activeSubtitle.url;
+      let subContent = "";
+      try {
+        if (subUrl.startsWith("/subtitles?file=")) {
+          const decoded = decodeURIComponent(subUrl.replace("/subtitles?file=", ""));
+          if (fs.existsSync(decoded)) subContent = fs.readFileSync(decoded, "utf8");
+        } else if (subUrl.startsWith("/") && fs.existsSync(subUrl)) {
+          subContent = fs.readFileSync(subUrl, "utf8");
+        } else if (subUrl.startsWith("http://") || subUrl.startsWith("https://")) {
+          const upHeaders = resolveCdnHeaders(subUrl, headers);
+          const subResp = await axios.get(subUrl, {
+            headers: upHeaders,
             responseType: "text",
-            timeout: 9000,
+            timeout: 10000,
           });
-          if (
-            preRes.data &&
-            (typeof preRes.data === "string" &&
-              (preRes.data.includes("#EXTM3U") || isPlaylistUrl(mediaUrl)))
-          ) {
-            const rewritten = rewriteHlsPlaylist(
-              preRes.data,
-              mediaUrl,
-              effectiveHeaders,
-              localIp,
-              port,
-              subtitles,
-            );
-            manifestCache.set(mediaUrl, {
-              content: rewritten,
-              timestamp: Date.now(),
-            });
-            manifestCache.set("active", {
-              content: rewritten,
-              timestamp: Date.now(),
-            });
-            mimeType = "application/vnd.apple.mpegurl";
-          }
-        } catch (warmErr) {
-          logger.warn(
-            `[cast] Stream pre-warm warning for ${mediaUrl}: ${warmErr.message}`,
-          );
+          subContent = subResp.data || "";
+        }
+      } catch (subFetchErr) {
+        logger.warn(`[cast] Could not fetch subtitle from ${subUrl}: ${subFetchErr.message}`);
+      }
+
+      if (subContent) {
+        const subSessionId = Date.now();
+        const srtContent = convertToSrt(subContent);
+        const subFilePath = path.join(os.tmpdir(), `strawverse_sub_${subSessionId}.srt`);
+        fs.writeFileSync(subFilePath, srtContent, "utf8");
+
+        const burnReady = await startBurnSession({
+          mediaUrl: mediaUrl || "",
+          filePath: filePath || "",
+          subFilePath,
+          headers: effectiveHeaders,
+          position: parseFloat(position) || 0,
+        });
+
+        if (burnReady) {
+          streamProxyUrl = `http://${localIp}:${port}/api/cast/burn/index.m3u8`;
+          mimeType = "application/vnd.apple.mpegurl";
         }
       }
-    } else {
-      return res
-        .status(400)
-        .json({ success: false, error: "Neither url nor filePath provided" });
+    }
+
+    if (!streamProxyUrl) {
+      // Direct pass-through mode without subtitle burning
+      cleanupBurnSession();
+
+      if (filePath) {
+        streamProxyUrl = `http://${localIp}:${port}/api/cast/stream.mp4`;
+        mimeType = getMimeType(filePath);
+      } else if (mediaUrl) {
+        // Short, clean stream URL (< 45 chars) without 8KB query bloat that breaks Smart TV microhttpd
+        streamProxyUrl = `http://${localIp}:${port}/api/cast/stream.mp4`;
+        mimeType = getMimeType(mediaUrl);
+
+        // Pre-warm the HLS master playlist in memory so the TV gets an instant <5ms response
+        if (isPlaylistUrl(mediaUrl)) {
+          try {
+            const upstreamHeaders = resolveCdnHeaders(mediaUrl, effectiveHeaders);
+            const preRes = await axios.get(mediaUrl, {
+              headers: upstreamHeaders,
+              responseType: "text",
+              timeout: 9000,
+            });
+            if (
+              preRes.data &&
+              (typeof preRes.data === "string" &&
+                (preRes.data.includes("#EXTM3U") || isPlaylistUrl(mediaUrl)))
+            ) {
+              const rewritten = rewriteHlsPlaylist(
+                preRes.data,
+                mediaUrl,
+                effectiveHeaders,
+                localIp,
+                port
+              );
+              manifestCache.set(mediaUrl, {
+                content: rewritten,
+                timestamp: Date.now(),
+              });
+              manifestCache.set("active", {
+                content: rewritten,
+                timestamp: Date.now(),
+              });
+              mimeType = "application/vnd.apple.mpegurl";
+            }
+          } catch (warmErr) {
+            logger.warn(
+              `[cast] Stream pre-warm warning for ${mediaUrl}: ${warmErr.message}`,
+            );
+          }
+        }
+      } else {
+        return res
+          .status(400)
+          .json({ success: false, error: "Neither url nor filePath provided" });
+      }
     }
 
     activeCastStream = {
@@ -559,16 +790,16 @@ router.post("/api/cast/start", async (req, res) => {
       timestamp: Date.now(),
     };
 
-    logger.info(`[cast] Starting cast to ${device.name} -> ${streamProxyUrl} (subtitles: ${subtitles.length}, active: ${activeSubtitle?.lang || "none"})`);
+    logger.info(`[cast] Starting cast to ${device.name} -> ${streamProxyUrl} (hardsub: ${Boolean(activeCastBurnSession.process)}, active: ${activeSubtitle?.lang || "none"})`);
 
     const session = await castService.castToDevice(device, {
       streamUrl: streamProxyUrl,
       title,
-      position: parseFloat(position) || 0,
+      position: activeCastBurnSession.process ? 0 : parseFloat(position) || 0,
       mimeType,
       poster,
-      subtitles,
-      activeSubtitle,
+      subtitles: [],
+      activeSubtitle: null,
       headers,
     });
 
@@ -611,7 +842,31 @@ router.post("/api/cast/seek", async (req, res) => {
         : positionMs !== undefined
         ? parseFloat(positionMs) / 1000
         : 0;
-    await castService.seek(targetSeconds);
+
+    if (activeCastBurnSession.process && (activeCastBurnSession.mediaUrl || activeCastBurnSession.filePath)) {
+      logger.info(`[cast-burn] Seeking burned session to ${targetSeconds}s`);
+      await startBurnSession({
+        mediaUrl: activeCastBurnSession.mediaUrl,
+        filePath: activeCastBurnSession.filePath,
+        subFilePath: activeCastBurnSession.subFilePath,
+        headers: activeCastBurnSession.headers,
+        position: targetSeconds,
+      });
+
+      if (castService.activeSession?.device) {
+        const localIp = castService.getLocalIpAddress();
+        const port = global.PORT || 9545;
+        const streamProxyUrl = `http://${localIp}:${port}/api/cast/burn/index.m3u8?t=${Date.now()}`;
+        await castService.castToDevice(castService.activeSession.device, {
+          streamUrl: streamProxyUrl,
+          title: activeCastStream.title,
+          position: 0,
+          mimeType: "application/vnd.apple.mpegurl",
+        });
+      }
+    } else {
+      await castService.seek(targetSeconds);
+    }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -621,6 +876,7 @@ router.post("/api/cast/seek", async (req, res) => {
 // 6. Stop
 router.post("/api/cast/stop", async (req, res) => {
   try {
+    cleanupBurnSession();
     await castService.stop();
     activeCastStream = {
       mediaUrl: "",
@@ -664,12 +920,6 @@ router.all(["/api/cast/stream", "/api/cast/stream.mp4"], async (req, res) => {
 
   const localIp = castService.getLocalIpAddress();
   const port = global.PORT || 9545;
-  const activeSubVttUrl = `http://${localIp}:${port}/api/cast/subtitle/active.vtt`;
-
-  // Always advertise CaptionInfo.sec for Samsung Tizen DLNA caption negotiation
-  if (activeCastStream.activeSubtitle) {
-    res.setHeader("CaptionInfo.sec", activeSubVttUrl);
-  }
 
   if (req.method === "OPTIONS") {
     return res.status(200).end();
@@ -816,8 +1066,7 @@ router.all(["/api/cast/stream", "/api/cast/stream.mp4"], async (req, res) => {
           remoteUrl,
           effectiveHeaders,
           localIp,
-          port,
-          subtitles
+          port
         );
 
         manifestCache.set(remoteUrl, {
@@ -1008,6 +1257,40 @@ router.all("/api/cast/segment", async (req, res) => {
   }
 });
 
+// 10b. Burned Subtitle HLS Stream Endpoint
+router.all("/api/cast/burn/:file", (req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "*");
+  res.setHeader("Accept-Ranges", "bytes");
+
+  if (req.method === "OPTIONS") return res.status(200).end();
+
+  const file = req.params.file;
+  if (!activeCastBurnSession.hlsDir) {
+    return res.status(404).send("No active burn session");
+  }
+
+  const filePath = path.join(activeCastBurnSession.hlsDir, file);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).send("File not found");
+  }
+
+  if (file.endsWith(".m3u8")) {
+    res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    if (req.method === "HEAD") return res.end();
+    return res.sendFile(filePath);
+  } else if (file.endsWith(".ts")) {
+    res.setHeader("Content-Type", "video/mp2t");
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    if (req.method === "HEAD") return res.end();
+    return res.sendFile(filePath);
+  }
+
+  return res.sendFile(filePath);
+});
+
 // 11. HLS Subtitle Media Playlist Endpoint
 router.all("/api/cast/subtitles.m3u8", async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -1191,6 +1474,9 @@ router.all(
 
 module.exports = router;
 module.exports.activeCastStream = activeCastStream;
+module.exports.activeCastBurnSession = activeCastBurnSession;
+module.exports.startBurnSession = startBurnSession;
+module.exports.cleanupBurnSession = cleanupBurnSession;
 module.exports.resolveCdnHeaders = resolveCdnHeaders;
 module.exports.rewriteHlsPlaylist = rewriteHlsPlaylist;
 module.exports.isPlaylistUrl = isPlaylistUrl;

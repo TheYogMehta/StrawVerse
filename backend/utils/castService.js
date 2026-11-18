@@ -351,22 +351,6 @@ class CastService {
       headers = {},
     } = mediaOptions;
 
-    let captionXml = "";
-    if (activeSubtitle || (Array.isArray(subtitles) && subtitles.length > 0)) {
-      const localIp = this.getLocalIpAddress();
-      const port = global.PORT || 9545;
-      const subVttUrl = `http://${localIp}:${port}/api/cast/subtitle/active.vtt`;
-      const subSrtUrl = `http://${localIp}:${port}/api/cast/subtitle/active.srt`;
-
-      captionXml = `
-    <sec:CaptionInfo sec:type="vtt">${xmlEscape(subVttUrl)}</sec:CaptionInfo>
-    <sec:CaptionInfo sec:type="srt">${xmlEscape(subSrtUrl)}</sec:CaptionInfo>
-    <sec:CaptionInfoEx sec:type="vtt">${xmlEscape(subVttUrl)}</sec:CaptionInfoEx>
-    <sec:CaptionInfoEx sec:type="srt">${xmlEscape(subSrtUrl)}</sec:CaptionInfoEx>
-    <res protocolInfo="http-get:*:text/vtt:*">${xmlEscape(subVttUrl)}</res>
-    <res protocolInfo="http-get:*:application/x-subrip:*">${xmlEscape(subSrtUrl)}</res>`;
-    }
-
     const isHls =
       mimeType.includes("mpegurl") ||
       mimeType.includes("apple") ||
@@ -382,13 +366,12 @@ class CastService {
       : `<res protocolInfo="http-get:*:${mimeType || "video/mp4"}:*">${xmlEscape(streamUrl)}</res>
     <res protocolInfo="http-get:*:video/mp4:*">${xmlEscape(streamUrl)}</res>`;
 
-    const didl = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:sec="http://www.sec.co.kr/" xmlns:samsung="http://www.samsung.com/sec/dlna">
+    const didl = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
   <item id="1" parentID="0" restricted="1">
     <dc:title>${xmlEscape(title)}</dc:title>
     <upnp:class>object.item.videoItem</upnp:class>
     ${poster ? `<upnp:albumArtURI>${xmlEscape(poster)}</upnp:albumArtURI>` : ""}
     ${resElements}
-    ${captionXml}
   </item>
 </DIDL-Lite>`;
 
