@@ -102,6 +102,7 @@ import {
   AlertTriangle,
   Check,
   Tv,
+  Cast,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -2110,7 +2111,7 @@ export default function VideoPlayer({
                         : "Cast to TV"
                     }
                   >
-                    <Tv size={16} style={isCasting ? { color: "#3b82f6" } : {}} />
+                    <Cast size={16} style={isCasting ? { color: "#3b82f6" } : {}} />
                   </button>
 
                   {/* Picture-in-Picture Button */}
