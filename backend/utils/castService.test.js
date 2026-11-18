@@ -7,6 +7,8 @@ const {
   getMimeType,
   convertToVtt,
   convertToSrt,
+  convertAssToSrt,
+  convertAssToVtt,
   prepareSubtitlesForCast,
   getLanguageCode,
 } = require("../routes/cast");
@@ -151,4 +153,52 @@ test("castService: prepareSubtitlesForCast normalizes and selects preferred lang
   const chi = prepared.find((s) => s.lang.includes("Chinese"));
   assert.ok(chi);
   assert.strictEqual(chi.default, false);
+});
+
+test("castService: prepareSubtitlesForCast deduplicates mirror CDNs and prioritizes CC over signs", () => {
+  const rawWithMirrors = [
+    { url: "https://vault-90.phantomcdn.top/sub_eng_3.ass", lang: "English (English Signs [CR])", default: false },
+    { url: "https://vault-90.phantomcdn.top/sub_eng_4.srt", lang: "English (English Closed Captions [CR])", default: false },
+    { url: "https://vault-90.phantomcdn.top/sub_fre_7.ass", lang: "French (CR)", default: false },
+    // Duplicate CDN mirror tracks:
+    { url: "https://vault-90.rundowncdn.top/sub_eng_3.ass", lang: "English (English Signs [CR])", default: false },
+    { url: "https://vault-90.rundowncdn.top/sub_eng_4.srt", lang: "English (English Closed Captions [CR])", default: false },
+    { url: "https://vault-90.rundowncdn.top/sub_fre_7.ass", lang: "French (CR)", default: false },
+  ];
+
+  const prepared = prepareSubtitlesForCast(rawWithMirrors, ["English"]);
+  // Mirrors must be deduplicated
+  assert.strictEqual(prepared.length, 3);
+  // Full dialogue / CC subtitle must be picked as default over signs
+  const cc = prepared.find((s) => s.lang.includes("Closed Captions"));
+  assert.ok(cc);
+  assert.strictEqual(cc.default, true);
+
+  const signs = prepared.find((s) => s.lang.includes("Signs"));
+  assert.ok(signs);
+  assert.strictEqual(signs.default, false);
+});
+
+test("castService: convertAssToVtt and convertAssToSrt parse ASS dialogue events", () => {
+  const assSample = `[Script Info]
+Title: Sample ASS
+ScriptType: v4.00+
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:01:23.45,0:01:26.78,Default,,0,0,0,,{\\i1}Hello{\\i0} from ASS!\\NSecond line
+Dialogue: 0,0:01:30.10,0:01:32.20,Default,,0,0,0,,Next dialogue cue.`;
+
+  const vtt = convertToVtt(assSample);
+  assert.ok(vtt.startsWith("WEBVTT\n\n"));
+  assert.ok(vtt.includes("00:01:23.450 --> 00:01:26.780"));
+  assert.ok(vtt.includes("Hello from ASS!\nSecond line"));
+  assert.ok(vtt.includes("00:01:30.100 --> 00:01:32.200"));
+  assert.ok(vtt.includes("Next dialogue cue."));
+
+  const srt = convertToSrt(assSample);
+  assert.ok(srt.includes("00:01:23,450 --> 00:01:26,780"));
+  assert.ok(srt.includes("Hello from ASS!\nSecond line"));
+  assert.ok(srt.includes("00:01:30,100 --> 00:01:32,200"));
+  assert.ok(srt.includes("Next dialogue cue."));
 });

@@ -46,12 +46,15 @@ function getLanguageCode(lang) {
 }
 
 function formatAssTime(t) {
-  const m = t.match(/^(\d+):(\d{2}):(\d{2})\.(\d{2})$/);
+  const m = t.match(/^(\d+):(\d{2}):(\d{2})\.(\d{1,3})$/);
   if (!m) return null;
   const hours = m[1].padStart(2, "0");
   const mins = m[2];
   const secs = m[3];
-  const ms = (parseInt(m[4], 10) * 10).toString().padStart(3, "0");
+  let ms = m[4];
+  if (ms.length === 1) ms = ms + "00";
+  else if (ms.length === 2) ms = ms + "0";
+  else if (ms.length > 3) ms = ms.slice(0, 3);
   return `${hours}:${mins}:${secs}.${ms}`;
 }
 
@@ -80,6 +83,33 @@ function convertAssToVtt(assText) {
   return vtt;
 }
 
+function convertAssToSrt(assText) {
+  const lines = assText.split("\n");
+  let srt = "";
+  let cueIdx = 1;
+  for (const line of lines) {
+    if (line.startsWith("Dialogue:")) {
+      const parts = line.substring(9).split(",");
+      if (parts.length >= 10) {
+        const start = formatAssTime(parts[1].trim());
+        const end = formatAssTime(parts[2].trim());
+        const text = parts
+          .slice(9)
+          .join(",")
+          .replace(/{[^}]+}/g, "")
+          .replace(/\\N/gi, "\n")
+          .trim();
+        if (start && end && text) {
+          const srtStart = start.replace(".", ",");
+          const srtEnd = end.replace(".", ",");
+          srt += `${cueIdx++}\n${srtStart} --> ${srtEnd}\n${text}\n\n`;
+        }
+      }
+    }
+  }
+  return srt.trim();
+}
+
 function convertToVtt(content) {
   if (!content || typeof content !== "string") return "WEBVTT\n\n";
   let clean = content
@@ -104,6 +134,9 @@ function convertToSrt(content) {
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .trim();
+  if (clean.includes("[Script Info]") || clean.includes("Dialogue:")) {
+    return convertAssToSrt(clean);
+  }
   if (clean.startsWith("WEBVTT")) {
     clean = clean.replace(/^WEBVTT[^\n]*\n+/i, "");
     clean = clean.replace(/NOTE[^\n]*\n[^\n]*\n+/g, "");
@@ -117,21 +150,39 @@ function prepareSubtitlesForCast(rawSubs, preferredLangs = ["English"]) {
   if (!Array.isArray(rawSubs) || rawSubs.length === 0) return [];
   const cleaned = [];
   const seenUrls = new Set();
+  const seenLangs = new Set();
 
   for (const s of rawSubs) {
     if (!s) continue;
     const url = typeof s === "string" ? s : s.url || s.file || "";
     if (!url || seenUrls.has(url)) continue;
-    seenUrls.add(url);
 
-    const lang = typeof s === "object" ? s.lang || s.label || s.name || "Unknown" : "Unknown";
+    const rawLang = typeof s === "object" ? s.lang || s.label || s.name || "Unknown" : "Unknown";
+    const normLang = String(rawLang).trim().toLowerCase();
+
+    // Prevent duplicate tracks from multiple mirror CDNs (e.g. PhantomCDN & RundownCDN)
+    if (seenLangs.has(normLang)) continue;
+
+    seenUrls.add(url);
+    seenLangs.add(normLang);
+
     const isExplicitDefault = typeof s === "object" && Boolean(s.default);
-    cleaned.push({ url, lang, default: isExplicitDefault });
+    cleaned.push({ url, lang: String(rawLang).trim(), default: isExplicitDefault });
+
+    if (cleaned.length >= 12) break; // Limit to max 12 distinct tracks
   }
 
   let defaultIdx = cleaned.findIndex((s) => s.default);
   if (defaultIdx < 0 && preferredLangs && preferredLangs.length > 0) {
-    defaultIdx = cleaned.findIndex((s) => isLanguagePreferred(s.lang, preferredLangs));
+    // Prefer full dialogue / CC subtitles over signs if available
+    defaultIdx = cleaned.findIndex(
+      (s) =>
+        isLanguagePreferred(s.lang, preferredLangs) &&
+        !s.lang.toLowerCase().includes("signs")
+    );
+    if (defaultIdx < 0) {
+      defaultIdx = cleaned.findIndex((s) => isLanguagePreferred(s.lang, preferredLangs));
+    }
   }
   if (defaultIdx < 0 && cleaned.length > 0) {
     defaultIdx = 0;
@@ -145,6 +196,18 @@ function prepareSubtitlesForCast(rawSubs, preferredLangs = ["English"]) {
 
 // In-memory cache for pre-warmed / rewritten HLS manifests
 const manifestCache = new Map();
+
+// In-memory active cast session for the local LAN player / TV
+let activeCastStream = {
+  mediaUrl: "",
+  filePath: "",
+  headers: {},
+  subtitles: [],
+  activeSubtitle: null,
+  mimeType: "video/mp4",
+  title: "",
+  timestamp: 0,
+};
 
 function rewriteHlsPlaylist(playlistContent, baseUrl, customHeaders, localIp, port, subtitles = []) {
   const encodedHeaders = encodeURIComponent(JSON.stringify(customHeaders || {}));
@@ -297,9 +360,9 @@ router.post("/api/cast/start", async (req, res) => {
     const poster = req.body.poster || "";
 
     let device = deviceId ? castService.discoveredDevices.get(deviceId) : null;
-    if (!device && req.body.device && req.body.device.location) {
+    if (!device && req.body.device && (req.body.device.controlUrl || req.body.device.location)) {
       device = req.body.device;
-      castService.discoveredDevices.set(device.id || device.location, device);
+      castService.discoveredDevices.set(device.id || device.location || device.controlUrl, device);
     }
 
     if (!device && deviceId) {
@@ -330,21 +393,17 @@ router.post("/api/cast/start", async (req, res) => {
     } catch (_) {}
 
     const subtitles = prepareSubtitlesForCast(rawSubtitles, prefLangs);
+    const activeSubtitle = subtitles.find((s) => s.default) || subtitles[0] || null;
 
     let streamProxyUrl;
     let mimeType = "video/mp4";
 
     if (filePath) {
-      streamProxyUrl = `http://${localIp}:${port}/api/cast/stream?path=${encodeURIComponent(filePath)}`;
+      streamProxyUrl = `http://${localIp}:${port}/api/cast/stream.mp4`;
       mimeType = getMimeType(filePath);
     } else if (mediaUrl) {
-      const encodedUrl = encodeURIComponent(mediaUrl);
-      const encodedHeaders = encodeURIComponent(JSON.stringify(headers));
-      const encodedSubs =
-        subtitles.length > 0
-          ? encodeURIComponent(JSON.stringify(subtitles))
-          : "";
-      streamProxyUrl = `http://${localIp}:${port}/api/cast/stream?url=${encodedUrl}&headers=${encodedHeaders}${encodedSubs ? `&subtitles=${encodedSubs}` : ""}`;
+      // Short, clean stream URL (< 45 chars) without 8KB query bloat that breaks Smart TV microhttpd
+      streamProxyUrl = `http://${localIp}:${port}/api/cast/stream.mp4`;
       mimeType = getMimeType(mediaUrl);
 
       // Pre-warm the HLS master playlist in memory so the TV gets an instant <5ms response
@@ -380,6 +439,10 @@ router.post("/api/cast/start", async (req, res) => {
               content: rewritten,
               timestamp: Date.now(),
             });
+            manifestCache.set("active", {
+              content: rewritten,
+              timestamp: Date.now(),
+            });
             mimeType = "application/vnd.apple.mpegurl";
           }
         } catch (warmErr) {
@@ -394,7 +457,18 @@ router.post("/api/cast/start", async (req, res) => {
         .json({ success: false, error: "Neither url nor filePath provided" });
     }
 
-    logger.info(`[cast] Starting cast to ${device.name} -> ${streamProxyUrl} (subtitles: ${subtitles.length})`);
+    activeCastStream = {
+      mediaUrl: mediaUrl || "",
+      filePath: filePath || "",
+      headers: headers || {},
+      subtitles,
+      activeSubtitle,
+      mimeType,
+      title,
+      timestamp: Date.now(),
+    };
+
+    logger.info(`[cast] Starting cast to ${device.name} -> ${streamProxyUrl} (subtitles: ${subtitles.length}, active: ${activeSubtitle?.lang || "none"})`);
 
     const session = await castService.castToDevice(device, {
       streamUrl: streamProxyUrl,
@@ -403,6 +477,7 @@ router.post("/api/cast/start", async (req, res) => {
       mimeType,
       poster,
       subtitles,
+      activeSubtitle,
       headers,
     });
 
@@ -456,6 +531,17 @@ router.post("/api/cast/seek", async (req, res) => {
 router.post("/api/cast/stop", async (req, res) => {
   try {
     await castService.stop();
+    activeCastStream = {
+      mediaUrl: "",
+      filePath: "",
+      headers: {},
+      subtitles: [],
+      activeSubtitle: null,
+      mimeType: "video/mp4",
+      title: "",
+      timestamp: 0,
+    };
+    manifestCache.clear();
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
@@ -479,18 +565,51 @@ router.post("/api/cast/volume", async (req, res) => {
 });
 
 // 9. LAN Media Stream Proxy: Handles both local files and remote scraper streams
-router.all("/api/cast/stream", async (req, res) => {
+router.all(["/api/cast/stream", "/api/cast/stream.mp4"], async (req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "*");
   res.setHeader("Accept-Ranges", "bytes");
 
+  const localIp = castService.getLocalIpAddress();
+  const port = global.PORT || 9545;
+  const activeSubVttUrl = `http://${localIp}:${port}/api/cast/subtitle/active.vtt`;
+
+  // Always advertise CaptionInfo.sec for Samsung Tizen DLNA caption negotiation
+  if (activeCastStream.activeSubtitle) {
+    res.setHeader("CaptionInfo.sec", activeSubVttUrl);
+  }
+
   if (req.method === "OPTIONS") {
     return res.status(200).end();
   }
 
-  const localPath = req.query.path;
-  const remoteUrl = req.query.url;
+  let localPath = req.query.path;
+  let remoteUrl = req.query.url;
+
+  // If no specific url or path passed in query params, resolve from active cast session
+  if (!localPath && !remoteUrl) {
+    if (activeCastStream.filePath) {
+      localPath = activeCastStream.filePath;
+    } else if (activeCastStream.mediaUrl) {
+      remoteUrl = activeCastStream.mediaUrl;
+    }
+  }
+
+  // Fast-path for HEAD requests (TV probing before play)
+  if (req.method === "HEAD") {
+    const isHls =
+      remoteUrl &&
+      (isPlaylistUrl(remoteUrl) ||
+        req.query.isM3U8 === "true" ||
+        req.query.isChild === "1");
+    res.setHeader(
+      "Content-Type",
+      isHls ? "application/vnd.apple.mpegurl" : activeCastStream.mimeType || "video/mp4",
+    );
+    res.setHeader("Accept-Ranges", "bytes");
+    return res.status(200).end();
+  }
 
   // Case A: Local downloaded video file
   if (localPath) {
@@ -555,6 +674,16 @@ router.all("/api/cast/stream", async (req, res) => {
         if (req.method === "HEAD") return res.end();
         return res.send(cached.content);
       }
+    } else if (manifestCache.has("active") && remoteUrl === activeCastStream.mediaUrl) {
+      const cached = manifestCache.get("active");
+      if (Date.now() - cached.timestamp < 300000) {
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.apple.mpegurl; charset=utf-8",
+        );
+        if (req.method === "HEAD") return res.end();
+        return res.send(cached.content);
+      }
     }
 
     let subtitles = [];
@@ -562,6 +691,8 @@ router.all("/api/cast/stream", async (req, res) => {
       try {
         subtitles = JSON.parse(decodeURIComponent(req.query.subtitles));
       } catch (_) {}
+    } else if (!req.query.url && activeCastStream.subtitles) {
+      subtitles = activeCastStream.subtitles;
     }
 
     let customHeaders = {};
@@ -569,16 +700,14 @@ router.all("/api/cast/stream", async (req, res) => {
       try {
         customHeaders = JSON.parse(req.query.headers);
       } catch (_) {}
+    } else if (!req.query.url && activeCastStream.headers) {
+      customHeaders = activeCastStream.headers;
     }
 
-    const cleanUrl = remoteUrl.split("?")[0].toLowerCase();
     const isHls =
       isPlaylistUrl(remoteUrl) ||
       req.query.isM3U8 === "true" ||
       req.query.isChild === "1";
-
-    const localIp = castService.getLocalIpAddress();
-    const port = global.PORT || 9545;
 
     if (isHls) {
       try {
@@ -930,11 +1059,92 @@ router.all("/api/cast/subtitle", async (req, res) => {
   }
 });
 
+// 13. Active Preferred Subtitle Endpoint for DLNA / Samsung Smart TV
+router.all(
+  ["/api/cast/subtitle/active.vtt", "/api/cast/subtitle/active.srt"],
+  async (req, res) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "*");
+
+    if (req.method === "OPTIONS") return res.status(200).end();
+
+    const isSrt = req.path.endsWith(".srt") || req.query.format === "srt";
+    const activeSub = activeCastStream.activeSubtitle;
+
+    if (!activeSub || !activeSub.url) {
+      if (isSrt) {
+        res.setHeader("Content-Type", "application/x-subrip; charset=utf-8");
+        return res.send("");
+      }
+      res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+      return res.send("WEBVTT\n\n");
+    }
+
+    try {
+      const subUrl = activeSub.url;
+      let subContent = "";
+
+      if (subUrl.startsWith("/subtitles?file=")) {
+        const decodedPath = decodeURIComponent(
+          subUrl.replace("/subtitles?file=", ""),
+        );
+        if (fs.existsSync(decodedPath)) {
+          subContent = fs.readFileSync(decodedPath, "utf8");
+        }
+      } else if (subUrl.startsWith("/") && fs.existsSync(subUrl)) {
+        subContent = fs.readFileSync(subUrl, "utf8");
+      } else if (subUrl.startsWith("http://") || subUrl.startsWith("https://")) {
+        const customHeaders = activeCastStream.headers || {};
+        const upstreamHeaders = {
+          "User-Agent":
+            customHeaders["User-Agent"] ||
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+          Referer: customHeaders.Referer || customHeaders.referer || subUrl,
+          ...customHeaders,
+        };
+
+        const resp = await axios.get(subUrl, {
+          headers: upstreamHeaders,
+          responseType: "text",
+          timeout: 9000,
+        });
+        subContent = resp.data || "";
+      }
+
+      if (isSrt) {
+        const srt = convertToSrt(subContent);
+        res.setHeader("Content-Type", "application/x-subrip; charset=utf-8");
+        if (req.method === "HEAD") return res.end();
+        return res.send(srt);
+      } else {
+        const vtt = convertToVtt(subContent);
+        res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+        if (req.method === "HEAD") return res.end();
+        return res.send(vtt);
+      }
+    } catch (err) {
+      logger.error(
+        `[cast] Failed to fetch active subtitle (${activeSub.url}): ${err.message}`,
+      );
+      if (isSrt) {
+        res.setHeader("Content-Type", "application/x-subrip; charset=utf-8");
+        return res.send("");
+      }
+      res.setHeader("Content-Type", "text/vtt; charset=utf-8");
+      return res.send("WEBVTT\n\n");
+    }
+  },
+);
+
 module.exports = router;
+module.exports.activeCastStream = activeCastStream;
 module.exports.rewriteHlsPlaylist = rewriteHlsPlaylist;
 module.exports.isPlaylistUrl = isPlaylistUrl;
 module.exports.getMimeType = getMimeType;
 module.exports.convertToVtt = convertToVtt;
 module.exports.convertToSrt = convertToSrt;
+module.exports.convertAssToSrt = convertAssToSrt;
+module.exports.convertAssToVtt = convertAssToVtt;
 module.exports.prepareSubtitlesForCast = prepareSubtitlesForCast;
 module.exports.getLanguageCode = getLanguageCode;

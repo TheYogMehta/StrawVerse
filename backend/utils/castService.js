@@ -347,33 +347,24 @@ class CastService {
       mimeType = "video/mp4",
       poster = "",
       subtitles = [],
+      activeSubtitle = null,
       headers = {},
     } = mediaOptions;
 
     let captionXml = "";
-    if (Array.isArray(subtitles) && subtitles.length > 0) {
+    if (activeSubtitle || (Array.isArray(subtitles) && subtitles.length > 0)) {
       const localIp = this.getLocalIpAddress();
       const port = global.PORT || 9545;
-      const encodedHeaders =
-        headers && Object.keys(headers).length > 0
-          ? encodeURIComponent(JSON.stringify(headers))
-          : "";
+      const subVttUrl = `http://${localIp}:${port}/api/cast/subtitle/active.vtt`;
+      const subSrtUrl = `http://${localIp}:${port}/api/cast/subtitle/active.srt`;
 
-      for (const sub of subtitles) {
-        if (!sub || !sub.url) continue;
-        const encodedSubUrl = encodeURIComponent(sub.url);
-        const subSrtUrl = `http://${localIp}:${port}/api/cast/subtitle?url=${encodedSubUrl}${encodedHeaders ? `&headers=${encodedHeaders}` : ""}&format=srt`;
-        const subVttUrl = `http://${localIp}:${port}/api/cast/subtitle?url=${encodedSubUrl}${encodedHeaders ? `&headers=${encodedHeaders}` : ""}&format=vtt`;
-
-        captionXml += `
-    <sec:CaptionInfo sec:type="srt">${xmlEscape(subSrtUrl)}</sec:CaptionInfo>
+      captionXml = `
     <sec:CaptionInfo sec:type="vtt">${xmlEscape(subVttUrl)}</sec:CaptionInfo>
-    <sec:CaptionInfoEx sec:type="srt">${xmlEscape(subSrtUrl)}</sec:CaptionInfoEx>
+    <sec:CaptionInfo sec:type="srt">${xmlEscape(subSrtUrl)}</sec:CaptionInfo>
     <sec:CaptionInfoEx sec:type="vtt">${xmlEscape(subVttUrl)}</sec:CaptionInfoEx>
+    <sec:CaptionInfoEx sec:type="srt">${xmlEscape(subSrtUrl)}</sec:CaptionInfoEx>
     <res protocolInfo="http-get:*:text/vtt:*">${xmlEscape(subVttUrl)}</res>
-    <res protocolInfo="http-get:*:text/srt:*">${xmlEscape(subSrtUrl)}</res>
     <res protocolInfo="http-get:*:application/x-subrip:*">${xmlEscape(subSrtUrl)}</res>`;
-      }
     }
 
     const isHls =
@@ -381,11 +372,15 @@ class CastService {
       mimeType.includes("apple") ||
       streamUrl.toLowerCase().includes(".m3u8");
 
+    // Samsung Tizen MediaRenderer requires http-get:*:video/mp4:* to be the primary
+    // descriptor, even for HLS streams (which Tizen plays via its native media pipeline).
+    // If application/vnd.apple.mpegurl is first, Samsung TV rejects SetAVTransportURI with error 714 (Illegal MIME-type).
     const resElements = isHls
-      ? `<res protocolInfo="http-get:*:application/vnd.apple.mpegurl:*">${xmlEscape(streamUrl)}</res>
-    <res protocolInfo="http-get:*:application/x-mpegURL:*">${xmlEscape(streamUrl)}</res>
-    <res protocolInfo="http-get:*:video/mp4:*">${xmlEscape(streamUrl)}</res>`
-      : `<res protocolInfo="http-get:*:${mimeType}:*">${xmlEscape(streamUrl)}</res>`;
+      ? `<res protocolInfo="http-get:*:video/mp4:*">${xmlEscape(streamUrl)}</res>
+    <res protocolInfo="http-get:*:application/vnd.apple.mpegurl:*">${xmlEscape(streamUrl)}</res>
+    <res protocolInfo="http-get:*:application/x-mpegURL:*">${xmlEscape(streamUrl)}</res>`
+      : `<res protocolInfo="http-get:*:${mimeType || "video/mp4"}:*">${xmlEscape(streamUrl)}</res>
+    <res protocolInfo="http-get:*:video/mp4:*">${xmlEscape(streamUrl)}</res>`;
 
     const didl = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:sec="http://www.sec.co.kr/" xmlns:samsung="http://www.samsung.com/sec/dlna">
   <item id="1" parentID="0" restricted="1">
@@ -421,8 +416,8 @@ class CastService {
       },
     );
 
-    // 2. Allow TV 600ms to initialize AVTransport pipeline for the new URI before sending Play
-    await new Promise((r) => setTimeout(r, 600));
+    // 2. Allow TV 800ms to initialize AVTransport pipeline for the new URI before sending Play
+    await new Promise((r) => setTimeout(r, 800));
 
     try {
       await this.sendSoapAction(
@@ -435,8 +430,8 @@ class CastService {
         },
       );
     } catch (playErr) {
-      logger.warn(`[cast] Initial Play returned: ${playErr.message}. Retrying in 1s...`);
-      await new Promise((r) => setTimeout(r, 1000));
+      logger.warn(`[cast] Initial Play returned: ${playErr.message}. Retrying in 1.2s...`);
+      await new Promise((r) => setTimeout(r, 1200));
       await this.sendSoapAction(
         device.controlUrl,
         "urn:schemas-upnp-org:service:AVTransport:1",
