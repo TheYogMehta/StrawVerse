@@ -305,6 +305,7 @@ export default function VideoPlayer({
         title: animeTitle || (type === "Movies" ? "Movie Stream" : "Anime Stream"),
         position: currentPos || 0,
         poster: image || "",
+        subtitles: Array.isArray(subtitles) ? subtitles : [],
       };
 
       if (isCurrentDownloaded && selectedSource?.url) {

@@ -346,7 +346,35 @@ class CastService {
       position = 0,
       mimeType = "video/mp4",
       poster = "",
+      subtitles = [],
+      headers = {},
     } = mediaOptions;
+
+    let captionXml = "";
+    if (Array.isArray(subtitles) && subtitles.length > 0) {
+      const localIp = this.getLocalIpAddress();
+      const port = global.PORT || 9545;
+      const encodedHeaders =
+        headers && Object.keys(headers).length > 0
+          ? encodeURIComponent(JSON.stringify(headers))
+          : "";
+
+      for (const sub of subtitles) {
+        if (!sub || !sub.url) continue;
+        const encodedSubUrl = encodeURIComponent(sub.url);
+        const subSrtUrl = `http://${localIp}:${port}/api/cast/subtitle?url=${encodedSubUrl}${encodedHeaders ? `&headers=${encodedHeaders}` : ""}&format=srt`;
+        const subVttUrl = `http://${localIp}:${port}/api/cast/subtitle?url=${encodedSubUrl}${encodedHeaders ? `&headers=${encodedHeaders}` : ""}&format=vtt`;
+
+        captionXml += `
+    <sec:CaptionInfo sec:type="srt">${xmlEscape(subSrtUrl)}</sec:CaptionInfo>
+    <sec:CaptionInfo sec:type="vtt">${xmlEscape(subVttUrl)}</sec:CaptionInfo>
+    <sec:CaptionInfoEx sec:type="srt">${xmlEscape(subSrtUrl)}</sec:CaptionInfoEx>
+    <sec:CaptionInfoEx sec:type="vtt">${xmlEscape(subVttUrl)}</sec:CaptionInfoEx>
+    <res protocolInfo="http-get:*:text/vtt:*">${xmlEscape(subVttUrl)}</res>
+    <res protocolInfo="http-get:*:text/srt:*">${xmlEscape(subSrtUrl)}</res>
+    <res protocolInfo="http-get:*:application/x-subrip:*">${xmlEscape(subSrtUrl)}</res>`;
+      }
+    }
 
     const isHls =
       mimeType.includes("mpegurl") ||
@@ -359,12 +387,13 @@ class CastService {
     <res protocolInfo="http-get:*:video/mp4:*">${xmlEscape(streamUrl)}</res>`
       : `<res protocolInfo="http-get:*:${mimeType}:*">${xmlEscape(streamUrl)}</res>`;
 
-    const didl = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/">
+    const didl = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" xmlns:sec="http://www.sec.co.kr/" xmlns:samsung="http://www.samsung.com/sec/dlna">
   <item id="1" parentID="0" restricted="1">
     <dc:title>${xmlEscape(title)}</dc:title>
     <upnp:class>object.item.videoItem</upnp:class>
     ${poster ? `<upnp:albumArtURI>${xmlEscape(poster)}</upnp:albumArtURI>` : ""}
     ${resElements}
+    ${captionXml}
   </item>
 </DIDL-Lite>`;
 

@@ -5,6 +5,10 @@ const {
   rewriteHlsPlaylist,
   isPlaylistUrl,
   getMimeType,
+  convertToVtt,
+  convertToSrt,
+  prepareSubtitlesForCast,
+  getLanguageCode,
 } = require("../routes/cast");
 
 test("castService: getLocalIpAddress returns valid non-empty IPv4", () => {
@@ -85,4 +89,66 @@ https://cdn.example.com/chunk-1.webp`;
     rewrittenChild,
     /http:\/\/192\.168\.1\.55:9545\/api\/cast\/segment\?url=https%3A%2F%2Fcdn\.example\.com%2Fchunk-1\.webp/
   );
+});
+
+test("castService: rewriteHlsPlaylist injects subtitles into master playlist", () => {
+  const masterManifest = `#EXTM3U
+#EXT-X-VERSION:3
+#EXT-X-STREAM-INF:BANDWIDTH=5184,RESOLUTION=1920x1080
+http://127.0.0.1:4000/video.m3u8`;
+
+  const subtitles = [
+    { url: "https://example.com/subs_eng.srt", lang: "English", default: true },
+    { url: "https://example.com/subs_spa.srt", lang: "Spanish", default: false },
+  ];
+
+  const rewritten = rewriteHlsPlaylist(
+    masterManifest,
+    "http://127.0.0.1:4000/master.m3u8",
+    { Referer: "https://flixcloud.cc/" },
+    "192.168.1.55",
+    9545,
+    subtitles
+  );
+
+  // Subtitle tags must be present with TYPE=SUBTITLES
+  assert.match(rewritten, /#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",DEFAULT=YES/);
+  assert.match(rewritten, /#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="Spanish",DEFAULT=NO/);
+  assert.match(rewritten, /URI="http:\/\/192\.168\.1\.55:9545\/api\/cast\/subtitles\.m3u8\?url=https%3A%2F%2Fexample\.com%2Fsubs_eng\.srt/);
+  // SUBTITLES="subs" must be appended to the stream-inf line
+  assert.match(rewritten, /#EXT-X-STREAM-INF:BANDWIDTH=5184,RESOLUTION=1920x1080,SUBTITLES="subs"/);
+});
+
+test("castService: convertToVtt correctly converts SRT to WebVTT", () => {
+  const srt = `1
+00:00:04,523 --> 00:00:06,592
+Hello world
+
+2
+00:00:06,593 --> 00:00:09,763
+Second subtitle line`;
+
+  const vtt = convertToVtt(srt);
+  assert.ok(vtt.startsWith("WEBVTT\n\n"));
+  assert.ok(vtt.includes("00:00:04.523 --> 00:00:06.592"));
+  assert.ok(vtt.includes("00:00:06.593 --> 00:00:09.763"));
+  assert.ok(vtt.includes("Hello world"));
+});
+
+test("castService: prepareSubtitlesForCast normalizes and selects preferred language as default", () => {
+  const raw = [
+    { url: "https://example.com/chi.srt", lang: "Chinese (Simplified)", default: false },
+    { url: "https://example.com/eng.srt", lang: "English (Track 2 (ENG))", default: false },
+    { url: "https://example.com/spa.srt", lang: "Spanish", default: false },
+  ];
+
+  const prepared = prepareSubtitlesForCast(raw, ["English"]);
+  assert.strictEqual(prepared.length, 3);
+  const eng = prepared.find((s) => s.lang.includes("English"));
+  assert.ok(eng);
+  assert.strictEqual(eng.default, true);
+
+  const chi = prepared.find((s) => s.lang.includes("Chinese"));
+  assert.ok(chi);
+  assert.strictEqual(chi.default, false);
 });

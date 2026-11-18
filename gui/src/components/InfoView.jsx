@@ -1468,6 +1468,7 @@ export default function InfoView({
 
       let streamUrl = "";
       let streamHeaders = {};
+      let streamSubtitles = [];
 
       if (isDownloaded) {
         setCastConnectingStep("Loading local video...");
@@ -1482,6 +1483,11 @@ export default function InfoView({
           watchRes?.sources?.[0] || watchRes?.[activeSubDub]?.sources?.[0] || watchRes?.[activeSubDub]?.[0];
         streamUrl = typeof firstSrc?.url === "string" ? firstSrc.url : firstSrc?.url?.url || "";
         streamHeaders = firstSrc?.headers || {};
+        streamSubtitles =
+          watchRes?.subtitles ||
+          watchRes?.[activeSubDub]?.subtitles ||
+          watchRes?.sub?.subtitles ||
+          [];
       } else {
         setCastConnectingStep("Fetching stream servers...");
         const watchRes = await apiPost("/api/watch", {
@@ -1493,6 +1499,12 @@ export default function InfoView({
           provider: details?.provider || "",
           type: type || "Anime",
         });
+
+        streamSubtitles =
+          watchRes?.subtitles ||
+          watchRes?.[activeSubDub]?.subtitles ||
+          watchRes?.sub?.subtitles ||
+          [];
 
         let srcs = [];
         if (activeSubDub && Array.isArray(watchRes?.[activeSubDub]?.sources)) {
@@ -1531,6 +1543,9 @@ export default function InfoView({
             rawUrl = typeof srvRes.url === "string" ? srvRes.url : srvRes.url.url;
             streamHeaders = srvRes.headers || streamHeaders;
           }
+          if (Array.isArray(srvRes?.subtitles) && srvRes.subtitles.length > 0) {
+            streamSubtitles = srvRes.subtitles;
+          }
         }
         streamUrl = rawUrl;
       }
@@ -1552,6 +1567,7 @@ export default function InfoView({
           url: streamUrl,
           headers: streamHeaders,
           filePath: isDownloaded ? streamUrl : undefined,
+          subtitles: streamSubtitles,
           title: castTitle,
           position: 0,
           poster: details?.image || "",
