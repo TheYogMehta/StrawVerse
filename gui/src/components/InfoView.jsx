@@ -1417,6 +1417,7 @@ export default function InfoView({
   const [activeCastDevice, setActiveCastDevice] = useState(null);
   const [activeCastTitle, setActiveCastTitle] = useState("");
   const [isCastConnecting, setIsCastConnecting] = useState(false);
+  const [castConnectingStep, setCastConnectingStep] = useState("");
   const [isCastPlaying, setIsCastPlaying] = useState(true);
 
   const scanCastDevices = async (timeout = 3500) => {
@@ -1453,6 +1454,7 @@ export default function InfoView({
   const handleStartCast = async (device) => {
     if (!castTargetEp || !device) return;
     setIsCastConnecting(true);
+    setCastConnectingStep("Resolving video stream...");
 
     try {
       const activeSubDub = historyProgress?.lastSubDub || dubSelect || "sub";
@@ -1468,6 +1470,7 @@ export default function InfoView({
       let streamHeaders = {};
 
       if (isDownloaded) {
+        setCastConnectingStep("Loading local video...");
         const watchRes = await apiPost("/api/watch", {
           ep: details?.id || id,
           epNum: castTargetEp.number,
@@ -1480,6 +1483,7 @@ export default function InfoView({
         streamUrl = typeof firstSrc?.url === "string" ? firstSrc.url : firstSrc?.url?.url || "";
         streamHeaders = firstSrc?.headers || {};
       } else {
+        setCastConnectingStep("Fetching stream servers...");
         const watchRes = await apiPost("/api/watch", {
           ep: castTargetEp.id || castTargetEp.number,
           epNum: castTargetEp.number,
@@ -1513,6 +1517,7 @@ export default function InfoView({
         streamHeaders = chosen.headers || {};
 
         if (chosen.isUnresolved || !rawUrl) {
+          setCastConnectingStep("Resolving video server...");
           const srvRes = await apiPost("/api/watch/server", {
             animeId: details?.id || id,
             episodeId: castTargetEp.id || castTargetEp.number,
@@ -1534,6 +1539,7 @@ export default function InfoView({
         throw new Error("Could not resolve video stream URL for casting.");
       }
 
+      setCastConnectingStep("Connecting to TV...");
       const epLabel = `Episode ${castTargetEp.number}`;
       const castTitle = `${details?.title || "Stream"} - ${epLabel}`;
 
@@ -1568,6 +1574,7 @@ export default function InfoView({
       swalError("Casting Failed", err.message || "Failed to start casting to device.");
     } finally {
       setIsCastConnecting(false);
+      setCastConnectingStep("");
     }
   };
 
@@ -5183,6 +5190,28 @@ export default function InfoView({
                       </span>
                     )}
                   </div>
+                  {isCastConnecting && castConnectingStep && (
+                    <div
+                      style={{
+                        padding: "8px 12px",
+                        marginBottom: "10px",
+                        borderRadius: "6px",
+                        background: "rgba(59, 130, 246, 0.15)",
+                        border: "1px solid rgba(59, 130, 246, 0.3)",
+                        color: "#93c5fd",
+                        fontSize: "12px",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                      }}
+                    >
+                      <div
+                        className="infoview-cast-spinner"
+                        style={{ width: 14, height: 14, borderWidth: 2 }}
+                      />
+                      <span>{castConnectingStep}</span>
+                    </div>
+                  )}
                   {castDevices.map((dev) => {
                     const isCurrent = activeCastDevice?.id === dev.id;
                     return (

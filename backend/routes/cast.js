@@ -10,36 +10,52 @@ const { isVideoFile, ALLOWED_VIDEO_EXTENSIONS } = require("../utils/constants");
 const router = express.Router();
 
 function getMimeType(filePathOrUrl) {
-  const clean = filePathOrUrl ? filePathOrUrl.split("?")[0].toLowerCase() : "";
-  if (clean.endsWith(".m3u8") || clean.includes(".m3u8")) return "application/vnd.apple.mpegurl";
-  if (clean.endsWith(".mp4")) return "video/mp4";
-  if (clean.endsWith(".mkv")) return "video/x-matroska";
-  if (clean.endsWith(".webm")) return "video/webm";
-  if (clean.endsWith(".ts")) return "video/mp2t";
+  if (!filePathOrUrl || typeof filePathOrUrl !== "string") return "video/mp4";
+  const lower = filePathOrUrl.toLowerCase();
+  if (lower.includes(".m3u8") || lower.includes("m3u8")) return "application/vnd.apple.mpegurl";
+  if (lower.endsWith(".mp4")) return "video/mp4";
+  if (lower.endsWith(".mkv")) return "video/x-matroska";
+  if (lower.endsWith(".webm")) return "video/webm";
+  if (lower.endsWith(".ts")) return "video/mp2t";
   return "video/mp4";
 }
 
 function isPlaylistUrl(url) {
   if (!url || typeof url !== "string") return false;
-  const clean = url.split("?")[0].toLowerCase();
-  return clean.endsWith(".m3u8") || clean.includes(".m3u8");
+  const lower = url.toLowerCase();
+  return lower.includes(".m3u8") || lower.includes("m3u8");
 }
+
+// In-memory cache for pre-warmed / rewritten HLS manifests
+const manifestCache = new Map();
 
 function rewriteHlsPlaylist(playlistContent, baseUrl, customHeaders, localIp, port) {
   const encodedHeaders = encodeURIComponent(JSON.stringify(customHeaders || {}));
-  return playlistContent
-    .split("\n")
+  const lines = playlistContent.split("\n");
+  const isMaster =
+    playlistContent.includes("#EXT-X-STREAM-INF") ||
+    playlistContent.includes("#EXT-X-MEDIA:TYPE");
+
+  let nextLineIsStream = false;
+
+  return lines
     .map((line) => {
       const trimmed = line.trim();
       if (!trimmed) return line;
 
-      // Handle tags like #EXT-X-KEY:...,URI="..." or #EXT-X-MEDIA:...,URI="..." or #EXT-X-MAP:URI="..."
+      // Handle tags
       if (trimmed.startsWith("#EXT")) {
+        if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
+          nextLineIsStream = true;
+          return line;
+        }
+
         if (trimmed.includes('URI="')) {
           return line.replace(/URI="([^"]+)"/, (match, subUri) => {
             try {
               const absSubUri = new URL(subUri, baseUrl).toString();
-              const route = isPlaylistUrl(absSubUri) ? "stream" : "segment";
+              const isMediaSub = trimmed.startsWith("#EXT-X-MEDIA");
+              const route = isMediaSub || isPlaylistUrl(absSubUri) ? "stream" : "segment";
               const proxyUri = `http://${localIp}:${port}/api/cast/${route}?url=${encodeURIComponent(absSubUri)}&headers=${encodedHeaders}`;
               return `URI="${proxyUri}"`;
             } catch (_) {
@@ -50,12 +66,16 @@ function rewriteHlsPlaylist(playlistContent, baseUrl, customHeaders, localIp, po
         return line;
       }
 
-      // Non-#EXT lines are URLs: either child playlists (e.g. video.m3u8) or media segments (.ts, .webp, .png, etc.)
+      // Non-#EXT lines are URLs:
       try {
         const absoluteUrl = new URL(trimmed, baseUrl).toString();
-        const route = isPlaylistUrl(absoluteUrl) ? "stream" : "segment";
+        const isChildPlaylist = nextLineIsStream || (isMaster && isPlaylistUrl(absoluteUrl));
+        nextLineIsStream = false;
+
+        const route = isChildPlaylist ? "stream" : "segment";
         return `http://${localIp}:${port}/api/cast/${route}?url=${encodeURIComponent(absoluteUrl)}&headers=${encodedHeaders}`;
       } catch (_) {
+        nextLineIsStream = false;
         return line;
       }
     })
@@ -124,6 +144,47 @@ router.post("/api/cast/start", async (req, res) => {
       const encodedHeaders = encodeURIComponent(JSON.stringify(headers));
       streamProxyUrl = `http://${localIp}:${port}/api/cast/stream?url=${encodedUrl}&headers=${encodedHeaders}`;
       mimeType = getMimeType(mediaUrl);
+
+      // Pre-warm the HLS master playlist in memory so the TV gets an instant <5ms response
+      if (isPlaylistUrl(mediaUrl)) {
+        try {
+          const upstreamHeaders = {
+            "User-Agent":
+              headers["User-Agent"] ||
+              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+            Referer: headers.Referer || headers.referer || mediaUrl,
+            Origin: headers.Origin || headers.origin || new URL(mediaUrl).origin,
+            ...headers,
+          };
+          const preRes = await axios.get(mediaUrl, {
+            headers: upstreamHeaders,
+            responseType: "text",
+            timeout: 9000,
+          });
+          if (
+            preRes.data &&
+            (typeof preRes.data === "string" &&
+              (preRes.data.includes("#EXTM3U") || isPlaylistUrl(mediaUrl)))
+          ) {
+            const rewritten = rewriteHlsPlaylist(
+              preRes.data,
+              mediaUrl,
+              headers,
+              localIp,
+              port,
+            );
+            manifestCache.set(mediaUrl, {
+              content: rewritten,
+              timestamp: Date.now(),
+            });
+            mimeType = "application/vnd.apple.mpegurl";
+          }
+        } catch (warmErr) {
+          logger.warn(
+            `[cast] Stream pre-warm warning for ${mediaUrl}: ${warmErr.message}`,
+          );
+        }
+      }
     } else {
       return res
         .status(400)
@@ -279,6 +340,18 @@ router.all("/api/cast/stream", async (req, res) => {
 
   // Case B: Remote online stream with custom headers
   if (remoteUrl) {
+    if (manifestCache.has(remoteUrl)) {
+      const cached = manifestCache.get(remoteUrl);
+      if (Date.now() - cached.timestamp < 300000) {
+        res.setHeader(
+          "Content-Type",
+          "application/vnd.apple.mpegurl; charset=utf-8",
+        );
+        if (req.method === "HEAD") return res.end();
+        return res.send(cached.content);
+      }
+    }
+
     let customHeaders = {};
     if (req.query.headers) {
       try {
@@ -316,6 +389,11 @@ router.all("/api/cast/stream", async (req, res) => {
           localIp,
           port
         );
+
+        manifestCache.set(remoteUrl, {
+          content: rewrittenPlaylist,
+          timestamp: Date.now(),
+        });
 
         res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
         if (req.method === "HEAD") return res.end();
@@ -399,6 +477,18 @@ router.all("/api/cast/segment", async (req, res) => {
   const port = global.PORT || 9545;
 
   // Case 1: If the requested segment URL is actually a sub-playlist (.m3u8):
+  if (manifestCache.has(segmentUrl)) {
+    const cached = manifestCache.get(segmentUrl);
+    if (Date.now() - cached.timestamp < 300000) {
+      res.setHeader(
+        "Content-Type",
+        "application/vnd.apple.mpegurl; charset=utf-8",
+      );
+      if (req.method === "HEAD") return res.end();
+      return res.send(cached.content);
+    }
+  }
+
   if (isPlaylistUrl(segmentUrl)) {
     try {
       const upstreamHeaders = {
@@ -423,6 +513,11 @@ router.all("/api/cast/segment", async (req, res) => {
         localIp,
         port
       );
+
+      manifestCache.set(segmentUrl, {
+        content: rewritten,
+        timestamp: Date.now(),
+      });
 
       res.setHeader("Content-Type", "application/vnd.apple.mpegurl; charset=utf-8");
       if (req.method === "HEAD") return res.end();

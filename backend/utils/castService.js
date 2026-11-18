@@ -186,27 +186,18 @@ class CastService {
             const manMatch = xml.match(/<manufacturer>([^<]+)<\/manufacturer>/i);
             const udnMatch = xml.match(/<UDN>([^<]+)<\/UDN>/i);
 
-            // Extract AVTransport controlURL
+            // Extract service controlURLs safely by iterating each <service> block
+            const serviceBlocks = xml.match(/<service>[\s\S]*?<\/service>/gi) || [];
             let avControlUrl = null;
-            const avSection = xml.match(
-              /<service>[\s\S]*?urn:schemas-upnp-org:service:AVTransport:1[\s\S]*?<\/service>/i,
-            );
-            if (avSection) {
-              const cMatch = avSection[0].match(/<controlURL>([^<]+)<\/controlURL>/i);
-              if (cMatch) {
-                avControlUrl = new URL(cMatch[1].trim(), desc.origin).toString();
-              }
-            }
-
-            // Extract RenderingControl controlURL (volume)
             let renderingControlUrl = null;
-            const rcSection = xml.match(
-              /<service>[\s\S]*?urn:schemas-upnp-org:service:RenderingControl:1[\s\S]*?<\/service>/i,
-            );
-            if (rcSection) {
-              const cMatch = rcSection[0].match(/<controlURL>([^<]+)<\/controlURL>/i);
-              if (cMatch) {
-                renderingControlUrl = new URL(cMatch[1].trim(), desc.origin).toString();
+
+            for (const block of serviceBlocks) {
+              if (/urn:schemas-upnp-org:service:AVTransport/i.test(block)) {
+                const m = block.match(/<controlURL>([^<]+)<\/controlURL>/i);
+                if (m) avControlUrl = new URL(m[1].trim(), desc.origin).toString();
+              } else if (/urn:schemas-upnp-org:service:RenderingControl/i.test(block)) {
+                const m = block.match(/<controlURL>([^<]+)<\/controlURL>/i);
+                if (m) renderingControlUrl = new URL(m[1].trim(), desc.origin).toString();
               }
             }
 
@@ -379,6 +370,16 @@ class CastService {
 
     logger.info(`[cast] Sending SetAVTransportURI to ${device.name} (${device.address}): ${streamUrl}`);
 
+    // 0. Stop any existing playback or error state on the TV
+    try {
+      await this.sendSoapAction(
+        device.controlUrl,
+        "urn:schemas-upnp-org:service:AVTransport:1",
+        "Stop",
+        { InstanceID: 0 },
+      );
+    } catch (_) {}
+
     // 1. Set URI
     await this.sendSoapAction(
       device.controlUrl,
@@ -391,16 +392,32 @@ class CastService {
       },
     );
 
-    // 2. Play
-    await this.sendSoapAction(
-      device.controlUrl,
-      "urn:schemas-upnp-org:service:AVTransport:1",
-      "Play",
-      {
-        InstanceID: 0,
-        Speed: 1,
-      },
-    );
+    // 2. Allow TV 600ms to initialize AVTransport pipeline for the new URI before sending Play
+    await new Promise((r) => setTimeout(r, 600));
+
+    try {
+      await this.sendSoapAction(
+        device.controlUrl,
+        "urn:schemas-upnp-org:service:AVTransport:1",
+        "Play",
+        {
+          InstanceID: 0,
+          Speed: 1,
+        },
+      );
+    } catch (playErr) {
+      logger.warn(`[cast] Initial Play returned: ${playErr.message}. Retrying in 1s...`);
+      await new Promise((r) => setTimeout(r, 1000));
+      await this.sendSoapAction(
+        device.controlUrl,
+        "urn:schemas-upnp-org:service:AVTransport:1",
+        "Play",
+        {
+          InstanceID: 0,
+          Speed: 1,
+        },
+      );
+    }
 
     // 3. Seek to position if specified
     if (position > 0) {
