@@ -14,6 +14,8 @@ import {
   Plus,
   FolderOpen,
   Folder,
+  Captions,
+  Mic,
   CheckCircle2,
   RotateCcw,
   Copy,
@@ -27,6 +29,7 @@ import {
   getMalStatusOptions,
   getMalStatusLabel,
 } from "../utils/common";
+import { normalizeStatus, formatAudioLangs } from "../utils/mediaBadges";
 import Dropdown from "./common/Dropdown";
 import "./css/InfoView.css";
 
@@ -79,6 +82,24 @@ const getItemLangs = (item, details, dubSelect) => {
   return [...new Set(langs)];
 };
 
+// Status + sub/dub pills drawn over the bottom of a Seasons/Recommendations
+// poster (same idea as the badge strip on catalog cards).
+const ExtrasCardBadges = ({ media, langs }) => {
+  const status = normalizeStatus(media?.status, "Anime");
+  const audio = formatAudioLangs(langs);
+  if (!status && !audio) return null;
+  return (
+    <span className="extras-foot-badges">
+      {status && (
+        <span className={`extras-pill status-${status.kind}`}>
+          {status.label}
+        </span>
+      )}
+      {audio && <span className="extras-pill langs-pill">{audio}</span>}
+    </span>
+  );
+};
+
 export default function InfoView({
   id: propId,
   type: rawType,
@@ -93,7 +114,9 @@ export default function InfoView({
   onWatch: propOnWatch,
   onRead: propOnRead,
   title: propTitle,
+  onSearchFallback,
   onIdChange,
+  onOpenExtra,
 }) {
   const type =
     typeof propId === "string" &&
@@ -109,6 +132,63 @@ export default function InfoView({
   const [localMalProvider, setLocalMalProvider] =
     useState(propLocalMalProvider);
   const [details, setDetails] = useState(null);
+
+  // Anime extras: Seasons (sequel/prequel chain) + Recommendations, from AniList
+  const [extras, setExtras] = useState(null);
+  const extrasKeyRef = useRef(null);
+
+  // How many recommendations to render (Settings → Anime Settings, 1-10)
+  const [recCount, setRecCount] = useState(4);
+
+  // Collapsible state for Seasons and Recommendations (collapsed by default)
+  const [seasonsCollapsed, setSeasonsCollapsed] = useState(true);
+  const [recommendationsCollapsed, setRecommendationsCollapsed] = useState(true);
+
+  useEffect(() => {
+    setSeasonsCollapsed(true);
+    setRecommendationsCollapsed(true);
+  }, [id]);
+
+  // Media-server naming: season + show folder this show downloads into,
+  // picked by the user and remembered per show (null = setting off)
+  const [msShow, setMsShow] = useState(null);
+  const msShowKey = String(id || "");
+  useEffect(() => {
+    setMsShow(null);
+    if (type !== "Anime" || !msShowKey || !window.sharedStateAPI?.getSettings)
+      return;
+    let cancelled = false;
+    window.sharedStateAPI
+      .getSettings(["mediaServerNaming", "mediaServerShows"])
+      .then((res) => {
+        if (cancelled || !res?.settings?.mediaServerNaming) return;
+        const saved = res.settings.mediaServerShows?.[msShowKey] || {};
+        setMsShow({
+          season: Number.isInteger(saved.season) ? saved.season : 1,
+          series: saved.series || details?.title || "",
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [type, msShowKey, details?.title]);
+
+  const saveMsShow = async (next) => {
+    const merged = { ...msShow, ...next };
+    setMsShow(merged);
+    try {
+      const res = await window.sharedStateAPI.getSettings(["mediaServerShows"]);
+      const shows = { ...(res?.settings?.mediaServerShows || {}) };
+      shows[msShowKey] = {
+        season: merged.season,
+        series: String(merged.series || "").trim(),
+      };
+      await window.sharedStateAPI.updateSetting("mediaServerShows", shows);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   const [mappingSearchQuery, setMappingSearchQuery] = useState(
     propTitle || propId || "",
@@ -126,10 +206,13 @@ export default function InfoView({
     if (!q) return;
     setIsSearchingMapping(true);
     try {
-      const apiType = type ? type.toLowerCase() : "anime";
-      const res = await fetch(
-        `https://strawverse.theyogmehta.online/api/search/${apiType}?q=${encodeURIComponent(q)}&limit=15`,
-      );
+      // Local mapping.db catalog (title substring or exact malid) — the old
+      // remote search was title-only and empty for anything the server lacked.
+      const res = await fetch("/api/mapping/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q, type: type || "Anime" }),
+      });
       const data = await res.json();
       if (data && Array.isArray(data.results)) {
         setMappingResults(data.results);
@@ -446,6 +529,54 @@ export default function InfoView({
 
   // Title copy state
   const [copiedTitle, setCopiedTitle] = useState(false);
+  const [copiedDesc, setCopiedDesc] = useState(false);
+  const titleHoldTimerRef = useRef(null);
+  const touchStartPosRef = useRef({ x: 0, y: 0 });
+
+  // Clipboard helper with a textarea fallback for non-secure contexts.
+  const copyTextToClipboard = async (text) => {
+    if (!text) return false;
+    if (navigator?.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch (_) {
+        // fall through to the execCommand fallback
+      }
+    }
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch (err) {
+      console.error("Failed to copy text", err);
+      return false;
+    }
+  };
+
+  const handleCopyDesc = useCallback(async () => {
+    const text = (details?.description || "")
+      .replace(/\s*\[\s*more\s*\]\s*$/i, "")
+      .trim();
+    if (!text) return;
+    const success = await copyTextToClipboard(text);
+    if (success) {
+      setCopiedDesc(true);
+      if (typeof navigator !== "undefined" && navigator.vibrate) {
+        try {
+          navigator.vibrate(50);
+        } catch (_) {}
+      }
+      setTimeout(() => setCopiedDesc(false), 2200);
+    }
+  }, [details?.description]);
 
   const handleCopyTitle = useCallback(
     (e) => {
@@ -1165,6 +1296,21 @@ export default function InfoView({
     }
   }, []);
 
+  // How many recommendations to show (Settings → Anime Settings, 1-10, default 4)
+  useEffect(() => {
+    if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
+      window.sharedStateAPI
+        .getSettings(["infoRecCount"])
+        .then((settingsData) => {
+          const raw = parseInt(settingsData?.settings?.infoRecCount, 10);
+          setRecCount(
+            Number.isInteger(raw) && raw >= 1 && raw <= 10 ? raw : 4,
+          );
+        })
+        .catch(() => {});
+    }
+  }, []);
+
   const getProviderIcon = (name) => {
     if (!name || !installedExtensions) return null;
     const list = installedExtensions[type];
@@ -1208,7 +1354,7 @@ export default function InfoView({
         if (data.id !== id) {
           const oldId = id;
           setId(data.id);
-          if (onIdChange) onIdChange(oldId, data.id);
+          if (onIdChange) onIdChange(oldId, data.id, data.provider || null);
         }
       }
       if (data && data.provider && data.provider !== localMalProvider) {
@@ -1523,6 +1669,177 @@ export default function InfoView({
     }
     fetchDetails(true);
   }, [id, type, localMalProvider]);
+
+  // Seasons + Recommendations for this title (anime only, one fetch per title).
+  // The payload is validated against the stored key rather than an
+  // effect-lifetime flag: a re-render with the same key must not cancel the
+  // in-flight request, otherwise the second details fetch that follows an
+  // in-place id heal dropped the response and the sections never rendered.
+  useEffect(() => {
+    const reset = () => {
+      extrasKeyRef.current = null;
+      setExtras(null);
+    };
+    if (
+      type !== "Anime" ||
+      !details ||
+      (details.id != null && String(details.id) !== String(id))
+    ) {
+      reset();
+      return;
+    }
+    // With provider "mal" the id itself is the MAL id, even when the info
+    // payload doesn't repeat it as a malid field.
+    const malid =
+      details.malid ||
+      details.MalID ||
+      (localMalProvider === "mal" && /^\d+$/.test(String(id))
+        ? Number(id)
+        : null);
+    const title = details.title || null;
+    if (!malid && !title) {
+      reset();
+      return;
+    }
+    const key = `${id}_extras_${malid || `t:${String(title).toLowerCase()}`}`;
+    if (extrasKeyRef.current === key) return;
+    extrasKeyRef.current = key;
+    setExtras(null);
+
+    (async () => {
+      try {
+        const response = await fetch("/api/info/extras", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ malid, title, type }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (extrasKeyRef.current !== key) return;
+        setExtras({
+          // Airing/publishing status of this title (AniList) — drives the
+          // status pill in the title row.
+          status: data?.status || null,
+          seasons: Array.isArray(data?.seasons) ? data.seasons : [],
+          recommendations: Array.isArray(data?.recommendations)
+            ? data.recommendations
+            : [],
+        });
+      } catch (err) {
+        console.error("Failed to load seasons/recommendations:", err);
+        if (extrasKeyRef.current === key) {
+          extrasKeyRef.current = null;
+          setExtras(null);
+        }
+      }
+    })();
+  }, [id, type, details, localMalProvider]);
+
+  // Scroll the info page back to the top (the Seasons/Recommendations rows sit
+  // above the episode list, so a jump from a card would land mid-page).
+  const scrollInfoToTop = () => {
+    let node = document.querySelector(".info-wrapper");
+    while (node && node !== document.body) {
+      if (node.scrollHeight > node.clientHeight + 4) {
+        node.scrollTo({ top: 0, behavior: "smooth" });
+        break;
+      }
+      node = node.parentElement;
+    }
+  };
+
+  // Open another title from a season or recommendation card.
+  // Preferred path pushes a real history entry (onOpenExtra) so Back returns to
+  // the title we came from instead of falling straight through to Discover; the
+  // in-place id swap is only a fallback when no navigator is provided.
+  const openExtrasMedia = (item) => {
+    if (!item || item.current) return;
+    scrollInfoToTop();
+    if (item.idMal) {
+      if (onOpenExtra) {
+        onOpenExtra(item, details?.title || null);
+        return;
+      }
+      setId(String(item.idMal));
+      setLocalMalProvider("mal");
+      return;
+    }
+    if (item.title && onSearchFallback) {
+      onSearchFallback(item.title);
+    }
+  };
+
+  // Airing status for the title row (AniList first, provider info as fallback)
+  const statusBadge = useMemo(
+    () =>
+      normalizeStatus(extras?.status, type) ||
+      normalizeStatus(details?.status, type),
+    [extras?.status, details?.status, type],
+  );
+
+  // "SUB" / "SUB & DUB" from the languages of the loaded episode list
+  const audioLangsLabel = useMemo(() => {
+    if (type !== "Anime") return null;
+    const merged = new Set();
+    for (const item of episodesOrChapters) {
+      getItemLangs(item, details, dubSelect).forEach((l) => merged.add(l));
+    }
+    return formatAudioLangs([...merged]) || "SUB";
+  }, [type, episodesOrChapters, details, dubSelect]);
+
+  // Audio languages for the Seasons/Recommendations cards (one bulk lookup)
+  const [extrasLangs, setExtrasLangs] = useState({});
+  const extrasLangsKeyRef = useRef(null);
+
+  useEffect(() => {
+    const targets = [
+      ...((extras?.seasons || []).map((s) => s.idMal)),
+      ...((extras?.recommendations || []).map((r) => r.idMal)),
+    ]
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n > 0);
+    const unique = [...new Set(targets)].slice(0, 24);
+    if (!unique.length) {
+      extrasLangsKeyRef.current = null;
+      setExtrasLangs({});
+      return;
+    }
+    const key = unique.join(",");
+    if (extrasLangsKeyRef.current === key) return;
+    setExtrasLangs({});
+
+    // The key is claimed when the request actually starts, not when the timer
+    // is scheduled: an effect re-run with the same targets clears the pending
+    // timer, so claiming early would leave the languages never fetched. A stale
+    // response can never land either — the key is re-checked before applying.
+    const timer = setTimeout(async () => {
+      if (extrasLangsKeyRef.current === key) return;
+      extrasLangsKeyRef.current = key;
+      try {
+        const response = await fetch("/api/info/bulk-meta", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type: "Anime",
+            items: unique.map((malid) => ({ malid })),
+            // Status comes straight from the AniList-shaped extras payload;
+            // only the provider episode languages need fetching here.
+            includeStatus: false,
+          }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        if (extrasLangsKeyRef.current !== key) return;
+        setExtrasLangs(data?.meta || {});
+      } catch (err) {
+        console.error("Failed to load card languages:", err);
+        if (extrasLangsKeyRef.current === key) extrasLangsKeyRef.current = null;
+      }
+    }, 500);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [extras]);
 
   useEffect(() => {
     if (window.sharedStateAPI && window.sharedStateAPI.on) {
@@ -2213,6 +2530,22 @@ export default function InfoView({
                 )
                 .join("")}
             </div>
+            ${
+              msShow
+                ? `<div style="margin-top: 14px; font-size: 12px; color: var(--text-muted); line-height: 1.5; text-align: center;">
+                Jellyfin/Plex naming: saves to <strong>${String(
+                  msShow.series || details?.title || "",
+                )
+                  .replace(/&/g, "&amp;")
+                  .replace(/</g, "&lt;")
+                  .replace(
+                    />/g,
+                    "&gt;",
+                  )}\\${msShow.season === 0 ? "Season 00 (Specials)" : `Season ${String(msShow.season).padStart(2, "0")}`}</strong>.<br>
+                To change this, cancel and set <strong>Season</strong> and <strong>Show folder</strong> above the episode list.
+              </div>`
+                : ""
+            }
           `,
           showCancelButton: true,
           confirmButtonText: "Download",
@@ -3340,6 +3673,35 @@ export default function InfoView({
                 {details.type.toUpperCase()}
               </span>
             )}
+            {statusBadge && (
+              <span
+                className={`info-tag-status status-${statusBadge.kind}`}
+                title="Airing status"
+              >
+                <span className="status-dot" />
+                {statusBadge.label}
+              </span>
+            )}
+            {audioLangsLabel && (
+              <span
+                className="info-tag-langs"
+                title={
+                  audioLangsLabel === "SUB & DUB"
+                    ? "Subtitled and dubbed"
+                    : audioLangsLabel === "DUB"
+                      ? "Dubbed only"
+                      : "Subtitled only"
+                }
+              >
+                {audioLangsLabel === "DUB" ? (
+                  <Mic size={12} />
+                ) : (
+                  <Captions size={12} />
+                )}
+                {audioLangsLabel === "SUB & DUB" && <Mic size={12} />}
+                {audioLangsLabel}
+              </span>
+            )}
             {details?.nextEpisodeIn && (
               <span
                 className="info-tag-schedule"
@@ -3361,29 +3723,47 @@ export default function InfoView({
                 ? rawDescription.slice(0, 200) + "..."
                 : rawDescription || "No description available for this title.";
             return (
-              <p className="info-description">
-                {displayDesc}
-                {isLongDesc && (
+              <div className="info-desc-wrap">
+                <p className="info-description">
+                  {displayDesc}
+                  {isLongDesc && (
+                    <button
+                      type="button"
+                      onClick={() => setIsDescExpanded(!isDescExpanded)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--accent-blue, #60a5fa)",
+                        cursor: "pointer",
+                        fontWeight: 600,
+                        marginLeft: "6px",
+                        padding: 0,
+                        fontSize: "13px",
+                        userSelect: "none",
+                        WebkitUserSelect: "none",
+                      }}
+                    >
+                      {isDescExpanded ? "Show Less" : "Show More"}
+                    </button>
+                  )}
+                </p>
+                {rawDescription && (
                   <button
                     type="button"
-                    onClick={() => setIsDescExpanded(!isDescExpanded)}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--accent-blue, #60a5fa)",
-                      cursor: "pointer",
-                      fontWeight: 600,
-                      marginLeft: "6px",
-                      padding: 0,
-                      fontSize: "13px",
-                      userSelect: "none",
-                      WebkitUserSelect: "none",
-                    }}
+                    className={`btn-copy-desc ${copiedDesc ? "copied" : ""}`}
+                    onClick={handleCopyDesc}
+                    title={copiedDesc ? "Copied!" : "Copy description"}
+                    aria-label="Copy description"
                   >
-                    {isDescExpanded ? "Show Less" : "Show More"}
+                    {copiedDesc ? <Check size={14} /> : <Copy size={14} />}
+                    <span
+                      className={`copy-badge ${copiedDesc ? "visible" : ""}`}
+                    >
+                      Copied!
+                    </span>
                   </button>
                 )}
-              </p>
+              </div>
             );
           })()}
 
@@ -3756,10 +4136,228 @@ export default function InfoView({
         </div>
       </div>
 
+      {/* Anime Seasons + Recommendations (AniList) */}
+      {type === "Anime" && extras && (
+        <>
+          {(extras.seasons?.length || 0) > 1 && (
+            <div
+              className={`extras-section${
+                seasonsCollapsed ? " is-collapsed" : ""
+              }`}
+            >
+              <div
+                className="section-header extras-section-header"
+                onClick={() => setSeasonsCollapsed((prev) => !prev)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setSeasonsCollapsed((prev) => !prev);
+                  }
+                }}
+                aria-expanded={!seasonsCollapsed}
+                aria-label={`Toggle Seasons (currently ${
+                  seasonsCollapsed ? "collapsed" : "expanded"
+                })`}
+                title={seasonsCollapsed ? "Expand Seasons" : "Collapse Seasons"}
+              >
+                <div className="extras-title-row">
+                  <h2>Seasons</h2>
+                  <span
+                    className={`extras-collapse-chevron${
+                      !seasonsCollapsed ? " is-open" : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <ChevronDown size={20} />
+                  </span>
+                </div>
+              </div>
+              <div
+                className={`extras-grid extras-row${
+                  seasonsCollapsed ? " is-collapsed" : ""
+                }`}
+              >
+                {extras.seasons.map((season) => (
+                  <button
+                    key={season.id}
+                    type="button"
+                    className={`extras-card${
+                      season.current ? " extras-card-current" : ""
+                    }`}
+                    onClick={() => openExtrasMedia(season)}
+                    disabled={season.current}
+                    title={
+                      season.current
+                        ? "Currently open"
+                        : `Open ${season.title}`
+                    }
+                  >
+                    <span className="extras-poster">
+                      <img
+                        src={
+                          season.image
+                            ? `/api/image?url=${encodeURIComponent(season.image)}`
+                            : "/images/image-404.png"
+                        }
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = "/images/image-404.png";
+                        }}
+                      />
+                      <ExtrasCardBadges
+                        media={season}
+                        langs={extrasLangs[String(season.idMal)]?.langs}
+                      />
+                    </span>
+                    <span className="extras-body">
+                      <span className="extras-title">{season.title}</span>
+                      <span className="extras-meta">
+                        {[
+                          season.format,
+                          season.year ? `(${season.year})` : null,
+                          season.episodes ? `${season.episodes} eps` : null,
+                          season.score != null ? `${season.score}%` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </span>
+                    {season.current && (
+                      <span className="extras-badge">Current</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {(extras.recommendations?.length || 0) > 0 && (
+            <div
+              className={`extras-section${
+                recommendationsCollapsed ? " is-collapsed" : ""
+              }`}
+            >
+              <div
+                className="section-header extras-section-header"
+                onClick={() => setRecommendationsCollapsed((prev) => !prev)}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    setRecommendationsCollapsed((prev) => !prev);
+                  }
+                }}
+                aria-expanded={!recommendationsCollapsed}
+                aria-label={`Toggle Recommendations (currently ${
+                  recommendationsCollapsed ? "collapsed" : "expanded"
+                })`}
+                title={
+                  recommendationsCollapsed
+                    ? "Expand Recommendations"
+                    : "Collapse Recommendations"
+                }
+              >
+                <div className="extras-title-row">
+                  <h2>Recommendations</h2>
+                  <span
+                    className={`extras-collapse-chevron${
+                      !recommendationsCollapsed ? " is-open" : ""
+                    }`}
+                    aria-hidden="true"
+                  >
+                    <ChevronDown size={20} />
+                  </span>
+                </div>
+              </div>
+              {/* One horizontal row (no wrapping grid); the count comes from
+                  Settings → Anime Settings (1-10, default 4). */}
+              <div
+                className={`extras-grid extras-row${
+                  recommendationsCollapsed ? " is-collapsed" : ""
+                }`}
+              >
+                {extras.recommendations.slice(0, recCount).map((rec) => (
+                  <button
+                    key={rec.id}
+                    type="button"
+                    className="extras-card"
+                    onClick={() => openExtrasMedia(rec)}
+                    title={`Open ${rec.title}`}
+                  >
+                    <span className="extras-poster">
+                      <img
+                        src={
+                          rec.image
+                            ? `/api/image?url=${encodeURIComponent(rec.image)}`
+                            : "/images/image-404.png"
+                        }
+                        alt=""
+                        loading="lazy"
+                        onError={(e) => {
+                          e.currentTarget.onerror = null;
+                          e.currentTarget.src = "/images/image-404.png";
+                        }}
+                      />
+                      <ExtrasCardBadges
+                        media={rec}
+                        langs={extrasLangs[String(rec.idMal)]?.langs}
+                      />
+                    </span>
+                    <span className="extras-body">
+                      <span className="extras-title">{rec.title}</span>
+                      <span className="extras-meta">
+                        {[
+                          rec.format,
+                          rec.year ? `(${rec.year})` : null,
+                          rec.episodes ? `${rec.episodes} eps` : null,
+                          rec.score != null ? `${rec.score}%` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
       {/* Episodes / Chapters List */}
       <div className="items-section">
         <div className="section-header">
-          <h2>{type === "Manga" ? "Chapters List" : "Episodes List"}</h2>
+          <div
+            style={{
+              display: "flex",
+              width: "100%",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <h2>{type === "Manga" ? "Chapters List" : "Episodes List"}</h2>
+            <button
+              type="button"
+              className="btn-back"
+              disabled={itemsLoading}
+              onClick={() => fetchItems(1, details?.provider, details)}
+              style={{
+                margin: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                opacity: itemsLoading ? 0.6 : 1,
+              }}
+            >
+              <RotateCcw size={15} />
+              <span>{itemsLoading ? "Refreshing..." : "Refresh"}</span>
+            </button>
+          </div>
         </div>
         {episodesOrChapters.length > 0 && (
           <div className="bulk-actions">
@@ -3955,6 +4553,48 @@ export default function InfoView({
                     Select
                   </button>
                 </div>
+                {msShow && (
+                  <>
+                    <Dropdown
+                      label="Season:"
+                      value={String(msShow.season)}
+                      onChange={(v) => saveMsShow({ season: parseInt(v, 10) })}
+                      options={[
+                        { value: "0", label: "Specials" },
+                        ...Array.from({ length: 30 }, (_, i) => ({
+                          value: String(i + 1),
+                          label: String(i + 1),
+                        })),
+                      ]}
+                      className="u-style-46"
+                      triggerClassName="u-style-44"
+                      menuClassName="u-style-45"
+                    />
+                    <input
+                      type="text"
+                      title="Show folder: give every season of a show the same name so Jellyfin/Plex group them"
+                      placeholder="Show folder"
+                      value={msShow.series}
+                      onChange={(e) =>
+                        setMsShow({ ...msShow, series: e.target.value })
+                      }
+                      onBlur={() =>
+                        saveMsShow({
+                          series: msShow.series.trim() || details?.title || "",
+                        })
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") e.currentTarget.blur();
+                      }}
+                      className="input-val"
+                      style={{
+                        width: "220px",
+                        height: "38px",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </>
+                )}
                 {selectedItems.size > 0 && (
                   <>
                     <button

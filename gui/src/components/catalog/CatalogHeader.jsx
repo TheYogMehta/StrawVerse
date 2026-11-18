@@ -12,11 +12,37 @@ export default function CatalogHeader({
   onTypeChange,
   showTypeToggle = true,
   catalogSource = "mal",
+  installedProviders = [],
+  activeProvider = "",
+  onProviderChange,
   isFilterOpen,
   onToggleFilter,
   activeFilterCount = 0,
   showFilterToggle = false,
 }) {
+  // Discover only: a provider picker sitting directly left of the
+  // Anime/Manga toggle, listing the extensions installed for this type.
+  const providerChoices = Array.isArray(installedProviders)
+    ? [...installedProviders]
+    : [];
+  if (activeProvider && !providerChoices.includes(activeProvider)) {
+    providerChoices.unshift(activeProvider);
+  }
+  // Show whenever at least one provider exists - with a single provider the
+  // picker still shows the active extension (it becomes a switcher as soon as
+  // more are installed), which is how Android surfaces it too.
+  const showProviderPicker =
+    provider === "provider" &&
+    typeof onProviderChange === "function" &&
+    providerChoices.length >= 1;
+
+  const providerLabel = (value) => {
+    const clean = String(value).replace(/^@/, "");
+    if (!clean.includes("/")) return clean;
+    const [owner, name] = clean.split("/");
+    return `${name} (@${owner})`;
+  };
+
   const typeOptions = [
     { value: "Anime", label: "Anime" },
     { value: "Manga", label: "Manga" },
@@ -102,17 +128,35 @@ export default function CatalogHeader({
         </div>
       </div>
 
-      {showTypeToggle && (
-        <div className="header-right-section desktop-only">
-          <Dropdown
-            value={type}
-            onChange={(val) => onTypeChange && onTypeChange(val)}
-            options={typeOptions}
-            className="header-type-dropdown"
-            minWidth={160}
-          />
-        </div>
-      )}
+      <div className="header-right-section">
+        {showProviderPicker && (
+          <select
+            className="discover-provider-select"
+            value={activeProvider || providerChoices[0]}
+            onChange={(e) => onProviderChange(e.target.value)}
+            aria-label="Change active provider"
+            title="Choose which extension provider Discover uses"
+          >
+            {providerChoices.map((value) => (
+              <option key={value} value={value}>
+                {providerLabel(value)}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {showTypeToggle && (
+          <div className="desktop-only">
+            <Dropdown
+              value={type}
+              onChange={(val) => onTypeChange && onTypeChange(val)}
+              options={typeOptions}
+              className="header-type-dropdown"
+              minWidth={160}
+            />
+          </div>
+        )}
+      </div>
     </header>
   );
 }

@@ -90,6 +90,32 @@ export default function App() {
     }
   };
 
+  // Bottom-bar taps reset the history stack, so the stack can't tell you
+  // where you were. Remember the last anime browsing screen instead, so the
+  // Downloads header can offer a button back to it.
+  const lastAnimeViewRef = useRef({ view: "discover", params: {} });
+  useEffect(() => {
+    const cur = history[history.length - 1];
+    if (cur && ["home", "discover", "filters", "info"].includes(cur.view)) {
+      lastAnimeViewRef.current = { view: cur.view, params: cur.params };
+    }
+  }, [history]);
+
+  const goBackToAnime = () => {
+    cancelObsoleteNativeRequests();
+    const target = lastAnimeViewRef.current;
+    if (target.view === "info") {
+      // Keep a Discover entry underneath so the detail page's own
+      // "Back to Discover" button still has somewhere to pop to.
+      setHistory([
+        { view: "discover", params: {} },
+        { view: "info", params: target.params },
+      ]);
+    } else {
+      setHistory([{ view: target.view, params: target.params }]);
+    }
+  };
+
   const handleCloseWhatsNew = () => {
     setWhatsNewData(null);
   };
@@ -573,12 +599,26 @@ export default function App() {
             setSortOrder={setInfoSortOrder}
             onBack={navigateBack}
             title={current.params.title}
-            onSearchFallback={(title) => {
-              setHistory([
-                { view: "discover", params: { searchQuery: title } },
-              ]);
+            onSearchFallback={(title) =>
+              // Pushed (not replaced) so Back still returns to this title
+              // instead of the stack collapsing to a single Discover entry.
+              navigateTo("discover", { searchQuery: title })
+            }
+            onOpenExtra={(media, fromTitle) => {
+              // A real history entry per season/recommendation jump: Back now
+              // returns to the title we came from, and the new entry re-mounts
+              // the info page so its Seasons/Recommendations load fresh.
+              const label = fromTitle
+                ? `Back to ${fromTitle}`
+                : current.params.backText || "Back to Discover";
+              navigateTo("info", {
+                id: String(media.idMal),
+                type: current.params.type || contentType,
+                provider: "mal",
+                backText: label.length > 40 ? `${label.slice(0, 39)}…` : label,
+              });
             }}
-            onIdChange={(oldId, newId) => {
+            onIdChange={(oldId, newId, newProvider) => {
               if (!oldId || !newId) return;
               setHistory((prev) =>
                 prev.map((item) => {
@@ -588,6 +628,11 @@ export default function App() {
                       params: {
                         ...item.params,
                         id: newId,
+                        // Keep the info page's provider in step with the id it
+                        // was resolved to (e.g. opening a MAL id in-place)
+                        ...(newProvider && item.view === "info"
+                          ? { provider: newProvider }
+                          : {}),
                       },
                     };
                   }
@@ -718,8 +763,17 @@ export default function App() {
             malid={current.params.malid}
           />
         );
-      case "downloads":
-        return <DownloadsTracker />;
+      case "downloads": {
+        const target = lastAnimeViewRef.current;
+        const viewNames = { home: "Home", discover: "Discover", filters: "Filters" };
+        const backLabel =
+          target.view === "info"
+            ? "Back to Anime"
+            : `Back to ${viewNames[target.view] || "Discover"}`;
+        return (
+          <DownloadsTracker onBackToAnime={goBackToAnime} backLabel={backLabel} />
+        );
+      }
       case "logs":
         return <LogsView />;
       case "settings":
@@ -764,22 +818,26 @@ export default function App() {
           currentView={current.view}
           setView={(view) => {
             cancelObsoleteNativeRequests();
-            if (window.catalogCache) {
-              if (view === "home") {
-                delete window.catalogCache[`Anime_local`];
-                delete window.catalogCache[`Manga_local`];
-                delete window.catalogCache[`Movies_local`];
-              } else if (view === "discover") {
-                delete window.catalogCache[`Anime_provider`];
-                delete window.catalogCache[`Manga_provider`];
-                delete window.catalogCache[`Movies_provider`];
-              } else if (view === "filters") {
-                delete window.catalogCache[`Anime_mal`];
-                delete window.catalogCache[`Manga_mal`];
-                delete window.catalogCache[`Movies_mal`];
-              }
-            }
+            // Re-tapping the active view is an explicit refresh: wipe the
+            // cached list and remount. Switching TO a view keeps its cache
+            // so Discover returns to the page/scroll/filters the user was
+            // last seeing instead of restarting at page 1.
             if (view === current.view) {
+              if (window.catalogCache) {
+                if (view === "home") {
+                  delete window.catalogCache[`Anime_local`];
+                  delete window.catalogCache[`Manga_local`];
+                  delete window.catalogCache[`Movies_local`];
+                } else if (view === "discover") {
+                  delete window.catalogCache[`Anime_provider`];
+                  delete window.catalogCache[`Manga_provider`];
+                  delete window.catalogCache[`Movies_provider`];
+                } else if (view === "filters") {
+                  delete window.catalogCache[`Anime_mal`];
+                  delete window.catalogCache[`Manga_mal`];
+                  delete window.catalogCache[`Movies_mal`];
+                }
+              }
               setReloadCounter((prev) => prev + 1);
             }
             setHistory([{ view, params: {} }]);

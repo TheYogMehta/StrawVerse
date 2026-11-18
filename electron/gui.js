@@ -802,6 +802,14 @@ app.whenReady().then(async () => {
     });
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
+    // Malformed requests (e.g. MPV's wrapped folded headers) are auto-400'd
+    // by llhttp before any route/middleware runs — log them or they vanish.
+    server.on("clientError", (err, socket) => {
+      logger.warn(
+        `[Express] Rejected malformed request (${err.code || err.message})`,
+      );
+      if (socket && !socket.destroyed) socket.destroy();
+    });
     server.on("error", (err) => {
       logger.error(
         `Express server failed to listen on port ${PORT}: ${err.message}`,
@@ -861,7 +869,15 @@ app.whenReady().then(async () => {
   });
 
   if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify();
+    // Deferred so the update check (GitHub round-trip, ~4s) does not compete
+    // with window paint, mapping sync and scraper loading during startup.
+    setTimeout(() => {
+      try {
+        autoUpdater.checkForUpdatesAndNotify();
+      } catch (err) {
+        logger.error(`Auto-update check failed to start: ${err.message}`);
+      }
+    }, 8000);
   }
 
   try {
@@ -1030,27 +1046,35 @@ ipcMain.handle("play-in-mpv", async (event, options) => {
 
 ipcMain.handle("control-mpv", (event, command, args) => {
   if (command === "quit") {
-    if (global.activeMpvClient && !global.activeMpvClient.destroyed) {
+    const procToKill = global.activeMpvProcess;
+    const clientToDestroy = global.activeMpvClient;
+    if (clientToDestroy && !clientToDestroy.destroyed) {
       try {
-        global.activeMpvClient.write(
+        clientToDestroy.write(
           JSON.stringify({ command: ["quit"] }) + "\n",
         );
       } catch (err) {}
     }
     setTimeout(() => {
-      if (global.activeMpvProcess && !global.activeMpvProcess.killed) {
+      if (procToKill && !procToKill.killed) {
         try {
-          global.activeMpvProcess.kill("SIGKILL");
+          procToKill.kill("SIGKILL");
         } catch (_) {}
       }
-      if (global.activeMpvClient) {
+      if (clientToDestroy && !clientToDestroy.destroyed) {
         try {
-          global.activeMpvClient.destroy();
+          clientToDestroy.destroy();
         } catch (_) {}
+      }
+      if (global.activeMpvProcess === procToKill) {
+        global.activeMpvProcess = null;
+      }
+      if (global.activeMpvClient === clientToDestroy) {
         global.activeMpvClient = null;
       }
-      global.activeMpvProcess = null;
-      global.activeMpvSession = null;
+      if (global.activeMpvSession) {
+        global.activeMpvSession = null;
+      }
     }, 150);
     return { success: true };
   }

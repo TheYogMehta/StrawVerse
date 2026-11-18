@@ -31,13 +31,22 @@ const {
   getSourceById,
   FindMapping,
 } = require("../utils/Metadata");
-const { getKeyValue, queryOne, queryAll, run } = require("../utils/db");
+const {
+  getKeyValue,
+  queryOne,
+  queryAll,
+  run,
+  mappingQueryOne,
+  mappingQueryAll,
+} = require("../utils/db");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getHeaders } = require("../utils/proxyHeaders");
+const { isAdSegmentUrl } = require("../utils/adSegments");
 const {
   resolveMalIdFromMapping,
   getLinkedProvidersForMalId,
   getBestProviderForMalId,
+  learnProviderLinks,
 } = require("../utils/mappingResolver");
 const {
   sanitizeFolderName,
@@ -47,6 +56,7 @@ const {
   isMangaFile,
 } = require("../utils/constants");
 const { getDownloadsFolder } = require("../utils/DirectoryMaker");
+const { buildExtras, fetchStatuses } = require("../utils/anilistExtras");
 
 const router = express.Router();
 
@@ -144,6 +154,80 @@ function cleanBaseTitle(title) {
     .trim();
 }
 
+// "@RavenGod1/animekai" -> "animekai"
+function cleanProviderName(provider) {
+  return String(provider || "")
+    .toLowerCase()
+    .trim()
+    .split("/")
+    .pop();
+}
+
+// A status only counts when we actually know it: "Unknown"/empty placeholders
+// written by the mapping sync are treated as "no status".
+function hasKnownStatus(value) {
+  if (value === null || value === undefined) return false;
+  const v = String(value).trim();
+  return !!v && !/^(unknown|tbd|n\/a|-)$/i.test(v);
+}
+
+// Airing/publishing status straight from the local + mapping databases, i.e.
+// the extension side. Used for cards with no MAL id (AniList can never answer
+// for them) and as a fallback when the AniList lookup fails, so a card is
+// never left without a badge when the provider/mapping data knows the status.
+async function statusFromDbs(item, isAnime) {
+  if (hasKnownStatus(item?.status)) return item.status;
+  const mediaWord = isAnime ? "Anime" : "Manga";
+
+  // 1. Local library row for this provider id.
+  if (item?.id && global.db) {
+    try {
+      const row = await global.db
+        .prepare(`SELECT status FROM ${mediaWord} WHERE id = ?`)
+        .get(String(item.id));
+      if (hasKnownStatus(row?.status)) return row.status;
+    } catch (_) {}
+  }
+
+  if (!global.mappingDb || !item) return null;
+
+  // 2. Unmapped provider rows (status persisted when the provider page was read).
+  const seg = String(item.provider || "")
+    .toLowerCase()
+    .split("/")
+    .pop();
+  const itemId = item.id != null ? String(item.id) : null;
+  try {
+    if (seg && itemId) {
+      const row = await global.mappingDb
+        .prepare(
+          "SELECT status FROM unmapped_items WHERE (provider = ? OR provider = ? OR provider LIKE ?) AND id = ? AND media_type = ? LIMIT 1",
+        )
+        .get(seg, `@%/${seg}`, `%/${seg}`, itemId, mediaWord);
+      if (hasKnownStatus(row?.status)) return row.status;
+    }
+    if (itemId) {
+      const row = await global.mappingDb
+        .prepare(
+          "SELECT status FROM unmapped_items WHERE id = ? AND media_type = ? LIMIT 1",
+        )
+        .get(itemId, mediaWord);
+      if (hasKnownStatus(row?.status)) return row.status;
+    }
+    const name = String(item.title || "").trim();
+    if (name) {
+      const row = await global.mappingDb
+        .prepare(
+          "SELECT status FROM unmapped_items WHERE LOWER(TRIM(name)) = LOWER(?) AND media_type = ? LIMIT 1",
+        )
+        .get(name, mediaWord);
+      if (hasKnownStatus(row?.status)) return row.status;
+    }
+  } catch (_) {}
+
+  return null;
+}
+
 async function enrichResultsWithMappingImages(results, AnimeManga) {
   if (!results || !Array.isArray(results) || results.length === 0) {
     return results;
@@ -154,144 +238,392 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
   }
 
   const isAnime = AnimeManga === "Anime";
+  const table = isAnime ? "Anime" : "Manga";
+  const listTable = isAnime ? "MyAnimeList" : "MyMangaList";
+  const malTable = isAnime ? "anime" : "manga";
+  const items = results.filter(Boolean);
+  if (items.length === 0) return results;
 
-  for (const item of results) {
-    if (!item) continue;
-
-    item.scraper_image = item.image || null;
-
-    let malid =
-      item.MalID || item.malid ? Number(item.MalID || item.malid) : null;
-
-    if (!malid && item.id && global.db) {
-      try {
-        const table = isAnime ? "Anime" : "Manga";
-        const row = await global.db
-          .prepare(`SELECT MalID FROM ${table} WHERE id = ?`)
-          .get(String(item.id));
-        if (row && row.MalID) {
-          malid = parseInt(row.MalID);
-        }
-      } catch (_) {}
+  // Batched so Android doesn't pay one Java-bridge round trip per query per
+  // card: a page of 24 used to make ~200 sequential lookups, now ~12.
+  // Same semantics as the old per-item loop — every lookup is prefetched with
+  // IN(...) and applied in the same order with the same precedence.
+  const runAll = async (adapter, sql, params) => {
+    if (!adapter) return [];
+    try {
+      return (await adapter.prepare(sql).all(...params)) || [];
+    } catch (_) {
+      return [];
     }
-
-    if (!malid && item.id && global.mappingDb) {
-      try {
-        const resolved = await resolveMalIdFromMapping({
-          id: item.id,
-          mediaType: isAnime ? "Anime" : "Manga",
-        });
-        if (resolved) malid = resolved;
-      } catch (_) {}
+  };
+  // IN(...) lists are chunked so a big page can't exceed SQLite's bound
+  // parameter limit (999 on older Android SQLite).
+  const runIn = async (adapter, sqlFor, values) => {
+    const out = [];
+    for (let i = 0; i < values.length; i += 400) {
+      const part = values.slice(i, i + 400);
+      out.push(...(await runAll(adapter, sqlFor(part), part)));
     }
+    return out;
+  };
 
-    if (!malid && item.title) {
-      const candidates = generateNormalizedTitleCandidates(item.title);
-      for (const cand of candidates) {
-        const cleanTitle = cand.trim().toLowerCase();
-        if (!malid && global.db) {
-          try {
-            const table = isAnime ? "Anime" : "Manga";
-            const row = await global.db
-              .prepare(
-                `SELECT MalID FROM ${table} WHERE LOWER(TRIM(title)) = ? LIMIT 1`,
-              )
-              .get(cleanTitle);
-            if (row && row.MalID) {
-              malid = parseInt(row.MalID);
-            }
-          } catch (_) {}
+  const ids = [...new Set(items.filter((i) => i.id).map((i) => String(i.id)))];
+  const titles = [
+    ...new Set(items.filter((i) => i.title).map((i) => String(i.title).trim())),
+  ];
+  // LIMIT 1 semantics: the first matching row wins.
+  const put = (map, key, value) => {
+    if (key != null && value != null && !map.has(key)) map.set(key, value);
+  };
+
+  // Prefetch maps.
+  const localById = new Map();
+  const malByLocalTitle = new Map();
+  const malByListTitle = new Map();
+  const malByMapTitle = new Map();
+  const mapTitleStats = new Map();
+  const malMeta = new Map();
+  const malListImg = new Map();
+  const mapImgById = new Map();
+  const mapImgByName = new Map();
+  const unmappedStatusById = new Map();
+  const unmappedStatusByName = new Map();
+  const unmappedStatusByProviderId = new Map();
+  const baseByItem = new Map();
+  const baseTitleRow = new Map();
+  const providerMalidById = new Map();
+
+  // 1. Local library rows by id (malid + status).
+  if (global.db && ids.length) {
+    const rows = await runIn(
+      global.db,
+      (part) =>
+        `SELECT id, MalID, status, image_url, provider FROM ${table} WHERE id IN (${part.map(() => "?").join(",")})`,
+      ids,
+    );
+    for (const r of rows) put(localById, String(r.id), r);
+  }
+  // 2. Title-candidate resolution — per candidate: local table, then list
+  //    table, then mapping table (same order/precedence as the old loop).
+  const candByItem = new Map();
+  const allCands = new Set();
+  for (const item of items) {
+    if (!item.title || item.MalID || item.malid) continue;
+    const cands = generateNormalizedTitleCandidates(item.title);
+    candByItem.set(item, cands);
+    for (const c of cands) {
+      const clean = c.trim().toLowerCase();
+      if (clean) allCands.add(clean);
+    }
+  }
+  const candArr = [...allCands];
+  if (candArr.length) {
+    if (global.db) {
+      const rows = await runIn(
+        global.db,
+        (part) =>
+          `SELECT LOWER(TRIM(title)) AS k, MalID FROM ${table} WHERE LOWER(TRIM(title)) IN (${part.map(() => "?").join(",")})`,
+        candArr,
+      );
+      for (const r of rows) put(malByLocalTitle, r.k, r.MalID);
+      const rows2 = await runIn(
+        global.db,
+        (part) =>
+          `SELECT LOWER(TRIM(title)) AS k, id FROM ${listTable} WHERE LOWER(TRIM(title)) IN (${part.map(() => "?").join(",")})`,
+        candArr,
+      );
+      for (const r of rows2) put(malByListTitle, r.k, r.id);
+    }
+    if (global.mappingDb) {
+      // The catalogue holds thousands of duplicate titles ("minna no uta" x709),
+      // so the winner is picked deterministically: a title the mapping server
+      // linked (has_mapping) first, then the shortest title, then the lowest
+      // malid. The same title always resolves to the same MAL id.
+      const rows3 = await runIn(
+        global.mappingDb,
+        (part) =>
+          `SELECT LOWER(TRIM(title)) AS k, malid, has_mapping FROM ${malTable} WHERE LOWER(TRIM(title)) IN (${part.map(() => "?").join(",")}) ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC`,
+        candArr,
+      );
+      for (const r of rows3) {
+        put(malByMapTitle, r.k, r.malid);
+        let stat = mapTitleStats.get(r.k);
+        if (!stat) {
+          stat = { mapped: new Set(), all: new Set() };
+          mapTitleStats.set(r.k, stat);
         }
-        if (!malid && global.db) {
-          try {
-            const listTable = isAnime ? "MyAnimeList" : "MyMangaList";
-            const row = await global.db
-              .prepare(
-                `SELECT id FROM ${listTable} WHERE LOWER(TRIM(title)) = ? LIMIT 1`,
-              )
-              .get(cleanTitle);
-            if (row && row.id) {
-              malid = parseInt(row.id);
-            }
-          } catch (_) {}
-        }
-        if (!malid && global.mappingDb) {
-          try {
-            const malTable = isAnime ? "anime" : "manga";
-            const row = await global.mappingDb
-              .prepare(
-                `SELECT malid, image_url FROM ${malTable} WHERE LOWER(TRIM(title)) = ? LIMIT 1`,
-              )
-              .get(cleanTitle);
-            if (row && row.malid) {
-              malid = parseInt(row.malid);
-            }
-          } catch (_) {}
-        }
-        if (malid) break;
+        stat.all.add(r.malid);
+        if (r.has_mapping) stat.mapped.add(r.malid);
       }
+    }
+  }
 
-      if (!malid && global.mappingDb) {
+  // 3. Provider mapping tables by id (resolveMalIdFromMapping, batched).
+  if (global.mappingDb && ids.length) {
+    try {
+      const { getMappingProviders } = require("../utils/mappingResolver");
+      const providers =
+        (await getMappingProviders(isAnime ? "Anime" : "Manga", {
+          installedOnly: false,
+        })) || [];
+      for (const p of providers) {
         try {
-          const malTable = isAnime ? "anime" : "manga";
-          const baseClean = cleanBaseTitle(item.title);
-          if (baseClean && baseClean.length >= 4) {
-            let orderSql = "ORDER BY LENGTH(title) ASC";
-            if (/\b(?:season\s*2|2nd\s*season)\b/i.test(item.title)) {
-              orderSql =
-                "ORDER BY CASE WHEN title LIKE '%2%' OR title LIKE '%Season 2%' THEN 0 ELSE 1 END, LENGTH(title) ASC";
-            }
-            const row = await global.mappingDb
-              .prepare(
-                `SELECT malid, image_url FROM ${malTable} WHERE title LIKE ? ${orderSql} LIMIT 1`,
-              )
-              .get(`${baseClean}%`);
-            if (row && row.malid) {
-              malid = parseInt(row.malid);
-            }
+          const tbl = p.table_name;
+          const rows = [];
+          for (let i = 0; i < ids.length; i += 400) {
+            const part = ids.slice(i, i + 400);
+            const ph = part.map(() => "?").join(",");
+            const sql =
+              tbl === "pahe"
+                ? `SELECT id, malid FROM "${tbl}" WHERE id IN (${ph}) OR uuid IN (${ph})`
+                : `SELECT id, malid FROM "${tbl}" WHERE id IN (${ph})`;
+            const params = tbl === "pahe" ? [...part, ...part] : part;
+            rows.push(...(await runAll(global.mappingDb, sql, params)));
+          }
+          for (const r of rows) {
+            put(providerMalidById, String(r.id), r.malid);
           }
         } catch (_) {}
       }
+    } catch (_) {}
+  }
+
+  // 4. Base-title fallback (only for items whose earlier lookups missed).
+  //    One table scan for all needed base titles, then the same
+  //    "shortest title wins" pick the old per-item query did.
+  const allBase = new Set();
+  for (const item of items) {
+    if (!item.title || item.MalID || item.malid) continue;
+    const base = cleanBaseTitle(item.title);
+    if (base && base.length >= 4) {
+      baseByItem.set(item, base);
+      allBase.add(base);
+    }
+  }
+
+  // Resolve malid per item using the prefetched maps (same precedence as old).
+  const malidByItem = new Map();
+  const baseStatusByItem = new Map();
+  // Provider id -> MAL id links worth remembering (the mapping server ships
+  // no provider tables, so these are the only way back to a provider).
+  const learnEntries = [];
+  for (const item of items) {
+    let malid =
+      item.MalID || item.malid ? Number(item.MalID || item.malid) : null;
+    let mapMatchKey = null;
+    if (!malid && item.id) {
+      const row = localById.get(String(item.id));
+      if (row && row.MalID) {
+        malid = parseInt(row.MalID);
+        // A library row is a confirmed provider id -> MAL id link, but only
+        // when it really came from the same provider (ids are per provider).
+        if (
+          cleanProviderName(row.provider) &&
+          cleanProviderName(row.provider) === cleanProviderName(item.provider)
+        ) {
+          learnEntries.push({
+            provider: item.provider,
+            id: item.id,
+            malid,
+          });
+        }
+      }
+    }
+    if (!malid && item.id) {
+      const pm = providerMalidById.get(String(item.id));
+      if (pm) malid = parseInt(pm);
+    }
+    if (!malid && candByItem.has(item)) {
+      for (const cand of candByItem.get(item)) {
+        const clean = cand.trim().toLowerCase();
+        const local = malByLocalTitle.get(clean);
+        const list = malByListTitle.get(clean);
+        const map = malByMapTitle.get(clean);
+        const m = local || list || map;
+        if (m) {
+          malid = parseInt(m);
+          if (!local && !list) mapMatchKey = clean;
+          break;
+        }
+      }
+    }
+    // The base-title fallback only runs when nothing above resolved a malid,
+    // and its status is only used then too.
+    if (malid) malidByItem.set(item, malid);
+    // Learn the link when the title points at exactly one MAL entry and it
+    // is the provider's own title (not a shortened/normalized variant).
+    if (mapMatchKey && item.id && item.title) {
+      const exact = String(item.title).trim().toLowerCase();
+      if (mapMatchKey === exact) {
+        const stat = mapTitleStats.get(mapMatchKey);
+        const candidates = stat?.mapped.size ? stat.mapped : stat?.all;
+        if (candidates && candidates.size === 1) {
+          learnEntries.push({
+            provider: item.provider,
+            id: item.id,
+            malid,
+          });
+        }
+      }
+    }
+  }
+
+  // Base-title fallback for the leftovers: one scan for every base title that
+  // is actually needed, then pick the shortest matching title (same order as
+  // the old ORDER BY LENGTH(title) ASC LIMIT 1).
+  const needBases = [
+    ...new Set(
+      items
+        .filter((i) => !malidByItem.has(i) && baseByItem.has(i))
+        .map((i) => baseByItem.get(i)),
+    ),
+  ];
+  if (global.mappingDb && needBases.length) {
+    const patterns = needBases.map((b) => `${b}%`);
+    const rows = await runIn(
+      global.mappingDb,
+      (part) =>
+        `SELECT malid, title, image_url, status FROM ${malTable} WHERE ${part
+          .map(() => "title LIKE ?")
+          .join(" OR ")}`,
+      patterns,
+    );
+    for (const base of needBases) {
+      const isS2 = /\b(?:season\s*2|2nd\s*season)\b/i.test(base);
+      const baseLower = base.toLowerCase();
+      let best = null;
+      for (const r of rows) {
+        const title = String(r.title || "");
+        if (!title.toLowerCase().startsWith(baseLower)) continue;
+        const rank = isS2 ? (title.includes("2") ? 0 : 1) : 0;
+        const key = [rank, title.length];
+        if (!best || key[0] < best.key[0] || (key[0] === best.key[0] && key[1] < best.key[1])) {
+          best = { key, row: r };
+        }
+      }
+      if (best) put(baseTitleRow, base, best.row);
+    }
+  }
+  for (const item of items) {
+    if (malidByItem.has(item)) continue;
+    const row = baseTitleRow.get(baseByItem.get(item));
+    if (!row) continue;
+    if (row.malid) malidByItem.set(item, parseInt(row.malid));
+    if (hasKnownStatus(row.status)) baseStatusByItem.set(item, row.status);
+  }
+
+  // 5. Malid metadata + MyAnimeList images.
+  const malids = [...new Set([...malidByItem.values()].map(String))];
+  if (global.mappingDb && malids.length) {
+    const rows = await runIn(
+      global.mappingDb,
+      (part) =>
+        `SELECT malid, image_url, genres, status FROM ${malTable} WHERE malid IN (${part.map(() => "?").join(",")})`,
+      malids,
+    );
+    for (const r of rows) put(malMeta, String(r.malid), r);
+  }
+  if (global.db && malids.length) {
+    const rows = await runIn(
+      global.db,
+      (part) =>
+        `SELECT id, image FROM ${listTable} WHERE id IN (${part.map(() => "?").join(",")})`,
+      malids,
+    );
+    for (const r of rows) put(malListImg, String(r.id), r.image);
+  }
+
+  // 6. Unmapped items (image + status) by id, name and provider id.
+  if (global.mappingDb) {
+    if (ids.length) {
+      const rows = await runIn(
+        global.mappingDb,
+        (part) =>
+          `SELECT id, image_url, status FROM unmapped_items WHERE id IN (${part.map(() => "?").join(",")})`,
+        ids,
+      );
+      for (const r of rows) {
+        const k = String(r.id);
+        put(mapImgById, k, r.image_url);
+        if (hasKnownStatus(r.status)) put(unmappedStatusById, k, r.status);
+      }
+    }
+    if (titles.length) {
+      const rows = await runIn(
+        global.mappingDb,
+        (part) =>
+          `SELECT LOWER(TRIM(name)) AS k, image_url, status FROM unmapped_items WHERE LOWER(TRIM(name)) IN (${part.map(() => "?").join(",")})`,
+        titles.map((t) => t.toLowerCase()),
+      );
+      for (const r of rows) {
+        put(mapImgByName, r.k, r.image_url);
+        if (hasKnownStatus(r.status)) put(unmappedStatusByName, r.k, r.status);
+      }
+    }
+    const segs = [
+      ...new Set(
+        items
+          .map((i) => String(i.provider || "").toLowerCase().split("/").pop())
+          .filter(Boolean),
+      ),
+    ];
+    if (segs.length && ids.length) {
+      const rows = await runIn(
+        global.mappingDb,
+        (part) =>
+          `SELECT provider, id, status FROM unmapped_items WHERE (provider IN (${segs.map(() => "?").join(",")}) OR provider LIKE ?) AND id IN (${part.map(() => "?").join(",")}) AND media_type = ?`,
+        [...segs, `@%/${segs[0]}`, ...ids, isAnime ? "Anime" : "Manga"],
+      );
+      for (const r of rows) {
+        if (hasKnownStatus(r.status)) {
+          const seg = String(r.provider || "").toLowerCase().split("/").pop();
+          unmappedStatusByProviderId.set(`${seg}:${String(r.id)}`, r.status);
+        }
+      }
+    }
+  }
+
+  // Apply per item — no DB calls, all lookups pre-fetched.
+  for (const item of items) {
+    item.scraper_image = item.image || null;
+
+    const malid = malidByItem.get(item) || null;
+
+    // Local-row status (old step 1).
+    if (!hasKnownStatus(item.status) && item.id) {
+      const row = localById.get(String(item.id));
+      if (row && hasKnownStatus(row.status)) item.status = row.status;
+    }
+
+    // Base-title status (old step 4: only when no malid was resolved above).
+    if (!hasKnownStatus(item.status) && baseStatusByItem.has(item)) {
+      item.status = baseStatusByItem.get(item);
     }
 
     if (malid) {
       item.malid = malid;
       let remoteImg = null;
-      if (global.mappingDb) {
-        try {
-          const imgRow = await global.mappingDb
-            .prepare(
-              isAnime
-                ? "SELECT image_url, genres FROM anime WHERE malid = ? LIMIT 1"
-                : "SELECT image_url, genres FROM manga WHERE malid = ? LIMIT 1",
-            )
-            .get(malid);
-          if (imgRow && imgRow.image_url) {
-            remoteImg = imgRow.image_url;
-          }
-          if (imgRow && imgRow.genres && !item.genres) {
-            item.genres = imgRow.genres;
-          }
-        } catch (_) {}
+      const meta = malMeta.get(String(malid));
+      if (meta) {
+        if (meta.image_url) remoteImg = meta.image_url;
+        if (meta.genres && !item.genres) item.genres = meta.genres;
+        if (!hasKnownStatus(item.status) && hasKnownStatus(meta.status)) {
+          item.status = meta.status;
+        }
       }
-      if (!remoteImg && global.db) {
-        try {
-          const listTable = isAnime ? "MyAnimeList" : "MyMangaList";
-          const malRow = await global.db
-            .prepare(`SELECT image FROM ${listTable} WHERE id = ? LIMIT 1`)
-            .get(String(malid));
-          if (malRow && malRow.image) {
-            remoteImg = malRow.image;
-          }
-        } catch (_) {}
+      if (!remoteImg) {
+        const img = malListImg.get(String(malid));
+        if (img) remoteImg = img;
       }
       if (remoteImg) {
         item.mal_image = remoteImg;
         item.image_url = remoteImg;
         item.image = remoteImg;
-        if (item.id && global.db) {
+        // Only the local library row can change; Discover cards have no row,
+        // so this used to be a no-op write per card (17 extra bridge calls).
+        const localRow = item.id ? localById.get(String(item.id)) : null;
+        if (localRow && localRow.image_url !== remoteImg && global.db) {
           try {
-            const table = isAnime ? "Anime" : "Manga";
             await global.db
               .prepare(`UPDATE ${table} SET image_url = ? WHERE id = ?`)
               .run(remoteImg, item.id);
@@ -300,23 +632,51 @@ async function enrichResultsWithMappingImages(results, AnimeManga) {
       }
     }
 
+    // statusFromDbs fallback (old step 5): local → provider unmapped → id unmapped → name unmapped.
+    if (!hasKnownStatus(item.status)) {
+      const key = item.id != null ? String(item.id) : null;
+      if (key && localById.has(key) && hasKnownStatus(localById.get(key).status)) {
+        item.status = localById.get(key).status;
+      }
+      if (!hasKnownStatus(item.status) && key) {
+        const seg = String(item.provider || "").toLowerCase().split("/").pop();
+        const ps = seg ? unmappedStatusByProviderId.get(`${seg}:${key}`) : null;
+        if (ps) item.status = ps;
+      }
+      if (!hasKnownStatus(item.status) && key && unmappedStatusById.has(key)) {
+        item.status = unmappedStatusById.get(key);
+      }
+      if (!hasKnownStatus(item.status) && item.title) {
+        const ns = unmappedStatusByName.get(
+          String(item.title).trim().toLowerCase(),
+        );
+        if (ns) item.status = ns;
+      }
+    }
+
+    // Unmapped image fallback.
     if (!item.mal_image && global.mappingDb && (item.id || item.title)) {
-      try {
-        const uRow = await global.mappingDb
-          .prepare(
-            "SELECT image_url FROM unmapped_items WHERE (id = ? OR name = ?) AND image_url IS NOT NULL AND image_url != '' LIMIT 1",
-          )
-          .get(String(item.id || ""), String(item.title || ""));
-        if (uRow && uRow.image_url) {
-          item.image = uRow.image_url;
-          item.image_url = uRow.image_url;
-        }
-      } catch (_) {}
+      const uImg =
+        (item.id != null && mapImgById.get(String(item.id))) ||
+        (item.title &&
+          mapImgByName.get(String(item.title).trim().toLowerCase()));
+      if (uImg) {
+        item.image = uImg;
+        item.image_url = uImg;
+      }
     }
 
     if (!item.image && !item.scraper_image) {
       item.image = "/images/image-404.png";
     }
+  }
+
+  // Remember the links after the response is on its way - the write must not
+  // slow the page down.
+  if (learnEntries.length) {
+    setImmediate(() => {
+      learnProviderLinks(learnEntries).catch(() => {});
+    });
   }
 
   return results;
@@ -1397,10 +1757,14 @@ async function getUniqueProviderList(
         const placeholders = titles.map(() => "?").join(",");
         const malRows = await global.mappingDb
           .prepare(
-            `SELECT LOWER(TRIM(title)) as t, image_url FROM ${malTable} WHERE LOWER(TRIM(title)) IN (${placeholders}) AND image_url IS NOT NULL`,
+            `SELECT LOWER(TRIM(title)) as t, image_url FROM ${malTable} WHERE LOWER(TRIM(title)) IN (${placeholders}) AND image_url IS NOT NULL ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC`,
           )
           .all(...titles);
-        const map = new Map(malRows.map((r) => [r.t, r.image_url]));
+        // First row wins - same pick as the Discover card enrichment.
+        const map = new Map();
+        for (const r of malRows) {
+          if (!map.has(r.t)) map.set(r.t, r.image_url);
+        }
         for (const item of results) {
           if (!item.image) {
             const t = (item.title || "").toLowerCase().trim();
@@ -2052,6 +2416,10 @@ async function healProviderId(
     }
   }
 
+  // Extensions may return { id, title } — normalize to the id string or the
+  // SQLite bind below throws and the healed id is lost.
+  if (newId && typeof newId === "object") newId = newId.id || null;
+
   if (newId && newId !== cleanOldId) {
     try {
       if (global.db) {
@@ -2102,6 +2470,120 @@ async function healProviderId(
     }
   }
 
+  return null;
+}
+
+function normalizeTitle(t) {
+  return String(t || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+// Confident title match only: a learned link is written once and never
+// overwritten, so near-misses are left to the manual link UI instead.
+function titlesMatch(a, b) {
+  const na = normalizeTitle(a);
+  const nb = normalizeTitle(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const bigrams = (s) => {
+    const set = new Set();
+    for (let i = 0; i < s.length - 1; i++) set.add(s.slice(i, i + 2));
+    return set;
+  };
+  const A = bigrams(na);
+  const B = bigrams(nb);
+  if (!A.size || !B.size) return false;
+  let overlap = 0;
+  for (const g of A) if (B.has(g)) overlap++;
+  return (2 * overlap) / (A.size + B.size) >= 0.86;
+}
+
+// A MAL entry with no provider link: search the installed scrapers for its
+// title and remember the match in the mapping db so it resolves from now on.
+async function autoLearnProviderLink(malid, mediaType, preferred) {
+  const numMalId = Number(malid);
+  if (!Number.isInteger(numMalId) || numMalId <= 0) return null;
+
+  let title = "";
+  try {
+    const malTable = mediaType === "Manga" ? "manga" : "anime";
+    const row = await mappingQueryOne(
+      `SELECT title FROM "${malTable}" WHERE malid = ? LIMIT 1`,
+      [numMalId],
+    );
+    title = row?.title || "";
+  } catch (_) {}
+  if (!title && global.db) {
+    try {
+      const row = await global.db
+        .prepare(`SELECT title FROM ${mediaType} WHERE MalID = ? LIMIT 1`)
+        .get(numMalId);
+      title = row?.title || "";
+    } catch (_) {}
+  }
+  if (!title) {
+    logger.info(
+      `[autoMapping] No title known for ${mediaType} malid ${numMalId}; cannot auto-learn a provider link`,
+    );
+    return null;
+  }
+
+  const pMap =
+    mediaType === "Anime" ? global.Anime_providers : global.Manga_providers;
+  const candidates = [];
+  const seen = new Set();
+  for (const [key, scraper] of Object.entries(pMap || {})) {
+    if (!scraper || seen.has(scraper) || typeof scraper.name !== "string")
+      continue;
+    seen.add(scraper);
+    candidates.push({ key, scraper });
+  }
+  const prefLower = String(preferred || "").toLowerCase();
+  const score = (c) =>
+    Number(
+      c.key.toLowerCase() === prefLower ||
+        c.scraper.name.toLowerCase() === prefLower,
+    );
+  candidates.sort((a, b) => score(b) - score(a));
+
+  // shortcut: 3 network searches max per unmapped entry; raise if long-tail titles keep missing
+  for (const { key, scraper } of candidates.slice(0, 3)) {
+    try {
+      const pObj = {
+        provider: scraper,
+        provider_name: scraper.name,
+        name: scraper.name,
+      };
+      const data =
+        mediaType === "Anime"
+          ? await animesearch(pObj, title)
+          : await MangaSearch(pObj, title);
+      const results = data?.results || data?.data || [];
+      const match = results.find(
+        (r) => r?.id != null && r?.title && titlesMatch(title, r.title),
+      );
+      if (!match) continue;
+
+      await learnProviderLinks([
+        { provider: key, id: match.id, malid: numMalId },
+      ]);
+      logger.info(
+        `[autoMapping] Linked ${mediaType} malid ${numMalId} ("${title}") -> ${scraper.name}/${match.id}`,
+      );
+      return { id: String(match.id), provider: key };
+    } catch (err) {
+      logger.warn(
+        `[autoMapping] Search failed on ${key} for malid ${numMalId}: ${err.message}`,
+      );
+    }
+  }
+  logger.info(
+    `[autoMapping] No confident match for ${mediaType} malid ${numMalId} ("${title}"); staying unmapped`,
+  );
   return null;
 }
 
@@ -2226,12 +2708,17 @@ router.post(
                   if (localRow.MalID) {
                     resolvedMalId = parseInt(localRow.MalID);
                   }
-                  resolvedId = localRow.id;
-                  resolvedProvider =
-                    localRow.provider ||
-                    (AnimeManga === "Movies"
-                      ? setting.Moviesprovider || "provider"
-                      : "pahe");
+                  // id === MalID means the row is poisoned (the malid was
+                  // stored as the provider id): keep the malid for recovery
+                  // but never adopt the row as a provider link.
+                  if (String(localRow.id) !== String(localRow.MalID || "")) {
+                    resolvedId = localRow.id;
+                    resolvedProvider =
+                      localRow.provider ||
+                      (AnimeManga === "Movies"
+                        ? setting.Moviesprovider || "provider"
+                        : "pahe");
+                  }
                 }
               } catch (_) {}
             }
@@ -2300,6 +2787,31 @@ router.post(
             } catch (_) {}
           }
 
+          // Recovery: with a malid but no usable provider link, search the
+          // installed scrapers by title just like the mal branch does.
+          if (!resolvedId && resolvedMalId) {
+            try {
+              const preferred = (
+                AnimeManga === "Anime"
+                  ? setting.Animeprovider || "pahe"
+                  : setting.Mangaprovider || "weebcentral"
+              ).toLowerCase();
+              const learned = await autoLearnProviderLink(
+                resolvedMalId,
+                AnimeManga,
+                preferred,
+              );
+              if (learned) {
+                resolvedId = learned.id;
+                resolvedProvider = learned.provider;
+              }
+            } catch (err) {
+              logger.warn(
+                `[autoMapping] Local-route auto-learn failed for malid ${resolvedMalId}: ${err.message}`,
+              );
+            }
+          }
+
           if (!resolvedId && AnimeManga === "Movies" && id) {
             resolvedId = id;
             resolvedProvider =
@@ -2319,6 +2831,8 @@ router.post(
             throw new Error(`No ${AnimeManga} Found with id '${id}'`);
           }
         } else if (LocalMalProvider === "mal") {
+          let resolvedId = null;
+          let resolvedProvider = null;
           if (AnimeManga === "Movies") {
             const activeProvName =
               setting?.Moviesprovider ||
@@ -2331,8 +2845,6 @@ router.post(
             data.provider = resolvedProvider;
             data.malid = null;
           } else {
-            let resolvedId = null;
-            let resolvedProvider = null;
             let targetMalId = Number(id);
 
             if (isNaN(targetMalId)) {
@@ -2377,6 +2889,24 @@ router.post(
                   resolvedProvider = unmapped.provider;
                 }
               } catch (_) {}
+            }
+
+            if (!resolvedId && !isNaN(targetMalId)) {
+              try {
+                const learned = await autoLearnProviderLink(
+                  targetMalId,
+                  AnimeManga,
+                  preferred,
+                );
+                if (learned) {
+                  resolvedId = learned.id;
+                  resolvedProvider = learned.provider;
+                }
+              } catch (err) {
+                logger.warn(
+                  `[autoMapping] Info-route auto-learn failed for malid ${targetMalId}: ${err.message}`,
+                );
+              }
             }
 
             if (resolvedId && resolvedProvider) {
@@ -2628,7 +3158,7 @@ router.post(
                   if (checkTitle) {
                     const matchAnime = await global.mappingDb
                       .prepare(
-                        "SELECT malid FROM anime WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1",
+                        "SELECT malid FROM anime WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 1",
                       )
                       .get(checkTitle);
                     if (matchAnime && matchAnime.malid) {
@@ -2940,7 +3470,7 @@ router.post(
                       if (checkTitle) {
                         const matchManga = await global.mappingDb
                           .prepare(
-                            "SELECT malid FROM manga WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1",
+                            "SELECT malid FROM manga WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 1",
                           )
                           .get(checkTitle);
                         if (matchManga && matchManga.malid) {
@@ -3790,6 +4320,23 @@ router.post(
       }
 
       if (!data?.id) throw new Error(`No ${AnimeManga} Found with id '${id}'`);
+
+      // Extension-side status fallback for the title-row badge when AniList
+      // extras have nothing to say about this title.
+      if (!hasKnownStatus(data.status)) {
+        try {
+          const dbStatus = await statusFromDbs(
+            {
+              provider: data.provider || provider || null,
+              id: data.id || id,
+              title: data.title || null,
+            },
+            AnimeManga === "Anime",
+          );
+          if (dbStatus) data.status = dbStatus;
+        } catch (_) {}
+      }
+
       return res.json(data);
     } catch (err) {
       logger.error(
@@ -3820,6 +4367,269 @@ router.post(
     }
   },
 );
+
+// ---------------------------------------------------------------------------
+// InfoView extras: Anime "Seasons" (sequel/prequel chain) + Recommendations.
+// Source: AniList GraphQL (no auth, no key). See utils/anilistExtras.js.
+// ---------------------------------------------------------------------------
+
+// POST /api/info/extras  { malid?, title, type }
+router.post("/api/info/extras", async (req, res) => {
+  const { malid, title, type } = req.body || {};
+  if ((!malid && !title) || (type !== "Anime" && type !== "Manga")) {
+    return res.json({ seasons: [], recommendations: [] });
+  }
+  try {
+    const payload = await buildExtras({ malid, title, type });
+    res.json(payload);
+  } catch (err) {
+    logger.warn(`[info/extras] Failed to load extras: ${err.message}`);
+    res.json({ seasons: [], recommendations: [] });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Bulk card metadata for Discover / Seasons / Recommendations cards:
+//   { [malid]: { status, langs } }
+// status comes from AniList (one batched request), langs from the provider's
+// episode list (anime only, small worker pool, cached so cards stay cheap).
+// The two lookups can be requested separately (includeStatus / includeLangs:
+// false) so the GUI can paint status badges without waiting on the slow
+// provider episode fetches.
+// ---------------------------------------------------------------------------
+const bulkLangsCache = new Map();
+const BULK_META_TTL = 15 * 60 * 1000;
+const BULK_META_MAX_ITEMS = 48;
+const BULK_META_CONCURRENCY = 2;
+
+async function runPool(items, limit, worker) {
+  const queue = [...items];
+  const size = Math.max(1, Math.min(limit, queue.length));
+  await Promise.all(
+    Array.from({ length: size }, async () => {
+      while (queue.length) {
+        const item = queue.shift();
+        try {
+          await worker(item);
+        } catch (_) {}
+      }
+    }),
+  );
+}
+
+// Extract the distinct audio languages out of a provider episode page.
+function langsFromEpisodes(episodes) {
+  const found = new Set();
+  for (const ep of episodes || []) {
+    if (Array.isArray(ep?.langs)) {
+      ep.langs.forEach((l) => found.add(String(l).toLowerCase()));
+    } else if (ep?.lang) {
+      found.add(String(ep.lang).toLowerCase());
+    } else {
+      const suffix = String(ep?.id || "").match(/-(sub|dub|hsub|both)$/);
+      if (suffix) found.add(suffix[1]);
+    }
+  }
+  return found.size ? [...found] : null;
+}
+
+function cacheBulkLangs(key, langs) {
+  if (bulkLangsCache.size > 500) {
+    const oldest = bulkLangsCache.keys().next().value;
+    if (oldest !== undefined) bulkLangsCache.delete(oldest);
+  }
+  bulkLangsCache.set(key, { expires: Date.now() + BULK_META_TTL, langs });
+}
+
+async function resolveBulkLangs(malid, title = null) {
+  const key = `Anime:${malid}`;
+  const hit = bulkLangsCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.langs;
+
+  let langs = null;
+  try {
+    const setting = await settingfetch();
+    const preferred = (setting?.Animeprovider || "pahe").toLowerCase();
+    const best = await getBestProviderForMalId(malid, "Anime", preferred);
+    if (best?.id && best?.provider) {
+      const providerObj = await providerFetch("Anime", best.provider);
+      let data = await fetchEpisode(providerObj, best.id, 1);
+      if (!data?.episodes?.length) {
+        // Mapping ids rot when the site rotates its slugs — heal and retry
+        // once, the same repair the episode route already uses.
+        const healed = await healProviderId(providerObj, {
+          oldId: best.id,
+          malid,
+          title: title || best.title || null,
+        });
+        if (healed && healed !== String(best.id)) {
+          data = await fetchEpisode(providerObj, healed, 1);
+        }
+      }
+      langs = langsFromEpisodes(data?.episodes);
+    }
+  } catch (_) {
+    langs = null;
+  }
+
+  cacheBulkLangs(key, langs);
+  return langs;
+}
+
+// Extension-side variant: the card already carries the provider name + provider
+// id it came from, so its episode list can be read straight from the extension
+// even when there is no MAL id to resolve.
+async function resolveProviderLangs(
+  providerName,
+  itemId,
+  { title = null, malid = null } = {},
+) {
+  const key = `P:${String(providerName || "").toLowerCase()}:${itemId}`;
+  const hit = bulkLangsCache.get(key);
+  if (hit && hit.expires > Date.now()) return hit.langs;
+
+  let langs = null;
+  try {
+    const providerObj = await providerFetch("Anime", providerName);
+    let data = await fetchEpisode(providerObj, itemId, 1);
+    if (!data?.episodes?.length) {
+      // Stale provider id (site rotated its slugs) — heal and retry once.
+      const healed = await healProviderId(providerObj, {
+        oldId: itemId,
+        malid,
+        title,
+      });
+      if (healed && healed !== String(itemId)) {
+        data = await fetchEpisode(providerObj, healed, 1);
+      }
+    }
+    langs = langsFromEpisodes(data?.episodes);
+  } catch (_) {
+    langs = null;
+  }
+
+  cacheBulkLangs(key, langs);
+  return langs;
+}
+
+// POST /api/info/bulk-meta  { type, items: [{ malid } | { key, provider, id, title }], includeStatus?, includeLangs? }
+// Defaults: both true. Pass includeLangs:false for a fast status-only pass
+// (one batched AniList call) or includeStatus:false for the slow provider
+// episode-language pass, so status badges aren't held up by episode fetches.
+// Every entry may carry the provider name + provider id it came from, so cards
+// without a MAL id are still answered from the extension side: status from the
+// local/mapping databases, languages from the provider's own episode list.
+// Responses are keyed by the entry's `key` (the card's own cache key), which
+// for MAL-id-only callers is just the MAL id as before.
+router.post("/api/info/bulk-meta", async (req, res) => {
+  const { type, items } = req.body || {};
+  const isManga = type === "Manga";
+  const wantLangs = !isManga && req.body.includeLangs !== false;
+  const wantStatus = req.body.includeStatus !== false;
+
+  const entries = [];
+  const seen = new Set();
+  for (const it of Array.isArray(items) ? items : []) {
+    if (!it) continue;
+    const rawMalid = Number(it.malid);
+    const malid = Number.isInteger(rawMalid) && rawMalid > 0 ? rawMalid : null;
+    const provider = it.provider ? String(it.provider) : null;
+    const itemId = it.id !== undefined && it.id !== null ? String(it.id) : null;
+    const key =
+      it.key !== undefined && it.key !== null
+        ? String(it.key)
+        : malid !== null
+          ? String(malid)
+          : provider && itemId
+            ? `p:${provider}:${itemId}`
+            : null;
+    if (!key || seen.has(key)) continue;
+    if (malid === null && !(provider && itemId)) continue;
+    seen.add(key);
+    entries.push({
+      key,
+      malid,
+      provider,
+      id: itemId,
+      title: it.title ? String(it.title) : null,
+    });
+  }
+
+  entries.length = Math.min(entries.length, BULK_META_MAX_ITEMS);
+
+  if (!entries.length || (!wantLangs && !wantStatus)) {
+    return res.json({ meta: {} });
+  }
+
+  const meta = {};
+  for (const e of entries) meta[e.key] = { status: null, langs: null };
+
+  // A failed pass must be distinguishable from "genuinely unknown": the
+  // frontend marks keys as known after a success, so a null caused by an
+  // outage would otherwise pin missing badges for the whole session.
+  let statusFailed = false;
+  let langsFailed = false;
+
+  if (wantStatus) {
+    const malids = entries.filter((e) => e.malid !== null).map((e) => e.malid);
+    if (malids.length) {
+      try {
+        const statuses = await fetchStatuses(
+          malids,
+          isManga ? "MANGA" : "ANIME",
+        );
+        for (const e of entries) {
+          if (e.malid === null) continue;
+          if (statuses[e.malid]) meta[e.key].status = statuses[e.malid];
+        }
+      } catch (err) {
+        statusFailed = true;
+        logger.warn(`[bulk-meta] status lookup failed: ${err.message}`);
+      }
+    }
+    // Provider/mapping fallback for entries AniList could not answer (no MAL
+    // id, unmapped, or a failed lookup).
+    const missing = entries.filter((e) => !meta[e.key].status);
+    if (missing.length) {
+      await runPool(missing, BULK_META_CONCURRENCY, async (e) => {
+        try {
+          const status = await statusFromDbs(
+            { provider: e.provider, id: e.id, title: e.title },
+            !isManga,
+          );
+          if (status) meta[e.key].status = status;
+        } catch (_) {}
+      });
+    }
+  }
+
+  if (wantLangs) {
+    await runPool(entries, BULK_META_CONCURRENCY, async (e) => {
+      try {
+        let langs =
+          e.malid !== null ? await resolveBulkLangs(e.malid, e.title) : null;
+        // The mapping's malid→id lookup often has no row for the card's own
+        // provider, but the card already carries a working provider id — read
+        // the episode languages straight from it instead of giving up.
+        if (!langs && e.provider && e.id) {
+          langs = await resolveProviderLangs(e.provider, e.id, {
+            title: e.title,
+            malid: e.malid,
+          });
+        }
+        meta[e.key].langs = langs;
+      } catch (_) {
+        langsFailed = true;
+      }
+    });
+  }
+
+  res.json({
+    meta,
+    ...(statusFailed ? { statusFailed: true } : {}),
+    ...(langsFailed ? { langsFailed: true } : {}),
+  });
+});
 
 // Fetches Anime Episodes, Movies/Series Episodes, or Manga Chapters
 router.post("/api/info/items", async (req, res) => {
@@ -4678,6 +5488,7 @@ router.get("/api/stream/m3u8", async (req, res) => {
       reqHeaders.Referer = customReferer;
     }
     let data;
+    const m3u8Start = Date.now();
     try {
       const resp = await global.axios.get(url, {
         headers: reqHeaders,
@@ -4685,6 +5496,9 @@ router.get("/api/stream/m3u8", async (req, res) => {
         timeout: 15000,
       });
       data = resp.data;
+      logger.info(
+        `[StreamProxy] m3u8 upstream ${resp.status} for ${url} (${Date.now() - m3u8Start}ms, ${String(resp.data || "").length} chars)`,
+      );
     } catch (fetchErr) {
       if (
         fetchErr.response &&
@@ -4704,6 +5518,35 @@ router.get("/api/stream/m3u8", async (req, res) => {
         data = retry.data;
       } else {
         throw fetchErr;
+      }
+    }
+    // Some stacks hand back Buffer/ArrayBuffer even with responseType text —
+    // coerce instead of failing the whole open.
+    if (typeof data !== "string" && data != null) {
+      try {
+        data = Buffer.isBuffer(data)
+          ? data.toString("utf8")
+          : Buffer.from(data).toString("utf8");
+      } catch (_) {}
+    }
+    if (typeof data !== "string" || !data.includes("#EXTM3U")) {
+      logger.warn(
+        `[Stream Proxy] Upstream returned invalid m3u8 playlist for ${url} (retrying once)...`,
+      );
+      try {
+        const retry2 = await global.axios.get(url, {
+          headers: reqHeaders,
+          responseType: "text",
+          timeout: 15000,
+        });
+        data =
+          typeof retry2.data === "string"
+            ? retry2.data
+            : Buffer.from(retry2.data || []).toString("utf8");
+      } catch (retryErr) {
+        logger.warn(
+          `[Stream Proxy] m3u8 retry failed for ${url}: ${retryErr?.response?.status || retryErr.message}`,
+        );
       }
     }
     if (typeof data !== "string" || !data.includes("#EXTM3U")) {
@@ -4733,17 +5576,26 @@ router.get("/api/stream/m3u8", async (req, res) => {
       }
     };
 
+    // Some hosts inject ad segments (e.g. TikTok CDN images) at the head of
+    // variant playlists. MPV locks onto the image codec ("Video: png") and
+    // then chokes on every real segment. Drop ad URIs (plus their EXTINF)
+    // so playback starts on genuine media. Patterns live in utils/adSegments.
     let nextIsVariantPlaylist = false;
-    const manifest = String(data)
-      .split("\n")
-      .map((line) => {
-        const t = line.trim();
-        if (!t) return line;
-        if (t.startsWith("#")) {
-          if (t.startsWith("#EXT-X-STREAM-INF:")) {
-            nextIsVariantPlaylist = true;
-          }
-          return t.includes('URI="')
+    const rawLines = String(data).split("\n");
+    const outLines = [];
+    let skippedAds = 0;
+    for (const line of rawLines) {
+      const t = line.trim();
+      if (!t) {
+        outLines.push(line);
+        continue;
+      }
+      if (t.startsWith("#")) {
+        if (t.startsWith("#EXT-X-STREAM-INF:")) {
+          nextIsVariantPlaylist = true;
+        }
+        outLines.push(
+          t.includes('URI="')
             ? t.replace(/URI="([^"]+)"/, (_, u) => {
                 const abs = u.startsWith("http") ? u : base + u;
                 regHost(abs);
@@ -4753,23 +5605,38 @@ router.get("/api/stream/m3u8", async (req, res) => {
                   abs.includes(".m3u8") || isSubOrAudio ? m3u8Proxy : segProxy;
                 return `URI="${proxy}${encodeURIComponent(abs)}${refParam}"`;
               })
-            : line;
-        }
+            : line,
+        );
+        continue;
+      }
 
-        const isVariant = nextIsVariantPlaylist;
-        nextIsVariantPlaylist = false;
+      const isVariant = nextIsVariantPlaylist;
+      nextIsVariantPlaylist = false;
 
-        const abs = t.startsWith("http") ? t : base + t;
-        regHost(abs);
-        const proxy = isVariant || abs.includes(".m3u8") ? m3u8Proxy : segProxy;
-        return `${proxy}${encodeURIComponent(abs)}${refParam}`;
-      })
-      .join("\n");
+      const abs = t.startsWith("http") ? t : base + t;
+      regHost(abs);
+      if (!isVariant && !abs.includes(".m3u8") && isAdSegmentUrl(abs)) {
+        const prev = outLines[outLines.length - 1];
+        if (prev && prev.trim().startsWith("#EXTINF")) outLines.pop();
+        skippedAds++;
+        continue;
+      }
+      const proxy = isVariant || abs.includes(".m3u8") ? m3u8Proxy : segProxy;
+      outLines.push(`${proxy}${encodeURIComponent(abs)}${refParam}`);
+    }
+    const manifest = outLines.join("\n");
+    if (skippedAds > 0) {
+      logger.info(
+        `[StreamProxy] Skipped ${skippedAds} ad segment(s) for ${url}`,
+      );
+    }
 
     res.setHeader("Content-Type", "application/vnd.apple.mpegurl");
     res.send(manifest);
   } catch (err) {
-    logger.error(`[StreamProxy] m3u8 error: ${err.message}`);
+    logger.error(
+      `[StreamProxy] m3u8 error for ${url}: status=${err?.response?.status || "none"} msg=${err.message}`,
+    );
     res.status(502).send(err.message);
   }
 });
@@ -4900,8 +5767,14 @@ router.get(
       }
       let buffer = Buffer.isBuffer(data) ? data : Buffer.from(data);
 
+      // Obfuscated wrappers (e.g. PNG headers prepended to segments) break
+      // demuxing ("Video: png", fatal packet errors). MPEG-TS packets are 188
+      // bytes starting with sync byte 0x47: slice from the first offset with 3
+      // consecutive syncs. Only applied when the payload opens with PNG magic,
+      // so clean segments and non-TS payloads (keys, subtitles) pass through
+      // untouched even if the wrapper outgrows the old 1KB scan window.
       if (
-        buffer.length >= 8 &&
+        buffer.length > 376 &&
         buffer[0] === 0x89 &&
         buffer[1] === 0x50 &&
         buffer[2] === 0x4e &&
@@ -4911,14 +5784,14 @@ router.get(
         buffer[6] === 0x1a &&
         buffer[7] === 0x0a
       ) {
-        for (let i = 0; i < Math.min(buffer.length - 3, 1024); i++) {
+        const maxScan = Math.min(buffer.length - 376, 65536);
+        for (let i = 0; i <= maxScan; i++) {
           if (
-            buffer[i] === 0x49 &&
-            buffer[i + 1] === 0x45 &&
-            buffer[i + 2] === 0x4e &&
-            buffer[i + 3] === 0x44
+            buffer[i] === 0x47 &&
+            buffer[i + 188] === 0x47 &&
+            buffer[i + 376] === 0x47
           ) {
-            buffer = buffer.subarray(i + 8);
+            if (i > 0) buffer = buffer.subarray(i);
             break;
           }
         }
@@ -4948,7 +5821,9 @@ router.get(
 
       res.send(buffer);
     } catch (err) {
-      logger.error(`[StreamProxy] segment error: ${err.message}`);
+      logger.error(
+        `[StreamProxy] segment error for ${url}: status=${err?.response?.status || "none"} msg=${err.message}`,
+      );
       res.status(502).send(err.message);
     }
   },
@@ -4968,6 +5843,9 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
   const numMalId = Number(malIdStr);
   let selectedProvider = null;
   let resolvedProviderId = null;
+  // `setting` was referenced below but never loaded here — unmapped links
+  // crashed with "setting is not defined" before reaching the fallback.
+  const cfg = await settingfetch();
 
   if (global.mappingDb && numMalId) {
     try {
@@ -4980,18 +5858,43 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
       logger.error(`Error querying mappingDb for link-mapping: ${err.message}`);
     }
   }
+  if (!selectedProvider && numMalId) {
+    // No provider link anywhere: search the installed scrapers by title and
+    // remember the match so Link & Open gets a real provider id instead of
+    // falling back to the raw malid.
+    try {
+      const learned = await autoLearnProviderLink(
+        numMalId,
+        itemType,
+        itemType === "Anime" ? cfg?.Animeprovider : cfg?.Mangaprovider,
+      );
+      if (learned) {
+        selectedProvider = learned.provider;
+        resolvedProviderId = learned.id;
+      }
+    } catch (err) {
+      logger.warn(
+        `[autoMapping] Link-time auto-learn failed for malid ${numMalId}: ${err.message}`,
+      );
+    }
+  }
   if (!selectedProvider) {
     selectedProvider =
       itemType === "Anime"
-        ? setting?.Animeprovider ||
+        ? cfg?.Animeprovider ||
           Object.keys(global.Anime_providers || {})[0] ||
           "pahe"
-        : setting?.Mangaprovider ||
+        : cfg?.Mangaprovider ||
           Object.keys(global.Manga_providers || {})[0] ||
           "weebcentral";
   }
 
   const finalId = resolvedProviderId || oldId || malIdStr;
+  // A final id equal to the raw malid means no provider id was ever resolved
+  // (oldId/malIdStr fallback). Storing it would write the MAL id as a
+  // provider id — a poisoned row that resolves to 404 forever — so the link
+  // is refused instead.
+  const isEcho = !!numMalId && String(finalId) === String(numMalId);
 
   if (numMalId) {
     if (!title) {
@@ -5035,39 +5938,43 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
       if (finalId) await stmt.run(finalId, String(numMalId));
       if (cleanFolder) await stmt.run(cleanFolder, String(numMalId));
 
-      const existing = await queryOne(
-        `SELECT * FROM ${itemType} WHERE id = ? OR id = ? OR folder_name = ?`,
-        [finalId, oldId, cleanFolder],
-      );
+      // Poison guard: an echo link must not create or rename a local row to
+      // the raw malid — the id->malid breadcrumb above is all it keeps.
+      if (!isEcho) {
+        const existing = await queryOne(
+          `SELECT * FROM ${itemType} WHERE id = ? OR id = ? OR folder_name = ?`,
+          [finalId, oldId, cleanFolder],
+        );
 
-      if (existing) {
-        await run(
-          `UPDATE ${itemType} SET id = ?, MalID = ?, provider = ?, title = COALESCE(NULLIF(?, ''), title), image_url = COALESCE(NULLIF(?, ''), image_url), folder_name = COALESCE(NULLIF(folder_name, ''), ?) WHERE id = ? OR id = ? OR folder_name = ?`,
-          [
-            finalId,
-            String(numMalId),
-            selectedProvider,
-            title || existing.title || "",
-            image || existing.image_url || "",
-            cleanFolder,
-            oldId || finalId,
-            finalId,
-            cleanFolder,
-          ],
-        );
-      } else {
-        await run(
-          `INSERT OR REPLACE INTO ${itemType} (id, title, image_url, folder_name, MalID, provider, CustomTag) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            finalId,
-            title || finalId,
-            image || "",
-            cleanFolder,
-            String(numMalId),
-            selectedProvider,
-            JSON.stringify(["downloads"]),
-          ],
-        );
+        if (existing) {
+          await run(
+            `UPDATE ${itemType} SET id = ?, MalID = ?, provider = ?, title = COALESCE(NULLIF(?, ''), title), image_url = COALESCE(NULLIF(?, ''), image_url), folder_name = COALESCE(NULLIF(folder_name, ''), ?) WHERE id = ? OR id = ? OR folder_name = ?`,
+            [
+              finalId,
+              String(numMalId),
+              selectedProvider,
+              title || existing.title || "",
+              image || existing.image_url || "",
+              cleanFolder,
+              oldId || finalId,
+              finalId,
+              cleanFolder,
+            ],
+          );
+        } else {
+          await run(
+            `INSERT OR REPLACE INTO ${itemType} (id, title, image_url, folder_name, MalID, provider, CustomTag) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+              finalId,
+              title || finalId,
+              image || "",
+              cleanFolder,
+              String(numMalId),
+              selectedProvider,
+              JSON.stringify(["downloads"]),
+            ],
+          );
+        }
       }
     } catch (err) {
       logger.error(`Error updating local db in link-mapping: ${err.message}`);
@@ -5097,50 +6004,70 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
   if (global.mappingDb && (oldId || finalId)) {
     try {
       const cleanProv = (selectedProvider || "").toLowerCase().split("/").pop();
-      await global.mappingDb
-        .prepare(
-          "DELETE FROM unmapped_items WHERE (id = ? OR id = ?) OR (provider = ? AND id = ?)",
-        )
-        .run(oldId || "", finalId || "", cleanProv, oldId || finalId);
+      if (isEcho) {
+        // Refused link: drop any poisoned mapping row (id === malid) this
+        // malid already carries, and leave the entry in the unmapped queue.
+        if (cleanProv && numMalId) {
+          await global.mappingDb
+            .prepare(`DELETE FROM "${cleanProv}" WHERE id = ? AND malid = ?`)
+            .run(String(numMalId), numMalId);
+        }
+      } else {
+        await global.mappingDb
+          .prepare(
+            "DELETE FROM unmapped_items WHERE (id = ? OR id = ?) OR (provider = ? AND id = ?)",
+          )
+          .run(oldId || "", finalId || "", cleanProv, oldId || finalId);
 
-      if (cleanProv && numMalId) {
-        if (cleanProv === "pahe") {
-          const isUuid =
-            /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-              String(finalId),
-            );
-          if (isUuid) {
+        if (cleanProv && numMalId) {
+          if (cleanProv === "pahe") {
+            const isUuid =
+              /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+                String(finalId),
+              );
+            if (isUuid) {
+              await global.mappingDb
+                .prepare(
+                  "INSERT OR REPLACE INTO pahe (id, uuid, malid) VALUES (?, ?, ?)",
+                )
+                .run(finalId, finalId, numMalId);
+            } else {
+              await global.mappingDb
+                .prepare(
+                  "INSERT OR REPLACE INTO pahe (id, malid) VALUES (?, ?)",
+                )
+                .run(finalId, numMalId);
+            }
+          } else {
+            try {
+              await global.mappingDb.exec(`
+                CREATE TABLE IF NOT EXISTS "${cleanProv}" (
+                  id TEXT PRIMARY KEY,
+                  malid INTEGER
+                );
+              `);
+            } catch (_) {}
             await global.mappingDb
               .prepare(
-                "INSERT OR REPLACE INTO pahe (id, uuid, malid) VALUES (?, ?, ?)",
+                `INSERT OR REPLACE INTO "${cleanProv}" (id, malid) VALUES (?, ?)`,
               )
-              .run(finalId, finalId, numMalId);
-          } else {
-            await global.mappingDb
-              .prepare("INSERT OR REPLACE INTO pahe (id, malid) VALUES (?, ?)")
               .run(finalId, numMalId);
           }
-        } else {
-          try {
-            await global.mappingDb.exec(`
-              CREATE TABLE IF NOT EXISTS "${cleanProv}" (
-                id TEXT PRIMARY KEY,
-                malid INTEGER
-              );
-            `);
-          } catch (_) {}
+          const malTable = itemType === "Anime" ? "anime" : "manga";
           await global.mappingDb
-            .prepare(
-              `INSERT OR REPLACE INTO "${cleanProv}" (id, malid) VALUES (?, ?)`,
-            )
-            .run(finalId, numMalId);
+            .prepare(`UPDATE ${malTable} SET has_mapping = 1 WHERE malid = ?`)
+            .run(numMalId);
         }
-        const malTable = itemType === "Anime" ? "anime" : "manga";
-        await global.mappingDb
-          .prepare(`UPDATE ${malTable} SET has_mapping = 1 WHERE malid = ?`)
-          .run(numMalId);
       }
     } catch (_) {}
+  }
+
+  if (isEcho) {
+    return {
+      success: false,
+      error:
+        "No installed provider returned a real id for this title — left unmapped.",
+    };
   }
 
   const linkedProviders = await getLinkedProvidersForMalId(numMalId, itemType, {
@@ -5169,6 +6096,36 @@ async function linkMediaItem({ oldId, malId, type, title, image }) {
     details,
   };
 }
+
+// Local mapping catalog search for the link UI: title substring or exact
+// malid. The old flow searched the remote server by title only, so a malid
+// (or any title the server lacked) always came back empty even when the
+// local mapping.db had the entry.
+router.post("/api/mapping/search", async (req, res) => {
+  try {
+    const q = String(req.body?.q || "").trim();
+    const type = req.body?.type === "Manga" ? "Manga" : "Anime";
+    if (!q || !global.mappingDb) return res.json({ results: [] });
+
+    const malTable = type === "Manga" ? "manga" : "anime";
+    const like = `%${q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const numeric = Number(q);
+    const rows =
+      Number.isInteger(numeric) && numeric > 0
+        ? await mappingQueryAll(
+            `SELECT malid, title, image_url, has_mapping FROM "${malTable}" WHERE title LIKE ? ESCAPE '\\' OR malid = ? ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 15`,
+            [like, numeric],
+          )
+        : await mappingQueryAll(
+            `SELECT malid, title, image_url, has_mapping FROM "${malTable}" WHERE title LIKE ? ESCAPE '\\' ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 15`,
+            [like],
+          );
+    res.json({ results: rows || [] });
+  } catch (err) {
+    logger.error(`Mapping search failed: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Handles linking local downloaded entries to provider mappings
 router.post(
