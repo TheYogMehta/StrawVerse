@@ -1,6 +1,6 @@
 # Changelog
 
-# [12.0.5] - 2026-11-17
+# [12.1.0] - 2026-11-17
 
 ### Mapping Sync Timer
 
@@ -12,15 +12,28 @@
 
 - **Seasons Row:** The Seasons list on a title page now scrolls horizontally in a single row instead of wrapping into a grid, matching Recommendations.
 
+### Single-Movie & Series Library Handling
+
+- **Standalone Movie Detection:** Automatically detects whether an item under Movies & Series is a standalone movie or a multi-episode TV series, preventing unnecessary `Season 1` subfolders and saving single movies directly as `Title.mp4` (or `Title (Year) [Quality].mp4` under Plex/Jellyfin naming).
+- **Episode Number Extraction Fix:** Filters out 4-digit release years (`1900–2099`) and common video resolutions (`1080p`, `720p`, `4k`) so movie release years and resolutions are never falsely parsed as episode numbers (e.g. `Inception (2010)` being mistaken for episode 2010).
+- **Library File Deletion & Opening:** Standalone movie files without episode numbers in their filenames can now be seamlessly opened and deleted directly from the downloaded library.
+- **Downloaded Episode Scanning:** Unnumbered movie files in download folders are properly detected and marked as downloaded (`[1]`).
+
+### Downloader & Streaming Reliability
+
+- **Non-Media Error Payload Rejection:** Direct video downloads and stream verification now reject HTML error pages and JSON responses instead of saving them as corrupt `.mp4` video files.
+- **Stream Token Expiry vs. Blacklisting:** Recognizes HTTP 403/404/410 errors during active HLS segment downloads as token/session expirations rather than dead hosts, preventing the mirror from being blacklisted.
+- **Domain Concurrency Penalty Decay:** Domain concurrency failure records older than 30 minutes are ignored so temporary network throttles do not permanently restrict future downloads.
+- **Corrupt File Cleanup in Player:** Automatically deletes zero-byte or corrupt local files under 500 KB on playback attempts so the player streams fresh media.
+
 ### Builds
 
 - **Linux Packages:** The desktop release now ships Linux AppImage and deb packages, including the previously missing Linux ffmpeg binary (downloaded alongside the Windows/macOS ones).
 
-- Version bump to 12.0.5 (versionCode 29).
-
 ### Special Thanks to Contributors
 
 - Special thanks to **@RavenGod1** for major contributions: Anime Seasons & Recommendations, Discover status & SUB/DUB badges, mapping background sync timer & poison protection, MPV folded header fixes, and performance improvements!
+- Special thanks to **@Buff-alo** for implementing single-movie download detection, movie file naming & library handling, and download stream validation!
 
 # [12.0.2] - 2026-11-16
 
@@ -114,7 +127,7 @@
 
 ### Startup & Mapping Sync
 
-- **Mapping Sync No Longer Aborted by One Bad Table:** The mapping database sync used to send every table in a single request, so one provider table answering HTTP 500 (the `animesalt` table on the mapping server) blocked *all* tables — including `anime`/`manga` — from ever updating. The sync now falls back to splitting the request by group: core tables (`anime`, `manga`, `next_episodes`) plus unmapped items are fetched first, then each provider table individually, so only the broken table is skipped (and remembered for the session).
+- **Mapping Sync No Longer Aborted by One Bad Table:** The mapping database sync used to send every table in a single request, so one provider table answering HTTP 500 (the `animesalt` table on the mapping server) blocked _all_ tables — including `anime`/`manga` — from ever updating. The sync now falls back to splitting the request by group: core tables (`anime`, `manga`, `next_episodes`) plus unmapped items are fetched first, then each provider table individually, so only the broken table is skipped (and remembered for the session).
 - **Faster Startup:** The auto-update check is deferred by 8 seconds so it no longer competes with window paint, mapping sync and scraper loading for network/CPU; image-cache cleanup now batches its deletes instead of issuing one database statement per row.
 - **Cheaper Snapshot Apply:** Duplicate-mapping pruning loads local ids once up front instead of running a query per incoming row — 80k+ queries removed when applying a full anime/manga snapshot.
 
@@ -149,7 +162,6 @@
 ### Title Page
 
 - **Copy Description:** The description block now has its own copy button beside the existing title copy — one tap copies the full, untruncated text (trailing "[more]" marker stripped) with a "Copied!" confirmation.
-
 
 # [11.2.1] - 2026-11-09
 
@@ -242,6 +254,7 @@
 - Special thanks to **@cyber-winner** for their contributions to extension installation error handling and scraper loading rollback!
 - Special thanks to **@satoridev01** for responsibly disclosing the media/subtitles security vulnerability!
 - Special thanks to **@Buff-alo** for their contributions to native macOS Apple Silicon (arm64) support, MPV and FFmpeg binary packaging, and macOS window lifecycle integration!
+
 # [11.1.5] - 2026-11-08
 
 ### Discover & Info Badges
