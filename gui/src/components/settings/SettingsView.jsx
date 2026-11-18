@@ -182,6 +182,7 @@ export default function SettingsView({
   const [subBorderSize, setSubBorderSize] = useState(3.0);
   const [subBgColor, setSubBgColor] = useState("transparent");
   const [playerSpeed, setPlayerSpeed] = useState(1.0);
+  const [desktopPlayer, setDesktopPlayer] = useState("web");
   const [mangaReaderLayout, setMangaReaderLayout] = useState("long-strip");
   const [mangaReaderWidth, setMangaReaderWidth] = useState(800);
   const [catalogTitleFontSize, setCatalogTitleFontSize] = useState(14);
@@ -772,6 +773,7 @@ export default function SettingsView({
         setPlayerSpeed(
           s.playerSpeed !== undefined ? parseFloat(s.playerSpeed) : 1.0,
         );
+        setDesktopPlayer(s.desktopPlayer || "web");
         setImageCacheSizeLimit(s.imageCacheSizeLimit || 5);
         setDeveloperMode(s.developerMode);
         setDownloadNotification(
@@ -1021,6 +1023,12 @@ export default function SettingsView({
         : 1.0)
     )
       dirty.playerSpeed = playerSpeed;
+    if (desktopPlayer !== (settings.desktopPlayer || "web")) {
+      dirty.desktopPlayer = desktopPlayer;
+      try {
+        localStorage.setItem("desktopPlayer", desktopPlayer);
+      } catch (_) {}
+    }
     if (developerMode !== settings.developerMode)
       dirty.developerMode = developerMode;
     if (
@@ -1192,6 +1200,7 @@ export default function SettingsView({
         (settings.playerSpeed !== undefined
           ? parseFloat(settings.playerSpeed)
           : 1.0) ||
+      desktopPlayer !== (settings.desktopPlayer || "web") ||
       developerMode !== settings.developerMode ||
       downloadNotification !==
         (settings.downloadNotification !== undefined
@@ -1258,6 +1267,7 @@ export default function SettingsView({
     subBorderSize,
     subBgColor,
     playerSpeed,
+    desktopPlayer,
     developerMode,
     downloadNotification,
     animeDownloadLocation,
@@ -2689,6 +2699,26 @@ export default function SettingsView({
                         { value: "360p", label: "360p (Data Saver)" },
                       ]}
                       minWidth={200}
+                    />
+                  </div>
+                </div>
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">Desktop Video Player</div>
+                    <div className="settings-row-hint">
+                      Select your preferred desktop player. Use Web Player for built-in TV Casting (Smart TV / DLNA / Chromecast).
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={desktopPlayer}
+                      onChange={setDesktopPlayer}
+                      options={[
+                        { value: "web", label: "Web Player (Built-in + Cast to TV)" },
+                        { value: "mpv", label: "MPV Player (Native External)" },
+                      ]}
+                      minWidth={240}
                     />
                   </div>
                 </div>

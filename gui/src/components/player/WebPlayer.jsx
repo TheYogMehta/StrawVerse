@@ -103,6 +103,7 @@ import {
   Check,
   Tv,
   Cast,
+  MonitorPlay,
   RefreshCw,
   X,
 } from "lucide-react";
@@ -123,6 +124,7 @@ export default function VideoPlayer({
   malid,
   hideExit = false,
   type: propType = "Anime",
+  onSwitchToMpv,
 }) {
   const type =
     typeof id === "string" && (id.startsWith("tv:") || id.startsWith("movie:"))
@@ -2113,6 +2115,18 @@ export default function VideoPlayer({
                   >
                     <Cast size={16} style={isCasting ? { color: "#3b82f6" } : {}} />
                   </button>
+
+                  {/* Switch to MPV Player (Desktop Electron only) */}
+                  {onSwitchToMpv && (
+                    <button
+                      onClick={onSwitchToMpv}
+                      className="player-control-btn"
+                      aria-label="Open in MPV"
+                      title="Switch to MPV Player"
+                    >
+                      <MonitorPlay size={16} />
+                    </button>
+                  )}
 
                   {/* Picture-in-Picture Button */}
                   {pipSupported && (
