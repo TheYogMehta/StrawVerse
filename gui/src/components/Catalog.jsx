@@ -398,7 +398,6 @@ export default function Catalog({
   const [totalCount, setTotalCount] = useState(null);
   const [cardMeta, setCardMeta] = useState({});
   const cardMetaStatusReqRef = useRef(new Set());
-  const cardMetaLangsReqRef = useRef(new Set());
   // Failed passes are retried on a later render (the key is unmarked), so we
   // count attempts per key+field to give up after 3 instead of looping.
   const cardMetaAttemptRef = useRef(new Map());
@@ -527,19 +526,14 @@ export default function Catalog({
     return null;
   };
 
-  // Status + sub/dub badges for catalog cards, fetched as two passes so the
-  // fast AniList status lookup paints without waiting on the slow provider
-  // episode-list lookup (langs). Both passes fire on the same 500ms defer and
-  // run concurrently; each merges its own field, so a slow langs response
-  // never delays a status badge. Requests are capped at 24 cards (the
-  // endpoint's own limit) and a response re-runs this effect, cascading
-  // through any remaining items. Keys stay marked after a success (no
-  // refetch of a known-null) and are unmarked on failure so a later render
-  // retries.
+  // Status badges for catalog cards, fetched in bulk via AniList GraphQL.
+  // Requests are capped at 24 cards (the endpoint's limit) and a response
+  // re-runs this effect, cascading through any remaining items. Keys stay
+  // marked after a success (no refetch of a known-null) and are unmarked on
+  // failure so a later render retries.
   useEffect(() => {
     const items = Array.isArray(displayResults) ? displayResults : [];
     const needStatus = [];
-    const needLangs = [];
     const seen = new Set();
     for (const item of items) {
       const key = getItemMetaKey(item);
@@ -549,8 +543,6 @@ export default function Catalog({
       // A card the backend can be asked about (a MAL id, or the provider +
       // provider id it came from for the extension-side lookups) always goes
       // through the batched lookup — AniList wins over the card's own status.
-      // Status/languages carried on the item itself only satisfy cards that
-      // nothing can be fetched for.
       const fetchable =
         malid != null ||
         !!(item.provider && item.id !== undefined && item.id !== null);
@@ -559,11 +551,6 @@ export default function Catalog({
         !!normalizeStatus(fetched?.status, type) ||
         cardMetaStatusReqRef.current.has(key) ||
         (!fetchable && !!normalizeStatus(item.status, type));
-      const hasLangs =
-        type !== "Anime" ||
-        !!formatAudioLangs(fetched?.langs) ||
-        cardMetaLangsReqRef.current.has(key) ||
-        (!fetchable && !!formatAudioLangs(item.langs));
       const lookup = {
         key,
         malid,
@@ -574,13 +561,7 @@ export default function Catalog({
       if (!hasStatus && needStatus.length < 24) {
         needStatus.push(lookup);
       }
-      if (!hasLangs && needLangs.length < 24) {
-        needLangs.push(lookup);
-      }
-      if (
-        needStatus.length >= 24 &&
-        (type !== "Anime" || needLangs.length >= 24)
-      ) {
+      if (needStatus.length >= 24) {
         break;
       }
     }
@@ -590,94 +571,58 @@ export default function Catalog({
         const key = getItemMetaKey(item);
         return cardMeta[key]?.status !== null;
       });
-      const hasAllLangs = displayResults.every((item) => {
-        const key = getItemMetaKey(item);
-        return cardMeta[key]?.langs !== null;
-      });
-      if (hasAllStatus && hasAllLangs) {
+      if (hasAllStatus) {
         setCardMeta((prev) => prev);
         return;
       }
     }
-    const langsBatch = type === "Anime" ? needLangs : [];
-    if (!needStatus.length && !langsBatch.length) return;
+    if (!needStatus.length) return;
 
     const timer = setTimeout(async () => {
-      const runPass = async (batch, extraBody, field, ref) => {
-        batch.forEach(({ key }) => ref.current.add(key));
-        try {
-          const response = await fetch("/api/info/bulk-meta", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type,
-              items: batch.map(({ key, malid, provider, id, title }) => ({
-                key,
-                malid,
-                provider,
-                id,
-                title,
-              })),
-              ...extraBody,
-            }),
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const payload = await response.json();
-          setCardMeta((prev) => {
-            const next = { ...prev };
-            for (const { key } of batch) {
-              const got = payload?.meta?.[key];
-              const existing = prev[key] || { status: null, langs: null };
-              next[key] = {
-                status:
-                  field === "status" ? (got?.status ?? null) : existing.status,
-                langs:
-                  field === "langs" ? (got?.langs ?? null) : existing.langs,
-              };
-            }
-            return next;
-          });
-          // The backend flags a pass that failed (outage/rate limit) as
-          // distinct from "genuinely unknown" — unmark those keys so a later
-          // render retries them instead of pinning null badges all session.
-          const failed =
-            field === "status" ? payload?.statusFailed : payload?.langsFailed;
-          if (failed) {
-            batch.forEach(({ key }) => {
-              const id = `${field}:${key}`;
-              const attempts = (cardMetaAttemptRef.current.get(id) || 0) + 1;
-              cardMetaAttemptRef.current.set(id, attempts);
-              if (attempts < 3) ref.current.delete(key);
-            });
+      const batch = needStatus;
+      batch.forEach(({ key }) => cardMetaStatusReqRef.current.add(key));
+      try {
+        const response = await fetch("/api/info/bulk-meta", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            type,
+            items: batch.map(({ key, malid, provider, id, title }) => ({
+              key,
+              malid,
+              provider,
+              id,
+              title,
+            })),
+            includeLangs: false,
+          }),
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        setCardMeta((prev) => {
+          const next = { ...prev };
+          for (const { key } of batch) {
+            const got = payload?.meta?.[key];
+            const existing = prev[key] || { status: null, langs: null };
+            next[key] = {
+              status: got?.status ?? null,
+              langs: existing.langs,
+            };
           }
-        } catch (err) {
-          console.error(`Failed to load card ${field}:`, err);
-          batch.forEach(({ key }) => ref.current.delete(key));
+          return next;
+        });
+        if (payload?.statusFailed) {
+          batch.forEach(({ key }) => {
+            const id = `status:${key}`;
+            const attempts = (cardMetaAttemptRef.current.get(id) || 0) + 1;
+            cardMetaAttemptRef.current.set(id, attempts);
+            if (attempts < 3) cardMetaStatusReqRef.current.delete(key);
+          });
         }
-      };
-
-      await Promise.all([
-        ...(needStatus.length
-          ? [
-              runPass(
-                needStatus,
-                { includeLangs: false },
-                "status",
-                cardMetaStatusReqRef,
-              ),
-            ]
-          : []),
-        ...(langsBatch.length
-          ? [
-              runPass(
-                langsBatch,
-                { includeStatus: false },
-                "langs",
-                cardMetaLangsReqRef,
-              ),
-            ]
-          : []),
-      ]);
+      } catch (err) {
+        console.error("Failed to load card status:", err);
+        batch.forEach(({ key }) => cardMetaStatusReqRef.current.delete(key));
+      }
     }, 250);
     return () => clearTimeout(timer);
   }, [displayResults, type, provider, cardMeta]);

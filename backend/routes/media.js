@@ -4445,40 +4445,12 @@ async function resolveBulkLangs(malid, title = null) {
   const key = `Anime:${malid}`;
   const hit = bulkLangsCache.get(key);
   if (hit && hit.expires > Date.now()) return hit.langs;
-
-  let langs = null;
-  try {
-    const setting = await settingfetch();
-    const preferred = (setting?.Animeprovider || "pahe").toLowerCase();
-    const best = await getBestProviderForMalId(malid, "Anime", preferred);
-    if (best?.id && best?.provider) {
-      const providerObj = await providerFetch("Anime", best.provider);
-      let data = await fetchEpisode(providerObj, best.id, 1);
-      if (!data?.episodes?.length) {
-        // Mapping ids rot when the site rotates its slugs — heal and retry
-        // once, the same repair the episode route already uses.
-        const healed = await healProviderId(providerObj, {
-          oldId: best.id,
-          malid,
-          title: title || best.title || null,
-        });
-        if (healed && healed !== String(best.id)) {
-          data = await fetchEpisode(providerObj, healed, 1);
-        }
-      }
-      langs = langsFromEpisodes(data?.episodes);
-    }
-  } catch (_) {
-    langs = null;
-  }
-
-  cacheBulkLangs(key, langs);
-  return langs;
+  // Never live-scrape episode lists in bulk passes: scrapers (especially Pahe)
+  // rate-limit immediately on concurrent hits, triggering Cloudflare 403/429.
+  return null;
 }
 
-// Extension-side variant: the card already carries the provider name + provider
-// id it came from, so its episode list can be read straight from the extension
-// even when there is no MAL id to resolve.
+// Extension-side variant: returns cached langs if already loaded
 async function resolveProviderLangs(
   providerName,
   itemId,
@@ -4487,29 +4459,7 @@ async function resolveProviderLangs(
   const key = `P:${String(providerName || "").toLowerCase()}:${itemId}`;
   const hit = bulkLangsCache.get(key);
   if (hit && hit.expires > Date.now()) return hit.langs;
-
-  let langs = null;
-  try {
-    const providerObj = await providerFetch("Anime", providerName);
-    let data = await fetchEpisode(providerObj, itemId, 1);
-    if (!data?.episodes?.length) {
-      // Stale provider id (site rotated its slugs) — heal and retry once.
-      const healed = await healProviderId(providerObj, {
-        oldId: itemId,
-        malid,
-        title,
-      });
-      if (healed && healed !== String(itemId)) {
-        data = await fetchEpisode(providerObj, healed, 1);
-      }
-    }
-    langs = langsFromEpisodes(data?.episodes);
-  } catch (_) {
-    langs = null;
-  }
-
-  cacheBulkLangs(key, langs);
-  return langs;
+  return null;
 }
 
 // POST /api/info/bulk-meta  { type, items: [{ malid } | { key, provider, id, title }], includeStatus?, includeLangs? }
@@ -4761,6 +4711,18 @@ router.post("/api/info/items", async (req, res) => {
       if (!data) throw new Error(`No ${errorName} Found`);
       if (data.hasNextPage === undefined && data.totalPages !== undefined) {
         data.hasNextPage = page < data.totalPages;
+      }
+
+      if (isAnime && Array.isArray(data?.episodes)) {
+        try {
+          const langs = langsFromEpisodes(data.episodes);
+          if (id && provider) {
+            cacheBulkLangs(`P:${String(provider).toLowerCase()}:${id}`, langs);
+          }
+          if (animeMalId) {
+            cacheBulkLangs(`Anime:${animeMalId}`, langs);
+          }
+        } catch (_) {}
       }
 
       try {
