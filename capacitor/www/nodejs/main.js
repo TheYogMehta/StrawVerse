@@ -446,14 +446,12 @@ async function boot() {
             throw error;
           }
         } catch (err) {
+          console.warn(
+            `[nativeAxiosAdapter] Native request failed for ${config.url} (${err.message}). Falling back to Node default HTTP adapter...`,
+          );
           try {
             return await defaultAdapter(config);
           } catch (fallbackErr) {
-            // Only log when BOTH adapters fail - a successful fallback is
-            // routine on Android (native bridge limits), not a warning.
-            console.warn(
-              `[nativeAxiosAdapter] Native request failed for ${config.url} (${err.message}); Node fallback also failed (${fallbackErr.message}).`,
-            );
             throw err;
           }
         }

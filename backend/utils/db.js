@@ -805,65 +805,15 @@ async function getKeyValue(tableName, key) {
 async function setKeyValue(tableName, key, value) {
   try {
     const cleanValue = unwrapJson(value);
-    await runUpsertCompat(
+    await run(
       `INSERT INTO ${tableName} (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
       [key, JSON.stringify(cleanValue)],
-      () =>
-        run(`INSERT OR REPLACE INTO ${tableName} (key, value) VALUES (?, ?)`, [
-          key,
-          JSON.stringify(cleanValue),
-        ]),
     );
   } catch (e) {
     logger.error(
       `Error writing key ${key} to SQLite table ${tableName}: ${e.message}`,
     );
   }
-}
-
-// UPSERT needs SQLite 3.24+; old Android WebViews ship 3.22, where every
-// ON CONFLICT ... DO UPDATE fails with near "ON": syntax error. Detect once
-// and fall back to caller-supplied legacy statements (INSERT OR REPLACE for
-// full-row writes, UPDATE-then-INSERT OR IGNORE where counters increment).
-let legacyUpsertMode = false;
-
-function useLegacyUpserts() {
-  return legacyUpsertMode;
-}
-
-async function detectUpsertSupport() {
-  try {
-    const row = await queryOne("SELECT sqlite_version() AS v");
-    const parts = String(row?.v || "")
-      .split(".")
-      .map((n) => parseInt(n, 10) || 0);
-    const modern = parts[0] > 3 || (parts[0] === 3 && parts[1] >= 24);
-    if (!modern) {
-      legacyUpsertMode = true;
-      logger.warn(
-        `[db] SQLite ${row?.v} lacks UPSERT support. Using legacy write path.`,
-      );
-    }
-  } catch (_) {}
-}
-
-async function runUpsertCompat(upsertSql, upsertParams, legacyFn) {
-  if (!legacyUpsertMode) {
-    try {
-      return await run(upsertSql, upsertParams);
-    } catch (e) {
-      const msg = e?.message || String(e);
-      if (/near "ON": syntax error/i.test(msg)) {
-        legacyUpsertMode = true;
-        logger.warn(
-          "[db] Old SQLite without UPSERT support detected. Using legacy write path.",
-        );
-      } else {
-        throw e;
-      }
-    }
-  }
-  return legacyFn();
 }
 
 async function batchRun(dbNameOrOps, maybeOps) {
@@ -989,8 +939,6 @@ async function initDatabase() {
     logger.error("Failed to create unique index on SkipTimes: " + e.message);
   }
 
-  await detectUpsertSupport();
-
   try {
     await exec(`
       INSERT OR IGNORE INTO Movies (id, folder_name, title, type, provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag)
@@ -1069,7 +1017,4 @@ module.exports = {
   getUserDataPath,
   getDesktopUserDataPath,
   executeDb,
-  runUpsertCompat,
-  useLegacyUpserts,
-  detectUpsertSupport,
 };

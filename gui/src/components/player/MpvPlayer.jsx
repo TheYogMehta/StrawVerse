@@ -29,9 +29,6 @@ export default function VideoPlayer({
   const [loading, setLoading] = useState(true);
   const [statusMsg, setStatusMsg] = useState("Initializing MPV player...");
   const [currentEpNumOrId, setCurrentEpNumOrId] = useState(episodeNumOrId);
-  // Same-episode relaunch guard: identical params must not fire playInMpv
-  // twice (double effect runs / rapid state churn spawned two players).
-  const launchedRef = useRef(null);
   const [currentSeason, setCurrentSeason] = useState(season);
   const lastNavTimeRef = useRef(0);
 
@@ -142,10 +139,6 @@ export default function VideoPlayer({
 
     setLoading(true);
     setStatusMsg(`Opening MPV player for ${epLabel}...`);
-
-    const launchKey = `${id}|${targetEpNum}|${subdub || playerSubDub}`;
-    if (launchedRef.current === launchKey) return;
-    launchedRef.current = launchKey;
 
     window.sharedStateAPI
       .playInMpv({

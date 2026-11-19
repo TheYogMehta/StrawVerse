@@ -1,16 +1,6 @@
 # Changelog
 
-# [12.1.0] - 2026-11-17
-
-### Mapping Sync Timer
-
-- **Hourly Background Sync:** The mapping database (anime, manga and every provider table) now refreshes automatically while the app is running instead of only once at launch. The cadence is configurable in Settings → Mapping Sync Interval: `0` disables the timer, `1, 2, 3…` set the hours between syncs, and changes apply within a minute.
-- **Startup Toggle Scope:** The Anime/Manga Mapping Auto-Sync dropdowns now only control whether a sync runs at startup (skipped anyway when the data is already fresher than the interval); "Sync now" still forces an immediate sync.
-- **No Duplicate Syncs or Rows:** Only one mapping sync can run at a time (startup, timer and manual runs coalesce), a failed run backs off by the full interval instead of retrying every minute, and every mapping table keeps its primary key with `INSERT OR REPLACE`, so repeated syncs can never duplicate anime, manga or provider rows.
-
-### UI
-
-- **Seasons Row:** The Seasons list on a title page now scrolls horizontally in a single row instead of wrapping into a grid, matching Recommendations.
+# [12.1.0] - 2026-11-18
 
 ### Single-Movie & Series Library Handling
 
@@ -32,20 +22,9 @@
 
 ### Special Thanks to Contributors
 
-- Special thanks to **@RavenGod1** for major contributions: Anime Seasons & Recommendations, Discover status & SUB/DUB badges, mapping background sync timer & poison protection, MPV folded header fixes, and performance improvements!
 - Special thanks to **@Buff-alo** for implementing single-movie download detection, movie file naming & library handling, and download stream validation!
 
 # [12.0.2] - 2026-11-16
-
-### Mapping Poison Fixes
-
-- **Echo Ids Refused:** Linking now rejects a provider id that just echoes the MAL id, so a failed auto-learn can no longer write a fake mapping row that dead-ends every future lookup; poison rows are ignored by the resolver and deleted on re-link.
-- **Honest Unmapped State:** A title with no confident provider match now stays unmapped and says so instead of failing later with a 404, and every auto-learn decline is logged.
-- **Badges Survive Rate Limits:** The AniList status lookup now backs off and retries on HTTP 429 (honoring Retry-After), and catalog cards re-try a failed status/sub-dub pass (up to 3 times) instead of pinning "no badge" for the whole session — the cause of cards missing their Complete/Currently Airing and SUB/DUB labels.
-
-### Scroll Restoration Fix
-
-- **Back Preserves Position:** Returning from a title page to Discover now restores the exact scroll position again under infinite scroll; the card-click handler no longer overwrites the tracked active page with the pagination counter (which stays at 1 when infinite scroll is on).
 
 ### Anime Format & Category Routing Fixes
 
@@ -122,46 +101,6 @@
 
 - Special thanks to **@cyber-winner** for architecting the Movies & Series section, multi-repository marketplace support, and download queue stability fixes!
 - Special thanks to **@Buff-alo** for implementing download video quality selection, smart server matching, and the minimum download speed mirror failover system!
-
-# [11.2.2] - 2026-11-10
-
-### Startup & Mapping Sync
-
-- **Mapping Sync No Longer Aborted by One Bad Table:** The mapping database sync used to send every table in a single request, so one provider table answering HTTP 500 (the `animesalt` table on the mapping server) blocked _all_ tables — including `anime`/`manga` — from ever updating. The sync now falls back to splitting the request by group: core tables (`anime`, `manga`, `next_episodes`) plus unmapped items are fetched first, then each provider table individually, so only the broken table is skipped (and remembered for the session).
-- **Faster Startup:** The auto-update check is deferred by 8 seconds so it no longer competes with window paint, mapping sync and scraper loading for network/CPU; image-cache cleanup now batches its deletes instead of issuing one database statement per row.
-- **Cheaper Snapshot Apply:** Duplicate-mapping pruning loads local ids once up front instead of running a query per incoming row — 80k+ queries removed when applying a full anime/manga snapshot.
-
-### Discover & Info Badges
-
-- **Badges From the Extension Side:** Airing status and SUB/DUB badges now fall back to the provider + mapping databases, so titles with no MAL id or no AniList match are no longer left blank on Discover cards.
-- **Provider Episode Languages:** Cards without a MAL id now read their SUB/DUB straight from the extension's own episode list instead of being skipped entirely.
-- **Title-Page Status Restored:** The status pill on a title page now receives the AniList status that was already being fetched — it was discarded before reaching the UI.
-
-### Seasons & Recommendations
-
-- **Sections Load Again:** Seasons and Recommendations were being wiped when the title page resolved its id a second time — the in-flight response is no longer cancelled, so the sections (and their badges) render reliably.
-- **Back Returns to the Previous Title:** Clicking a Season or Recommendation card now opens a real history entry, so the back button returns to the title you came from instead of jumping straight to Discover.
-- **Search Fallback Keeps History:** Recommendations with no MAL id open a Discover search as a new entry, so Back still returns to the previous title.
-- **OVA/Movie/Special Support:** Seasons now includes OVA, MOVIE, and SPECIAL formats (not just TV series); related content fetched via SEQUEL/PREQUEL relations.
-
-### Settings
-
-- **Recommendation Count:** New **Settings → Anime Settings → Recommendations Shown** picker controls how many recommendations appear (1-10, default 4).
-- **Horizontal-Only Row:** Recommendations now render as a single sideways-scrolling row that never wraps into a grid.
-- **Dedicated Plex & Jellyfin Section:** Anime Settings now groups **Anime Download Naming**, **Jellyfin & Plex Compatibility** and **Media Server Integration** into their own "Plex & Jellyfin" section right before Subtitle Customization & Appearance; the old combined section is now titled "Downloads".
-
-### Extensions & Marketplace
-
-- **Repository Enable/Disable:** The Extension Repositories dialog now has an on/off switch for every repository (official included). Disabling a repository hides its extensions from the Extensions list, while extensions already installed from it stay visible so they can still be updated or removed — re-enabling brings the full list back.
-- **Disabled State Persists:** The choice is saved with your settings, so a disabled repository stays disabled across restarts.
-
-### Discover
-
-- **Provider Switcher:** A provider picker now sits directly left of the Anime/Manga toggle on the Discover page, listing every extension installed for the current type. Switching updates the active provider (the same setting Extensions' "Use Provider" writes), clears the stale catalog caches and reloads from page 1.
-
-### Title Page
-
-- **Copy Description:** The description block now has its own copy button beside the existing title copy — one tap copies the full, untruncated text (trailing "[more]" marker stripped) with a "Copied!" confirmation.
 
 # [11.2.1] - 2026-11-09
 
@@ -255,34 +194,7 @@
 - Special thanks to **@satoridev01** for responsibly disclosing the media/subtitles security vulnerability!
 - Special thanks to **@Buff-alo** for their contributions to native macOS Apple Silicon (arm64) support, MPV and FFmpeg binary packaging, and macOS window lifecycle integration!
 
-# [11.1.5] - 2026-11-08
-
-### Discover & Info Badges
-
-- **Airing Status Badge:** Every card on Discover and every title page now shows **Currently Airing** or **Complete** (plus Upcoming / Hiatus / Cancelled when known), sourced from AniList with local fallbacks.
-- **Sub / Dub Badge:** Cards and title pages now show **SUB**, **SUB & DUB**, or **DUB** based on what the provider actually offers — never guessed; unknown titles simply show no badge.
-- **Badge Placement:** Status + audio badges sit along the poster bottom on Discover catalog cards, in the tag row on the title page, and over Seasons/Recommendations posters.
-- **Faster Badge Loading:** Catalog badge lookups are split into a fast status pass and a background audio pass, so status appears immediately and slow episode scans never delay it.
-- **Reliable Status Lookups:** A single unmappable or manga-only id in a batch no longer blanks every status — bad ids are isolated and cached while good titles keep their badges.
-
-### Anime Seasons & Recommendations
-
-- **Seasons Section:** The title page now lists every season of a show above the Episodes List, each with poster, episode count, and its own badges.
-- **Recommendations Section:** Personalized "If you liked this..." recommendations appear above the Episodes List with the same card badges.
-
-# [11.1.4] - 2026-10-29
-
-### Discover & Extensions
-
-- **MangaKatana Discover Filters:** New Genre + Status filter panel on Discover for provider extensions (MangaKatana v1.1.0: 25 genres including School Life & Slice of Life, plus Ongoing/Completed status), forwarded straight to the extension.
-
 # [11.1.1] - 2026-10-26
-
-### Discover & Extensions
-
-- **Universal Dynamic Provider Discovery:** Extensions and their filter definitions are now discovered dynamically at runtime, with animepahe IDs standardized across discovery, catalog, and mapping lookups.
-- **Capacitor Peer-Dependency Fix:** `@capacitor/android` and the Capacitor CLI are restored to v6 so Android installs resolve their peer dependencies cleanly.
-- **Dependency Refresh:** Electron and GUI build dependencies updated to their latest stable releases.
 
 ### Android Updates & Notifications
 
@@ -317,39 +229,6 @@
 - **Scoped Extension Mapping & Instant Cleanup:** Installing an extension now only fetches mapping and unmapped metadata for that specific provider instead of transferring unnecessary database records. Deleting an extension immediately purges its mapping tables, unmapped items, and settings from your device.
 - **Compacted Delta Sync & Auto-Reconciliation:** Delta mapping updates are squashed to transmit only the latest net state for installed extensions. Local manual links and unmapped entries are automatically reconciled and pruned when server mappings arrive, eliminating duplicate metadata.
 - **Dynamic Catalog Filters & Clean Metadata:** The Catalog source dropdown now strictly shows installed extensions that have unmapped results.
-
-# [11.0.6] - 2026-10-23
-
-### Dependencies & Security
-
-- **sprintf-js DoS Fix:** `@electron/get` is pinned to `^5.1.0`, removing the vulnerable `sprintf-js`/`roarr` chain from the dependency tree.
-- **Vite 8.3.5:** GUI build tooling upgraded from `8.0.12` to `8.3.5`.
-
-### Build
-
-- **Local Builds Only:** Windows, Linux and Android artifacts are built locally — no CI workflows run.
-
-# [11.0.5] - 2026-10-17
-
-### Video Player & Streaming
-
-- **Playback Fix (Windows):** MPV's wrapped `User-Agent` header was silently making every proxied stream return `400` ("Failed to open" with no logs). Headers now go through dedicated MPV options instead of folded header-lines.
-- **Ad-Decoy Fallback:** Streams that are entirely ad-image placeholders are rejected during verification, so playback automatically falls through to the next working server.
-- **Ad Filtering:** Ad-image segments are stripped from proxied HLS playlists on every platform.
-
-### Android Mobile
-
-- **SQLite Compat:** Database writes use a legacy path on older Android SQLite (<3.24), fixing startup on pre-2018 devices.
-
-### Reliability
-
-- **Smarter Auto-Next:** Episode auto-advance now requires 30s of real accumulated playback instead of triggering on a network stall.
-- **No Duplicate Players:** Launching a title no longer spawns two MPV instances.
-- **Marketplace Safety:** Custom extension repos only match their exact owner.
-
-### Build
-
-- **Cross-Platform CI:** GitHub Actions now builds Windows, Linux (AppImage/deb/snap) and Android artifacts on every push, and publishes a release on version tags.
 
 # [11.0.4] - 2026-10-25
 
@@ -444,18 +323,6 @@
 - **Decoupled Extension Hooks:** Site-specific logic (such as integrity canary checks and mapping database reporting) has been extracted from the StrawVerse core into generic scraper hooks (`onInfoFetched`, `checkCanary`).
 - **Compatibility Verification:** Marketplace and scraper loader now verify `MinAppVersion` compatibility to ensure extensions match the running StrawVerse version.
 - **Legacy Extension Auto-Cleanup:** Automatically removes obsolete flat extension files from the root scraper directory to prevent duplicate provider loading.
-
-# [10.1.4] - 2026-10-14 (fork)
-
-### Downloads
-
-- **Dead-Mirror Fast Abort:** 8 auth rejections (403/401/404) with almost nothing downloaded aborts the loop immediately and rotates to another server instead of grinding every segment through retries.
-- **Persisted Dead-Host Skips:** Dead mirror hosts are saved per episode (7-day TTL) and re-applied after restarts. Skips only deprioritize, so an episode can never get permanently bricked.
-- **Android FFmpeg Lookup:** Native library search covers all mapped `.so` dirs and arch subdirs, fixing "libffmpeg.so not found" remux failures on Android.
-
-### Streaming
-
-- **Site-Root Clearance Refresh:** CDN clearance refreshes against the site root with success/failure reporting so failures fail fast toward server rotation.
 
 # [10.1.2] - 2026-10-07
 

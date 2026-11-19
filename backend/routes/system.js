@@ -4,7 +4,6 @@ const { getQueue, updateQueue, isQueuePaused } = require("../utils/queue");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getCurrentAppVersion } = require("../utils/constants");
 const { getChangelog } = require("../utils/changelog");
-const { checkForMappingUpdates } = require("../utils/mappingUpdater");
 
 const router = express.Router();
 
@@ -45,17 +44,6 @@ router.get("/api/changelog", (req, res) => {
   } catch (err) {
     logger.error("Failed to read changelog: " + err.message);
     res.status(500).json({ error: err.message });
-  }
-});
-
-// Force-refresh the mapping database (Settings → General → Sync now)
-router.post("/api/mapping/refresh", async (req, res) => {
-  try {
-    await checkForMappingUpdates(true);
-    res.json({ success: true, type: "all" });
-  } catch (err) {
-    logger.error("Mapping refresh failed: " + err.message);
-    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -159,9 +147,9 @@ router.post("/api/logger", async (req, res) => {
 });
 
 // Get image cache stats
-router.get("/api/cache/stats", async (req, res) => {
+router.get("/api/cache/stats", (req, res) => {
   try {
-    const stats = await ImageCacheManager.getCacheStats();
+    const stats = ImageCacheManager.getCacheStats();
     res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -257,16 +245,6 @@ router.delete("/api/marketplace/repos/:identifier", async (req, res) => {
       req.body?.id ||
       req.body?.url;
     const result = await removeExtensionRepo(target);
-    res.json(result);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-router.post("/api/marketplace/repos/:owner/toggle", async (req, res) => {
-  try {
-    const { toggleExtensionRepo } = require("../utils/settings");
-    const result = await toggleExtensionRepo(req.params.owner);
     res.json(result);
   } catch (err) {
     res.status(400).json({ error: err.message });

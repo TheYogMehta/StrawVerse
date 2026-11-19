@@ -802,14 +802,6 @@ app.whenReady().then(async () => {
     });
     server.keepAliveTimeout = 65000;
     server.headersTimeout = 66000;
-    // Malformed requests (e.g. MPV's wrapped folded headers) are auto-400'd
-    // by llhttp before any route/middleware runs — log them or they vanish.
-    server.on("clientError", (err, socket) => {
-      logger.warn(
-        `[Express] Rejected malformed request (${err.code || err.message})`,
-      );
-      if (socket && !socket.destroyed) socket.destroy();
-    });
     server.on("error", (err) => {
       logger.error(
         `Express server failed to listen on port ${PORT}: ${err.message}`,
@@ -869,15 +861,7 @@ app.whenReady().then(async () => {
   });
 
   if (app.isPackaged) {
-    // Deferred so the update check (GitHub round-trip, ~4s) does not compete
-    // with window paint, mapping sync and scraper loading during startup.
-    setTimeout(() => {
-      try {
-        autoUpdater.checkForUpdatesAndNotify();
-      } catch (err) {
-        logger.error(`Auto-update check failed to start: ${err.message}`);
-      }
-    }, 8000);
+    autoUpdater.checkForUpdatesAndNotify();
   }
 
   try {

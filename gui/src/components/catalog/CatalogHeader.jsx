@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { Search, SlidersHorizontal } from "lucide-react";
 import Dropdown from "../common/Dropdown";
 
@@ -13,100 +12,11 @@ export default function CatalogHeader({
   onTypeChange,
   showTypeToggle = true,
   catalogSource = "mal",
-  installedProviders = [],
-  installedExtensions = [],
-  activeProvider = "",
-  onProviderChange,
   isFilterOpen,
   onToggleFilter,
   activeFilterCount = 0,
   showFilterToggle = false,
 }) {
-  const parseProvider = (item) => {
-    if (!item) return null;
-    if (typeof item === "object") {
-      const name = String(item.name || item.id || "").trim();
-      const owner = String(item.repoOwner || item.author || "TheYogMehta")
-        .replace(/^@/, "")
-        .trim();
-      const value =
-        item.uniqueId ||
-        (owner.toLowerCase() === "theyogmehta" ? name : `@${owner}/${name}`);
-      return { name, owner, value, icon: item.icon || null };
-    }
-    const raw = String(item).trim();
-    const clean = raw.replace(/^@/, "");
-    if (clean.includes("/")) {
-      const parts = clean.split("/");
-      const owner = parts[0];
-      const name = parts[1];
-      return { name, owner, value: raw, icon: null };
-    }
-    let owner = "TheYogMehta";
-    let icon = null;
-    if (Array.isArray(installedExtensions)) {
-      const ext = installedExtensions.find(
-        (e) => String(e.name || "").toLowerCase() === clean.toLowerCase(),
-      );
-      if (ext?.repoOwner) {
-        owner = ext.repoOwner.replace(/^@/, "");
-      }
-      if (ext?.icon) {
-        icon = ext.icon;
-      }
-    }
-    return { name: clean, owner, value: raw, icon };
-  };
-
-  const providerOptions = useMemo(() => {
-    const list = [];
-    const seen = new Set();
-
-    const addChoice = (item) => {
-      const parsed = parseProvider(item);
-      if (!parsed || !parsed.name) return;
-      const key = `${parsed.owner.toLowerCase()}/${parsed.name.toLowerCase()}`;
-      if (seen.has(key)) return;
-      seen.add(key);
-      list.push({
-        value: parsed.value,
-        name: parsed.name,
-        owner: parsed.owner,
-        label: `${parsed.name} (@${parsed.owner})`,
-        icon: parsed.icon,
-      });
-    };
-
-    if (Array.isArray(installedExtensions) && installedExtensions.length > 0) {
-      installedExtensions.forEach(addChoice);
-    }
-    if (Array.isArray(installedProviders)) {
-      installedProviders.forEach(addChoice);
-    }
-    if (activeProvider) {
-      addChoice(activeProvider);
-    }
-
-    return list;
-  }, [installedExtensions, installedProviders, activeProvider]);
-
-  const activeValue = useMemo(() => {
-    if (!activeProvider) return providerOptions[0]?.value || "";
-    const parsed = parseProvider(activeProvider);
-    if (!parsed) return providerOptions[0]?.value || "";
-    const matched = providerOptions.find(
-      (opt) =>
-        opt.name.toLowerCase() === parsed.name.toLowerCase() &&
-        opt.owner.toLowerCase() === parsed.owner.toLowerCase(),
-    );
-    return matched ? matched.value : activeProvider;
-  }, [providerOptions, activeProvider]);
-
-  const showProviderPicker =
-    provider === "provider" &&
-    typeof onProviderChange === "function" &&
-    providerOptions.length >= 1;
-
   const typeOptions = [
     { value: "Anime", label: "Anime" },
     { value: "Manga", label: "Manga" },
@@ -192,29 +102,17 @@ export default function CatalogHeader({
         </div>
       </div>
 
-      <div className="header-right-section">
-        {showProviderPicker && (
+      {showTypeToggle && (
+        <div className="header-right-section desktop-only">
           <Dropdown
-            value={activeValue}
-            onChange={(val) => onProviderChange(val)}
-            options={providerOptions}
-            className="header-type-dropdown discover-provider-dropdown"
-            minWidth={170}
+            value={type}
+            onChange={(val) => onTypeChange && onTypeChange(val)}
+            options={typeOptions}
+            className="header-type-dropdown"
+            minWidth={160}
           />
-        )}
-
-        {showTypeToggle && (
-          <div className="desktop-only">
-            <Dropdown
-              value={type}
-              onChange={(val) => onTypeChange && onTypeChange(val)}
-              options={typeOptions}
-              className="header-type-dropdown"
-              minWidth={160}
-            />
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </header>
   );
 }

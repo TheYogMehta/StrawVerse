@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Pause,
   Play,
-  ArrowLeft,
   Zap,
   AlertTriangle,
   Gauge,
@@ -49,10 +48,7 @@ function extractTasks(data) {
   return [];
 }
 
-export default function DownloadsTracker({
-  onBackToAnime,
-  backLabel = "Back to Discover",
-}) {
+export default function DownloadsTracker() {
   const [activeTasks, setActiveTasks] = useState([]);
   const [queue, setQueue] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -177,19 +173,7 @@ export default function DownloadsTracker({
     <div className="downloads-tracker-container">
       <header className="tracker-header">
         <div className="tracker-title-group">
-          <div className="tracker-title-row">
-            <h1 className="u-style-26 tracker-main-title">Downloads</h1>
-            {onBackToAnime && (
-              <button
-                onClick={onBackToAnime}
-                className="btn-back-anime"
-                title={backLabel}
-              >
-                <ArrowLeft size={15} />
-                <span>{backLabel}</span>
-              </button>
-            )}
-          </div>
+          <h1 className="u-style-26 tracker-main-title">Downloads</h1>
           <p className="tracker-subtitle">
             Manage your active and queued downloads
           </p>

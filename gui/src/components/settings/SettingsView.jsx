@@ -176,17 +176,12 @@ export default function SettingsView({
   const [maxLogFiles, setMaxLogFiles] = useState(5);
   const [logDirectory, setLogDirectory] = useState("");
   const [autoSkipIntro, setAutoSkipIntro] = useState(true);
-  const [syncingMapping, setSyncingMapping] = useState(null);
-  const [mappingSyncInterval, setMappingSyncInterval] = useState(1);
-  const [infoRecCount, setInfoRecCount] = useState(4);
   const [subFontSize, setSubFontSize] = useState(46);
   const [subColor, setSubColor] = useState("#FFFFFF");
   const [subBorderColor, setSubBorderColor] = useState("#000000");
   const [subBorderSize, setSubBorderSize] = useState(3.0);
   const [subBgColor, setSubBgColor] = useState("transparent");
   const [playerSpeed, setPlayerSpeed] = useState(1.0);
-  const [enableDiscordRPC, setEnableDiscordRPC] = useState(false);
-  const [malDiscordProfile, setMalDiscordProfile] = useState(false);
   const [mangaReaderLayout, setMangaReaderLayout] = useState("long-strip");
   const [mangaReaderWidth, setMangaReaderWidth] = useState(800);
   const [catalogTitleFontSize, setCatalogTitleFontSize] = useState(14);
@@ -800,25 +795,7 @@ export default function SettingsView({
         setMaxLogFiles(
           s.maxLogFiles !== undefined ? parseInt(s.maxLogFiles, 10) || 5 : 5,
         );
-        {
-          const intervalVal = parseInt(s.mappingSyncIntervalHours, 10);
-          setMappingSyncInterval(
-            Number.isFinite(intervalVal) && intervalVal >= 0 ? intervalVal : 1,
-          );
-        }
         setAutoSkipIntro(s.autoSkipIntro);
-        setEnableDiscordRPC(s.enableDiscordRPC === true);
-        setMalDiscordProfile(s.malDiscordProfile === true);
-        {
-          const recCountVal = parseInt(s.infoRecCount, 10);
-          setInfoRecCount(
-            Number.isInteger(recCountVal) &&
-              recCountVal >= 1 &&
-              recCountVal <= 10
-              ? recCountVal
-              : 4,
-          );
-        }
         const layoutVal = s.mangaReaderLayout || "long-strip";
         setMangaReaderLayout(layoutVal);
 
@@ -988,72 +965,6 @@ export default function SettingsView({
     }
   };
 
-  // Mapping auto-sync saves directly instead of through the debounced form
-  // state: it only affects the backend's boot-time sync, not a form field.
-  const handleMappingAutoSyncChange = async (val) => {
-    const value = val === "true";
-    setSettings((prev) => ({
-      ...(prev || {}),
-      mappingAutoSync: value,
-    }));
-    try {
-      if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
-        await window.sharedStateAPI.updateSetting("mappingAutoSync", value);
-      } else {
-        const res = await apiPost("/api/settings/update", {
-          mappingAutoSync: value,
-        });
-        if (res && res.success === false) {
-          throw new Error(res.error || "Save failed");
-        }
-      }
-    } catch (err) {
-      swalError("Error Saving Settings", err.message);
-    }
-  };
-
-  const handleMappingIntervalChange = async (raw) => {
-    const n = parseInt(raw, 10);
-    const clean = Number.isFinite(n) && n >= 0 ? n : 1;
-    setMappingSyncInterval(clean);
-    setSettings((prev) => ({
-      ...(prev || {}),
-      mappingSyncIntervalHours: clean,
-    }));
-    try {
-      if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
-        await window.sharedStateAPI.updateSetting(
-          "mappingSyncIntervalHours",
-          clean,
-        );
-      } else {
-        const res = await apiPost("/api/settings/update", {
-          mappingSyncIntervalHours: clean,
-        });
-        if (res && res.success === false) {
-          throw new Error(res.error || "Save failed");
-        }
-      }
-    } catch (err) {
-      swalError("Error Saving Settings", err.message);
-    }
-  };
-
-  const handleSyncMappingNow = async () => {
-    setSyncingMapping("all");
-    try {
-      const res = await apiPost("/api/mapping/refresh", {});
-      if (res && res.success === false) {
-        throw new Error(res.error || "Sync failed");
-      }
-      swalSuccess("Mapping Updated", "The mapping database is up to date.");
-    } catch (err) {
-      swalError("Sync Failed", err.message);
-    } finally {
-      setSyncingMapping(null);
-    }
-  };
-
   const autoSaveSettings = async () => {
     const finalLimit = parseInt(imageCacheSizeLimit, 10);
     const isValidLimit = !isNaN(finalLimit) && finalLimit >= 5;
@@ -1151,17 +1062,6 @@ export default function SettingsView({
     }
     if (autoSkipIntro !== settings.autoSkipIntro)
       dirty.autoSkipIntro = autoSkipIntro;
-    if (enableDiscordRPC !== (settings.enableDiscordRPC === true))
-      dirty.enableDiscordRPC = enableDiscordRPC;
-    if (malDiscordProfile !== (settings.malDiscordProfile === true))
-      dirty.malDiscordProfile = malDiscordProfile;
-    if (
-      infoRecCount !==
-      (settings.infoRecCount !== undefined
-        ? parseInt(settings.infoRecCount, 10)
-        : 4)
-    )
-      dirty.infoRecCount = infoRecCount;
     if (mangaReaderLayout !== (settings.mangaReaderLayout || "long-strip"))
       dirty.mangaReaderLayout = mangaReaderLayout;
     if (mangaReaderWidth !== (parseInt(settings.mangaReaderWidth, 10) || 800))
@@ -1312,11 +1212,6 @@ export default function SettingsView({
           : true) ||
       (parseInt(maxLogFiles, 10) || 5) !== (settings.maxLogFiles || 5) ||
       autoSkipIntro !== settings.autoSkipIntro ||
-      enableDiscordRPC !== (settings.enableDiscordRPC === true) ||
-      malDiscordProfile !== (settings.malDiscordProfile === true) ||
-      (settings.infoRecCount !== undefined
-        ? parseInt(settings.infoRecCount, 10)
-        : 4) !== infoRecCount ||
       mangaReaderLayout !== (settings.mangaReaderLayout || "long-strip") ||
       mangaReaderWidth !== (parseInt(settings.mangaReaderWidth, 10) || 800) ||
       catalogTitleFontSize !==
@@ -1374,9 +1269,6 @@ export default function SettingsView({
     externalLogEnabled,
     maxLogFiles,
     autoSkipIntro,
-    enableDiscordRPC,
-    malDiscordProfile,
-    infoRecCount,
     mangaReaderLayout,
     mangaReaderWidth,
     catalogTitleFontSize,
@@ -1615,79 +1507,6 @@ export default function SettingsView({
                     minWidth={200}
                   />
                 </SettingsRow>
-                {!isMobileApp() && (
-                  <SettingsRow
-                    label="Discord Rich Presence"
-                    desc="Display your current anime, manga, movie, or series activity on your Discord profile."
-                  >
-                    <Dropdown
-                      value={String(enableDiscordRPC)}
-                      onChange={(val) => setEnableDiscordRPC(val === "true")}
-                      options={[
-                        { value: "true", label: "Enabled" },
-                        { value: "false", label: "Disabled" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </SettingsRow>
-                )}
-                <SettingsRow
-                  label="Mapping Auto-Sync"
-                  desc="Sync anime and manga title-to-MAL mappings when the app starts, skipped when the data is already fresh. Off skips the startup sync only — the background interval below and Sync now still work."
-                >
-                  <div
-                    style={{ display: "flex", gap: 8, alignItems: "center" }}
-                  >
-                    <Dropdown
-                      value={String(settings?.mappingAutoSync !== false)}
-                      onChange={(val) => handleMappingAutoSyncChange(val)}
-                      options={[
-                        { value: "true", label: "On" },
-                        { value: "false", label: "Off" },
-                      ]}
-                      minWidth={110}
-                    />
-                    <button
-                      type="button"
-                      className="settings-market-btn"
-                      disabled={syncingMapping === "all"}
-                      onClick={() => handleSyncMappingNow()}
-                    >
-                      {syncingMapping === "all" ? "Syncing..." : "Sync now"}
-                    </button>
-                  </div>
-                </SettingsRow>
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Mapping Sync Interval
-                    </div>
-                    <div className="settings-row-hint">
-                      Hours between automatic background mapping syncs while the
-                      app is running. 0 disables the timer; startup sync and
-                      Sync now still follow the setting above.
-                    </div>
-                  </div>
-                  <div className="settings-row-control u-style-72">
-                    <input
-                      type="number"
-                      min={0}
-                      value={mappingSyncInterval}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        setMappingSyncInterval(isNaN(val) ? "" : val);
-                      }}
-                      onBlur={(e) =>
-                        handleMappingIntervalChange(e.target.value)
-                      }
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") e.currentTarget.blur();
-                      }}
-                      className="settings-text-input settings-number-input u-style-73"
-                    />
-                    <span className="u-style-74">hours</span>
-                  </div>
-                </div>
               </div>
               {/* MyAnimeList Connection */}
               <div className="settings-section glass-panel">
@@ -1737,24 +1556,6 @@ export default function SettingsView({
                         />
                       </div>
                     </div>
-                    {!isMobileApp() && (
-                      <SettingsRow
-                        label="Discord Profile Button"
-                        desc="Add a clickable button linking to your MyAnimeList profile on your Discord Rich Presence activity."
-                      >
-                        <Dropdown
-                          value={String(malDiscordProfile)}
-                          onChange={(val) =>
-                            setMalDiscordProfile(val === "true")
-                          }
-                          options={[
-                            { value: "true", label: "Enabled" },
-                            { value: "false", label: "Disabled" },
-                          ]}
-                          minWidth={200}
-                        />
-                      </SettingsRow>
-                    )}
                     <div className="settings-row-item">
                       <div className="settings-row-info">
                         <div className="settings-row-label">
@@ -2339,31 +2140,13 @@ export default function SettingsView({
                     />
                   </div>
                 </div>
-                <SettingsRow
-                  label={`Recommendations Shown (${infoRecCount} ${infoRecCount === 1 ? "title" : "titles"})`}
-                  desc="How many recommendation cards appear on a title page. Rendered as a single horizontal row (1-10, default 4)."
-                >
-                  <div
-                    className="catalog-columns-picker"
-                    style={{ flexWrap: "wrap", gap: "6px" }}
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        className={`catalog-col-btn ${infoRecCount === n ? "active" : ""}`}
-                        onClick={() => setInfoRecCount(n)}
-                      >
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                </SettingsRow>
               </div>
 
               {/* Downloads & Media Server */}
               <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">Downloads</h2>
+                <h2 className="settings-section-title">
+                  Downloads & Media Server
+                </h2>
 
                 <div className="settings-row-item">
                   <div className="settings-row-info">
@@ -2436,6 +2219,86 @@ export default function SettingsView({
                     )}
                   </div>
                 </SettingsRow>
+
+                <SettingsRow
+                  label="Anime Download Naming"
+                  desc="Format for downloaded anime video files. Plex / Jellyfin standard includes dynamic episode zero-padding (e.g. S01E0001 for 1000+ episode anime, S01E01 for standard series)."
+                >
+                  <Dropdown
+                    value={animeNamingScheme}
+                    onChange={setAnimeNamingScheme}
+                    options={[
+                      {
+                        value: "plex_jellyfin",
+                        label: "Plex / Jellyfin Standard (Auto-padded)",
+                      },
+                      {
+                        value: "default",
+                        label: "Default / Compact (1Ep.mp4)",
+                      },
+                      {
+                        value: "series_s_ep",
+                        label: "Series S#EP# (One Piece S1EP1.mp4)",
+                      },
+                      {
+                        value: "episode_only",
+                        label: "Episode Only (Episode 01.mp4)",
+                      },
+                    ]}
+                    minWidth={220}
+                  />
+                </SettingsRow>
+
+                {!isMobileApp() && (
+                  <SettingsRow
+                    label="Jellyfin & Plex Compatibility"
+                    desc="Automatically updates anime download file naming to Plex/Jellyfin format and generates .nfo metadata and poster.jpg for existing and new downloads. Disabling keeps existing NFO files."
+                  >
+                    <Dropdown
+                      value={String(jellyfinCompatibility)}
+                      onChange={(val) => {
+                        const isEnabled = val === "true";
+                        setJellyfinCompatibility(isEnabled);
+                        if (isEnabled) {
+                          setAnimeNamingScheme("plex_jellyfin");
+                        } else {
+                          setAnimeNamingScheme("default");
+                        }
+                      }}
+                      options={[
+                        { value: "true", label: "Enabled" },
+                        { value: "false", label: "Disabled" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </SettingsRow>
+                )}
+
+                <div className="settings-row-item">
+                  <div className="settings-row-info">
+                    <div className="settings-row-label">
+                      Media Server Integration (Jellyfin / Plex)
+                    </div>
+                    <div className="settings-row-hint">
+                      Save episodes as "Show/Season 02/Show - S02E05
+                      [1080p].mp4", align external subtitles, and automatically
+                      generate .nfo metadata and poster artwork for Jellyfin and
+                      Plex. Pick the season and show folder on each show's page
+                      next to the download buttons.
+                    </div>
+                  </div>
+                  <div className="settings-row-control">
+                    <Dropdown
+                      value={String(mediaServerNaming)}
+                      onChange={(val) => setMediaServerNaming(val === "true")}
+                      options={[
+                        { value: "true", label: "On (Show - S01E05 [1080p])" },
+                        { value: "false", label: "Off (5Ep.mp4)" },
+                      ]}
+                      minWidth={200}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
           )}
@@ -2760,8 +2623,7 @@ export default function SettingsView({
                       },
                       {
                         value: "title_s01e01",
-                        label:
-                          "Plex / Jellyfin (Title.mp4 / Title - S01E01.mp4)",
+                        label: "Plex / Jellyfin (Title.mp4 / Title - S01E01.mp4)",
                       },
                       {
                         value: "title_ep",
@@ -3061,91 +2923,6 @@ export default function SettingsView({
                           value: "false",
                           label: "No (Download subtitles in subfolder)",
                         },
-                      ]}
-                      minWidth={200}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Plex & Jellyfin */}
-              <div className="settings-section glass-panel">
-                <h2 className="settings-section-title">Plex & Jellyfin</h2>
-
-                <SettingsRow
-                  label="Anime Download Naming"
-                  desc="Format for downloaded anime video files. Plex / Jellyfin standard includes dynamic episode zero-padding (e.g. S01E0001 for 1000+ episode anime, S01E01 for standard series)."
-                >
-                  <Dropdown
-                    value={animeNamingScheme}
-                    onChange={setAnimeNamingScheme}
-                    options={[
-                      {
-                        value: "plex_jellyfin",
-                        label: "Plex / Jellyfin Standard (Auto-padded)",
-                      },
-                      {
-                        value: "default",
-                        label: "Default / Compact (1Ep.mp4)",
-                      },
-                      {
-                        value: "series_s_ep",
-                        label: "Series S#EP# (One Piece S1EP1.mp4)",
-                      },
-                      {
-                        value: "episode_only",
-                        label: "Episode Only (Episode 01.mp4)",
-                      },
-                    ]}
-                    minWidth={220}
-                  />
-                </SettingsRow>
-
-                {!isMobileApp() && (
-                  <SettingsRow
-                    label="Jellyfin & Plex Compatibility"
-                    desc="Automatically updates anime download file naming to Plex/Jellyfin format and generates .nfo metadata and poster.jpg for existing and new downloads. Disabling keeps existing NFO files."
-                  >
-                    <Dropdown
-                      value={String(jellyfinCompatibility)}
-                      onChange={(val) => {
-                        const isEnabled = val === "true";
-                        setJellyfinCompatibility(isEnabled);
-                        if (isEnabled) {
-                          setAnimeNamingScheme("plex_jellyfin");
-                        } else {
-                          setAnimeNamingScheme("default");
-                        }
-                      }}
-                      options={[
-                        { value: "true", label: "Enabled" },
-                        { value: "false", label: "Disabled" },
-                      ]}
-                      minWidth={200}
-                    />
-                  </SettingsRow>
-                )}
-
-                <div className="settings-row-item">
-                  <div className="settings-row-info">
-                    <div className="settings-row-label">
-                      Media Server Integration (Jellyfin / Plex)
-                    </div>
-                    <div className="settings-row-hint">
-                      Save episodes as "Show/Season 02/Show - S02E05
-                      [1080p].mp4", align external subtitles, and automatically
-                      generate .nfo metadata and poster artwork for Jellyfin and
-                      Plex. Pick the season and show folder on each show's page
-                      next to the download buttons.
-                    </div>
-                  </div>
-                  <div className="settings-row-control">
-                    <Dropdown
-                      value={String(mediaServerNaming)}
-                      onChange={(val) => setMediaServerNaming(val === "true")}
-                      options={[
-                        { value: "true", label: "On (Show - S01E05 [1080p])" },
-                        { value: "false", label: "Off (5Ep.mp4)" },
                       ]}
                       minWidth={200}
                     />

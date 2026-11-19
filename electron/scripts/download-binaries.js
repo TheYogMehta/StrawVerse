@@ -12,7 +12,6 @@ const macMpvUrl =
 
 const FFMPEG_RELEASE = "b6.1.1";
 const FFMPEG_WIN_URL = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-win32-x64.gz`;
-const FFMPEG_LINUX_URL = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-linux-x64.gz`;
 const FFMPEG_MAC_ARM64_URL = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-darwin-arm64.gz`;
 
 const mpvDir = path.join(__dirname, "..", "mpv");
@@ -22,7 +21,6 @@ const macDir = path.join(mpvDir, "darwin");
 
 const ffmpegDir = path.join(__dirname, "..", "ffmpeg");
 const ffmpegWinDir = path.join(ffmpegDir, "win32");
-const ffmpegLinuxDir = path.join(ffmpegDir, "linux");
 const ffmpegMacDir = path.join(ffmpegDir, "darwin");
 
 const downloadFile = async (url, destPath, progressLabel) => {
@@ -248,27 +246,6 @@ const setupFfmpegMac = async () => {
   }
 };
 
-const setupFfmpegLinux = async () => {
-  const destExe = path.join(ffmpegLinuxDir, "ffmpeg");
-
-  if (fs.existsSync(destExe) && fs.statSync(destExe).size > 0) {
-    console.log("Linux FFmpeg binary already exists, skipping download.");
-    return;
-  }
-
-  if (!fs.existsSync(ffmpegLinuxDir)) {
-    fs.mkdirSync(ffmpegLinuxDir, { recursive: true });
-  }
-
-  console.log("Downloading Linux FFmpeg binary...");
-  const response = await got(FFMPEG_LINUX_URL, { responseType: "buffer" });
-  const decompressed = require("zlib").gunzipSync(response.body);
-  fs.writeFileSync(destExe, decompressed);
-  fs.chmodSync(destExe, 0o755);
-
-  console.log("Downloaded and extracted Linux ffmpeg successfully.");
-};
-
 const patchSnapBuilder = () => {
   try {
     const snapLegacyPath = path.join(
@@ -314,7 +291,6 @@ const main = async () => {
     await setupMacMpv();
     await setupConfig();
     await setupFfmpegWindows();
-    await setupFfmpegLinux();
     await setupFfmpegMac();
     console.log("All binaries and custom skins configured successfully!");
   } catch (err) {

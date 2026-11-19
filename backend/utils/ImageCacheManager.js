@@ -3,7 +3,7 @@ const fs = require("fs");
 const crypto = require("crypto");
 
 const { logger } = require("./AppLogger");
-const { getKeyValue, queryOne, queryAll, run, exec, runUpsertCompat } = require("./db");
+const { getKeyValue, queryOne, queryAll, run, exec } = require("./db");
 const { getHeaders } = require("./proxyHeaders");
 const { getUserDataPath } = require("./constants");
 
@@ -105,7 +105,7 @@ async function cacheImage(url, buffer = null) {
     const fileSize = imageBuffer.length;
 
     const now = Date.now();
-    await runUpsertCompat(
+    await run(
       `
       INSERT INTO ImageCache (url, filename, file_size, last_accessed)
       VALUES (?, ?, ?, ?)
@@ -115,12 +115,6 @@ async function cacheImage(url, buffer = null) {
         last_accessed = excluded.last_accessed
     `,
       [url, filename, fileSize, now],
-      () =>
-        run(
-          `INSERT OR REPLACE INTO ImageCache (url, filename, file_size, last_accessed)
-           VALUES (?, ?, ?, ?)`,
-          [url, filename, fileSize, now],
-        ),
     );
 
     enforceLimit().catch((err) =>
@@ -179,26 +173,6 @@ async function enforceLimit() {
   }
 }
 
-// Delete ImageCache rows in chunks instead of one statement per row:
-// startup cleanup used to issue hundreds of sequential awaits.
-async function deleteImageCacheRows(urls) {
-  if (!urls || urls.length === 0) return;
-  const CHUNK = 400;
-  for (let i = 0; i < urls.length; i += CHUNK) {
-    const chunk = urls.slice(i, i + CHUNK);
-    try {
-      const placeholders = chunk.map(() => "?").join(", ");
-      await run(`DELETE FROM ImageCache WHERE url IN (${placeholders})`, chunk);
-    } catch (_) {
-      for (const url of chunk) {
-        try {
-          await run("DELETE FROM ImageCache WHERE url = ?", [url]);
-        } catch (_) {}
-      }
-    }
-  }
-}
-
 async function runStartupCleanup() {
   logger.info("Running startup image cache cleanup...");
   try {
@@ -210,7 +184,6 @@ async function runStartupCleanup() {
       [cutoff],
     );
 
-    const expiredUrls = [];
     for (const item of expiredItems) {
       try {
         const filePath = path.join(cacheDir, item.filename);
@@ -218,9 +191,8 @@ async function runStartupCleanup() {
           await fs.promises.unlink(filePath);
         }
       } catch (_) {}
-      expiredUrls.push(item.url);
+      await run("DELETE FROM ImageCache WHERE url = ?", [item.url]);
     }
-    await deleteImageCacheRows(expiredUrls);
     if (expiredItems.length > 0) {
       logger.info(`Evicted ${expiredItems.length} expired image cache files.`);
     }
@@ -250,14 +222,12 @@ async function runStartupCleanup() {
     }
 
     const allDbItems = await queryAll("SELECT url, filename FROM ImageCache");
-    const missingFileUrls = [];
     for (const item of allDbItems) {
       const filePath = path.join(cacheDir, item.filename);
       if (!fs.existsSync(filePath)) {
-        missingFileUrls.push(item.url);
+        await run("DELETE FROM ImageCache WHERE url = ?", [item.url]);
       }
     }
-    await deleteImageCacheRows(missingFileUrls);
 
     await migrateDatabaseBase64Images();
   } catch (e) {

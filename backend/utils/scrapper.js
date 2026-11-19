@@ -788,10 +788,10 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
         console.log(
           `[Bypass] Clearance for ${domain} was obtained recently (${Math.round(Math.abs(now - savedAt) / 1000)}s ago), skipping redundant bypass.`,
         );
-        return true;
+        return;
       }
       if (isValid && !force) {
-        return true;
+        return;
       }
     }
   } catch (e) {
@@ -808,7 +808,7 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
     console.log(
       `[Bypass] Skipping bypass for ${domain} — cooldown active (${Math.round((bypassCooldowns[domain] - Date.now()) / 1000)}s remaining)`,
     );
-    return false;
+    return;
   }
 
   activeBypasses[domain] = queueBypass(async () => {
@@ -829,32 +829,6 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
       global.LastScrapperResponseCode = 200;
 
       let navUrl = targetUrl;
-
-      // Embed-only player pages (megavid/megaplay/vidstream family) refuse
-      // direct navigation with an "Embed Only" page, so a window bypass can
-      // never yield clearance there. Fail fast so callers rotate servers
-      // instead of hanging on the verification window.
-      try {
-        const navParsed = new URL(navUrl);
-        const navHost = navParsed.hostname.toLowerCase();
-        const isPlayerHost = [
-          "megavid.",
-          "megaplay.",
-          "vidplay",
-          "vidstream",
-          "megacloud.",
-          "vidcloud.",
-          "voe.",
-          "doodstream",
-          "dood.",
-        ].some((h) => navHost.includes(h));
-        if (isPlayerHost && navParsed.pathname !== "/") {
-          console.warn(
-            `[Bypass] Embed-only player URL (${navUrl}). Skipping window bypass.`,
-          );
-          return false;
-        }
-      } catch (_) {}
 
       if (force) {
         showScrapperWindow();
@@ -889,7 +863,7 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
         console.warn(
           `[Bypass] Could not navigate to ${navUrl} (host unreachable). Aborting bypass.`,
         );
-        return false;
+        return;
       }
 
       let initialClearanceValue = null;
@@ -1034,7 +1008,6 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
         console.log(
           `[Bypass] Successfully bypassed / loaded destination page for ${domain} (title: "${title}")`,
         );
-        return true;
       } else {
         bypassCooldowns[domain] = Date.now() + 15 * 1000;
         console.warn(
@@ -1043,14 +1016,13 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
         if (global.ScrapperWindow && !global.ScrapperWindow.isDestroyed()) {
           global.ScrapperWindow.loadURL("about:blank").catch(() => {});
         }
-        return false;
       }
     } finally {
       global.IsBypassingCloudflare = false;
     }
   });
   try {
-    return (await activeBypasses[domain]) !== false;
+    await activeBypasses[domain];
   } finally {
     delete activeBypasses[domain];
   }

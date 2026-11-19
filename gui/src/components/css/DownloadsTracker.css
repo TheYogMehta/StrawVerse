@@ -20,34 +20,6 @@
   gap: 3px;
 }
 
-/* Title row keeps the header's top-right free for the back-to-anime button
-   (mirrors the red-box placement requested on the Downloads header). */
-.tracker-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.btn-back-anime {
-  background-color: var(--bg-secondary);
-  border: 1px solid var(--border);
-  color: var(--text-main);
-  padding: 7px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.btn-back-anime:hover {
-  border-color: var(--accent, #22c55e);
-}
-
 .tracker-main-title {
   margin: 0;
 }

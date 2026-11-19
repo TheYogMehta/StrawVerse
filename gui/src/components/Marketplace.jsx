@@ -510,35 +510,6 @@ export default function Marketplace({ initialType }) {
     }
   };
 
-  const handleToggleRepository = async (repo) => {
-    const willBeEnabled = repo.enabled === false;
-    try {
-      setLoading(true);
-      const resp = await fetch(
-        `/api/marketplace/repos/${encodeURIComponent(repo.owner)}/toggle`,
-        { method: "POST" },
-      );
-      const res = await resp.json().catch(() => ({}));
-      if (!resp.ok || res.error) {
-        throw new Error(res?.error || "Failed to toggle repository.");
-      }
-
-      if (res && res.success) {
-        swalSuccess(
-          willBeEnabled ? "Repository Enabled" : "Repository Disabled",
-          willBeEnabled
-            ? `Repository @${res.owner} is back in your marketplace.`
-            : `Repository @${res.owner} is hidden from the marketplace. Extensions already installed from it keep working.`,
-        );
-        fetchMarketplace();
-      }
-    } catch (err) {
-      swalError("Failed to Toggle Repository", err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleRestoreDefaultRepository = async () => {
     try {
       setLoading(true);
@@ -583,14 +554,8 @@ export default function Marketplace({ initialType }) {
     if (!matchesTab) return false;
 
     // 2. Disabled scraper check
-    if (provider.disabled && !isInstalled(provider)) {
-      return false;
-    }
-    // Items from a repository the user disabled are hidden, except ones that
-    // are already installed - those stay listed so they can still be updated
-    // or removed.
-    if (provider.repoEnabled === false && !isInstalled(provider)) {
-      return false;
+    if (provider.disabled) {
+      return isInstalled(provider);
     }
 
     // 3. Strict repository selection filter
@@ -910,10 +875,7 @@ export default function Marketplace({ initialType }) {
                     ? `${repo.owner}/${repo.name}`
                     : `@${repo.owner}`;
                   return (
-                    <div
-                      key={repoKey}
-                      className={`repo-item-card ${repo.enabled === false ? "disabled" : ""}`}
-                    >
+                    <div key={repoKey} className="repo-item-card">
                       <div className="repo-item-info">
                         <div className="repo-item-title-row">
                           <span className="repo-item-owner">{repoLabel}</span>
@@ -924,48 +886,19 @@ export default function Marketplace({ initialType }) {
                           ) : (
                             <span className="market-repo-badge">Custom</span>
                           )}
-                          {repo.enabled === false && (
-                            <span className="market-repo-badge disabled">
-                              Disabled
-                            </span>
-                          )}
                         </div>
                         <span className="repo-item-url" title={repo.url}>
                           {repo.url}
                         </span>
                       </div>
 
-                      <div className="repo-item-actions">
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={repo.enabled !== false}
-                          className={`repo-toggle ${repo.enabled === false ? "off" : ""}`}
-                          onClick={() => handleToggleRepository(repo)}
-                          title={
-                            repo.enabled === false
-                              ? "Enable this repository"
-                              : "Disable this repository"
-                          }
-                          aria-label={
-                            repo.enabled === false
-                              ? `Enable repository @${repo.owner}`
-                              : `Disable repository @${repo.owner}`
-                          }
-                        >
-                          <span className="repo-toggle-knob" />
-                        </button>
-
-                        {!repo.isDefault && (
-                          <button
-                            onClick={() => handleRemoveRepository(repo)}
-                            className="btn-remove-repo"
-                            title="Remove this custom repository"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        )}
-                      </div>
+                      <button
+                        onClick={() => handleRemoveRepository(repo)}
+                        className="btn-remove-repo"
+                        title={`Remove ${repo.isDefault ? "official" : "custom"} repository`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
                     </div>
                   );
                 })
@@ -995,10 +928,6 @@ export default function Marketplace({ initialType }) {
               ) : (
                 <div />
               )}
-              <p className="repo-modal-hint">
-                Disabled repositories are hidden from the Marketplace list.
-                Extensions already installed from them keep working.
-              </p>
               <button
                 onClick={() => {
                   setShowRepoModal(false);
