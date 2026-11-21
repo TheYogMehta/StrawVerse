@@ -20,7 +20,6 @@ import {
 import Swal from "sweetalert2";
 import { swalSuccess, swalError, swalConfirm } from "../utils/swal";
 import { apiPost, parseTags } from "../utils/common";
-import { normalizeStatus, formatAudioLangs } from "../utils/mediaBadges";
 
 import CatalogHeader from "./catalog/CatalogHeader";
 import LibraryStats from "./catalog/LibraryStats";
@@ -388,19 +387,11 @@ export default function Catalog({
   const [isFilterPanelOpen, setIsFilterPanelOpen] = useState(
     () => provider === "mal" && type !== "Movies",
   );
-  const [installedProvidersList, setInstalledProvidersList] = useState([]);
   const [providerMetadataList, setProviderMetadataList] = useState([]);
-  const [activeProviderName, setActiveProviderName] = useState("");
   const [catalogSource, setCatalogSource] = useState(() => {
     return sessionStorage.getItem(`catalog_source_${type}`) || "mal";
   });
   const [totalCount, setTotalCount] = useState(null);
-  const [cardMeta, setCardMeta] = useState({});
-  const cardMetaStatusReqRef = useRef(new Set());
-  const cardMetaLangsReqRef = useRef(new Set());
-  // Failed passes are retried on a later render (the key is unmarked), so we
-  // count attempts per key+field to give up after 3 instead of looping.
-  const cardMetaAttemptRef = useRef(new Map());
   const tagChipsRef = useRef(null);
 
   const filteredProviders = useMemo(() => {
@@ -434,51 +425,6 @@ export default function Catalog({
     fetchProviderMetadata();
   }, [type]);
 
-  useEffect(() => {
-    const fetchInstalledProviders = async () => {
-      const settingKey = type === "Manga" ? "Mangaprovider" : "Animeprovider";
-      try {
-        if (window.sharedStateAPI && window.sharedStateAPI.getSettings) {
-          const res = await window.sharedStateAPI.getSettings([
-            "providers",
-            "installedExtensions",
-            "Animeprovider",
-            "Mangaprovider",
-          ]);
-          const pList = res?.settings?.providers?.[type] || [];
-          setInstalledProvidersList(pList);
-          setActiveProviderName(res?.settings?.[settingKey] || "");
-          return;
-        }
-        // Web fallback: active provider comes from settings; installed list
-        // is only exposed through the shared-state bridge.
-        const resp = await fetch("/api/settings");
-        if (resp.ok) {
-          const data = await resp.json();
-          const s = data?.settings || data || {};
-          setActiveProviderName(s[settingKey] || "");
-        }
-      } catch (_) {}
-    };
-    fetchInstalledProviders();
-  }, [type]);
-
-  const allAvailableProviders = useMemo(() => {
-    const set = new Set(installedProvidersList);
-    if (data?.results && Array.isArray(data.results)) {
-      data.results.forEach((i) => {
-        if (
-          i.provider &&
-          i.provider !== "local source" &&
-          i.provider !== "provider"
-        ) {
-          set.add(i.provider);
-        }
-      });
-    }
-    return Array.from(set).sort();
-  }, [installedProvidersList, data?.results]);
-
   const activeFilterCount = useMemo(() => {
     return Object.entries(activeFilters).filter(([k, v]) => {
       if (k === "page") return false;
@@ -498,199 +444,6 @@ export default function Catalog({
       results: displayResults,
     }),
     [data, displayResults],
-  );
-
-  // MAL id for badge lookups: only trust a real malid, never a provider id.
-  // (Unique/unmapped provider lists carry provider ids in `id` — using that
-  // as a malid would query the wrong title's status.)
-  const getMalIdForItem = (item) => {
-    const raw = item?.malid || item?.MalID || null;
-    const num = Number(raw);
-    return Number.isInteger(num) && num > 0 ? num : null;
-  };
-
-  // Cache key for a card's badge metadata. Cards with a MAL id use it; cards
-  // without one fall back to the provider + provider id they came from so the
-  // extension-side lookups (status from the mapping DB, languages from the
-  // provider's own episode list) still have somewhere to land.
-  const getItemMetaKey = (item) => {
-    const malid = getMalIdForItem(item);
-    if (malid != null) return `${type}:${malid}`;
-    if (item?.provider && item?.id !== undefined && item?.id !== null) {
-      return `${type}:p:${item.provider}:${item.id}`;
-    }
-    return null;
-  };
-
-  // Status + sub/dub badges for catalog cards, fetched as two passes so the
-  // fast AniList status lookup paints without waiting on the slow provider
-  // episode-list lookup (langs). Both passes fire on the same 500ms defer and
-  // run concurrently; each merges its own field, so a slow langs response
-  // never delays a status badge. Requests are capped at 24 cards (the
-  // endpoint's own limit) and a response re-runs this effect, cascading
-  // through any remaining items. Keys stay marked after a success (no
-  // refetch of a known-null) and are unmarked on failure so a later render
-  // retries.
-  useEffect(() => {
-    const items = Array.isArray(displayResults) ? displayResults : [];
-    const needStatus = [];
-    const needLangs = [];
-    const seen = new Set();
-    for (const item of items) {
-      const key = getItemMetaKey(item);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      const malid = getMalIdForItem(item);
-      // A card the backend can be asked about (a MAL id, or the provider +
-      // provider id it came from for the extension-side lookups) always goes
-      // through the batched lookup — AniList wins over the card's own status.
-      // Status/languages carried on the item itself only satisfy cards that
-      // nothing can be fetched for.
-      const fetchable =
-        malid != null ||
-        !!(item.provider && item.id !== undefined && item.id !== null);
-      const fetched = cardMeta[key];
-      const hasStatus =
-        !!normalizeStatus(fetched?.status, type) ||
-        cardMetaStatusReqRef.current.has(key) ||
-        (!fetchable && !!normalizeStatus(item.status, type));
-      const hasLangs =
-        type !== "Anime" ||
-        !!formatAudioLangs(fetched?.langs) ||
-        cardMetaLangsReqRef.current.has(key) ||
-        (!fetchable && !!formatAudioLangs(item.langs));
-      const lookup = {
-        key,
-        malid,
-        provider: item.provider || null,
-        id: item.id !== undefined ? item.id : null,
-        title: item.title || null,
-      };
-      if (!hasStatus && needStatus.length < 24) {
-        needStatus.push(lookup);
-      }
-      if (!hasLangs && needLangs.length < 24) {
-        needLangs.push(lookup);
-      }
-      if (
-        needStatus.length >= 24 &&
-        (type !== "Anime" || needLangs.length >= 24)
-      ) {
-        break;
-      }
-    }
-          // Skip if cardMeta already has all the needed data (from previous filter changes)
-      if (cardMeta && Object.keys(cardMeta).length >= displayResults.length) {
-        const hasAllStatus = displayResults.every((item) => {
-          const key = getItemMetaKey(item);
-          return cardMeta[key]?.status !== null;
-        });
-        const hasAllLangs = displayResults.every((item) => {
-          const key = getItemMetaKey(item);
-          return cardMeta[key]?.langs !== null;
-        });
-        if (hasAllStatus && hasAllLangs) {
-          setCardMeta((prev) => prev);
-          return;
-        }
-      }
-      const langsBatch = type === "Anime" ? needLangs : [];
-    if (!needStatus.length && !langsBatch.length) return;
-
-    const timer = setTimeout(async () => {
-      const runPass = async (batch, extraBody, field, ref) => {
-        batch.forEach(({ key }) => ref.current.add(key));
-        try {
-          const response = await fetch("/api/info/bulk-meta", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              type,
-              items: batch.map(({ key, malid, provider, id, title }) => ({
-                key,
-                malid,
-                provider,
-                id,
-                title,
-              })),
-              ...extraBody,
-            }),
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const payload = await response.json();
-          setCardMeta((prev) => {
-            const next = { ...prev };
-            for (const { key } of batch) {
-              const got = payload?.meta?.[key];
-              const existing = prev[key] || { status: null, langs: null };
-              next[key] = {
-                status: field === "status" ? got?.status ?? null : existing.status,
-                langs: field === "langs" ? got?.langs ?? null : existing.langs,
-              };
-            }
-            return next;
-          });
-          // The backend flags a pass that failed (outage/rate limit) as
-          // distinct from "genuinely unknown" — unmark those keys so a later
-          // render retries them instead of pinning null badges all session.
-          const failed =
-            field === "status" ? payload?.statusFailed : payload?.langsFailed;
-          if (failed) {
-            batch.forEach(({ key }) => {
-              const id = `${field}:${key}`;
-              const attempts = (cardMetaAttemptRef.current.get(id) || 0) + 1;
-              cardMetaAttemptRef.current.set(id, attempts);
-              if (attempts < 3) ref.current.delete(key);
-            });
-          }
-        } catch (err) {
-          console.error(`Failed to load card ${field}:`, err);
-          batch.forEach(({ key }) => ref.current.delete(key));
-        }
-      };
-
-      await Promise.all([
-        ...(needStatus.length
-          ? [
-              runPass(
-                needStatus,
-                { includeLangs: false },
-                "status",
-                cardMetaStatusReqRef,
-              ),
-            ]
-          : []),
-        ...(langsBatch.length
-          ? [
-              runPass(
-                langsBatch,
-                { includeStatus: false },
-                "langs",
-                cardMetaLangsReqRef,
-              ),
-            ]
-          : []),
-      ]);
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [displayResults, type, provider, cardMeta]);
-
-  const getCardMeta = useCallback(
-    (item) => {
-      if (!item) return null;
-      const key = getItemMetaKey(item);
-      const fetched = key ? cardMeta[key] : null;
-      const status =
-        normalizeStatus(fetched?.status, type) ||
-        normalizeStatus(item.status, type);
-      const langs =
-        type === "Anime"
-          ? formatAudioLangs(item.langs) || formatAudioLangs(fetched?.langs)
-          : null;
-      if (!status && !langs) return null;
-      return { status, langs };
-    },
-    [cardMeta, type, provider],
   );
 
   const handleResetFilters = () => {
@@ -1397,14 +1150,6 @@ export default function Catalog({
           Special: "Special",
         },
       },
-      language: {
-        label: "Language",
-        options: {
-          All: "",
-          Sub: "sub",
-          Dub: "dub",
-        },
-      },
       sort: {
         label: "Sort",
         options: {
@@ -1412,124 +1157,6 @@ export default function Catalog({
           Popular: "most-viewed",
           Score: "score",
           "Name A-Z": "name-az",
-        },
-      },
-    },
-    animekai: {
-      genre: {
-        label: "Genre",
-        options: {
-          All: "",
-          Action: "1",
-          "Action & Adventure": "46",
-          Adventure: "2",
-          Animation: "47",
-          "Boys Love": "49",
-          Cars: "42",
-          Comedy: "3",
-          Dementia: "40",
-          Demons: "23",
-          Drama: "4",
-          Ecchi: "10",
-          Erotica: "51",
-          Fantasy: "5",
-          Game: "30",
-          "Girls Love": "50",
-          Gourmet: "45",
-          Harem: "38",
-          Historical: "32",
-          Horror: "16",
-          Isekai: "34",
-          Josei: "41",
-          Kids: "39",
-          Magic: "27",
-          "Mahou Shoujo": "17",
-          "Martial Arts": "36",
-          Mecha: "14",
-          Military: "21",
-          Music: "18",
-          Mystery: "11",
-          Parody: "31",
-          Police: "19",
-          Psychological: "9",
-          Romance: "6",
-          Samurai: "33",
-          School: "24",
-          "Sci-Fi": "8",
-          "Sci-Fi & Fantasy": "48",
-          Seinen: "25",
-          Shoujo: "37",
-          "Shoujo Ai": "28",
-          Shounen: "22",
-          "Shounen Ai": "29",
-          "Slice of Life": "7",
-          Space: "20",
-          Sports: "15",
-          Supernatural: "12",
-          "Super Power": "26",
-          Suspense: "44",
-          Thriller: "13",
-          Vampire: "35",
-        },
-      },
-      status: {
-        label: "Status",
-        options: {
-          All: "",
-          Ongoing: "currently-airing",
-          Completed: "finished-airing",
-        },
-      },
-      type: {
-        label: "Type",
-        options: {
-          All: "",
-          TV: "TV",
-          Movie: "Movie",
-          ONA: "ONA",
-          OVA: "OVA",
-          Special: "Special",
-          Music: "Music",
-        },
-      },
-      language: {
-        label: "Language",
-        options: {
-          All: "",
-          Sub: "sub",
-          Dub: "dub",
-        },
-      },
-      sort: {
-        label: "Sort",
-        options: {
-          Default: "default",
-          "Latest Updated": "latest-updated",
-          "Latest Added": "latest-added",
-          Score: "score",
-          "Name A-Z": "name-az",
-          "Release Date": "release-date",
-          "Most Viewed": "most-viewed",
-        },
-      },
-    },
-    weebcentral: {
-      sort: {
-        label: "Sort",
-        options: {
-          "Latest Updates": "Latest Updates",
-          "Recently Added": "Recently Added",
-          Popularity: "Popularity",
-          Subscribers: "Subscribers",
-          Alphabet: "Alphabet",
-          "Best Match": "Best Match",
-        },
-      },
-      order: {
-        label: "Order",
-        options: {
-          Descending: "Descending",
-          Ascending: "Ascending",
         },
       },
     },
@@ -1582,50 +1209,6 @@ export default function Catalog({
           "Most Followed": "most-followed",
           Rating: "rating",
           "Title A-Z": "title-az",
-        },
-      },
-    },
-
-    // MangaKatana: genre browses the site's /genre/{slug} listing; status
-    // is filtered per-item from div.status (ongoing|completed only). The
-    // extension also normalizes raw GUI labels itself, so unmapped values
-    // degrade gracefully.
-    mangakatana: {
-      genre: {
-        label: "Genre",
-        options: {
-          Action: "action",
-          Adventure: "adventure",
-          Comedy: "comedy",
-          Drama: "drama",
-          Ecchi: "ecchi",
-          Fantasy: "fantasy",
-          Harem: "harem",
-          Historical: "historical",
-          Horror: "horror",
-          Isekai: "isekai",
-          Josei: "josei",
-          "Martial Arts": "martial-arts",
-          Mecha: "mecha",
-          Music: "music",
-          Mystery: "mystery",
-          Psychological: "psychological",
-          Romance: "romance",
-          School: "school-life",
-          "Sci-Fi": "sci-fi",
-          Seinen: "seinen",
-          Shoujo: "shoujo",
-          Shounen: "shounen",
-          "Slice of Life": "slice-of-life",
-          Sports: "sports",
-          Supernatural: "supernatural",
-        },
-      },
-      status: {
-        label: "Status",
-        options: {
-          Ongoing: "ongoing",
-          Completed: "completed",
         },
       },
     },
@@ -1721,45 +1304,6 @@ export default function Catalog({
     setLoadedPageStart(1);
     setLoadedPageEnd(1);
     fetchData(1, activeFilters, null, undefined, false, newSource);
-  };
-
-  // Switch the active extension provider used by Discover (the same setting
-  // the Extensions page's "Use Provider" action writes), then reload the
-  // catalog from page 1 with the new provider.
-  const handleProviderChange = async (newProvider) => {
-    if (!newProvider || newProvider === activeProviderName) return;
-
-    setActiveProviderName(newProvider);
-    const settingKey = type === "Manga" ? "Mangaprovider" : "Animeprovider";
-
-    try {
-      if (window.sharedStateAPI && window.sharedStateAPI.updateSetting) {
-        await window.sharedStateAPI.updateSetting(settingKey, newProvider);
-      } else {
-        await fetch("/api/settings/update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ [settingKey]: newProvider }),
-        });
-      }
-    } catch (err) {
-      console.error("Failed to switch provider:", err);
-    }
-
-    // Drop every cached view that was built from the previous provider.
-    if (window.catalogCache) {
-      delete window.catalogCache[`${type}_provider`];
-      delete window.catalogCache[`${type}_trending`];
-      delete window.catalogCache[`${type}_latest`];
-      delete window.catalogCache[`${type}_${provider}`];
-    }
-
-    setCurrentPage(1);
-    setData(null);
-    setFetchedPages({});
-    setLoadedPageStart(1);
-    setLoadedPageEnd(1);
-    fetchData(1, activeFilters);
   };
 
   const fetchData = async (
@@ -1926,14 +1470,8 @@ export default function Catalog({
             preloadPagesAround(page, currentFilters);
           }
         }
-        // v11 may report scoped provider ids ("TheYogMehta/anikoto");
-        // filter defs are keyed by short lowercase names.
-        const siteKey = String(resData?.site ?? "")
-          .split("/")
-          .pop()
-          .toLowerCase();
-        if (siteKey && siteFilterDefs[siteKey]) {
-          setAvailableFilters(siteFilterDefs[siteKey]);
+        if (resData?.site && siteFilterDefs[resData.site]) {
+          setAvailableFilters(siteFilterDefs[resData.site]);
         } else {
           setAvailableFilters(null);
         }
@@ -2537,8 +2075,7 @@ export default function Catalog({
       loadedPageStart: loadedPageStart || 1,
       loadedPageEnd: loadedPageEnd || currentPage,
       scrollPosition: currentScroll,
-      // no lastActivePage here: keep handleScroll's computed value —
-      // currentPage stays 1 under infinite scroll and would send restore to page 1
+      lastActivePage: currentPage,
     };
     onSelectMedia(
       id,
@@ -2770,19 +2307,6 @@ export default function Catalog({
     discoverTab,
   ]);
 
-  const filterToggleBtn = (
-    <button
-      type="button"
-      onClick={() => setIsFilterPanelOpen((prev) => !prev)}
-      className={`filter-toggle-btn${isFilterPanelOpen ? " is-open" : ""}`}
-      title={isFilterPanelOpen ? "Collapse filters" : "Expand filters"}
-      aria-label={isFilterPanelOpen ? "Collapse filters" : "Expand filters"}
-      aria-expanded={isFilterPanelOpen}
-    >
-      <ChevronDown size={15} />
-    </button>
-  );
-
   return (
     <div ref={wrapperRef} onScroll={handleScroll} className="catalog-wrapper">
       <CatalogHeader
@@ -2808,9 +2332,6 @@ export default function Catalog({
         catalogSource={catalogSource}
         onCatalogSourceChange={handleCatalogSourceChange}
         availableProviders={providerMetadataList}
-        installedProviders={installedProvidersList}
-        activeProvider={activeProviderName}
-        onProviderChange={handleProviderChange}
       />
 
       <LibraryStats
@@ -2866,25 +2387,20 @@ export default function Catalog({
                 </div>
               </div>
             </div>
-            <div className="filter-panel-actions">
-              {activeFilterCount > 0 && (
-                <button
-                  type="button"
-                  onClick={handleResetFilters}
-                  className="filter-reset-btn"
-                  title="Clear all filters"
-                >
-                  <RotateCcw size={13} />
-                  <span>Reset All</span>
-                </button>
-              )}
-              {filterToggleBtn}
-            </div>
+            {activeFilterCount > 0 && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="filter-reset-btn"
+                title="Clear all filters"
+              >
+                <RotateCcw size={13} />
+                <span>Reset All</span>
+              </button>
+            )}
           </div>
 
-          <div
-            className={`filter-grid${isFilterPanelOpen ? "" : " is-collapsed"}`}
-          >
+          <div className="filter-grid">
             {/* 1. User Tags */}
             {localTags.length > 0 && (
               <div className="filter-group">
@@ -3030,12 +2546,8 @@ export default function Catalog({
         </div>
       )}
 
-      {/* Discover Provider-native filter panel: forwards filters to the
-          active provider extension (e.g. MangaKatana genre/status). */}
-      {provider === "provider" &&
-        type !== "Movies" &&
-        isFilterPanelOpen &&
-        availableFilters && (
+      {/* Discover Provider-native Filter panel */}
+      {provider === "provider" && type !== "Movies" && isFilterPanelOpen && (
         <div className="filter-panel">
           <div className="filter-panel-header">
             <div className="filter-panel-left">
@@ -3049,24 +2561,19 @@ export default function Catalog({
                 )}
               </div>
             </div>
-            <div className="filter-panel-actions">
-              {activeFilterCount > 0 && (
-                <button
-                  type="button"
-                  onClick={handleResetFilters}
-                  className="filter-reset-btn"
-                  title="Clear all filters"
-                >
-                  <RotateCcw size={13} />
-                  <span>Reset All</span>
-                </button>
-              )}
-              {filterToggleBtn}
-            </div>
+            {activeFilterCount > 0 && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="filter-reset-btn"
+                title="Clear all filters"
+              >
+                <RotateCcw size={13} />
+                <span>Reset All</span>
+              </button>
+            )}
           </div>
-          <div
-            className={`filter-grid${isFilterPanelOpen ? "" : " is-collapsed"}`}
-          >
+          <div className="filter-grid">
             <div className="filter-group">
               <label className="filter-label">Downloads</label>
               <select
@@ -3287,7 +2794,6 @@ export default function Catalog({
               handlePageChange={handlePageChange}
               handleRemoveFromLibrary={handleRemoveFromLibrary}
               getItemTagInfo={getItemTagInfo}
-              getCardMeta={getCardMeta}
               onOpenTagModal={handleOpenTagModal}
             />
           )}

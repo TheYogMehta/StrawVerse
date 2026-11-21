@@ -174,10 +174,10 @@ async function settingfetch() {
         } catch (_) {}
       }
     }
-    // kept log files: default 3, user range 1..10
+    // kept log files: default 5, user range 1..10
     const parsedLogFiles = parseInt(config?.maxLogFiles, 10);
     const clampedLogFiles = isNaN(parsedLogFiles)
-      ? 3
+      ? 5
       : Math.min(Math.max(parsedLogFiles, 1), 10);
     if (config?.maxLogFiles !== clampedLogFiles) {
       config.maxLogFiles = clampedLogFiles;
@@ -299,21 +299,6 @@ async function settingfetch() {
       changes = true;
     }
 
-    if (!config?.hasOwnProperty("infoRecCount")) {
-      config.infoRecCount = 4;
-      changes = true;
-    } else {
-      // Recommendations shown on the info page: 1-10, default 4.
-      const parsedRecCount = parseInt(config.infoRecCount, 10);
-      const clampedRecCount = Number.isInteger(parsedRecCount)
-        ? Math.min(10, Math.max(1, parsedRecCount))
-        : 4;
-      if (clampedRecCount !== config.infoRecCount) {
-        config.infoRecCount = clampedRecCount;
-        changes = true;
-      }
-    }
-
     if (changes) {
       await settingSave();
     }
@@ -352,7 +337,7 @@ async function SettingsLoad() {
             CustomDownloadLocationMovies: null,
             mangaAutoScrollSpeed: 2,
             externalLogEnabled: true,
-            maxLogFiles: 3,
+            maxLogFiles: 5,
             Animeprovider: 0,
             Mangaprovider: 0,
             Moviesprovider: 0,
@@ -374,7 +359,6 @@ async function SettingsLoad() {
             subBgColor: "transparent",
             playerSpeed: 1.0,
             infoSortOrder: null,
-            infoRecCount: 4,
             upscalePreset: "off",
             forceHighPerformanceGpu: false,
             preferredSubtitleLanguages: ["English"],
@@ -404,10 +388,6 @@ async function SettingsLoad() {
       config.playerSpeed = 1.0;
     }
 
-    if (config && !config.hasOwnProperty("infoRecCount")) {
-      config.infoRecCount = 4;
-    }
-
     if (config && !config.hasOwnProperty("imageCacheSizeLimit")) {
       config.imageCacheSizeLimit = 5;
     }
@@ -418,7 +398,7 @@ async function SettingsLoad() {
     // One-time migration: external logs were force-disabled on mobile
     // before this setting existed there, so flip it on exactly once.
     if (config && !config.hasOwnProperty("maxLogFiles")) {
-      config.maxLogFiles = 3;
+      config.maxLogFiles = 5;
     }
     if (
       process.env.NODEJS_MOBILE_DATA_DIR &&
@@ -893,30 +873,16 @@ function getExtensionRepos() {
         };
       });
   };
-  const isOfficialEntry = (r) =>
-    r.isDefault ||
-    (r.id &&
-      r.id.toLowerCase() === DEFAULT_EXTENSION_REPO.id.toLowerCase()) ||
-    (r.url && r.url.toLowerCase() === DEFAULT_EXTENSION_REPO.url.toLowerCase());
 
   if (Array.isArray(config?.extension_repos)) {
-    // The official repo's on/off switch lives in its own config key, so the
-    // flag stays authoritative even after repos migrate to extension_repos.
-    return normalize(config.extension_repos).map((r) =>
-      isOfficialEntry(r)
-        ? { ...r, enabled: config?.official_extension_repo_enabled !== false }
-        : r,
-    );
+    return normalize(config.extension_repos);
   }
 
   // Backward compatibility with config.custom_extension_repos
   if (Array.isArray(config?.custom_extension_repos)) {
     const list = [];
     if (!config?.default_repo_removed) {
-      list.push({
-        ...DEFAULT_EXTENSION_REPO,
-        enabled: config?.official_extension_repo_enabled !== false,
-      });
+      list.push(DEFAULT_EXTENSION_REPO);
     }
     for (const r of config.custom_extension_repos) {
       if (r && r.owner && r.url) {
@@ -928,7 +894,6 @@ function getExtensionRepos() {
           rawBaseUrl: r.rawBaseUrl,
           marketplaceUrl: r.marketplaceUrl,
           isDefault: !!r.isDefault,
-          enabled: r.enabled !== false,
         };
         if (
           !list.some(
@@ -944,76 +909,7 @@ function getExtensionRepos() {
     return normalize(list);
   }
 
-  return [
-    {
-      ...DEFAULT_EXTENSION_REPO,
-      enabled: config?.official_extension_repo_enabled !== false,
-    },
-  ];
-}
-
-async function toggleExtensionRepo(ownerOrUrl) {
-  if (!ownerOrUrl) throw new Error("Repository identifier is required.");
-
-  const isOfficial =
-    ownerOrUrl.toLowerCase() ===
-      DEFAULT_EXTENSION_REPO.owner.toLowerCase() ||
-    ownerOrUrl.toLowerCase() === DEFAULT_EXTENSION_REPO.url.toLowerCase();
-
-  if (isOfficial) {
-    const nextEnabled = config?.official_extension_repo_enabled === false;
-    config.official_extension_repo_enabled = nextEnabled;
-    await settingSave();
-    logger.info(
-      `[Marketplace] ${nextEnabled ? "Enabled" : "Disabled"} official extension repository`,
-    );
-    return {
-      success: true,
-      owner: DEFAULT_EXTENSION_REPO.owner,
-      enabled: nextEnabled,
-    };
-  }
-
-  const customList = Array.isArray(config?.custom_extension_repos)
-    ? config.custom_extension_repos
-    : [];
-  const idx = customList.findIndex((r) => {
-    if (!r) return false;
-    const owner = (r.owner || "").toLowerCase();
-    const url = (r.url || "").toLowerCase();
-    const marketUrl = (r.marketplaceUrl || "").toLowerCase();
-    const target = ownerOrUrl.toLowerCase();
-    return owner === target || url === target || marketUrl === target;
-  });
-  if (idx === -1) {
-    throw new Error(`Repository '${ownerOrUrl}' not found in custom repositories.`);
-  }
-
-  const nextEnabled = !(customList[idx].enabled !== false);
-  customList[idx] = { ...customList[idx], enabled: nextEnabled };
-  config.custom_extension_repos = customList;
-  // Once repos have migrated to extension_repos (new multi-repo storage),
-  // that array is what getExtensionRepos reads - mirror the flag there too.
-  if (Array.isArray(config.extension_repos)) {
-    const target = ownerOrUrl.toLowerCase();
-    const matches = (r) =>
-      r &&
-      ((r.owner || "").toLowerCase() === target ||
-        (r.url || "").toLowerCase() === target ||
-        (r.marketplaceUrl || "").toLowerCase() === target);
-    config.extension_repos = config.extension_repos.map((r) =>
-      matches(r) && !r.isDefault ? { ...r, enabled: nextEnabled } : r,
-    );
-  }
-  await settingSave();
-  logger.info(
-    `[Marketplace] ${nextEnabled ? "Enabled" : "Disabled"} custom extension repo: @${customList[idx].owner}`,
-  );
-  return {
-    success: true,
-    owner: customList[idx].owner,
-    enabled: nextEnabled,
-  };
+  return [DEFAULT_EXTENSION_REPO];
 }
 
 async function addExtensionRepo(inputUrl) {
@@ -1223,10 +1119,6 @@ async function fetchAggregatedMarketplace(activeType = "Anime") {
           repoBaseUrl: repo.rawBaseUrl,
           uniqueId: `${repoId}/${item.name}`,
           isDefaultRepo: !!repo.isDefault,
-          // A disabled repo's items are still returned (so an extension
-          // installed from it stays visible and removable in the UI) — the
-          // frontend hides them unless they are actually installed.
-          repoEnabled: repo.enabled !== false,
         }));
       } catch (err) {
         logger.warn(
@@ -2318,7 +2210,6 @@ module.exports = {
   getExtensionRepos,
   addExtensionRepo,
   removeExtensionRepo,
-  toggleExtensionRepo,
   restoreDefaultExtensionRepo,
   fetchAggregatedMarketplace,
   parseExtensionRepoUrl,

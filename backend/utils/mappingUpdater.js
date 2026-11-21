@@ -23,89 +23,10 @@ const { getOSName, sanitizeFolderName } = require("./constants");
 const {
   getMappingProviders,
   resolveMalIdFromMapping,
-  ensureProviderTable,
 } = require("./mappingResolver");
 
 const MAPPING_API_BASE =
   process.env.MAPPING_API_URL || "https://strawverse.theyogmehta.online";
-
-// Tables the mapping server answered with an error for during this session.
-// One broken provider table used to fail the entire combined sync request
-// (HTTP 500), which also blocked anime/manga/next_episodes from updating.
-// Remembered here so later requests skip only the broken table.
-const syncFailedTables = new Set();
-
-// Hours between scheduled background syncs (settings key
-// mappingSyncIntervalHours): 0 = timer off, missing/garbage = 1 hour.
-function parseSyncIntervalHours(raw) {
-  if (raw === null || raw === undefined || raw === "") return 1;
-  const v = Number(raw);
-  if (!Number.isFinite(v) || v < 0) return 1;
-  return Math.floor(v);
-}
-
-async function getSyncIntervalHours() {
-  try {
-    return parseSyncIntervalHours(
-      await getKeyValue("Settings", "mappingSyncIntervalHours"),
-    );
-  } catch (_) {
-    return 1;
-  }
-}
-
-// Freshness window for skipping a sync: the configured interval (a restart
-// right after a run must not sync twice), or a day when the timer is off.
-async function getFreshTtlMs() {
-  const hours = await getSyncIntervalHours();
-  return (hours > 0 ? hours : 24) * 60 * 60 * 1000;
-}
-
-async function shouldAutoSyncMapping(type = "Anime", opts = {}) {
-  const isManga = type === "Manga";
-  try {
-    // Scheduled (watchdog) runs ignore the startup toggle — the interval
-    // is the only switch for those — and stay quiet, because the watchdog
-    // re-evaluates them every minute.
-    if (!opts.scheduled) {
-      const toggle = await getKeyValue(
-        "Settings",
-        isManga ? "mappingAutoSyncManga" : "mappingAutoSyncAnime",
-      );
-      // Pre-split builds stored one combined toggle; honor it until each side
-      // has been set explicitly.
-      const legacy = await getKeyValue("Settings", "mappingAutoSync");
-      if (toggle === false || (toggle === null && legacy === false)) {
-        logger.info(
-          `[mappingUpdater] ${type} auto-sync disabled in settings; skipping.`,
-        );
-        return false;
-      }
-    }
-    const ttl = await getFreshTtlMs();
-    let last =
-      Number(
-        await getKeyValue(
-          "Settings",
-          isManga ? "mappingLastSyncManga" : "mappingLastSyncAnime",
-        ),
-      ) || 0;
-    if (!last) {
-      last = Number(await getKeyValue("Settings", "mappingLastSync")) || 0;
-    }
-    if (last && Date.now() - last < ttl) {
-      if (!opts.scheduled) {
-        logger.info(
-          `[mappingUpdater] ${type} mapping data is fresh; skipping sync.`,
-        );
-      }
-      return false;
-    }
-  } catch (_) {
-    // Unreadable settings: sync anyway (previous behavior).
-  }
-  return true;
-}
 
 async function dropAllTriggers() {
   try {
@@ -185,17 +106,6 @@ async function ensureMappingTablesExist() {
         CREATE INDEX IF NOT EXISTS idx_next_episodes_date ON next_episodes(date);
         CREATE INDEX IF NOT EXISTS idx_anime_genres ON anime(genres);
         CREATE INDEX IF NOT EXISTS idx_manga_genres ON manga(genres);
-      `);
-    } catch (_) {}
-
-    // Every title lookup used to scan the whole catalogue (30k anime / 87k
-    // manga rows). An expression index turns those scans into index lookups.
-    // Kept in its own statement so an old SQLite without expression index
-    // support only loses the speed-up, not the other indexes.
-    try {
-      await mappingExec(`
-        CREATE INDEX IF NOT EXISTS idx_anime_title_key ON anime(LOWER(TRIM(title)));
-        CREATE INDEX IF NOT EXISTS idx_manga_title_key ON manga(LOWER(TRIM(title)));
       `);
     } catch (_) {}
 
@@ -282,6 +192,30 @@ async function ensureMappingTablesExist() {
   }
 }
 
+async function ensureProviderTable(providerName) {
+  const cleanProv = String(providerName).toLowerCase().trim().split("/").pop();
+  if (!cleanProv) return;
+
+  if (cleanProv === "pahe") {
+    await mappingExec(`
+      CREATE TABLE IF NOT EXISTS pahe (
+        id TEXT PRIMARY KEY,
+        uuid TEXT,
+        malid INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_pahe_malid ON pahe(malid);
+    `);
+  } else {
+    await mappingExec(`
+      CREATE TABLE IF NOT EXISTS "${cleanProv}" (
+        id TEXT PRIMARY KEY,
+        malid INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS "idx_${cleanProv}_malid" ON "${cleanProv}"(malid);
+    `);
+  }
+}
+
 async function applySyncResponse(data) {
   if (!data) return false;
   const { tables, unmapped } = data;
@@ -292,19 +226,6 @@ async function applySyncResponse(data) {
   await mappingExec("PRAGMA foreign_keys = OFF");
 
   try {
-    // Load local unlinked ids once up front. The pruning below used to run
-    // one SELECT per incoming row — 80k+ queries on a full anime+manga
-    // snapshot — which blocked the event loop during startup sync.
-    let unlinkedIds = null;
-    if (global.db) {
-      try {
-        const unlinkedRows = await queryAll("SELECT id FROM unlinked_mal_ids");
-        unlinkedIds = new Set((unlinkedRows || []).map((r) => String(r.id)));
-      } catch (_) {
-        unlinkedIds = new Set();
-      }
-    }
-
     // 1. Process regular & core tables (anime, manga, next_episodes, pahe, etc.)
     if (tables && typeof tables === "object") {
       for (const [tbl, tableData] of Object.entries(tables)) {
@@ -424,17 +345,21 @@ async function applySyncResponse(data) {
                 const targetIds = [row.id, row.uuid]
                   .filter(Boolean)
                   .map(String);
-                if (unlinkedIds && unlinkedIds.size > 0 && targetIds.length > 0) {
+                if (global.db && targetIds.length > 0) {
                   for (const tid of targetIds) {
-                    if (!unlinkedIds.has(tid)) continue;
                     try {
-                      await run("DELETE FROM unlinked_mal_ids WHERE id = ?", [
-                        tid,
-                      ]);
-                      unlinkedIds.delete(tid);
-                      logger.info(
-                        `[mappingUpdater] Pruned duplicate local mapping for ${tid} (canonical MAL ID ${row.malid})`,
+                      const localEntry = await queryOne(
+                        "SELECT malid FROM unlinked_mal_ids WHERE id = ? LIMIT 1",
+                        [tid],
                       );
+                      if (localEntry) {
+                        await run("DELETE FROM unlinked_mal_ids WHERE id = ?", [
+                          tid,
+                        ]);
+                        logger.info(
+                          `[mappingUpdater] Pruned duplicate local mapping for ${tid} (canonical MAL ID ${row.malid})`,
+                        );
+                      }
                     } catch (_) {}
                   }
                 }
@@ -673,98 +598,40 @@ async function checkCanaries(osName) {
   } catch (_) {}
 }
 
-// The watchdog wakes once a minute, re-reads the interval setting (so a
-// change — including 0 = off — takes effect within a minute, with no
-// reschedule plumbing in the settings save paths) and runs a scheduled
-// sync once the interval has elapsed since the last attempt. Attempts are
-// tracked in memory: a failed sync retries next interval instead of every
-// minute, and a restart starts clean (the boot sync covers that run).
-let lastMappingSyncAttempt = 0;
-let watchdogTimer = null;
-
-function armMappingWatchdog() {
-  if (watchdogTimer) return;
-  watchdogTimer = setInterval(runMappingWatchdogTick, 60 * 1000);
-  // Never keep the process alive just for the timer.
-  if (typeof watchdogTimer.unref === "function") watchdogTimer.unref();
-}
-
-async function runMappingWatchdogTick() {
-  try {
-    const hours = await getSyncIntervalHours();
-    if (hours === 0) return; // 0 = no scheduled sync
-    if (Date.now() - lastMappingSyncAttempt < hours * 60 * 60 * 1000) return;
-    await checkForMappingUpdates(false, null, { scheduled: true });
-  } catch (e) {
-    logger.error(`[mappingUpdater] Scheduled sync failed: ${e.message}`);
-  }
-}
-
-// Never two syncs at once: a watchdog tick or a manual "Sync now" that
-// lands mid-run joins the in-flight run instead of starting a second one
-// (shortcut: a forced sync during an in-flight run resolves with that run
-// rather than forcing a fresh one — rare, and a sync is happening either way).
-let activeMappingSync = null;
-
-async function checkForMappingUpdates(force = false, type = null, opts = {}) {
-  armMappingWatchdog();
-  if (activeMappingSync) return activeMappingSync;
-  activeMappingSync = runMappingSyncCheck(force, type, opts).finally(() => {
-    activeMappingSync = null;
-  });
-  return activeMappingSync;
-}
-
-async function runMappingSyncCheck(force, type, opts) {
-  const scope =
-    type === "Anime"
-      ? ["Anime"]
-      : type === "Manga"
-        ? ["Manga"]
-        : ["Anime", "Manga"];
-  const enabled = [];
-  for (const t of scope) {
-    if (force || (await shouldAutoSyncMapping(t, opts))) enabled.push(t);
-  }
-  if (enabled.length === 0) return;
-  // Any run that actually starts anchors the next scheduled run: the
-  // watchdog will not fire another one for a full interval.
-  lastMappingSyncAttempt = Date.now();
-  const syncAnime = enabled.includes("Anime");
-  const syncManga = enabled.includes("Manga");
-  logger.info(
-    `[mappingUpdater] Checking for mapping database updates (${enabled.join(", ")})...`,
-  );
+async function checkForMappingUpdates(force = false) {
+  logger.info("[mappingUpdater] Checking for mapping database updates...");
 
   await dropAllTriggers();
   await ensureMappingTablesExist();
 
-  const animeProviders = new Set();
-  const mangaProviders = new Set();
-  const collect = (map, target) => {
-    if (!map) return;
-    for (const p of Object.values(map)) {
+  const installedProviders = new Set();
+  if (global.Anime_providers) {
+    for (const p of Object.values(global.Anime_providers)) {
       if (p?.name) {
         const clean = String(p.name).toLowerCase().trim().split("/").pop();
-        if (clean) target.add(clean);
+        if (clean) installedProviders.add(clean);
       }
     }
-  };
-  collect(global.Anime_providers, animeProviders);
-  collect(global.Manga_providers, mangaProviders);
-
-  const installedProviders = new Set();
-  if (syncAnime) for (const prov of animeProviders) installedProviders.add(prov);
-  if (syncManga) for (const prov of mangaProviders) installedProviders.add(prov);
+  }
+  if (global.Manga_providers) {
+    for (const p of Object.values(global.Manga_providers)) {
+      if (p?.name) {
+        const clean = String(p.name).toLowerCase().trim().split("/").pop();
+        if (clean) installedProviders.add(clean);
+      }
+    }
+  }
 
   for (const prov of installedProviders) {
     await ensureProviderTable(prov);
   }
 
-  const tablesToSync = [];
-  if (syncAnime) tablesToSync.push("anime", "next_episodes");
-  if (syncManga) tablesToSync.push("manga");
-  for (const prov of installedProviders) tablesToSync.push(prov);
+  const tablesToSync = [
+    "anime",
+    "manga",
+    "next_episodes",
+    ...Array.from(installedProviders),
+  ];
   const reqTables = {};
 
   for (const tbl of tablesToSync) {
@@ -821,20 +688,13 @@ async function runMappingSyncCheck(force, type, opts) {
 
   const osName = getOSName();
 
-  // Exclude tables the server already failed on this session.
-  const liveTables = {};
-  for (const [tbl, meta] of Object.entries(reqTables)) {
-    if (!syncFailedTables.has(tbl)) liveTables[tbl] = meta;
-  }
-  const liveUnmapped = {};
-  for (const [prov, meta] of Object.entries(reqUnmapped)) {
-    if (!syncFailedTables.has(prov)) liveUnmapped[prov] = meta;
-  }
-
-  const postSync = async (tables, unmapped) => {
+  try {
     const res = await mappingClient.post(
       `${MAPPING_API_BASE}/api/mapping/sync`,
-      { tables, unmapped },
+      {
+        tables: reqTables,
+        unmapped: reqUnmapped,
+      },
       {
         headers: {
           os: osName,
@@ -842,115 +702,28 @@ async function runMappingSyncCheck(force, type, opts) {
         },
       },
     );
-    return res.data || null;
-  };
 
-  let syncSucceeded = false;
-  const scopeLabel =
-    syncAnime && syncManga
-      ? "Mapping database"
-      : syncAnime
-        ? "Anime mapping"
-        : "Manga mapping";
-  const applyData = async (data, label) => {
-    if (!data) return;
-    if (
-      data.upToDate &&
-      (!data.tables || Object.keys(data.tables).length === 0)
-    ) {
-      logger.info(`[mappingUpdater] ${label} is already up to date.`);
-      syncSucceeded = true;
-      return;
+    if (res.data) {
+      if (
+        res.data.upToDate &&
+        (!res.data.tables || Object.keys(res.data.tables).length === 0)
+      ) {
+        logger.info("[mappingUpdater] Mapping database is already up to date.");
+      } else {
+        const changed = await applySyncResponse(res.data);
+        if (changed) {
+          logger.info(
+            "[mappingUpdater] Mapping database sync completed successfully.",
+          );
+        } else {
+          logger.info("[mappingUpdater] Mapping database is up to date.");
+        }
+      }
     }
-    const changed = await applySyncResponse(data);
-    syncSucceeded = true;
-    logger.info(
-      changed
-        ? `[mappingUpdater] ${label} sync completed successfully.`
-        : `[mappingUpdater] ${label} is up to date.`,
-    );
-  };
-
-  // Fast path: one combined request for everything.
-  try {
-    await applyData(
-      await postSync(liveTables, liveUnmapped),
-      scopeLabel,
-    );
   } catch (err) {
-    const status = err.response && err.response.status;
     logger.error(
       `[mappingUpdater] Failed to sync mapping database: ${err.message}`,
     );
-
-    // The server answered with an error: retry split by table group so a
-    // single broken table no longer aborts the whole sync. (Verified: the
-    // API can 500 on one provider table while anime/manga stay healthy.)
-    if (status && status >= 400) {
-      logger.warn(
-        "[mappingUpdater] Retrying sync split by table group so one bad table cannot block the rest.",
-      );
-
-      const core = {};
-      const providers = {};
-      for (const [tbl, meta] of Object.entries(liveTables)) {
-        if (tbl === "anime" || tbl === "manga" || tbl === "next_episodes") {
-          core[tbl] = meta;
-        } else {
-          providers[tbl] = meta;
-        }
-      }
-
-      // 1) Core tables together with every unmapped bucket.
-      if (Object.keys(core).length > 0) {
-        try {
-          await applyData(
-            await postSync(core, liveUnmapped),
-            "Mapping database (core tables)",
-          );
-        } catch (coreErr) {
-          logger.error(
-            `[mappingUpdater] Core table sync failed: ${coreErr.message}`,
-          );
-          try {
-            await applyData(
-              await postSync(core, {}),
-              "Mapping database (core tables)",
-            );
-          } catch (coreOnlyErr) {
-            logger.error(
-              `[mappingUpdater] Core table sync failed without unmapped data: ${coreOnlyErr.message}`,
-            );
-          }
-        }
-      }
-
-      // 2) Each provider table on its own; remember the ones that fail.
-      for (const [tbl, meta] of Object.entries(providers)) {
-        try {
-          await applyData(
-            await postSync({ [tbl]: meta }, {}),
-            `Provider table "${tbl}"`,
-          );
-        } catch (provErr) {
-          syncFailedTables.add(tbl);
-          logger.warn(
-            `[mappingUpdater] Skipping provider table "${tbl}" for this session: ${provErr.message}`,
-          );
-        }
-      }
-    }
-  }
-
-  if (syncSucceeded) {
-    try {
-      if (syncAnime) {
-        await setKeyValue("Settings", "mappingLastSyncAnime", Date.now());
-      }
-      if (syncManga) {
-        await setKeyValue("Settings", "mappingLastSyncManga", Date.now());
-      }
-    } catch (_) {}
   }
 
   try {
@@ -998,11 +771,6 @@ async function syncExtensionMapping(extensionName) {
       logger.info(`[mappingUpdater] Initialized mappings for ${cleanProv}`);
     }
   } catch (err) {
-    if (err.response && err.response.status >= 400) {
-      // Server-side failure for this provider table: remember it so the
-      // next full sync skips it instead of failing the whole request.
-      syncFailedTables.add(cleanProv);
-    }
     logger.warn(
       `[mappingUpdater] Could not fetch mappings for ${cleanProv}: ${err.message}`,
     );
@@ -1544,7 +1312,6 @@ async function syncLibraryIdsWithMapping() {
 
 module.exports = {
   checkForMappingUpdates,
-  parseSyncIntervalHours,
   applyDeltaUpdates,
   syncExtensionMapping,
   cleanupExtensionMapping,

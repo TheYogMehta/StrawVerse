@@ -1,4 +1,4 @@
-const { run, queryAll, runUpsertCompat } = require("./db");
+const { run, queryAll } = require("./db");
 const {
   getExtensionHeaderRules,
   getCookieDomains,
@@ -62,15 +62,10 @@ function saveStreamReferer(domain, referer) {
     if (refererCache[d] !== normalizedReferer) {
       refererCache[d] = normalizedReferer;
       try {
-        runUpsertCompat(
+        run(
           "INSERT INTO StreamReferer (domain, referer, updatedAt) VALUES (?, ?, ?) ON CONFLICT(domain) DO UPDATE SET referer = excluded.referer, updatedAt = excluded.updatedAt",
           [d, normalizedReferer, Date.now()],
-          () =>
-            run(
-              "INSERT OR REPLACE INTO StreamReferer (domain, referer, updatedAt) VALUES (?, ?, ?)",
-              [d, normalizedReferer, Date.now()],
-            ),
-        ).catch(() => {});
+        );
       } catch (e) {}
     }
   }

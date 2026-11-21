@@ -58,41 +58,6 @@ let isQueuePausedState = false;
 // on a different mirror instead of re-downloading from the dead one.
 const hostSkipByEpid = new Map();
 
-// Persisted dead-mirror skips (survive restarts). Keyed by a stable episode
-// key (provider|title|ep|subdub) because queue epids embed expiring session
-// tokens. 7-day TTL. Skips only deprioritize: downloadEpisodeByQuality falls
-// back to excluded hosts when nothing else resolves, so a stale entry can
-// never permanently brick an episode.
-const DEAD_HOST_SKIP_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-
-function deadSkipStableKey(provider, title, epNum, subdub) {
-  const clean = (v) => String(v ?? "").slice(0, 80);
-  return `deadHostSkip:${clean(provider)}|${clean(title)}|${clean(epNum)}|${clean(subdub)}`;
-}
-
-async function loadPersistedDeadHosts(stableKey) {
-  try {
-    const val = await getKeyValue("Settings", stableKey);
-    const hosts = val?.hosts;
-    if (!Array.isArray(hosts) || hosts.length === 0) return [];
-    if (val?.ts && Date.now() - Number(val.ts) > DEAD_HOST_SKIP_TTL_MS) {
-      run("DELETE FROM Settings WHERE key = ?", [stableKey]).catch(() => {});
-      return [];
-    }
-    return hosts.filter((h) => typeof h === "string");
-  } catch (_) {
-    return [];
-  }
-}
-
-async function savePersistedDeadHosts(stableKey, hosts) {
-  try {
-    const list = [...new Set((hosts || []).filter((h) => typeof h === "string"))].slice(0, 8);
-    if (list.length === 0) return;
-    await setKeyValue("Settings", stableKey, { hosts: list, ts: Date.now() });
-  } catch (_) {}
-}
-
 (async () => {
   try {
     const val = await getKeyValue("Settings", "isQueuePaused");
@@ -735,13 +700,6 @@ async function continuousExecution() {
                   `[queueWorker] Excluding ${isSlow ? "slow" : "dead"} host ${err.failedHost} for ${currentTask.epid} on retry`,
                 );
               }
-              const stableKey = deadSkipStableKey(
-                currentTask?.config?.Animeprovider,
-                currentTask?.Title,
-                currentTask?.EpNum,
-                currentTask?.SubDub,
-              );
-              await savePersistedDeadHosts(stableKey, hostSkipByEpid.get(currentTask.epid) || []);
             }
 
             if (isSlow) {
@@ -817,10 +775,7 @@ async function continuousExecution() {
                   ? `S${taskSeason} `
                   : "";
               const prefix = currentTask.Type === "Manga" ? "CHP" : "EP";
-              const deadNote = err?.failedHost
-                ? ` (dead mirror ${err.failedHost} skipped, trying another server)`
-                : "";
-              const retryCaption = `Downloading ${seasonPrefix}${prefix} ${cleanEp} ${currentTask.Title || ""}${qualStr} Retrying in ${Math.round(backoffMs / 1000)}s...${deadNote}`;
+              const retryCaption = `Downloading ${seasonPrefix}${prefix} ${cleanEp} ${currentTask.Title || ""}${qualStr} Retrying in ${Math.round(backoffMs / 1000)}s...`;
               await updateQueue(currentTask.epid, 0, 0, retryCaption);
               try {
                 global.sendToRenderer("download-logger", {
@@ -889,20 +844,6 @@ async function downloadep(
   animeId,
 ) {
   logger.info(`[queueWorker] ${AnimeEpId} phase: dir-start`);
-  try {
-    const stableKey = deadSkipStableKey(Videoconfig?.Animeprovider, Title, EpNum, SubDub);
-    const persisted = await loadPersistedDeadHosts(stableKey);
-    if (persisted.length > 0) {
-      const known = hostSkipByEpid.get(AnimeEpId) || [];
-      for (const h of persisted) {
-        if (!known.includes(h)) known.push(h);
-      }
-      hostSkipByEpid.set(AnimeEpId, known);
-      logger.warn(
-        `[queueWorker] Re-applied ${persisted.length} persisted dead-host skip(s) for ${AnimeEpId}: ${persisted.join(", ")}`,
-      );
-    }
-  } catch (_) {}
   const liveSettings = (await settingfetch()) || {};
   let directoryPath;
   const isMovie =
@@ -1154,42 +1095,6 @@ async function downloadEpisodeByQuality(
       sourcesList = extractSources(sourcesArray, subdub);
     }
 
-    // Graceful fallback: if requested category (sub/dub/hsub) returned empty,
-    // try the other category and the unfiltered list. This handles cases where
-    // the anikoto site returns servers for a different sub-dub type than requested
-    // (e.g., episode 1 is hardsub-only, user requested softsub).
-    if ((!sourcesList || sourcesList.length === 0) && subdub) {
-      // Try opposite category (sub <-> dub <-> hsub)
-      const tryCategory =
-        subdub.toLowerCase() === "sub" ? "dub" : subdub.toLowerCase() === "dub" ? "hsub" : "sub";
-      try {
-        const fallback = await fetchEpisodeSources(provider, resolvedEpid, tryCategory);
-        const fallbackList = extractSources(fallback, tryCategory);
-        if (fallbackList && fallbackList.length > 0) {
-          logger.info(
-            `[Download] Fallback: Requested ${subdub} returned empty, used ${tryCategory} instead.`,
-          );
-          sourcesArray = fallback;
-          sourcesList = fallbackList;
-        }
-      } catch (e) {}
-    }
-
-    // Final fallback: try without any category suffix (get all servers)
-    if ((!sourcesList || sourcesList.length === 0) && resolvedEpid !== epid) {
-      try {
-        const noCategory = await fetchEpisodeSources(provider, epid, null);
-        const noCatList = extractSources(noCategory, null);
-        if (noCatList && noCatList.length > 0) {
-          logger.info(
-            `[Download] Final fallback: Requested ${subdub} returned empty, used unfiltered servers.`,
-          );
-          sourcesArray = noCategory;
-          sourcesList = noCatList;
-        }
-      } catch (e) {}
-    }
-
     // Stale queued episode IDs (e.g. anikoto session tokens expire, so a
     // task queued days ago resolves to nothing). Refresh via mapping: look
     // up the anime's current provider id, walk its episode list for the
@@ -1253,35 +1158,6 @@ async function downloadEpisodeByQuality(
       sourcesArray?.sub?.subtitles ||
       sourcesArray?.dub?.subtitles ||
       [];
-
-    // Prefer soft-sub servers when the user asked for "sub": an unfiltered
-    // fallback can return hardsub (hsub) servers whose subtitles are burned
-    // into the video frames and can't be toggled in a player.
-    if (sourcesList && sourcesList.length > 0 && subdub) {
-      const isHSub = (s) =>
-        s?.isHsub ||
-        s?.type === "hsub" ||
-        String(s?.quality || "").toLowerCase().includes("hsub");
-      const isDub = (s) =>
-        s?.isDub ||
-        s?.type === "dub" ||
-        String(s?.quality || "").toLowerCase().includes("dub");
-      const want = String(subdub).toLowerCase();
-      let preferred = [];
-      if (want === "sub") {
-        preferred = sourcesList.filter((s) => !isHSub(s) && !isDub(s));
-      } else if (want === "dub") {
-        preferred = sourcesList.filter((s) => isDub(s));
-      } else if (want === "hsub") {
-        preferred = sourcesList.filter((s) => isHSub(s));
-      }
-      if (preferred.length > 0 && preferred.length < sourcesList.length) {
-        logger.info(
-          `[Download] Using ${preferred.length}/${sourcesList.length} ${want} servers; skipping hardsub/burned-subtitle sources.`,
-        );
-        sourcesList = preferred;
-      }
-    }
 
     const Animeprovider = provider;
     const targetQualStr = config?.quality ?? "1080p";
@@ -1587,9 +1463,6 @@ async function downloadEpisodeByQuality(
       isSingleMovie,
     );
     hostSkipByEpid.delete(epid);
-    run("DELETE FROM Settings WHERE key = ?", [
-      deadSkipStableKey(config?.Animeprovider, Title, episodeNumber, subdub),
-    ]).catch(() => {});
 
     if (malid && animeId) {
       try {

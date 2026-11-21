@@ -313,7 +313,7 @@ async function generateNfoAndPosterForAnime(
       try {
         const titleMatch = await global.mappingDb
           .prepare(
-            "SELECT malid FROM anime WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) ORDER BY has_mapping DESC, LENGTH(title) ASC, malid ASC LIMIT 1",
+            "SELECT malid FROM anime WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1",
           )
           .get(anime.title);
         if (titleMatch?.malid) malId = Number(titleMatch.malid);
