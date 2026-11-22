@@ -50,6 +50,8 @@ async function updateHistory({
   sub_dub,
   isCompleted,
   timestamp,
+  skipNotification = false,
+  skipRpc = false,
 }) {
   const tSpent = parseFloat(timeSpent || 0);
   const rawNum = parseFloat(number);
@@ -353,7 +355,9 @@ async function updateHistory({
     await cleanDuplicates(record.id);
 
     if (record.is_completed === 0 && nextComp === 1) {
-      await notifyCompletion();
+      if (!skipNotification) {
+        await notifyCompletion();
+      }
     }
   } else {
     const compAt = isComp === 1 ? nowIso : null;
@@ -399,11 +403,13 @@ async function updateHistory({
     }
 
     if (isComp === 1) {
-      await notifyCompletion();
+      if (!skipNotification) {
+        await notifyCompletion();
+      }
     }
   }
 
-  if (process.versions?.electron) {
+  if (process.versions?.electron && !skipRpc) {
     try {
       const { UpdateDiscordRPC } = require("./discord");
       if (typeof UpdateDiscordRPC === "function") {
