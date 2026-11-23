@@ -3770,6 +3770,8 @@ mp.register_event('file-loaded', function()
     state.loading_active = false
     state.switching_episode = false
     state.loading_message = nil
+    state.intro_skipped = false
+    state.outro_skipped = false
     mp.set_property("pause", "no")
     if state.resume_pos and state.resume_pos > 0 then
         local pos = state.resume_pos

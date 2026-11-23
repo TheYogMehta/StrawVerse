@@ -32,3 +32,21 @@ test("DomainConcurrency should maintain a floor of 4 on slow CDN throughput with
   // Concurrency should NOT drop below floor of 4 without explicit HTTP errors
   assert.ok(conc >= 4, `Expected concurrency to stay >= 4 on slow throughput, got ${conc}`);
 });
+
+test("DomainConcurrency should ignore stale failure records older than 30 minutes", async () => {
+  const { run } = require("./db");
+  const staleDomain = "stale-failure-domain.com";
+  resetDomainConcurrency(staleDomain);
+
+  // Insert a failure updated 1 hour ago
+  const oneHourAgo = Date.now() - 60 * 60 * 1000;
+  await run(
+    `INSERT OR REPLACE INTO DomainConcurrency (domain, current_concurrency, max_concurrency, total_requests, failed_requests, updated_at)
+     VALUES (?, 4, 4, 10, 5, ?)`,
+    [staleDomain, oneHourAgo],
+  );
+
+  // When requesting initial concurrency, it should not be clamped by the 1-hour-old failure
+  const conc = await getInitialDomainConcurrency(staleDomain, 8);
+  assert.strictEqual(conc, 8, `Expected initial concurrency 8, got ${conc}`);
+});

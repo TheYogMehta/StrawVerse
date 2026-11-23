@@ -48,8 +48,11 @@ export default function App() {
   const [reloadCounter, setReloadCounter] = useState(0);
 
   const showToast = (title, body, icon) => {
-    const id = Date.now();
-    setToasts((prev) => [...prev, { id, title, body, icon, fadeOut: false }]);
+    const id = `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    setToasts((prev) => {
+      const trimmed = prev.length >= 4 ? prev.slice(prev.length - 3) : prev;
+      return [...trimmed, { id, title, body, icon, fadeOut: false }];
+    });
     setTimeout(() => {
       setToasts((prev) =>
         prev.map((t) => (t.id === id ? { ...t, fadeOut: true } : t)),

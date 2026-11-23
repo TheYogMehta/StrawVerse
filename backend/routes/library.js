@@ -30,6 +30,7 @@ const {
   SEASON_FOLDER_RE,
 } = require("../utils/constants");
 const { updateHistory } = require("../utils/history");
+const { autoTrackMAL } = require("../utils/mal");
 const {
   getKeyValue,
   setKeyValue,
@@ -806,7 +807,15 @@ router.post("/api/local/delete", async (req, res) => {
           if (!isVideoFile(cand.name) && !isSubtitleFile(cand.name)) {
             return false;
           }
-          const epNum = getEpisodeNumberFromFilename(cand.name);
+          let epNum = getEpisodeNumberFromFilename(cand.name);
+          if (
+            epNum === null &&
+            type === "Movies" &&
+            target.number === 1 &&
+            !cand.name.match(/[Ss]\d+[Ee]\d+/i)
+          ) {
+            epNum = 1;
+          }
           if (epNum !== target.number) return false;
 
           // If season is known for target, match against filename or folder season
@@ -830,15 +839,19 @@ router.post("/api/local/delete", async (req, res) => {
 
       for (const fileToDelete of filesToDelete) {
         try {
-          await fs.promises.unlink(fileToDelete.fullPath);
-          deletedCount++;
-          if (fileToDelete.dirPath !== typeDir) {
-            modifiedDirs.add(fileToDelete.dirPath);
+          if (fs.existsSync(fileToDelete.fullPath)) {
+            await fs.promises.unlink(fileToDelete.fullPath);
+            deletedCount++;
+            if (fileToDelete.dirPath !== typeDir) {
+              modifiedDirs.add(fileToDelete.dirPath);
+            }
           }
         } catch (e) {
-          logger.warn(
-            `Failed to delete file ${fileToDelete.fullPath}: ${e.message}`,
-          );
+          if (e.code !== "ENOENT") {
+            logger.warn(
+              `Failed to delete file ${fileToDelete.fullPath}: ${e.message}`,
+            );
+          }
         }
       }
 
@@ -1011,13 +1024,22 @@ router.post("/api/local/open", async (req, res) => {
           const files = await fs.promises.readdir(searchDir);
           const targetNum = parseFloat(number);
           if (!isNaN(targetNum)) {
-            const matchedFile = files.find((file) => {
+            let matchedFile = files.find((file) => {
               if (type === "Anime" || type === "Movies") {
                 return getEpisodeNumberFromFilename(file) === targetNum;
               } else {
                 return getChapterNumberFromFilename(file) === targetNum;
               }
             });
+            if (!matchedFile && type === "Movies" && targetNum === 1) {
+              matchedFile = files.find(
+                (file) =>
+                  !file.startsWith(".") &&
+                  !file.includes(".temp") &&
+                  isVideoFile(file) &&
+                  !file.match(/[Ss]\d+[Ee]\d+/i),
+              );
+            }
             if (matchedFile) {
               targetPath = path.join(searchDir, matchedFile);
             }
@@ -1112,7 +1134,114 @@ router.post("/api/history/mark-read", async (req, res) => {
         duration: 1,
         timeSpent: isCompleted ? 10 : 0,
         timestamp: nowIso,
+        skipNotification: true,
+        skipRpc: true,
       });
+    }
+
+    // Resolve display title for single summary notification
+    let resolvedTitle = title;
+    const isVideo = type === "Anime" || type === "Movies";
+    const mainTable =
+      type === "Manga" ? "Manga" : type === "Movies" ? "Movies" : "Anime";
+    if (!resolvedTitle || resolvedTitle === type) {
+      try {
+        const localRec = await queryOne(
+          `SELECT title FROM ${mainTable} WHERE id = ?`,
+          [mediaId],
+        );
+        if (localRec && localRec.title) {
+          resolvedTitle = localRec.title;
+        }
+      } catch (_) {}
+    }
+    if (!resolvedTitle || resolvedTitle === type) {
+      if (mediaId && mediaId.includes(":")) {
+        const parts = mediaId.split(":");
+        const slug = parts[parts.length - 1];
+        resolvedTitle = slug
+          .split("-")
+          .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+          .join(" ");
+      }
+    }
+
+    const displayTitle = resolvedTitle || type;
+    const count = targetItems.length;
+    const itemNoun = isVideo ? "Episode" : "Chapter";
+    const itemsNoun = isVideo ? "Episodes" : "Chapters";
+    const itemNounLower = isVideo ? "episode" : "chapter";
+    const itemsNounLower = isVideo ? "episodes" : "chapters";
+    const actionVerb = isVideo ? "watching" : "reading";
+
+    // Send single summary notification and sync MAL
+    if (isCompleted) {
+      let synced = false;
+      const validNumbers = targetItems
+        .map((it) => parseFloat(it.number))
+        .filter((n) => !isNaN(n));
+      const maxNum = validNumbers.length > 0 ? Math.max(...validNumbers) : null;
+
+      if ((type === "Anime" || type === "Manga") && maxNum !== null) {
+        try {
+          synced = await autoTrackMAL(type, mediaId, maxNum);
+        } catch (_) {}
+      }
+
+      if (!synced && typeof global.sendToRenderer === "function") {
+        if (count === 1) {
+          global.sendToRenderer("mal-sync-notification", {
+            title: `${itemNoun} Completed`,
+            body: `Finished ${actionVerb} "${displayTitle}" ${itemNoun} ${targetItems[0].number}.`,
+            icon: "/assets/luffy.png",
+          });
+        } else {
+          global.sendToRenderer("mal-sync-notification", {
+            title: `${itemsNoun} Completed`,
+            body: `Finished ${actionVerb} ${count} ${itemsNounLower} of "${displayTitle}".`,
+            icon: "/assets/luffy.png",
+          });
+        }
+      }
+
+      // Single Discord RPC update with max completed number
+      if (process.versions?.electron && maxNum !== null) {
+        try {
+          const { UpdateDiscordRPC } = require("../utils/discord");
+          if (typeof UpdateDiscordRPC === "function") {
+            const firstSeason = targetItems[0]?.season || season || 1;
+            UpdateDiscordRPC(
+              displayTitle,
+              maxNum,
+              type,
+              image,
+              mediaId,
+              1,
+              1,
+              firstSeason,
+            ).catch(() => {});
+          }
+        } catch (_) {}
+      }
+    } else {
+      // Mark as unread / unwatched single notification
+      if (typeof global.sendToRenderer === "function") {
+        const unreadLabel = isVideo ? "Unwatched" : "Unread";
+        const unreadVerb = isVideo ? "unwatched" : "unread";
+        if (count === 1) {
+          global.sendToRenderer("mal-sync-notification", {
+            title: `${itemNoun} Marked as ${unreadLabel}`,
+            body: `Marked ${itemNoun} ${targetItems[0].number} of "${displayTitle}" as ${unreadVerb}.`,
+            icon: "/assets/luffy.png",
+          });
+        } else {
+          global.sendToRenderer("mal-sync-notification", {
+            title: `${itemsNoun} Marked as ${unreadLabel}`,
+            body: `Marked ${count} ${itemsNounLower} of "${displayTitle}" as ${unreadVerb}.`,
+            icon: "/assets/luffy.png",
+          });
+        }
+      }
     }
 
     res.json({ success: true, count: targetItems.length });

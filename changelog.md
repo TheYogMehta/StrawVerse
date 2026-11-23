@@ -1,6 +1,6 @@
 # Changelog
 
-# [12.0.3] - 2026-11-18
+# [12.1.1] - 2026-11-23
 
 ### Universal Smart TV & DLNA / UPnP Casting
 
@@ -19,6 +19,30 @@
 - **Unified Web Player Casting:** Added a Cast button, device selection modal, active casting overlay, and full remote control synchronization to `WebPlayer.jsx`.
 - **Playback Synchronization & Audio Guarding:** Local video players automatically pause when casting begins to prevent dual audio/video playback, and sync playback states (play, pause, seek, stop) in real time via background polling.
 - **Capacitor LAN Binding:** Configured the internal Express server in the Android runtime to listen on `0.0.0.0:9545`, allowing TVs on the local subnet to pull proxied media streams directly from the mobile device.
+
+# [12.1.0] - 2026-11-18
+
+### Single-Movie & Series Library Handling
+
+- **Standalone Movie Detection:** Automatically detects whether an item under Movies & Series is a standalone movie or a multi-episode TV series, preventing unnecessary `Season 1` subfolders and saving single movies directly as `Title.mp4` (or `Title (Year) [Quality].mp4` under Plex/Jellyfin naming).
+- **Episode Number Extraction Fix:** Filters out 4-digit release years (`1900–2099`) and common video resolutions (`1080p`, `720p`, `4k`) so movie release years and resolutions are never falsely parsed as episode numbers (e.g. `Inception (2010)` being mistaken for episode 2010).
+- **Library File Deletion & Opening:** Standalone movie files without episode numbers in their filenames can now be seamlessly opened and deleted directly from the downloaded library.
+- **Downloaded Episode Scanning:** Unnumbered movie files in download folders are properly detected and marked as downloaded (`[1]`).
+
+### Downloader & Streaming Reliability
+
+- **Non-Media Error Payload Rejection:** Direct video downloads and stream verification now reject HTML error pages and JSON responses instead of saving them as corrupt `.mp4` video files.
+- **Stream Token Expiry vs. Blacklisting:** Recognizes HTTP 403/404/410 errors during active HLS segment downloads as token/session expirations rather than dead hosts, preventing the mirror from being blacklisted.
+- **Domain Concurrency Penalty Decay:** Domain concurrency failure records older than 30 minutes are ignored so temporary network throttles do not permanently restrict future downloads.
+- **Corrupt File Cleanup in Player:** Automatically deletes zero-byte or corrupt local files under 500 KB on playback attempts so the player streams fresh media.
+
+### Builds
+
+- **Linux Packages:** The desktop release now ships Linux AppImage and deb packages, including the previously missing Linux ffmpeg binary (downloaded alongside the Windows/macOS ones).
+
+### Special Thanks to Contributors
+
+- Special thanks to **@Buff-alo** for implementing single-movie download detection, movie file naming & library handling, and download stream validation!
 
 # [12.0.2] - 2026-11-16
 
