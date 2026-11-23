@@ -388,7 +388,8 @@ async function boot() {
       }
       if (
         (config.strawverseDirectHttp === true ||
-          global.__isBackgroundDownload?.()) &&
+          global.__isBackgroundDownload?.() ||
+          config.responseType === "stream") &&
         config._forceNativeBridge !== true
       ) {
         return defaultAdapter(config);
@@ -1541,8 +1542,8 @@ async function boot() {
   const routes = require("../../../backend/routes/index");
   appExpress.use(routes);
 
-  appExpress.listen(PORT, "127.0.0.1", () => {
-    logger.info(`[android] Express listening on local port ${PORT}`);
+  appExpress.listen(PORT, "0.0.0.0", () => {
+    logger.info(`[android] Express listening on port ${PORT} (0.0.0.0)`);
     if (channel) channel.send("server-ready", { port: PORT });
   });
 

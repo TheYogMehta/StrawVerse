@@ -31,6 +31,7 @@ capacitor/www/nodejs/*.md
 capacitor/android/app/release/
 node_modules
 app.log
+app-previous.log
 *.db
 *.db-journal
 *.db-wal

@@ -467,8 +467,8 @@ function initDesktopTables() {
 
   try {
     desktopDb.exec(`
-      INSERT OR IGNORE INTO Movies (id, folder_name, title, type, provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag)
-      SELECT id, folder_name, title, 'Movies', provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag
+      INSERT OR IGNORE INTO Movies (id, folder_name, title, type, provider, description, status, genres, aired, image_url, last_updated, CustomTag)
+      SELECT id, folder_name, title, 'Movies', provider, description, status, genres, aired, image_url, last_updated, CustomTag
       FROM Anime
       WHERE id LIKE 'tv:%' OR id LIKE 'movie:%' OR LOWER(provider) IN ('bingr', 'cinejoy', 'hdhub4u', 'dramacool', 'kaidrama');
 
@@ -941,8 +941,8 @@ async function initDatabase() {
 
   try {
     await exec(`
-      INSERT OR IGNORE INTO Movies (id, folder_name, title, type, provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag)
-      SELECT id, folder_name, title, 'Movies', provider, description, status, genres, aired, image_url, last_updated, MalID, CustomTag
+      INSERT OR IGNORE INTO Movies (id, folder_name, title, type, provider, description, status, genres, aired, image_url, last_updated, CustomTag)
+      SELECT id, folder_name, title, 'Movies', provider, description, status, genres, aired, image_url, last_updated, CustomTag
       FROM Anime
       WHERE id LIKE 'tv:%' OR id LIKE 'movie:%' OR LOWER(provider) IN ('bingr', 'cinejoy', 'hdhub4u', 'dramacool', 'kaidrama');
 
