@@ -51,7 +51,13 @@ function isMediaFile(fileNameOrPath, type = "Anime") {
 }
 
 // "Season 02" subfolders used by media-server naming (Show/Season 02/...)
-const SEASON_FOLDER_RE = /^Season \d+$/i;
+const SEASON_FOLDER_RE = /^(?:Season\s+)?(\d+)$/i;
+
+function parseSeasonFolderNumber(folderName) {
+  if (!folderName || typeof folderName !== "string") return null;
+  const m = folderName.trim().match(SEASON_FOLDER_RE);
+  return m ? parseInt(m[1], 10) : null;
+}
 
 // includeSeasons: also count media inside "Season NN" subfolders, so a show
 // folder that only holds season folders is never treated as empty.
@@ -716,6 +722,7 @@ module.exports = {
   getChapterNumberFromFilename,
   mediaServerFileBase,
   SEASON_FOLDER_RE,
+  parseSeasonFolderNumber,
   sleep,
   parseTags,
   SYSTEM_TAGS,

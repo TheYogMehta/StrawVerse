@@ -150,9 +150,21 @@ async function MangaDir(title, customdir, mediaId = null) {
   return await GetDir(title, customdir, "Manga", mediaId, true);
 }
 
-// Movies & Series Dir Maker
+// Movies & Series Dir Maker (single movie: MoviesSeries/<Title>)
 async function MovieDir(title, customdir, mediaId = null) {
   return await GetDir(title, customdir, "MoviesSeries", mediaId, true);
+}
+
+// Series Season Dir Maker (seriesname/seasonnumber/episodes)
+async function MovieSeriesDir(title, season, customdir, mediaId = null) {
+  const seriesDir = await GetDir(title, customdir, "MoviesSeries", mediaId, true);
+  const seasonNum =
+    season !== undefined && season !== null && !isNaN(Number(season))
+      ? parseInt(season, 10)
+      : 1;
+  const seasonDir = path.join(seriesDir, String(seasonNum));
+  await fs.promises.mkdir(seasonDir, { recursive: true });
+  return seasonDir;
 }
 
 // download folder Location
@@ -190,6 +202,7 @@ module.exports = {
   mediaServerDir,
   MangaDir,
   MovieDir,
+  MovieSeriesDir,
   ensureDirectoryExists,
   getDownloadsFolder,
   GetDir,

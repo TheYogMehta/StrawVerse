@@ -990,9 +990,13 @@ router.post("/api/local/open", async (req, res) => {
         let searchDir = targetPath;
         if (season) {
           const sPad = String(season).padStart(2, "0");
+          const cand0 = path.join(targetPath, String(Number(season)));
           const cand1 = path.join(targetPath, `Season ${sPad}`);
           const cand2 = path.join(targetPath, `Season ${season}`);
-          if (fs.existsSync(cand1)) {
+          if (fs.existsSync(cand0)) {
+            searchDir = cand0;
+            targetPath = cand0;
+          } else if (fs.existsSync(cand1)) {
             searchDir = cand1;
             targetPath = cand1;
           } else if (fs.existsSync(cand2)) {

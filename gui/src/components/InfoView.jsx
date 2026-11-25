@@ -387,9 +387,10 @@ export default function InfoView({
           const sKey = `s${season}_e${num}`;
           if (list.includes(sKey)) return true;
           const hasSeasonTags = list.some(
-            (x) => typeof x === "string" && x.startsWith("s"),
+            (x) => typeof x === "string" && /^s\d+_e/i.test(x),
           );
           if (hasSeasonTags) return false;
+          if (Number(season) > 1) return false;
         }
         return list.map(Number).includes(num);
       };
@@ -965,14 +966,6 @@ export default function InfoView({
     [historyProgress, malWatched, type],
   );
 
-  const watchedCount = useMemo(() => {
-    if (!episodesOrChapters || episodesOrChapters.length === 0) return 0;
-    return episodesOrChapters.filter((item) => isItemWatched(item)).length;
-  }, [episodesOrChapters, isItemWatched]);
-
-  const showWatchedSort =
-    watchedCount > 0 && watchedCount < (episodesOrChapters?.length || 0);
-
   // Compute available seasons for Movies/Series season filter
   const availableSeasons = useMemo(() => {
     if (type !== "Movies" && type !== "Anime") return [];
@@ -987,6 +980,31 @@ export default function InfoView({
       .sort((a, b) => a - b);
     return seasons.length > 1 ? seasons : [];
   }, [episodesOrChapters, type]);
+
+  // Scope items to the currently selected season when a season filter is active
+  const seasonScopedItems = useMemo(() => {
+    if (availableSeasons.length > 0) {
+      const targetS =
+        selectedSeason !== "all"
+          ? Number(selectedSeason)
+          : Number(availableSeasons[0]);
+      return episodesOrChapters.filter(
+        (item) =>
+          item.season !== undefined &&
+          item.season !== null &&
+          Number(item.season) === targetS,
+      );
+    }
+    return episodesOrChapters;
+  }, [episodesOrChapters, availableSeasons, selectedSeason]);
+
+  const watchedCount = useMemo(() => {
+    if (!seasonScopedItems || seasonScopedItems.length === 0) return 0;
+    return seasonScopedItems.filter((item) => isItemWatched(item)).length;
+  }, [seasonScopedItems, isItemWatched]);
+
+  const showWatchedSort =
+    watchedCount > 0 && watchedCount < (seasonScopedItems?.length || 0);
 
   const userSelectedSeasonRef = useRef(false);
 
@@ -1047,14 +1065,7 @@ export default function InfoView({
 
   const sortedItems = useMemo(() => {
     // Apply season filter first (for Movies/Series with multiple seasons)
-    const seasonFiltered =
-      availableSeasons.length > 0 && selectedSeason !== "all"
-        ? episodesOrChapters.filter(
-            (item) =>
-              item.season !== undefined &&
-              Number(item.season) === Number(selectedSeason),
-          )
-        : episodesOrChapters;
+    const seasonFiltered = seasonScopedItems;
 
     // Season-aware sorter: by season ASC then by episode number
     const seasonAwareSort = (a, b) => {
@@ -1075,30 +1086,51 @@ export default function InfoView({
     };
 
     if (sortOrder === "downloaded") {
-      const allDownloadedNums =
+      const matched = seasonFiltered.filter((item) =>
+        isItemFullyDownloaded(item),
+      );
+      if (matched.length > 0 || seasonFiltered.length > 0) {
+        return matched.sort(seasonAwareSort);
+      }
+
+      const rawList =
         type === "Anime" || type === "Movies"
-          ? Array.from(
-              new Set(
-                Array.isArray(details?.DownloadedEpisodes)
-                  ? details.DownloadedEpisodes.map(Number)
-                  : [
-                      ...(details?.DownloadedEpisodes?.sub || []),
-                      ...(details?.DownloadedEpisodes?.dub || []),
-                    ].map(Number),
-              ),
-            ).sort((a, b) => a - b)
-          : Array.from(
-              new Set((details?.DownloadedChapters || []).map(Number)),
-            ).sort((a, b) => a - b);
+          ? Array.isArray(details?.DownloadedEpisodes)
+            ? details.DownloadedEpisodes
+            : [
+                ...(details?.DownloadedEpisodes?.sub || []),
+                ...(details?.DownloadedEpisodes?.dub || []),
+              ]
+          : details?.DownloadedChapters || [];
 
-      allDownloadedNums.sort((a, b) => a - b);
+      const activeSeasonFilter =
+        availableSeasons.length > 0 && selectedSeason !== "all"
+          ? Number(selectedSeason)
+          : null;
 
-      return allDownloadedNums.map((num) => {
-        const existingItem = seasonFiltered.find(
-          (item) => Number(item.number) === num,
-        );
-        if (existingItem) return existingItem;
+      const fallbackEntries = [];
+      const seenKeys = new Set();
+      for (const entry of rawList) {
+        const sMatch =
+          typeof entry === "string"
+            ? entry.match(/^s(\d+)_e(\d+(?:\.\d+)?)$/i)
+            : null;
+        const entrySeason = sMatch ? parseInt(sMatch[1], 10) : 1;
+        const entryNum = sMatch ? parseFloat(sMatch[2]) : Number(entry);
+        if (isNaN(entryNum)) continue;
+        if (activeSeasonFilter !== null && entrySeason !== activeSeasonFilter) {
+          continue;
+        }
+        const key = `${entrySeason}:${entryNum}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        fallbackEntries.push({ season: entrySeason, num: entryNum });
+      }
+      fallbackEntries.sort((a, b) =>
+        a.season !== b.season ? a.season - b.season : a.num - b.num,
+      );
 
+      return fallbackEntries.map(({ season: s, num }) => {
         if (type === "Anime" || type === "Movies") {
           const subList = details?.DownloadedEpisodes?.sub || [];
           const dubList = details?.DownloadedEpisodes?.dub || [];
@@ -1107,19 +1139,19 @@ export default function InfoView({
           if (dubList.map(Number).includes(num)) localLangs.push("dub");
           if (localLangs.length === 0) localLangs.push("sub");
           return {
-            id: `local-ep-${num}`,
+            id: `local-ep-s${s}-${num}`,
             number: String(num),
+            season: s,
             title: `Episode ${num}`,
             hasDub: dubList.map(Number).includes(num),
             langs: localLangs,
           };
-        } else {
-          return {
-            id: `local-ch-${num}`,
-            number: String(num),
-            title: `Chapter ${num}`,
-          };
         }
+        return {
+          id: `local-ch-${num}`,
+          number: String(num),
+          title: `Chapter ${num}`,
+        };
       });
     }
 
@@ -1137,6 +1169,7 @@ export default function InfoView({
 
     return [...seasonFiltered].sort(seasonAwareSort);
   }, [
+    seasonScopedItems,
     episodesOrChapters,
     sortOrder,
     sortDirection,
@@ -1366,19 +1399,34 @@ export default function InfoView({
       const dl = targetDetails?.DownloadedEpisodes;
       const subList = Array.isArray(dl) ? dl : dl?.sub || [];
       const dubList = Array.isArray(dl) ? dl : dl?.dub || [];
-      const allNums = Array.from(new Set([...subList, ...dubList]))
-        .map(Number)
-        .sort((a, b) => a - b);
-      if (allNums.length > 0) {
-        const localEps = allNums.map((num) => ({
-          id: `local-ep-${num}`,
-          number: num,
-          title: `Episode ${num}`,
-          hasDub: dubList.includes(num),
-        }));
+      const rawEntries = [...subList, ...dubList];
+      const entryMap = new Map();
+      for (const raw of rawEntries) {
+        const sMatch =
+          typeof raw === "string"
+            ? raw.match(/^s(\d+)_e(\d+(?:\.\d+)?)$/i)
+            : null;
+        const epSeason = sMatch ? parseInt(sMatch[1], 10) : 1;
+        const epNum = sMatch ? parseFloat(sMatch[2]) : Number(raw);
+        if (isNaN(epNum)) continue;
+        const key = `${epSeason}:${epNum}`;
+        if (!entryMap.has(key)) {
+          entryMap.set(key, {
+            id: `local-ep-s${epSeason}-${epNum}`,
+            number: epNum,
+            season: epSeason,
+            title: `Episode ${epNum}`,
+            hasDub: dubList.includes(raw) || dubList.map(Number).includes(epNum),
+          });
+        }
+      }
+      const localEps = Array.from(entryMap.values()).sort((a, b) =>
+        a.season !== b.season ? a.season - b.season : a.number - b.number,
+      );
+      if (localEps.length > 0) {
         setEpisodesOrChapters(localEps);
         setItemsHasNext(false);
-        setTotalItemsCount(allNums.length);
+        setTotalItemsCount(localEps.length);
       } else {
         setEpisodesOrChapters([]);
         setItemsHasNext(false);
@@ -1466,21 +1514,20 @@ export default function InfoView({
 
     try {
       const activeSubDub = historyProgress?.lastSubDub || dubSelect || "sub";
-      const dl = details?.DownloadedEpisodes;
-      const isDownloaded = Boolean(
-        dl &&
-          (Array.isArray(dl)
-            ? dl.map(Number).includes(Number(epItem.number))
-            : (dl[activeSubDub] || []).map(Number).includes(Number(epItem.number)))
+      const isDownloadedLocalCast = isDownloaded(
+        epItem.number,
+        activeSubDub,
+        epItem.season ?? null,
       );
 
-      if (isDownloaded) {
+      if (isDownloadedLocalCast) {
         const watchRes = await apiPost("/api/watch", {
           ep: details?.id || id,
           epNum: epItem.number,
           Downloaded: true,
           subdub: activeSubDub,
           type: type || "Anime",
+          season: epItem.season || 1,
         });
         const srcs =
           watchRes?.sources ||
@@ -1714,12 +1761,11 @@ export default function InfoView({
   const playItem = (targetItem, overrideSubDub = null) => {
     const activeSubDub = overrideSubDub || dubSelect;
     if (type === "Anime" || type === "Movies") {
-      const dl = details?.DownloadedEpisodes;
-      const isDownloadedLocal = Array.isArray(dl)
-        ? dl.map(Number).includes(Number(targetItem.number))
-        : activeSubDub === "dub"
-          ? (dl?.dub || []).map(Number).includes(Number(targetItem.number))
-          : (dl?.sub || []).map(Number).includes(Number(targetItem.number));
+      const isDownloadedLocal = isDownloaded(
+        targetItem.number,
+        activeSubDub,
+        targetItem.season ?? null,
+      );
 
       onWatch(
         details?.id || id,
@@ -1868,28 +1914,24 @@ export default function InfoView({
                   : null;
               if (Array.isArray(updated.DownloadedEpisodes)) {
                 const current = updated.DownloadedEpisodes;
-                const toAdd = [];
-                if (!current.map(Number).includes(epNum)) toAdd.push(epNum);
-                if (sKey && !current.includes(sKey)) toAdd.push(sKey);
-                if (toAdd.length > 0) {
-                  updated.DownloadedEpisodes = [...current, ...toAdd];
+                const entryToAdd = sKey || epNum;
+                if (!current.includes(entryToAdd)) {
+                  updated.DownloadedEpisodes = [...current, entryToAdd];
                 }
               } else if (
                 updated.DownloadedEpisodes &&
                 typeof updated.DownloadedEpisodes === "object"
               ) {
                 const currentList = updated.DownloadedEpisodes[subdub] || [];
-                const toAdd = [];
-                if (!currentList.map(Number).includes(epNum)) toAdd.push(epNum);
-                if (sKey && !currentList.includes(sKey)) toAdd.push(sKey);
-                if (toAdd.length > 0) {
+                const entryToAdd = sKey || epNum;
+                if (!currentList.includes(entryToAdd)) {
                   updated.DownloadedEpisodes = {
                     ...updated.DownloadedEpisodes,
-                    [subdub]: [...currentList, ...toAdd],
+                    [subdub]: [...currentList, entryToAdd],
                   };
                 }
               } else {
-                updated.DownloadedEpisodes = sKey ? [epNum, sKey] : [epNum];
+                updated.DownloadedEpisodes = sKey ? [sKey] : [epNum];
               }
             } else {
               const currentList = (updated.DownloadedChapters || []).map(
@@ -2180,7 +2222,7 @@ export default function InfoView({
       }
     }
 
-    episodesOrChapters.forEach((item) => {
+    seasonScopedItems.forEach((item) => {
       if (!isItemUnavailable(item)) {
         const num = parseFloat(item.number);
         if (!isNaN(num) && isNumberInRange(num, rangeStr)) {
@@ -3649,20 +3691,18 @@ export default function InfoView({
     );
   }
 
-  const selectableItems = (
-    selectedSeason !== "all" && availableSeasons.length > 0
-      ? episodesOrChapters.filter(
-          (item) => Number(item.season || 1) === Number(selectedSeason),
-        )
-      : episodesOrChapters
-  ).filter((item) => !isItemUnavailable(item));
+  const selectableItems = seasonScopedItems.filter(
+    (item) => !isItemUnavailable(item),
+  );
   const allSelectableSelected =
     selectableItems.length > 0 &&
     selectableItems.every((item) => selectedItems.has(Number(item.number)));
 
   const activeSeasonNum =
-    selectedSeason !== "all" && availableSeasons.length > 0
-      ? Number(selectedSeason)
+    availableSeasons.length > 0
+      ? selectedSeason !== "all"
+        ? Number(selectedSeason)
+        : Number(availableSeasons[0])
       : null;
   const numToDownload = Array.from(selectedItems).filter((num) => {
     const downloaded =
@@ -4325,7 +4365,13 @@ export default function InfoView({
       {/* Episodes / Chapters List */}
       <div className="items-section">
         <div className="section-header">
-          <h2>{type === "Manga" ? "Chapters List" : "Episodes List"}</h2>
+          <h2>
+            {type === "Manga"
+              ? "Chapters List"
+              : availableSeasons.length > 0 && selectedSeason !== "all"
+                ? `Season ${selectedSeason} Episodes`
+                : "Episodes List"}
+          </h2>
         </div>
         {episodesOrChapters.length > 0 && (
           <div className="bulk-actions">
@@ -4578,7 +4624,7 @@ export default function InfoView({
           </div>
         )}
 
-        <div className="items-list">
+        <div className="items-list" key={`season-${selectedSeason}`}>
           {filteredItems.length === 0 && !itemsLoading && (
             <div
               className="empty-items-state"
@@ -4608,7 +4654,7 @@ export default function InfoView({
             </div>
           )}
           {filteredItems.map((item) => {
-            const hasSub = isDownloaded(item.number, "sub");
+            const hasSub = isDownloaded(item.number, "sub", item.season);
             const isLocal = localMalProvider === "local";
 
             const itemSeason = item.season ? Number(item.season) : null;
@@ -4647,7 +4693,7 @@ export default function InfoView({
             const isSelected = selectedItems.has(Number(item.number));
             return (
               <div
-                key={item.id}
+                key={`${item.season ?? "all"}-${item.id ?? item.number}`}
                 className={`item-card glass-panel ${customBorderClass} ${isSelected ? "selected" : ""}`}
                 onClick={(e) => handleItemClick(e, item)}
               >

@@ -13,6 +13,7 @@ const {
   mediaServerDir,
   MangaDir,
   MovieDir,
+  MovieSeriesDir,
 } = require("./DirectoryMaker");
 const {
   MangaChapterFetch,
@@ -895,7 +896,22 @@ async function downloadep(
       } catch (_) {}
     }
   } else if (isMovie) {
-    directoryPath = await MovieDir(Title, dlLoc, animeId || AnimeEpId);
+    if (isSingleMovie) {
+      directoryPath = await MovieDir(Title, dlLoc, animeId || AnimeEpId);
+    } else {
+      const taskSeason =
+        Videoconfig?.season !== undefined && Videoconfig?.season !== null
+          ? parseInt(Videoconfig.season, 10)
+          : 1;
+      const resolvedSeason =
+        Number.isInteger(taskSeason) && taskSeason >= 0 ? taskSeason : 1;
+      directoryPath = await MovieSeriesDir(
+        Title,
+        resolvedSeason,
+        dlLoc,
+        animeId || AnimeEpId,
+      );
+    }
   } else {
     directoryPath = await directoryMaker(
       Title,

@@ -1501,20 +1501,25 @@ async function getSourceById(type, baseDir, id, number, subdub, season = null) {
     let dirsToSearch = [];
     if (targetSeason !== null) {
       const sPadded = String(targetSeason).padStart(2, "0");
+      dirsToSearch.push(path.join(folderPath, String(targetSeason)));
       dirsToSearch.push(path.join(folderPath, `Season ${sPadded}`));
       dirsToSearch.push(path.join(folderPath, `Season ${targetSeason}`));
-    }
-    dirsToSearch.push(folderPath);
-    if (fs.existsSync(folderPath)) {
-      try {
-        const subs = fs.readdirSync(folderPath, { withFileTypes: true });
-        for (const ent of subs) {
-          if (ent.isDirectory() && SEASON_FOLDER_RE.test(ent.name)) {
-            const sp = path.join(folderPath, ent.name);
-            if (!dirsToSearch.includes(sp)) dirsToSearch.push(sp);
+      if (targetSeason === 1) {
+        dirsToSearch.push(folderPath);
+      }
+    } else {
+      dirsToSearch.push(folderPath);
+      if (fs.existsSync(folderPath)) {
+        try {
+          const subs = fs.readdirSync(folderPath, { withFileTypes: true });
+          for (const ent of subs) {
+            if (ent.isDirectory() && SEASON_FOLDER_RE.test(ent.name)) {
+              const sp = path.join(folderPath, ent.name);
+              if (!dirsToSearch.includes(sp)) dirsToSearch.push(sp);
+            }
           }
-        }
-      } catch (_) {}
+        } catch (_) {}
+      }
     }
 
     if (malId) {

@@ -12,6 +12,8 @@ const {
   formatEpisodeFilename,
   scoreMovieMatch,
   rankMovieCandidates,
+  SEASON_FOLDER_RE,
+  parseSeasonFolderNumber,
 } = require("./constants");
 
 test("episode number from both naming schemes", () => {
@@ -222,4 +224,15 @@ test("movie match scoring and confidence ranking", () => {
   const empty = rankMovieCandidates({ title: "Nonexistent" }, []);
   assert.strictEqual(empty.confidence, "none");
   assert.strictEqual(empty.candidates.length, 0);
+});
+
+test("season folder pattern supports both Season NN and numeric seasonnumber folders", () => {
+  assert.strictEqual(SEASON_FOLDER_RE.test("Season 01"), true);
+  assert.strictEqual(SEASON_FOLDER_RE.test("Season 2"), true);
+  assert.strictEqual(SEASON_FOLDER_RE.test("1"), true);
+  assert.strictEqual(SEASON_FOLDER_RE.test("12"), true);
+  assert.strictEqual(SEASON_FOLDER_RE.test("subs"), false);
+  assert.strictEqual(parseSeasonFolderNumber("Season 02"), 2);
+  assert.strictEqual(parseSeasonFolderNumber("2"), 2);
+  assert.strictEqual(parseSeasonFolderNumber("subs"), null);
 });

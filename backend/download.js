@@ -538,11 +538,16 @@ async function downloadMovieSingle(
             ? downloadedList.includes(`s${resolvedSeason}_e${num}`)
             : false;
         const hasSeasonTags = downloadedList.some(
-          (x) => typeof x === "string" && x.startsWith("s"),
+          (x) => typeof x === "string" && /^s\d+_e/i.test(x),
         );
+        const allowUntaggedFallback =
+          !hasSeasonTags &&
+          (resolvedSeason === null ||
+            resolvedSeason === undefined ||
+            Number(resolvedSeason) <= 1);
         if (
           hasSeasonKey ||
-          (!hasSeasonTags && downloadedList.map(Number).includes(num))
+          (allowUntaggedFallback && downloadedList.map(Number).includes(num))
         ) {
           const epLabel =
             resolvedSeason !== null && resolvedSeason !== undefined

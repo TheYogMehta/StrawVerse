@@ -846,7 +846,9 @@ async function enrichResultsWithDownloads(results, AnimeManga) {
                 ) {
                   const num = getEpisodeNumberFromFilename(sf.name);
                   if (num !== null && !isNaN(num)) {
-                    eps.push(num);
+                    if (!isMovies) {
+                      eps.push(num);
+                    }
                     eps.push(`s${seasonNum}_e${num}`);
                   }
                 }
