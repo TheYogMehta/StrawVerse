@@ -34,9 +34,9 @@ All API endpoints are mounted under `/api` (or root prefix handled in [`backend/
 
 | Endpoint Group | File                                             | Key Methods                                                    | Description                                                                                    |
 | :------------- | :----------------------------------------------- | :------------------------------------------------------------- | :--------------------------------------------------------------------------------------------- |
-| **Media**      | [`media.js`](../backend/routes/media.js)         | `GET /search`, `GET /info`, `GET /watch`, `GET /read`          | Resolves anime episodes, video stream links (HLS/MP4), manga chapter image lists from scrapers |
+| **Media**      | [`media.js`](../backend/routes/media.js)         | `GET /search`, `GET /info`, `GET /watch`, `GET /read`, `POST /api/movies/resolve-provider` | Resolves anime/movie episodes, video stream links (HLS/MP4), manga chapter image lists, and movie providers |
 | **Downloads**  | [`downloads.js`](../backend/routes/downloads.js) | `POST /download`, `GET /queue`, `POST /cancel`, `POST /retry`  | Enqueues episodes/chapters, streams download progress, controls queue lifecycle                |
-| **Library**    | [`library.js`](../backend/routes/library.js)     | `GET /library`, `POST /bookmark`, `GET /history`, `POST /tags` | Interacts with local SQLite database to persist user watch history, bookmarks, and local files |
+| **Library**    | [`library.js`](../backend/routes/library.js)     | `GET /library`, `POST /bookmark`, `GET /history`, `POST /tags`, provider switching | Interacts with local SQLite database to persist watch history, bookmarks, local files, and provider migrations |
 | **System**     | [`system.js`](../backend/routes/system.js)       | `GET /settings`, `POST /settings`, `GET /logs`, `POST /folder` | System settings, local directory pickers, system specs, Discord RPC config                     |
 | **MAL**        | [`mal.js`](../backend/routes/mal.js)             | `GET /mal/auth`, `GET /mal/callback`, `POST /mal/sync`         | PKCE OAuth authentication with MyAnimeList, user list synchronization                          |
 
@@ -95,3 +95,13 @@ Download operations are handled by [`backend/utils/downloader.js`](../backend/ut
 - **FFmpeg Transcoding & Remuxing**: Merges downloaded video streams with subtitle tracks (`.vtt`, `.ass`) into clean `.mp4` or `.mkv` containers.
 - **CBZ Manga Packager**: Fetches individual manga chapter page images, caches them locally, and compiles them into `.cbz` archive formats.
 - **Domain Concurrency Limiter** ([`backend/utils/domainConcurrency.js`](../backend/utils/domainConcurrency.js)): Dynamically caps simultaneous TCP sockets per CDN/scraper hostname, monitoring 429/503 responses to trigger exponential backoff.
+
+---
+
+## 5. Provider Switching & Metadata Migration
+
+[`backend/utils/providerSwitch.js`](../backend/utils/providerSwitch.js) (`switchProviderMetadata`) handles atomic migration of saved `Anime`, `Movies`, and `Manga` entries when switching providers or IDs:
+
+- **Queue Safety Guard**: Blocks switching if downloads for the target `oldId` are currently active in `DownloadQueue` (`409 DOWNLOAD_IN_QUEUE`).
+- **Same-ID Provider Update**: Updates `provider` and `last_updated` in place (clearing `episodes_json` for `Movies`).
+- **Cross-ID Migration & Merging**: Migrates or merges `CustomTag` lists, `folder_name`, `WatchHistory` / `SeriesMovieWatchHistory`, and `custom_order_*` references atomically via `batchRun`.

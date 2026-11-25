@@ -45,6 +45,7 @@ const {
   getEpisodeNumberFromFilename,
   getChapterNumberFromFilename,
   isMangaFile,
+  rankMovieCandidates,
 } = require("../utils/constants");
 const { getDownloadsFolder } = require("../utils/DirectoryMaker");
 
@@ -3157,6 +3158,9 @@ router.post(
       if (AnimeManga === "Movies" && data) {
         data.malid = null;
         delete data.MalID;
+        data.availableProviders = Object.keys(global.Movies_providers || {}).map(
+          (p) => ({ provider: p }),
+        );
       }
 
       if (AnimeManga !== "Movies" && data && global.mappingDb) {
@@ -5184,5 +5188,88 @@ router.post(
     }
   },
 );
+
+// Resolve a Movie/Series on a target installed Movies extension
+router.post("/api/movies/resolve-provider", async (req, res) => {
+  try {
+    const {
+      targetProvider,
+      title,
+      year = null,
+      mediaType = null,
+      query = null,
+    } = req.body || {};
+
+    if (
+      typeof targetProvider !== "string" ||
+      !targetProvider.trim() ||
+      targetProvider.length > 512
+    ) {
+      return res.status(400).json({ error: "Invalid targetProvider" });
+    }
+
+    const searchTitle =
+      typeof query === "string" && query.trim()
+        ? query.trim()
+        : typeof title === "string"
+          ? title.trim()
+          : "";
+    if (!searchTitle || searchTitle.length > 200) {
+      return res
+        .status(400)
+        .json({ error: "Missing or invalid title/query (1-200 chars)" });
+    }
+
+    const installed = global.Movies_providers || {};
+    const canonicalName = Object.keys(installed).find(
+      (k) =>
+        k === targetProvider.trim() ||
+        k.toLowerCase() === targetProvider.trim().toLowerCase(),
+    );
+    if (!canonicalName) {
+      return res.status(400).json({
+        error: `Movies extension '${targetProvider}' is not installed`,
+      });
+    }
+
+    const provObj = await providerFetch("Movies", canonicalName);
+    const searchPromise = movieSearch(provObj, searchTitle, {});
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(
+        () => reject(new Error(`Timed out searching ${canonicalName}`)),
+        15000,
+      ),
+    );
+    const raw = await Promise.race([searchPromise, timeoutPromise]);
+    const rawResults = Array.isArray(raw?.results)
+      ? raw.results
+      : Array.isArray(raw)
+        ? raw
+        : [];
+
+    const isManualQuery = typeof query === "string" && query.trim().length > 0;
+    const ranked = rankMovieCandidates(
+      {
+        title: typeof title === "string" && title.trim() ? title.trim() : searchTitle,
+        year,
+        mediaType,
+      },
+      rawResults,
+      isManualQuery,
+    );
+
+    return res.json({
+      success: true,
+      targetProvider: canonicalName,
+      ...ranked,
+    });
+  } catch (err) {
+    logger.error(`Error in /api/movies/resolve-provider: ${err.message}`);
+    return res.status(502).json({
+      success: false,
+      error: err.message || "Failed to search target extension",
+    });
+  }
+});
 
 module.exports = router;

@@ -68,7 +68,8 @@ flowchart LR
 
 ### 3.2 Media Info & Selection ([`gui/src/components/InfoView.jsx`](../gui/src/components/InfoView.jsx))
 
-- Displays media synopsis, MAL ratings, genres, and provider switcher.
+- Displays media synopsis, MAL ratings, genres, and provider switcher across Anime, Movies, and Manga.
+- Supports movie provider resolution (`/api/movies/resolve-provider`) and atomic provider/extension switching for saved library entries.
 - Batch episode/chapter selection with "Select All", "Select Unwatched", and multi-range selectors.
 - Triggers single/bulk downloads or immediate streaming/reading.
 

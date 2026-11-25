@@ -10,6 +10,8 @@ const {
   hasLocalMediaFiles,
   formatMovieFilename,
   formatEpisodeFilename,
+  scoreMovieMatch,
+  rankMovieCandidates,
 } = require("./constants");
 
 test("episode number from both naming schemes", () => {
@@ -164,4 +166,60 @@ test("movie filenames do not false-positive as episode numbers", () => {
   );
   assert.strictEqual(getEpisodeNumberFromFilename("Inception [1080p].mp4"), null);
   assert.strictEqual(getEpisodeNumberFromFilename("Fight Club (1999).mkv"), null);
+});
+
+test("movie match scoring and confidence ranking", () => {
+  const highScore = scoreMovieMatch(
+    { title: "Inception", year: "2010-07-16", mediaType: "Movie" },
+    { title: "Inception", year: "2010", type: "Movie" },
+  );
+  assert.strictEqual(highScore, 100);
+
+  // Clear winner -> high confidence
+  const clear = rankMovieCandidates(
+    { title: "Inception", year: "2010", mediaType: "Movie" },
+    [
+      { id: "m1", title: "Inception", year: "2010", type: "Movie" },
+      { id: "m2", title: "Inception: The Cobol Job", year: "2010", type: "Movie" },
+    ],
+  );
+  assert.strictEqual(clear.confidence, "high");
+  assert.strictEqual(clear.match?.id, "m1");
+
+  // Ambiguous remakes with same title & no year -> low confidence
+  const remake = rankMovieCandidates(
+    { title: "Dune", mediaType: "Movie" },
+    [
+      { id: "d1", title: "Dune", year: "1984", type: "Movie" },
+      { id: "d2", title: "Dune", year: "2021", type: "Movie" },
+    ],
+  );
+  assert.strictEqual(remake.confidence, "low");
+  assert.strictEqual(remake.match, null);
+  assert.strictEqual(remake.candidates.length, 2);
+
+  // Movie vs TV disambiguation
+  const kindSplit = rankMovieCandidates(
+    { title: "Fargo", year: "1996", mediaType: "Movie" },
+    [
+      { id: "f-tv", title: "Fargo", year: "2014", type: "TV" },
+      { id: "f-mv", title: "Fargo", year: "1996", type: "Movie" },
+    ],
+  );
+  assert.strictEqual(kindSplit.confidence, "high");
+  assert.strictEqual(kindSplit.match?.id, "f-mv");
+
+  // Manual query always forces picker ("low")
+  const manual = rankMovieCandidates(
+    { title: "Inception", year: "2010", mediaType: "Movie" },
+    [{ id: "m1", title: "Inception", year: "2010", type: "Movie" }],
+    true,
+  );
+  assert.strictEqual(manual.confidence, "low");
+  assert.strictEqual(manual.match, null);
+
+  // Empty results -> none
+  const empty = rankMovieCandidates({ title: "Nonexistent" }, []);
+  assert.strictEqual(empty.confidence, "none");
+  assert.strictEqual(empty.candidates.length, 0);
 });

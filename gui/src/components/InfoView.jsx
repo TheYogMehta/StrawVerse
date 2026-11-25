@@ -783,6 +783,10 @@ export default function InfoView({
   const dropdownRef = useRef(null);
   const [isProviderDropdownOpen, setIsProviderDropdownOpen] = useState(false);
   const providerDropdownRef = useRef(null);
+  const [isSwitchingProvider, setIsSwitchingProvider] = useState(false);
+  const [moviePickerState, setMoviePickerState] = useState(null);
+  const [moviePickerQuery, setMoviePickerQuery] = useState("");
+  const [moviePickerLoading, setMoviePickerLoading] = useState(false);
   const [isMalStatusDropdownOpen, setIsMalStatusDropdownOpen] = useState(false);
   const malStatusDropdownRef = useRef(null);
   const [isImageExpanded, setIsImageExpanded] = useState(false);
@@ -2578,7 +2582,7 @@ export default function InfoView({
   const handleProviderSwitch = async (newId, newProvider) => {
     const oldId = id;
     try {
-      await fetch("/api/metadata/switch-provider", {
+      const res = await fetch("/api/metadata/switch-provider", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2588,11 +2592,113 @@ export default function InfoView({
           newProvider: newProvider,
         }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        swalError(
+          res.status === 409 ? "Download in Queue" : "Switch Failed",
+          data?.error || "Failed to switch extension.",
+        );
+        return false;
+      }
+      if (type === "Movies" && window.catalogCache) {
+        Object.keys(window.catalogCache).forEach((k) => {
+          if (k.startsWith("Movies_")) delete window.catalogCache[k];
+        });
+      }
     } catch (err) {
       console.error("Failed to migrate provider in database:", err);
+      swalError("Switch Failed", err?.message || "Failed to switch extension.");
+      return false;
     }
     setId(newId);
     setLocalMalProvider(newProvider);
+    return true;
+  };
+
+  const handleMovieProviderSelect = async (
+    targetProvider,
+    forcePicker = false,
+  ) => {
+    if (!targetProvider || isSwitchingProvider) return;
+    if (
+      !forcePicker &&
+      details?.provider &&
+      details.provider.toLowerCase() === targetProvider.toLowerCase()
+    ) {
+      return;
+    }
+
+    const searchTitle = details?.title || id;
+    setIsSwitchingProvider(true);
+    try {
+      const res = await fetch("/api/movies/resolve-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetProvider,
+          title: searchTitle,
+          year: details?.aired || details?.released || null,
+          mediaType: details?.type || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        swalError(
+          "Extension Error",
+          data?.error || `Could not search ${targetProvider}.`,
+        );
+        return;
+      }
+
+      if (!forcePicker && data.confidence === "high" && data.match?.id) {
+        await handleProviderSwitch(data.match.id, data.targetProvider);
+      } else {
+        setMoviePickerQuery(searchTitle);
+        setMoviePickerState({
+          targetProvider: data.targetProvider,
+          candidates: data.candidates || [],
+        });
+      }
+    } catch (err) {
+      swalError(
+        "Extension Error",
+        err?.message || `Failed to reach ${targetProvider}.`,
+      );
+    } finally {
+      setIsSwitchingProvider(false);
+    }
+  };
+
+  const performMoviePickerSearch = async (queryText) => {
+    if (!moviePickerState?.targetProvider) return;
+    const trimmed = String(queryText || "").trim();
+    if (!trimmed) return;
+    setMoviePickerLoading(true);
+    try {
+      const res = await fetch("/api/movies/resolve-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetProvider: moviePickerState.targetProvider,
+          title: details?.title || trimmed,
+          year: details?.aired || details?.released || null,
+          mediaType: details?.type || null,
+          query: trimmed,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        swalError("Search Failed", data?.error || "Extension search failed.");
+        return;
+      }
+      setMoviePickerState((prev) =>
+        prev ? { ...prev, candidates: data.candidates || [] } : prev,
+      );
+    } catch (err) {
+      swalError("Search Failed", err?.message || "Extension search failed.");
+    } finally {
+      setMoviePickerLoading(false);
+    }
   };
 
   const selectMalTitle = async (selectedMalId) => {
@@ -3500,6 +3606,146 @@ export default function InfoView({
                     details?.provider ||
                     (details?.linkedProviders &&
                       details.linkedProviders[0]?.provider);
+
+                  if (type === "Movies") {
+                    const installedMovies = (
+                      details?.availableProviders || []
+                    ).filter(
+                      (p, index, self) =>
+                        p.provider &&
+                        self.findIndex((t) => t.provider === p.provider) ===
+                          index,
+                    );
+                    const canSwitchMovie =
+                      installedMovies.length > 1 ||
+                      (installedMovies.length >= 1 &&
+                        (!activeProv || activeProv === "local source"));
+
+                    if (canSwitchMovie) {
+                      return (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            position: "relative",
+                          }}
+                        >
+                          <div
+                            className={`custom-dropdown-trigger ${isProviderDropdownOpen ? "open" : ""}`}
+                            onClick={() => {
+                              if (!isSwitchingProvider) {
+                                setIsProviderDropdownOpen(
+                                  !isProviderDropdownOpen,
+                                );
+                              }
+                            }}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              flex: 1,
+                              opacity: isSwitchingProvider ? 0.7 : 1,
+                              pointerEvents: isSwitchingProvider
+                                ? "none"
+                                : "auto",
+                            }}
+                          >
+                            {isSwitchingProvider ? (
+                              <Loader2 size={15} className="spin" />
+                            ) : (
+                              getProviderIcon(activeProv) && (
+                                <img
+                                  src={getProviderIcon(activeProv)}
+                                  alt=""
+                                  style={{
+                                    width: "16px",
+                                    height: "16px",
+                                    borderRadius: "3px",
+                                    objectFit: "contain",
+                                  }}
+                                />
+                              )
+                            )}
+                            <span
+                              className="custom-dropdown-trigger-text"
+                              style={{ flex: 1 }}
+                            >
+                              {isSwitchingProvider
+                                ? "Matching..."
+                                : activeProv === "local source"
+                                  ? "Local Source"
+                                  : activeProv || "Select Extension"}
+                            </span>
+                            <ChevronDown
+                              className="custom-dropdown-chevron"
+                              size={16}
+                              style={{ flexShrink: 0 }}
+                            />
+                          </div>
+
+                          {activeProv &&
+                            activeProv !== "local source" &&
+                            installedMovies.some(
+                              (p) => p.provider === activeProv,
+                            ) && (
+                              <button
+                                type="button"
+                                className="btn-watch-latest"
+                                style={{
+                                  height: "38px",
+                                  padding: "0 10px",
+                                  fontSize: "12px",
+                                  flexShrink: 0,
+                                }}
+                                title="Re-match this title on the current extension"
+                                disabled={isSwitchingProvider}
+                                onClick={() =>
+                                  handleMovieProviderSelect(activeProv, true)
+                                }
+                              >
+                                <Search size={13} />
+                              </button>
+                            )}
+
+                          {isProviderDropdownOpen && (
+                            <div className="custom-dropdown-menu">
+                              {installedMovies.map((p) => (
+                                <div
+                                  key={p.provider}
+                                  className={`custom-dropdown-item ${activeProv === p.provider ? "selected" : ""}`}
+                                  onClick={() => {
+                                    setIsProviderDropdownOpen(false);
+                                    handleMovieProviderSelect(p.provider);
+                                  }}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "8px",
+                                  }}
+                                >
+                                  {getProviderIcon(p.provider) && (
+                                    <img
+                                      src={getProviderIcon(p.provider)}
+                                      alt=""
+                                      style={{
+                                        width: "16px",
+                                        height: "16px",
+                                        borderRadius: "3px",
+                                        objectFit: "contain",
+                                      }}
+                                    />
+                                  )}
+                                  <span>{p.provider}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                  }
+
                   const validLinked = (details?.linkedProviders || []).filter(
                     (p, index, self) =>
                       p.provider &&
@@ -4779,6 +5025,113 @@ export default function InfoView({
                 <div className="mal-modal-status-initial">
                   Ready to search. Adjust title above if needed and click
                   Search.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Movie/Series Extension Match Picker Modal */}
+      {moviePickerState && (
+        <div
+          className="mal-modal-overlay"
+          onClick={() => setMoviePickerState(null)}
+        >
+          <div
+            className="mal-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mal-modal-header">
+              <div className="mal-modal-title-group">
+                <h2 className="mal-modal-title">
+                  Match on {moviePickerState.targetProvider}
+                </h2>
+                <span className="mal-modal-subtitle">
+                  Select the matching movie or series for "{details?.title}"
+                </span>
+              </div>
+              <button
+                className="mal-modal-close"
+                onClick={() => setMoviePickerState(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mal-modal-search-bar">
+              <input
+                type="text"
+                value={moviePickerQuery}
+                onChange={(e) => setMoviePickerQuery(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key === "Enter" &&
+                  performMoviePickerSearch(moviePickerQuery)
+                }
+                className="mal-modal-search-input"
+                placeholder={`Search ${moviePickerState.targetProvider}...`}
+                autoFocus
+              />
+              <button
+                onClick={() => performMoviePickerSearch(moviePickerQuery)}
+                className="mal-modal-search-btn"
+                disabled={moviePickerLoading}
+              >
+                <Search size={16} />
+                <span>Search</span>
+              </button>
+            </div>
+
+            <div className="mal-modal-results-container">
+              {moviePickerLoading ? (
+                <div className="mal-modal-status">
+                  <Loader2 size={24} className="spin" />
+                  <span>Searching {moviePickerState.targetProvider}...</span>
+                </div>
+              ) : moviePickerState.candidates.length > 0 ? (
+                <ul className="mal-modal-results-list">
+                  {moviePickerState.candidates.map((cand) => (
+                    <li
+                      key={cand.id}
+                      className="mal-modal-result-item"
+                      onClick={async () => {
+                        const targetProv = moviePickerState.targetProvider;
+                        setMoviePickerState(null);
+                        setIsSwitchingProvider(true);
+                        try {
+                          await handleProviderSwitch(cand.id, targetProv);
+                        } finally {
+                          setIsSwitchingProvider(false);
+                        }
+                      }}
+                    >
+                      {cand.image && (
+                        <img
+                          src={cand.image}
+                          alt={cand.title}
+                          className="mal-modal-result-image"
+                          onError={(e) => {
+                            e.target.src = "/images/image-404.png";
+                          }}
+                        />
+                      )}
+                      <div className="mal-modal-result-info">
+                        <div className="mal-modal-result-title">
+                          {cand.title}
+                        </div>
+                        <div className="mal-modal-result-meta">
+                          <span>
+                            {[cand.type, cand.year].filter(Boolean).join(" • ") ||
+                              "Match"}
+                          </span>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mal-modal-status">
+                  No results found on {moviePickerState.targetProvider}. Try
+                  adjusting the search title above.
                 </div>
               )}
             </div>

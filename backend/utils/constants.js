@@ -549,10 +549,152 @@ function formatChapterFilename(
   return `${baseName}${ext.startsWith(".") ? ext : `.${ext}`}`;
 }
 
+function normalizeTitleForMatch(str) {
+  if (!str) return "";
+  return String(str)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(?:19|20)\d{2}\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function extractYearFromDate(val) {
+  if (val === null || val === undefined) return null;
+  const match = String(val).match(/\b(19\d{2}|20\d{2})\b/);
+  return match ? match[1] : null;
+}
+
+function normalizeMediaKind(type) {
+  const norm = String(type || "").toLowerCase().trim();
+  if (!norm) return null;
+  if (norm === "movie" || norm === "movies" || norm === "film") return "movie";
+  if (
+    norm === "tv" ||
+    norm === "series" ||
+    norm === "tv series" ||
+    norm === "show" ||
+    norm === "tv show"
+  ) {
+    return "tv";
+  }
+  return null;
+}
+
+function scoreMovieMatch(target = {}, candidate = {}) {
+  const targetNorm = normalizeTitleForMatch(target.title);
+  const candNorm = normalizeTitleForMatch(candidate.title);
+  if (!targetNorm || !candNorm) return 0;
+
+  let score = 0;
+  if (targetNorm === candNorm) {
+    score += 70;
+  } else if (candNorm.includes(targetNorm) || targetNorm.includes(candNorm)) {
+    score += 40;
+  } else {
+    const targetTokens = new Set(targetNorm.split(" ").filter(Boolean));
+    const candTokens = new Set(candNorm.split(" ").filter(Boolean));
+    if (targetTokens.size > 0 && candTokens.size > 0) {
+      let overlap = 0;
+      for (const tok of targetTokens) {
+        if (candTokens.has(tok)) overlap++;
+      }
+      const unionSize = new Set([...targetTokens, ...candTokens]).size;
+      score += Math.round((overlap / unionSize) * 35);
+    }
+  }
+
+  const targetYear = extractYearFromDate(target.year);
+  const candYear =
+    extractYearFromDate(candidate.year) ||
+    extractYearFromDate(candidate.released) ||
+    extractYearFromDate(candidate.aired) ||
+    extractYearFromDate(candidate.releaseDate) ||
+    extractYearFromDate(candidate.title);
+
+  if (targetYear && candYear) {
+    const diff = Math.abs(parseInt(targetYear, 10) - parseInt(candYear, 10));
+    if (diff === 0) score += 20;
+    else if (diff === 1) score += 5;
+    else score -= 15;
+  }
+
+  const targetKind = normalizeMediaKind(target.mediaType || target.type);
+  const candKind = normalizeMediaKind(candidate.type);
+  if (targetKind && candKind) {
+    if (targetKind === candKind) score += 10;
+    else score -= 20;
+  }
+
+  return score;
+}
+
+function rankMovieCandidates(target = {}, rawResults = [], isManualQuery = false) {
+  if (!Array.isArray(rawResults) || rawResults.length === 0) {
+    return { confidence: "none", match: null, candidates: [] };
+  }
+
+  const seen = new Set();
+  const candidates = [];
+  for (const raw of rawResults) {
+    if (!raw || !raw.id) continue;
+    const idStr = String(raw.id);
+    if (seen.has(idStr)) continue;
+    seen.add(idStr);
+
+    const candYear =
+      extractYearFromDate(raw.year) ||
+      extractYearFromDate(raw.released) ||
+      extractYearFromDate(raw.aired) ||
+      extractYearFromDate(raw.releaseDate) ||
+      null;
+
+    const score = scoreMovieMatch(target, {
+      title: raw.title || raw.name || "",
+      year: candYear,
+      type: raw.type || raw.mediaType || null,
+    });
+
+    candidates.push({
+      id: idStr,
+      title: raw.title || raw.name || idStr,
+      image: raw.image || raw.image_url || raw.poster || null,
+      year: candYear,
+      type: raw.type || raw.mediaType || null,
+      score,
+    });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const topCandidates = candidates.slice(0, 15);
+  if (topCandidates.length === 0) {
+    return { confidence: "none", match: null, candidates: [] };
+  }
+
+  const top = topCandidates[0];
+  const second = topCandidates[1];
+  const isHighConfidence =
+    !isManualQuery &&
+    top.score >= 85 &&
+    (!second || top.score - second.score >= 15);
+
+  return {
+    confidence: isHighConfidence ? "high" : "low",
+    match: isHighConfidence ? top : null,
+    candidates: topCandidates,
+  };
+}
+
 module.exports = {
   formatEpisodeFilename,
   formatMovieFilename,
   formatChapterFilename,
+  normalizeTitleForMatch,
+  extractYearFromDate,
+  normalizeMediaKind,
+  scoreMovieMatch,
+  rankMovieCandidates,
   VIDEO_EXTENSIONS,
   SUBTITLE_EXTENSIONS,
   MANGA_EXTENSIONS,
