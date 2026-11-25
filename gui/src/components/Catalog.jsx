@@ -1804,7 +1804,7 @@ export default function Catalog({
         (data) => {
           if (!data?.oldId || !data?.newId) return;
           setRecentHistory((prev) =>
-            (prev || []).map((item) => {
+            (Array.isArray(prev) ? prev : []).map((item) => {
               if (
                 String(item.id) === String(data.oldId) ||
                 String(item.anime_id) === String(data.oldId) ||
@@ -1820,21 +1820,27 @@ export default function Catalog({
               return item;
             }),
           );
-          setData((prev) =>
-            (prev || []).map((item) => {
-              if (
-                String(item.id) === String(data.oldId) ||
-                String(item.media_id) === String(data.oldId)
-              ) {
-                return {
-                  ...item,
-                  id: data.newId,
-                  media_id: data.newId,
-                };
-              }
-              return item;
-            }),
-          );
+          setData((prevData) => {
+            if (!prevData?.results || !Array.isArray(prevData.results)) {
+              return prevData;
+            }
+            return {
+              ...prevData,
+              results: prevData.results.map((item) => {
+                if (
+                  String(item.id) === String(data.oldId) ||
+                  String(item.media_id) === String(data.oldId)
+                ) {
+                  return {
+                    ...item,
+                    id: data.newId,
+                    media_id: data.newId,
+                  };
+                }
+                return item;
+              }),
+            };
+          });
         },
       );
       return () => {

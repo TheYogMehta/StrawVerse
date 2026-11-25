@@ -12,6 +12,7 @@ const malRouter = require("./mal");
 const downloadsRouter = require("./downloads");
 const mediaRouter = require("./media");
 const libraryRouter = require("./library");
+const castRouter = require("./cast");
 
 const router = express.Router();
 
@@ -21,6 +22,7 @@ router.use(malRouter);
 router.use(downloadsRouter);
 router.use(mediaRouter);
 router.use(libraryRouter);
+router.use(castRouter);
 
 // Android only APK update router
 if (isAndroid) {

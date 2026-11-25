@@ -1,5 +1,25 @@
 # Changelog
 
+# [12.1.1] - 2026-11-23
+
+### Universal Smart TV & DLNA / UPnP Casting
+
+- **On-the-Fly Subtitle Burning & Merging:** When a subtitle track is selected for TV casting, subtitles are automatically converted to clean SubRip (`.srt`) format and burned directly onto the video frames using FFmpeg, eliminating Smart TV freezes caused by unhandled external DLNA caption tracks (`sec:CaptionInfo`) or HLS subtitle media groups (`#EXT-X-MEDIA:TYPE=SUBTITLES`).
+- **NVIDIA NVENC Hardware Acceleration:** Leveraged `h264_nvenc` low-latency hardware encoding for subtitle burning when an NVIDIA GPU is present, generating video chunks at up to 8x realtime with <1.5s startup and near-zero CPU load, with automatic fallback to `libx264 -preset ultrafast`.
+- **Pre-Cast Quality & Subtitle Selection Modal:** Added interactive selection step before casting starts, enabling users to choose their desired server/resolution quality and specific subtitle track (or "None / Off" for direct pass-through with zero re-encoding).
+- **Direct Pass-Through Baseline:** When casting without subtitles, media streams directly through the lightweight proxy without re-encoding, preserving native video quality and 0% CPU overhead.
+- **Cast to Any Smart TV:** Added native support to cast streaming video directly to any TV connected to the same Wi-Fi / local network. Supports Samsung Tizen TVs, LG webOS TVs, Sony Bravia, Roku TVs, Hisense, Philips, Panasonic, Chromecast / Android TV, and all DLNA/UPnP MediaRenderer devices.
+- **Samsung Tizen DLNA Compatibility & Protocol Negotiation:** Resolved Samsung Smart TV `Illegal MIME-type (code 714)` errors by positioning `http-get:*:video/mp4:*` as the primary protocol descriptor in UPnP DIDL-Lite metadata, allowing native Tizen video engines to accept proxied HLS and direct video streams.
+- **Short Stream URI Architecture & UPnP Buffer Overflow Prevention:** Replaced giant 8KB query strings (previously caused by serializing 40+ subtitle definitions into URL parameters) with a compact `/api/cast/stream.mp4` endpoint, keeping UPnP `CurrentURI` under 45 characters and DIDL-Lite metadata under 1KB to eliminate microhttpd buffer overflow crashes.
+- **Live Subtitle Negotiation (`CaptionInfo.sec`):** Implemented native Samsung Tizen subtitle negotiation by returning the `CaptionInfo.sec` response header on `HEAD` and `GET` requests, enabling Smart TVs to automatically fetch converted WebVTT subtitles via `/api/cast/subtitle/active.vtt`.
+- **Advanced Subtitle Parsing & Deduplication:** Added ASS/SSA dialogue conversion to both WebVTT (`.vtt`) and SubRip (`.srt`), automatically deduplicating mirror CDN subtitles, filtering dialogue tracks from signs, and selecting user-preferred subtitle tracks for casting.
+- **SSDP Auto-Discovery Engine:** Implemented a multi-interface SSDP UDP multicast discovery engine that automatically discovers network TV devices across all active physical network interfaces.
+- **LAN Media Proxy & Anti-Scraper Header Bypass:** Resolved the limitation where Smart TVs reject CDN video streams due to missing `Referer`, `Origin`, or `User-Agent` headers. The integrated proxy (`/api/cast/stream` and `/api/cast/segment`) proxies chunks upstream with all provider headers, dynamically rewrites HLS playlists (`.m3u8`), and supports byte-range streaming for local files.
+- **Android Native Player Remote Controls:** Added a dedicated Cast button to `PlayerActivity`, a Wi-Fi device discovery picker, a full-screen cast overlay with dark-mode styling, play/pause controls, +/-10s seek buttons, and a disconnect button.
+- **Unified Web Player Casting:** Added a Cast button, device selection modal, active casting overlay, and full remote control synchronization to `WebPlayer.jsx`.
+- **Playback Synchronization & Audio Guarding:** Local video players automatically pause when casting begins to prevent dual audio/video playback, and sync playback states (play, pause, seek, stop) in real time via background polling.
+- **Capacitor LAN Binding:** Configured the internal Express server in the Android runtime to listen on `0.0.0.0:9545`, allowing TVs on the local subnet to pull proxied media streams directly from the mobile device.
+
 # [12.1.0] - 2026-11-18
 
 ### Single-Movie & Series Library Handling
@@ -34,6 +54,9 @@
 
 ### Crash Diagnostics & Application Stability
 
+- **Native Bridge Memory Safeguard & OOM Prevention:** Enforced a 30 MB buffer limit on `nativeRequest` in `CloudflareBypassPlugin.java` to prevent Dalvik OutOfMemory crashes when large media chunks or video streams are fetched. Added graceful `Throwable` trapping with clean rejection to Node.js and automatic fallback to Node's native HTTP adapter.
+- **Stream Request Bridge Bypass:** Prevented streaming requests (`responseType: "stream"`) in `nativeAxiosAdapter` from routing through the native bridge buffer, ensuring video and audio streams bypass in-memory buffering without heap exhaustion.
+- **Database Migration Schema Alignment:** Fixed an SQLite startup error (`table Movies has no column named MalID`) by removing the non-existent `MalID` column from the automatic movie migration query in `backend/utils/db.js`.
 - **Persistent Session Logs:** Resolved an issue where `app.log` was wiped on application launch, erasing crash diagnostics. The previous session is now archived to `app-previous.log` and visible in the in-app Logs tab under `PREVIOUS SESSION`.
 - **Fatal Process Exception Trapping:** Added synchronous crash logging for uncaught Node.js exceptions and unhandled promise rejections to prevent silent background process terminations.
 - **Android Native Crash Handler:** Installed a global uncaught exception handler in `MainActivity.java` that records native Android runtime crash logs to disk (`Strawverse/data/crash.log`).

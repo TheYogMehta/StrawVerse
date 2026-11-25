@@ -101,6 +101,10 @@ import {
   PictureInPicture,
   AlertTriangle,
   Check,
+  Tv,
+  Cast,
+  RefreshCw,
+  X,
 } from "lucide-react";
 import "../css/VideoPlayer.css";
 
@@ -263,6 +267,174 @@ export default function VideoPlayer({
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
 
+  // Cast state
+  const [showCastModal, setShowCastModal] = useState(false);
+  const [castDevices, setCastDevices] = useState([]);
+  const [isScanningCast, setIsScanningCast] = useState(false);
+  const [isCasting, setIsCasting] = useState(false);
+  const [activeCastDevice, setActiveCastDevice] = useState(null);
+  const [castConnecting, setCastConnecting] = useState(false);
+
+  // Cast Quality & Subtitle selection states
+  const [castSelectedDevice, setCastSelectedDevice] = useState(null);
+  const [castSelectedSource, setCastSelectedSource] = useState(null);
+  const [castSelectedSubtitleUrl, setCastSelectedSubtitleUrl] = useState("none");
+
+  const scanCastDevices = async (timeout = 3500) => {
+    setIsScanningCast(true);
+    try {
+      const res = await fetch(`/api/cast/devices?timeout=${timeout}`);
+      const data = await res.json();
+      if (data.success && Array.isArray(data.devices)) {
+        setCastDevices(data.devices);
+        if (data.devices.length === 1 && !castSelectedDevice) {
+          setCastSelectedDevice(data.devices[0]);
+        }
+      }
+    } catch (e) {
+      console.error("[WebPlayer] Error scanning cast devices:", e);
+    } finally {
+      setIsScanningCast(false);
+    }
+  };
+
+  useEffect(() => {
+    if (showCastModal) {
+      scanCastDevices(3000);
+      if (selectedSource) {
+        setCastSelectedSource(selectedSource);
+      } else if (sources.length > 0) {
+        setCastSelectedSource(sources[0]);
+      }
+      if (Array.isArray(subtitles) && subtitles.length > 0) {
+        const activeSub =
+          subtitles[selectedSubtitleIndex] ||
+          subtitles.find((s) => s.default) ||
+          subtitles.find((s) => (s.lang || s.label || "").toLowerCase().includes("english")) ||
+          subtitles[0];
+        setCastSelectedSubtitleUrl(activeSub?.url || "none");
+      } else {
+        setCastSelectedSubtitleUrl("none");
+      }
+    }
+  }, [showCastModal, selectedSource, sources, subtitles, selectedSubtitleIndex]);
+
+  const handleStartCast = async (targetDevice = null) => {
+    const device = targetDevice || castSelectedDevice;
+    if (!device) return;
+    setCastConnecting(true);
+    try {
+      const currentPos = videoRef.current ? videoRef.current.currentTime : currentTime;
+      const chosenSource = castSelectedSource || selectedSource || sources[0];
+
+      const payload = {
+        deviceId: device.id,
+        device: device,
+        title: animeTitle || (type === "Movies" ? "Movie Stream" : "Anime Stream"),
+        position: currentPos || 0,
+        poster: image || "",
+        subtitles: Array.isArray(subtitles) ? subtitles : [],
+        selectedSubtitleUrl: castSelectedSubtitleUrl,
+        subtitlesDisabled: castSelectedSubtitleUrl === "none",
+      };
+
+      if (isCurrentDownloaded && chosenSource?.url) {
+        if (chosenSource.url.startsWith("/video?path=")) {
+          payload.filePath = decodeURIComponent(chosenSource.url.replace("/video?path=", ""));
+        } else {
+          payload.filePath = chosenSource.url;
+        }
+      } else {
+        payload.url = typeof chosenSource?.url === "string" ? chosenSource.url : sourceUrl;
+        payload.headers = chosenSource?.headers || {};
+      }
+
+      const res = await fetch("/api/cast/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.success) {
+        videoRef.current?.pause();
+        setIsPlaying(false);
+        setIsCasting(true);
+        setActiveCastDevice(device);
+        setShowCastModal(false);
+      } else {
+        alert("Failed to start casting: " + (data.error || "Unknown error"));
+      }
+    } catch (err) {
+      console.error("[WebPlayer] Error starting cast:", err);
+      alert("Error starting cast: " + err.message);
+    } finally {
+      setCastConnecting(false);
+    }
+  };
+
+  const handleStopCast = async () => {
+    try {
+      await fetch("/api/cast/stop", { method: "POST" });
+    } catch (_) {}
+    setIsCasting(false);
+    setActiveCastDevice(null);
+    if (videoRef.current) {
+      videoRef.current.currentTime = currentTime;
+      videoRef.current.play().catch(() => {});
+      setIsPlaying(true);
+    }
+  };
+
+  const handleCastPlayPause = async () => {
+    if (isPlaying) {
+      await fetch("/api/cast/pause", { method: "POST" }).catch(() => {});
+      setIsPlaying(false);
+    } else {
+      await fetch("/api/cast/play", { method: "POST" }).catch(() => {});
+      setIsPlaying(true);
+    }
+  };
+
+  const handleCastSeek = async (newTime) => {
+    setCurrentTime(newTime);
+    if (timelineRef.current) {
+      timelineRef.current.value = newTime;
+    }
+    try {
+      await fetch("/api/cast/seek", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ seconds: newTime }),
+      });
+    } catch (_) {}
+  };
+
+  useEffect(() => {
+    if (!isCasting) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch("/api/cast/status");
+        const status = await res.json();
+        if (status.isCasting && status.media) {
+          if (typeof status.media.position === "number") {
+            setCurrentTime(status.media.position);
+            if (timelineRef.current) {
+              timelineRef.current.value = status.media.position;
+            }
+          }
+          if (typeof status.media.duration === "number" && status.media.duration > 0) {
+            setDuration(status.media.duration);
+          }
+          setIsPlaying(status.media.state === "PLAYING");
+        } else if (!status.isCasting) {
+          setIsCasting(false);
+          setActiveCastDevice(null);
+        }
+      } catch (_) {}
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [isCasting]);
+
   useEffect(() => {
     const video = videoRef.current;
     if (video) {
@@ -387,6 +559,10 @@ export default function VideoPlayer({
   };
 
   const togglePlay = () => {
+    if (isCasting) {
+      handleCastPlayPause();
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -427,6 +603,10 @@ export default function VideoPlayer({
     const val = parseFloat(e.target.value);
     currentTimeRef.current = val;
     setCurrentTime(val);
+    if (isCasting) {
+      handleCastSeek(val);
+      return;
+    }
     if (videoRef.current) {
       videoRef.current.currentTime = val;
     }
@@ -1736,9 +1916,24 @@ export default function VideoPlayer({
             </video>
 
             {/* Custom Big Play Button Overlay */}
-            {!isPlaying && !loading && !errorMsg && (
+            {!isPlaying && !loading && !errorMsg && !isCasting && (
               <div className="player-big-play-btn" onClick={togglePlay}>
                 <Play size={28} fill="#fff" color="#fff" />
+              </div>
+            )}
+
+            {/* Casting Active Overlay */}
+            {isCasting && (
+              <div className="player-casting-overlay">
+                <Tv size={56} className="casting-icon-pulse" />
+                <h3>Casting to {activeCastDevice?.name || "TV"}</h3>
+                <p>{animeTitle || "StrawVerse Stream"}</p>
+                <span className="casting-status-badge">
+                  {isPlaying ? "Playing on TV" : "Paused on TV"}
+                </span>
+                <button onClick={handleStopCast} className="stop-cast-btn">
+                  <X size={15} /> Disconnect
+                </button>
               </div>
             )}
 
@@ -1936,6 +2131,20 @@ export default function VideoPlayer({
                     )}
                   </div>
 
+                  {/* Cast to TV Button */}
+                  <button
+                    onClick={() => setShowCastModal(true)}
+                    className={`player-control-btn ${isCasting ? "active" : ""}`}
+                    aria-label="Cast to TV"
+                    title={
+                      isCasting
+                        ? `Casting to ${activeCastDevice?.name || "TV"}`
+                        : "Cast to TV"
+                    }
+                  >
+                    <Cast size={16} style={isCasting ? { color: "#3b82f6" } : {}} />
+                  </button>
+
                   {/* Picture-in-Picture Button */}
                   {pipSupported && (
                     <button
@@ -2009,6 +2218,240 @@ export default function VideoPlayer({
           </div>
         )}
       </div>
+
+      {/* Cast to TV Selection Modal */}
+      {showCastModal && (
+        <div
+          className="player-cast-modal-backdrop"
+          onClick={() => setShowCastModal(false)}
+        >
+          <div
+            className="player-cast-modal"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="player-cast-header">
+              <div className="player-cast-title">
+                <Tv size={18} className="player-cast-header-icon" />
+                <span>Cast to TV Device</span>
+              </div>
+              <div className="player-cast-header-actions">
+                <button
+                  onClick={() => scanCastDevices()}
+                  disabled={isScanningCast}
+                  className="player-cast-btn-icon"
+                  title="Rescan for devices"
+                >
+                  <RefreshCw
+                    size={15}
+                    className={isScanningCast ? "spin" : ""}
+                  />
+                </button>
+                <button
+                  onClick={() => setShowCastModal(false)}
+                  className="player-cast-btn-icon"
+                  title="Close"
+                >
+                  <X size={17} />
+                </button>
+              </div>
+            </div>
+
+            <div className="player-cast-body">
+              {isScanningCast && castDevices.length === 0 ? (
+                <div className="player-cast-loading">
+                  <div className="player-cast-spinner" />
+                  <p>Searching for TVs on Wi-Fi...</p>
+                  <span>
+                    Scanning for Samsung Tizen, LG webOS, Sony, Roku, and DLNA devices
+                  </span>
+                </div>
+              ) : castDevices.length === 0 ? (
+                <div className="player-cast-empty">
+                  <Tv size={42} opacity={0.4} />
+                  <p>No TV devices detected on Wi-Fi</p>
+                  <span>
+                    Make sure your TV and this device are connected to the same Wi-Fi network with DLNA / casting enabled.
+                  </span>
+                  <button
+                    onClick={() => scanCastDevices()}
+                    className="player-cast-rescan-btn"
+                  >
+                    <RefreshCw size={13} /> Scan Again
+                  </button>
+                </div>
+              ) : (
+                <div className="player-cast-list">
+                  <div className="player-cast-list-header">
+                    <span>1. Select TV Device ({castDevices.length})</span>
+                    {isScanningCast && (
+                      <span className="scanning-tag">Scanning...</span>
+                    )}
+                  </div>
+                  {castDevices.map((device) => {
+                    const isSelected = castSelectedDevice?.id === device.id;
+                    const isCurrent =
+                      activeCastDevice?.id === device.id && isCasting;
+                    return (
+                      <div
+                        key={device.id}
+                        className={`player-cast-item ${isSelected ? "active" : ""}`}
+                        onClick={() => setCastSelectedDevice(device)}
+                        style={{ cursor: "pointer" }}
+                      >
+                        <div className="player-cast-item-icon">
+                          <Tv size={22} style={{ color: isSelected ? "#3b82f6" : undefined }} />
+                        </div>
+                        <div className="player-cast-item-info">
+                          <div className="player-cast-item-name">
+                            {device.name} {isCurrent ? "(Currently Playing)" : ""}
+                          </div>
+                          <div className="player-cast-item-details">
+                            {device.manufacturer !== "Unknown"
+                              ? device.manufacturer
+                              : "Smart TV"}
+                            {device.model ? ` • ${device.model}` : ""}
+                            <span className="player-cast-badge">
+                              {device.type.toUpperCase()}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="player-cast-item-action">
+                          {isCurrent ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStopCast();
+                              }}
+                              className="player-cast-disconnect-btn"
+                            >
+                              Disconnect
+                            </button>
+                          ) : (
+                            <input
+                              type="radio"
+                              name="webplayer-cast-dev"
+                              checked={isSelected}
+                              onChange={() => setCastSelectedDevice(device)}
+                              style={{ cursor: "pointer", accentColor: "#3b82f6" }}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Step 2: Quality & Subtitle Selection */}
+                  <div style={{ marginTop: "14px" }}>
+                    <div className="player-cast-list-header">
+                      <span>2. Stream Quality & Subtitles</span>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "6px" }}>
+                      {/* Quality Selector */}
+                      <div>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: "12px",
+                            color: "rgba(255,255,255,0.7)",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          Video Quality / Server
+                        </label>
+                        <select
+                          className="player-cast-select"
+                          value={
+                            castSelectedSource
+                              ? castSelectedSource.id ||
+                                castSelectedSource.url ||
+                                castSelectedSource.quality
+                              : ""
+                          }
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const found = sources.find(
+                              (s) =>
+                                (s.id || s.url || s.quality) === val
+                            );
+                            if (found) setCastSelectedSource(found);
+                          }}
+                          disabled={castConnecting || sources.length === 0}
+                        >
+                          {sources.length === 0 ? (
+                            <option value="">Current Stream</option>
+                          ) : (
+                            sources.map((s, idx) => (
+                              <option
+                                key={s.id || s.url || idx}
+                                value={s.id || s.url || s.quality}
+                              >
+                                {s.quality || s.name || `Source ${idx + 1}`}
+                                {s.name && s.name !== s.quality ? ` (${s.name})` : ""}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+
+                      {/* Subtitle Selector */}
+                      <div>
+                        <label
+                          style={{
+                            display: "block",
+                            fontSize: "12px",
+                            color: "rgba(255,255,255,0.7)",
+                            marginBottom: "4px",
+                          }}
+                        >
+                          Subtitle Track
+                        </label>
+                        <select
+                          className="player-cast-select"
+                          value={castSelectedSubtitleUrl}
+                          onChange={(e) => setCastSelectedSubtitleUrl(e.target.value)}
+                          disabled={castConnecting}
+                        >
+                          <option value="none">Off (No Subtitles)</option>
+                          {subtitles.map((sub, idx) => {
+                            const lang =
+                              sub.lang || sub.label || sub.name || `Track ${idx + 1}`;
+                            const isDef = sub.default ? " [Default]" : "";
+                            return (
+                              <option key={sub.url || idx} value={sub.url}>
+                                {lang}
+                                {isDef}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step 3: Cast Button */}
+                  <div style={{ marginTop: "16px" }}>
+                    <button
+                      onClick={() => handleStartCast()}
+                      disabled={!castSelectedDevice || castConnecting}
+                      className="player-cast-start-btn"
+                    >
+                      <Tv size={16} />
+                      <span>
+                        {castConnecting
+                          ? "Connecting to TV..."
+                          : castSelectedDevice
+                          ? `Cast to ${castSelectedDevice.name || "Smart TV"}`
+                          : "Select a Device to Cast"}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
