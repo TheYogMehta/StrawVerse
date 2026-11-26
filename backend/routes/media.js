@@ -3983,10 +3983,10 @@ router.post("/api/info/items", async (req, res) => {
               ? setting?.CustomDownloadLocationMovies
               : setting?.CustomDownloadLocationManga,
         );
-        if (isAnime && dlCheck && Array.isArray(dlCheck.DownloadedEpisodes)) {
+        if (isVideo && dlCheck && Array.isArray(dlCheck.DownloadedEpisodes)) {
           data.DownloadedEpisodes = dlCheck.DownloadedEpisodes;
         } else if (
-          !isAnime &&
+          !isVideo &&
           dlCheck &&
           Array.isArray(dlCheck.DownloadedChapters)
         ) {
