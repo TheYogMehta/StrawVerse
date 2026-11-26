@@ -3844,13 +3844,13 @@ router.post("/api/info/items", async (req, res) => {
   const isAnime = type === "Anime";
   const fetchFunction =
     type === "Movies"
-      if (type === "Movies") {
-        const info = await movieInfo(providerObj, null, itemId);
-        return {
-          episodes: info?.episodes || [],
-          isSingleMovie: Boolean(info?.isSingleMovie),
-        };
-      }
+      ? async (providerObj, itemId) => {
+          const info = await movieInfo(providerObj, null, itemId);
+          return {
+            episodes: info?.episodes || [],
+            isSingleMovie: Boolean(info?.isSingleMovie),
+          };
+        }
       : isAnime
         ? fetchEpisode
         : fetchChapters;
