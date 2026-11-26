@@ -30,9 +30,16 @@ import {
   parseTags,
   getMalStatusOptions,
   getMalStatusLabel,
+  isSingleMovieDetails,
 } from "../utils/common";
 import Dropdown from "./common/Dropdown";
+import MediaEnrichmentMeta, {
+  MediaEnrichmentBadges,
+} from "./info/MediaEnrichmentMeta";
+import TrailerSection from "./info/TrailerSection";
+import CastSection from "./info/CastSection";
 import "./css/InfoView.css";
+import "./css/InfoEnrichment.css";
 
 const getItemLangs = (item, details, dubSelect) => {
   let langs = [];
@@ -113,6 +120,60 @@ export default function InfoView({
   const [localMalProvider, setLocalMalProvider] =
     useState(propLocalMalProvider);
   const [details, setDetails] = useState(null);
+  const [enrichmentState, setEnrichmentState] = useState(null);
+
+  const enrichmentRequestKey =
+    (type === "Anime" || type === "Movies") && details?.title && !details?.error
+      ? `${type}::${details.id || id || ""}::${details.malid || details.MalID || ""}::${details.title}`
+      : null;
+
+  useEffect(() => {
+    if (!enrichmentRequestKey || !details?.title) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      type,
+      title: details.title,
+    });
+    if (details.id || id) params.set("id", String(details.id || id));
+    const malIdVal = details.malid || details.MalID;
+    if (malIdVal) params.set("malId", String(malIdVal));
+    const yearVal = details.released || details.aired;
+    if (yearVal) params.set("year", String(yearVal));
+    if (details.type) params.set("mediaType", String(details.type));
+
+    fetch(`/api/media/enrichment?${params.toString()}`, {
+      signal: controller.signal,
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!controller.signal.aborted && data) {
+          setEnrichmentState({ key: enrichmentRequestKey, data });
+        }
+      })
+      .catch((err) => {
+        if (err?.name !== "AbortError") {
+          console.warn("[InfoView] Enrichment fetch skipped:", err?.message);
+        }
+      });
+
+    return () => controller.abort();
+  }, [
+    enrichmentRequestKey,
+    type,
+    id,
+    details?.id,
+    details?.title,
+    details?.malid,
+    details?.MalID,
+    details?.released,
+    details?.aired,
+    details?.type,
+  ]);
+
+  const enrichment =
+    enrichmentRequestKey && enrichmentState?.key === enrichmentRequestKey
+      ? enrichmentState.data
+      : null;
 
   const [mappingSearchQuery, setMappingSearchQuery] = useState(
     propTitle || propId || "",
@@ -308,10 +369,13 @@ export default function InfoView({
     }
 
     const newArgs = [...args];
-    while (newArgs.length < 10) {
+    while (newArgs.length < 11) {
       newArgs.push(undefined);
     }
     newArgs[9] = details?.malid || details?.MalID;
+    if (newArgs[11] === undefined) {
+      newArgs[11] = isSingleMovie;
+    }
     propOnWatch(...newArgs);
   };
 
@@ -966,9 +1030,26 @@ export default function InfoView({
     [historyProgress, malWatched, type],
   );
 
+  const isSingleMovie = useMemo(
+    () => isSingleMovieDetails(details, episodesOrChapters, type),
+    [details, episodesOrChapters, type],
+  );
+
+  const movieItem = useMemo(() => {
+    if (!isSingleMovie) return null;
+    return (
+      episodesOrChapters[0] || {
+        id: details?.id || id,
+        number: 1,
+        season: null,
+        title: details?.title || "Movie",
+      }
+    );
+  }, [isSingleMovie, episodesOrChapters, details?.id, details?.title, id]);
+
   // Compute available seasons for Movies/Series season filter
   const availableSeasons = useMemo(() => {
-    if (type !== "Movies" && type !== "Anime") return [];
+    if ((type !== "Movies" && type !== "Anime") || isSingleMovie) return [];
     const seasonSet = new Set();
     episodesOrChapters.forEach((item) => {
       if (item.season !== undefined && item.season !== null) {
@@ -1616,9 +1697,18 @@ export default function InfoView({
   };
 
   const handleOpenCastModal = (targetItem) => {
-    const item = targetItem || nextToPlayItem || allSortedEpisodes[0];
+    const item =
+      targetItem ||
+      (isSingleMovie ? movieItem : null) ||
+      nextToPlayItem ||
+      allSortedEpisodes[0];
     if (!item) {
-      swalInfo("No Episode Available", "Please select an episode to cast.");
+      swalInfo(
+        isSingleMovie ? "Movie Unavailable" : "No Episode Available",
+        isSingleMovie
+          ? "Movie source is not available to cast."
+          : "Please select an episode to cast.",
+      );
       return;
     }
     setCastTargetEp(item);
@@ -1664,8 +1754,12 @@ export default function InfoView({
       }
 
       setCastConnectingStep(`Connecting to ${device.name || "TV"}...`);
-      const epLabel = `Episode ${castTargetEp.number}`;
-      const castTitle = `${details?.title || "Stream"} - ${epLabel}`;
+      const epLabel = isSingleMovie
+        ? "Movie"
+        : `Episode ${castTargetEp.number}`;
+      const castTitle = isSingleMovie
+        ? details?.title || "Movie"
+        : `${details?.title || "Stream"} - ${epLabel}`;
 
       const castRes = await fetch("/api/cast/start", {
         method: "POST",
@@ -1695,7 +1789,12 @@ export default function InfoView({
       setActiveCastTitle(castTitle);
       setShowCastModal(false);
       setIsCastPlaying(true);
-      swalSuccess("Casting Started", `Streaming ${epLabel} to ${device.name || "TV"}`);
+      swalSuccess(
+        "Casting Started",
+        isSingleMovie
+          ? `Streaming ${details?.title || "movie"} to ${device.name || "TV"}`
+          : `Streaming ${epLabel} to ${device.name || "TV"}`,
+      );
     } catch (err) {
       console.error("[InfoView] Cast start error:", err);
       swalError("Casting Failed", err.message || "Failed to start casting to device.");
@@ -1761,24 +1860,32 @@ export default function InfoView({
   const playItem = (targetItem, overrideSubDub = null) => {
     const activeSubDub = overrideSubDub || dubSelect;
     if (type === "Anime" || type === "Movies") {
+      const targetSeason = isSingleMovie ? null : (targetItem.season ?? null);
+      const resolvedSubDub =
+        overrideSubDub ||
+        ["sub", "dub", "hsub"].find((langKey) =>
+          isDownloaded(targetItem.number, langKey, targetSeason),
+        ) ||
+        activeSubDub;
       const isDownloadedLocal = isDownloaded(
         targetItem.number,
-        activeSubDub,
-        targetItem.season ?? null,
+        resolvedSubDub,
+        targetSeason,
       );
 
       onWatch(
         details?.id || id,
         isDownloadedLocal ? targetItem.id || targetItem.number : targetItem.id,
         isDownloadedLocal,
-        activeSubDub,
+        isDownloadedLocal ? resolvedSubDub : activeSubDub,
         episodesOrChapters,
         details?.DownloadedEpisodes,
         details?.title,
         details?.provider,
         details?.image,
         undefined, // malid passed by InfoView's onWatch wrapper
-        targetItem.season || 1,
+        isSingleMovie ? null : targetItem.season || 1,
+        isSingleMovie,
       );
     } else {
       const isDownloadedLocal = (details?.DownloadedChapters || [])
@@ -2303,14 +2410,17 @@ export default function InfoView({
   };
 
   const handleContinueWatchRead = async () => {
-    if (isCaughtUp) {
+    if (!isSingleMovie && isCaughtUp) {
       return;
     }
-    const targetItem = nextToPlayItem || allSortedEpisodes[0];
+    const targetItem =
+      (isSingleMovie ? movieItem : null) ||
+      nextToPlayItem ||
+      allSortedEpisodes[0];
     const activeSubDub = historyProgress?.lastSubDub || dubSelect;
 
     if (targetItem) {
-      if (targetItem.season && availableSeasons.length > 0) {
+      if (!isSingleMovie && targetItem.season && availableSeasons.length > 0) {
         userSelectedSeasonRef.current = true;
         setSelectedSeason(String(targetItem.season));
       }
@@ -2527,9 +2637,11 @@ export default function InfoView({
             </style>
             <div style="margin-bottom: 16px; font-size: 14px; color: var(--text-muted); line-height: 1.5; text-align: center;">
               ${
-                singleItem
-                  ? `Choose download options for Episode <strong>${singleItem.number}</strong>:`
-                  : `Choose download options for <strong>${targetEpisodes.length}</strong> selected episodes:`
+                isSingleMovie
+                  ? `Choose download options for <strong>${details?.title || "this movie"}</strong>:`
+                  : singleItem
+                    ? `Choose download options for Episode <strong>${singleItem.number}</strong>:`
+                    : `Choose download options for <strong>${targetEpisodes.length}</strong> selected episodes:`
               }
             </div>
             ${
@@ -3176,9 +3288,11 @@ export default function InfoView({
 
     await handleLocalDeleteFlow({
       numbers: allDownloaded,
-      confirmTitle: "Are you sure?",
-      confirmText: `Are you sure you want to delete all downloaded files for ${details?.title}?`,
-      confirmBtn: "Yes, delete all",
+      confirmTitle: isSingleMovie ? "Delete Movie?" : "Are you sure?",
+      confirmText: isSingleMovie
+        ? `Are you sure you want to delete the downloaded movie file for ${details?.title}?`
+        : `Are you sure you want to delete all downloaded files for ${details?.title}?`,
+      confirmBtn: isSingleMovie ? "Yes, delete movie" : "Yes, delete all",
       successTitle: "Deleted",
       successText: "Deleted successfully.",
       onComplete: () => fetchDetails(false),
@@ -3231,11 +3345,15 @@ export default function InfoView({
       items: [{ number: epNum, season: resolvedSeason }],
       season: resolvedSeason,
       subdub,
-      confirmTitle: "Delete Episode?",
-      confirmText: `Delete downloaded file for Episode ${epNum}${resolvedSeason ? ` (Season ${resolvedSeason})` : ""}${subdub ? ` (${subdub})` : ""}?`,
+      confirmTitle: isSingleMovie ? "Delete Movie?" : "Delete Episode?",
+      confirmText: isSingleMovie
+        ? `Delete downloaded file for "${details?.title || id}"?`
+        : `Delete downloaded file for Episode ${epNum}${resolvedSeason ? ` (Season ${resolvedSeason})` : ""}${subdub ? ` (${subdub})` : ""}?`,
       confirmBtn: "Yes, delete it",
       successTitle: "Deleted",
-      successText: "Episode file deleted.",
+      successText: isSingleMovie
+        ? "Movie file deleted."
+        : "Episode file deleted.",
       onComplete: () => fetchDetails(),
     });
   };
@@ -3800,6 +3918,8 @@ export default function InfoView({
             )}
           </div>
 
+          <MediaEnrichmentBadges enrichment={enrichment} />
+
           {(() => {
             const rawDescription = (details?.description || "")
               .replace(/\s*\[\s*more\s*\]\s*$/i, "")
@@ -3846,62 +3966,250 @@ export default function InfoView({
               <strong>Author:</strong> {details.author}
             </div>
           )}
+          <MediaEnrichmentMeta enrichment={enrichment} />
 
           {/* Action Row containing Play Actions & Library/Tracking Controls */}
           <div className="actions-row">
             {/* Quick Resumption / Play Actions */}
-            {(showContinueBtn || hasAnyDownloads) && (
-              <div className="quick-actions-wrapper">
-                {showContinueBtn && (
-                  <button
-                    onClick={handleContinueWatchRead}
-                    className="btn-action-base btn-continue"
-                  >
-                    {type === "Manga" ? (
-                      <BookOpen size={16} className="u-style-35" />
-                    ) : (
-                      <Play size={16} className="u-style-35" />
+            {isSingleMovie ? (
+              (() => {
+                const targetMovie = movieItem || {
+                  id: details?.id || id,
+                  number: 1,
+                  season: null,
+                  title: details?.title || "Movie",
+                };
+                const movieNum = Number(targetMovie.number || 1);
+                const movieDownloaded = isDownloaded(movieNum, null, null);
+                const movieDownloadedLang =
+                  ["sub", "dub", "hsub"].find((langKey) =>
+                    isDownloaded(movieNum, langKey, null),
+                  ) ||
+                  dubSelect ||
+                  "sub";
+                const movieStatus = (
+                  historyProgress?.episodesStatus || []
+                ).find(
+                  (h) =>
+                    Number(h.number) === movieNum &&
+                    (!h.season || Number(h.season) === 1),
+                );
+                const movieCompleted = Boolean(movieStatus?.isCompleted);
+                const movieHasProgress = Boolean(
+                  movieStatus &&
+                    Number(movieStatus.currentTime) > 0 &&
+                    !movieCompleted,
+                );
+                const movieQStatus = getItemQueueStatus(
+                  movieNum,
+                  null,
+                  targetMovie.id,
+                );
+                const canPlayMovie =
+                  !historyLoading &&
+                  !itemsLoading &&
+                  (episodesOrChapters.length > 0 || movieDownloaded);
+
+                return (
+                  <>
+                    <div className="quick-actions-wrapper">
+                      {canPlayMovie && (
+                        <button
+                          onClick={() =>
+                            playItem(
+                              targetMovie,
+                              movieDownloaded ? movieDownloadedLang : null,
+                            )
+                          }
+                          className="btn-action-base btn-continue"
+                        >
+                          <Play size={16} className="u-style-35" />
+                          <span>
+                            {movieHasProgress
+                              ? `Resume Movie (${formatTime(movieStatus.currentTime)})`
+                              : movieCompleted
+                                ? "Watch Movie Again"
+                                : movieDownloaded
+                                  ? "Play Movie"
+                                  : "Watch Movie"}
+                          </span>
+                        </button>
+                      )}
+
+                      {movieDownloaded ? (
+                        <>
+                          <button
+                            onClick={() =>
+                              handleOpenFile(
+                                movieNum,
+                                movieDownloadedLang,
+                                "open_folder",
+                                null,
+                              )
+                            }
+                            className="btn-action-base btn-watch-latest"
+                            title="Open movie folder in File Manager"
+                          >
+                            <FolderOpen size={16} className="u-style-35" />
+                            <span>Open Folder</span>
+                          </button>
+                          <button
+                            onClick={handleDeleteLocal}
+                            className="btn-action-base u-style-36"
+                            title="Delete downloaded movie"
+                          >
+                            <Trash2 size={16} className="u-style-35" />
+                            <span>Delete Download</span>
+                          </button>
+                        </>
+                      ) : movieQStatus.inProgress ? (
+                        <div
+                          className="btn-action-base btn-watch-latest"
+                          style={{ cursor: "default", gap: "8px" }}
+                        >
+                          <Loader2 size={15} className="spin" />
+                          <span>
+                            {movieQStatus.isQueued
+                              ? "Queued for Download"
+                              : `Downloading ${movieQStatus.pct}%`}
+                          </span>
+                        </div>
+                      ) : (
+                        localMalProvider !== "local" &&
+                        episodesOrChapters.length > 0 && (
+                          <button
+                            onClick={() => handleDownload(targetMovie)}
+                            className="btn-action-base btn-watch-latest"
+                            disabled={probingDownloadId !== null}
+                            title="Download movie for offline playback"
+                          >
+                            <Download size={16} className="u-style-35" />
+                            <span>
+                              {probingDownloadId ===
+                              (targetMovie.id || targetMovie.number)
+                                ? "Checking Sources..."
+                                : "Download Movie"}
+                            </span>
+                          </button>
+                        )
+                      )}
+
+                      <button
+                        onClick={() => handleOpenCastModal(targetMovie)}
+                        className={`btn-action-base btn-cast ${isCasting ? "active" : ""}`}
+                        title="Cast movie to Smart TV (Samsung, LG, Sony, Roku, Chromecast)"
+                      >
+                        <Cast size={16} className="u-style-35" />
+                        <span>
+                          {isCasting
+                            ? `Casting to ${activeCastDevice?.name || "TV"}`
+                            : "Cast to TV"}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleMarkRead(
+                            !movieCompleted,
+                            [movieNum],
+                            [{ number: movieNum, season: 1 }],
+                          )
+                        }
+                        className={`btn-action-base ${movieCompleted ? "btn-cast active" : "btn-watch-latest"}`}
+                        title={
+                          movieCompleted
+                            ? "Mark movie as unwatched"
+                            : "Mark movie as watched"
+                        }
+                      >
+                        <CheckCircle2 size={16} className="u-style-35" />
+                        <span>
+                          {movieCompleted ? "Watched" : "Mark as Watched"}
+                        </span>
+                      </button>
+                    </div>
+
+                    {movieHasProgress && Number(movieStatus.duration) > 0 && (
+                      <div
+                        className="item-progress-bar-wrap"
+                        style={{ marginTop: "10px", maxWidth: "360px" }}
+                      >
+                        <div className="item-progress-bar-bg">
+                          <div
+                            style={{
+                              width: `${Math.min(100, Math.max(0, (Number(movieStatus.currentTime) / Number(movieStatus.duration)) * 100))}%`,
+                              height: "100%",
+                              backgroundColor: "var(--accent)",
+                              borderRadius: "2px",
+                            }}
+                          />
+                        </div>
+                        <span className="item-progress-text">
+                          {formatTime(movieStatus.currentTime)} /{" "}
+                          {formatTime(movieStatus.duration)}
+                        </span>
+                      </div>
                     )}
-                    {type === "Manga"
-                      ? !hasAnyProgress
-                        ? "Start reading Chapter 1"
-                        : `Continue Reading Chapter ${nextToPlay}`
-                      : !hasAnyProgress
-                        ? "Start watching Episode 1"
-                        : nextToPlayItem?.season &&
-                            (type === "Movies" || availableSeasons.length > 0)
-                          ? `Continue Watching Season ${nextToPlaySeason} Episode ${nextToPlay}`
-                          : `Continue Watching Episode ${nextToPlay}`}
-                  </button>
-                )}
+                  </>
+                );
+              })()
+            ) : (
+              (showContinueBtn || hasAnyDownloads) && (
+                <div className="quick-actions-wrapper">
+                  {showContinueBtn && (
+                    <button
+                      onClick={handleContinueWatchRead}
+                      className="btn-action-base btn-continue"
+                    >
+                      {type === "Manga" ? (
+                        <BookOpen size={16} className="u-style-35" />
+                      ) : (
+                        <Play size={16} className="u-style-35" />
+                      )}
+                      {type === "Manga"
+                        ? !hasAnyProgress
+                          ? "Start reading Chapter 1"
+                          : `Continue Reading Chapter ${nextToPlay}`
+                        : !hasAnyProgress
+                          ? "Start watching Episode 1"
+                          : nextToPlayItem?.season &&
+                              (type === "Movies" || availableSeasons.length > 0)
+                            ? `Continue Watching Season ${nextToPlaySeason} Episode ${nextToPlay}`
+                            : `Continue Watching Episode ${nextToPlay}`}
+                    </button>
+                  )}
 
-                {type !== "Manga" && (
-                  <button
-                    onClick={() =>
-                      handleOpenCastModal(nextToPlayItem || allSortedEpisodes[0])
-                    }
-                    className={`btn-action-base btn-cast ${isCasting ? "active" : ""}`}
-                    title="Cast episode to Smart TV (Samsung, LG, Sony, Roku, Chromecast)"
-                  >
-                    <Cast size={16} className="u-style-35" />
-                    <span>
-                      {isCasting
-                        ? `Casting to ${activeCastDevice?.name || "TV"}`
-                        : "Cast to TV"}
-                    </span>
-                  </button>
-                )}
+                  {type !== "Manga" && (
+                    <button
+                      onClick={() =>
+                        handleOpenCastModal(
+                          nextToPlayItem || allSortedEpisodes[0],
+                        )
+                      }
+                      className={`btn-action-base btn-cast ${isCasting ? "active" : ""}`}
+                      title="Cast episode to Smart TV (Samsung, LG, Sony, Roku, Chromecast)"
+                    >
+                      <Cast size={16} className="u-style-35" />
+                      <span>
+                        {isCasting
+                          ? `Casting to ${activeCastDevice?.name || "TV"}`
+                          : "Cast to TV"}
+                      </span>
+                    </button>
+                  )}
 
-                {hasAnyDownloads && (
-                  <button
-                    onClick={handleDeleteLocal}
-                    className="btn-action-base u-style-36"
-                  >
-                    <Trash2 size={16} className="u-style-35" />
-                    <span>Delete All Downloads</span>
-                  </button>
-                )}
-              </div>
+                  {hasAnyDownloads && (
+                    <button
+                      onClick={handleDeleteLocal}
+                      className="btn-action-base u-style-36"
+                    >
+                      <Trash2 size={16} className="u-style-35" />
+                      <span>Delete All Downloads</span>
+                    </button>
+                  )}
+                </div>
+              )
             )}
 
             {/* Library Tags & Source Provider Selection */}
@@ -4362,17 +4670,33 @@ export default function InfoView({
         </div>
       </div>
 
-      {/* Episodes / Chapters List */}
-      <div className="items-section">
-        <div className="section-header">
-          <h2>
-            {type === "Manga"
-              ? "Chapters List"
-              : availableSeasons.length > 0 && selectedSeason !== "all"
-                ? `Season ${selectedSeason} Episodes`
-                : "Episodes List"}
-          </h2>
-        </div>
+      {/* Inline Trailer & Cast Enrichment */}
+      {enrichment?.found && (
+        <>
+          <TrailerSection
+            key={`trailer-${details?.id || id}`}
+            trailers={enrichment.trailers}
+          />
+          <CastSection
+            key={`cast-${details?.id || id}`}
+            cast={enrichment.cast}
+            mediaType={type}
+          />
+        </>
+      )}
+
+      {/* Episodes / Chapters List (hidden for single standalone movies) */}
+      {!isSingleMovie && (
+        <div className="items-section">
+          <div className="section-header">
+            <h2>
+              {type === "Manga"
+                ? "Chapters List"
+                : availableSeasons.length > 0 && selectedSeason !== "all"
+                  ? `Season ${selectedSeason} Episodes`
+                  : "Episodes List"}
+            </h2>
+          </div>
         {episodesOrChapters.length > 0 && (
           <div className="bulk-actions">
             {/* In-Page Search Input */}
@@ -5316,7 +5640,8 @@ export default function InfoView({
             )
           );
         })()}
-      </div>
+        </div>
+      )}
 
       {/* MAL Link Modal Overlay */}
       {type !== "Movies" && isLinkingMal && (
@@ -5716,7 +6041,7 @@ export default function InfoView({
               <div className="infoview-cast-section" style={{ marginTop: "16px" }}>
                 <div className="infoview-cast-list-header">
                   <span>2. Stream Quality & Subtitles</span>
-                  {castTargetEp && (
+                  {castTargetEp && !isSingleMovie && (
                     <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)" }}>
                       Ep {castTargetEp.number}
                     </span>

@@ -2,7 +2,6 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { spawn } = require("child_process");
 const axios = require("axios");
 
 const castService = require("../utils/castService");
@@ -10,7 +9,13 @@ const { logger } = require("../utils/AppLogger");
 const { isVideoFile, ALLOWED_VIDEO_EXTENSIONS } = require("../utils/constants");
 const { isLanguagePreferred, settingfetch } = require("../utils/settings");
 const { getExtensionHeaderRules } = require("../utils/extensionRegistry");
-const { getFfmpegPath } = require("../utils/downloader");
+const {
+  startCastBurn,
+  gracefulKill,
+  sweepOrphanedCastDirs,
+} = require("../utils/ffmpeg");
+
+sweepOrphanedCastDirs();
 
 const router = express.Router();
 
@@ -225,34 +230,11 @@ let activeCastBurnSession = {
   position: 0,
 };
 
-let isNvencAvailable = null;
-async function checkNvenc() {
-  if (isNvencAvailable !== null) return isNvencAvailable;
-  try {
-    const ffmpegBin = await getFfmpegPath();
-    await new Promise((resolve, reject) => {
-      const p = spawn(ffmpegBin, [
-        "-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=0.1",
-        "-c:v", "h264_nvenc", "-f", "null", "-"
-      ]);
-      p.on("close", (code) => (code === 0 ? resolve(true) : reject(new Error("nvenc failed"))));
-      p.on("error", reject);
-    });
-    isNvencAvailable = true;
-    logger.info("[cast-burn] NVIDIA NVENC hardware acceleration detected and enabled");
-  } catch (_) {
-    isNvencAvailable = false;
-    logger.info("[cast-burn] NVENC not available, using libx264 ultrafast");
-  }
-  return isNvencAvailable;
-}
-
 function cleanupBurnSession() {
   if (activeCastBurnSession.process) {
-    try {
-      activeCastBurnSession.process.kill("SIGKILL");
-    } catch (_) {}
+    const proc = activeCastBurnSession.process;
     activeCastBurnSession.process = null;
+    gracefulKill(proc).catch(() => {});
   }
   if (activeCastBurnSession.hlsDir && fs.existsSync(activeCastBurnSession.hlsDir)) {
     try {
@@ -280,86 +262,19 @@ async function startBurnSession({ mediaUrl, filePath, subFilePath, headers = {},
   const hlsDir = path.join(os.tmpdir(), `strawverse_cast_${sessionId}`);
   fs.mkdirSync(hlsDir, { recursive: true });
 
-  const ffmpegBin = await getFfmpegPath();
-  const args = [
-    "-y",
-    "-nostdin",
-    "-hide_banner",
-    "-loglevel", "warning",
-    "-allowed_extensions", "ALL",
-    "-allowed_segment_extensions", "ALL",
-    "-extension_picky", "0",
-  ];
-
-  const inputSource = filePath || mediaUrl;
   const effectiveHeaders = resolveCdnHeaders(mediaUrl || filePath, headers);
 
-  // If remote URL, pass HTTP headers
-  if (mediaUrl && (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://"))) {
-    const headerLines = Object.entries(effectiveHeaders)
-      .map(([k, v]) => `${k}: ${v}`)
-      .join("\r\n") + "\r\n";
-    args.push("-headers", headerLines);
-  }
-
-  // Fast seek if starting from a non-zero timestamp
-  if (position > 0) {
-    args.push("-ss", String(position));
-  }
-
-  args.push("-i", inputSource);
-
-  // Subtitle filter escaping (replace \ with /, : with \:, ' with \')
-  const escapedSubPath = subFilePath.replace(/\\/g, "/").replace(/:/g, "\\:").replace(/'/g, "\\'");
-  args.push("-vf", `subtitles='${escapedSubPath}':force_style='FontSize=22,Outline=2,Shadow=1,MarginV=25'`);
-
-  // Detect and use NVENC hardware acceleration if available for maximum speed
-  const hasNvenc = await checkNvenc();
-  if (hasNvenc) {
-    args.push(
-      "-c:v", "h264_nvenc",
-      "-preset", "p1",
-      "-tune", "ll",
-      "-zerolatency", "1"
-    );
-  } else {
-    args.push(
-      "-c:v", "libx264",
-      "-preset", "ultrafast",
-      "-tune", "zerolatency",
-      "-crf", "22"
-    );
-  }
-
-  // Audio: direct stream copy for zero latency
-  args.push("-c:a", "copy");
-
-  // HLS stream generation tuned for fast first segment
-  args.push(
-    "-f", "hls",
-    "-hls_time", "2",
-    "-hls_list_size", "25",
-    "-hls_flags", "delete_segments",
-    "-hls_segment_filename", path.join(hlsDir, "seg_%04d.ts"),
-    path.join(hlsDir, "index.m3u8")
-  );
-
-  logger.info(`[cast-burn] Spawning FFmpeg hardsubbing (nvenc=${hasNvenc}): ${ffmpegBin} -i ${inputSource} -vf subtitles='${subFilePath}'`);
-  const proc = spawn(ffmpegBin, args, { stdio: ["ignore", "pipe", "pipe"] });
-
-  proc.stderr.on("data", (data) => {
-    const str = data.toString();
-    if (str.includes("Error") || str.includes("fatal") || str.includes("error")) {
-      logger.warn(`[cast-burn] FFmpeg: ${str.trim()}`);
-    }
-  });
-
-  proc.on("exit", (code, signal) => {
-    logger.info(`[cast-burn] FFmpeg process exited with code ${code}, signal ${signal}`);
+  const burn = await startCastBurn({
+    mediaUrl,
+    filePath,
+    subFilePath,
+    headers: effectiveHeaders,
+    position,
+    hlsDir,
   });
 
   activeCastBurnSession = {
-    process: proc,
+    process: burn.child,
     hlsDir,
     subFilePath,
     sessionId,
@@ -369,24 +284,7 @@ async function startBurnSession({ mediaUrl, filePath, subFilePath, headers = {},
     position,
   };
 
-  // Wait up to 15 seconds for index.m3u8 to be written with first segment
-  const m3u8Path = path.join(hlsDir, "index.m3u8");
-  const startWait = Date.now();
-  while (Date.now() - startWait < 15000) {
-    if (fs.existsSync(m3u8Path)) {
-      try {
-        const c = fs.readFileSync(m3u8Path, "utf8");
-        if (c.includes("seg_")) {
-          logger.info(`[cast-burn] Burned HLS stream ready in ${Date.now() - startWait}ms`);
-          return true;
-        }
-      } catch (_) {}
-    }
-    await new Promise((r) => setTimeout(r, 80));
-  }
-
-  logger.warn(`[cast-burn] Timeout waiting for index.m3u8, proceeding anyway`);
-  return false;
+  return burn.ready;
 }
 
 function resolveCdnHeaders(targetUrl, incomingHeaders = {}) {

@@ -24,7 +24,10 @@ const {
   fetchMovieSources,
 } = require("./AnimeManga");
 const { verifyStreamReachability } = require("./streamVerifier");
-const { sortSourcesByPreferredQuality } = require("./constants");
+const {
+  sortSourcesByPreferredQuality,
+  detectIsSingleMovie,
+} = require("./constants");
 
 async function fetchSkipTimes(malid, epNum, durationSecs = 1440) {
   if (!malid || !epNum) return null;
@@ -413,6 +416,17 @@ async function playInMpv(window, options) {
   let malid = mediaType === "Movies" ? null : options.malid || "";
   let episodeId = options.episodeId || options.episode || episode;
   let title = options.title || (mediaType === "Movies" ? "Movie" : "Anime");
+  const isSingleMovie =
+    Boolean(options.isSingleMovie) ||
+    (mediaType === "Movies" &&
+      detectIsSingleMovie({
+        mediaType: "Movies",
+        id: options.mediaId,
+        episodeId: episodeId,
+        episodes: Array.isArray(options.episodes) ? options.episodes : null,
+        season,
+        epNum: episode,
+      }));
   let mediaId = options.mediaId;
   if (mediaId && global.db) {
     try {
@@ -491,6 +505,9 @@ async function playInMpv(window, options) {
         autoSkipIntro = appSettings.autoSkipIntro;
       if (appSettings.autoPlayNextEpisode !== undefined)
         autoPlayNextEpisode = appSettings.autoPlayNextEpisode;
+      if (isSingleMovie) {
+        autoPlayNextEpisode = false;
+      }
       if (appSettings.subFontSize)
         subFontSize = Number(appSettings.subFontSize);
       if (appSettings.subColor) subColor = appSettings.subColor;
@@ -511,9 +528,14 @@ async function playInMpv(window, options) {
   }
 
   const seasonLogPart =
-    mediaType === "Movies" && season > 1 ? `, Season ${season}` : "";
+    !isSingleMovie && mediaType === "Movies" && season > 1
+      ? `, Season ${season}`
+      : "";
+  const epLogPart = isSingleMovie
+    ? "Movie"
+    : `Ep ${episode}${seasonLogPart}`;
   logger.info(
-    `[MPV] Launch request #${currentRequestId} for ${mediaType === "Movies" ? "movie/series" : "anime"} "${title}" (Ep ${episode}${seasonLogPart}), provider=${provider}, subdub=${subdub}`,
+    `[MPV] Launch request #${currentRequestId} for ${isSingleMovie ? "movie" : mediaType === "Movies" ? "series" : "anime"} "${title}" (${epLogPart}), provider=${provider}, subdub=${subdub}`,
   );
 
   if (
@@ -526,8 +548,9 @@ async function playInMpv(window, options) {
       global.activeMpvClient.write(
         JSON.stringify({ command: ["set_property", "pause", true] }) + "\n",
       );
-      const loadingLabel =
-        mediaType === "Movies" && season > 1
+      const loadingLabel = isSingleMovie
+        ? `Loading ${title || "Movie"}...`
+        : mediaType === "Movies" && season > 1
           ? `Loading Season ${season} Episode ${episode}...`
           : `Loading Episode ${episode}...`;
       global.activeMpvClient.write(
@@ -638,8 +661,9 @@ async function playInMpv(window, options) {
   if (isLocalExplicit && activeSources.length === 0) {
     const foundLocal = await tryCheckLocalFile();
     if (!foundLocal) {
-      const epLabel =
-        mediaType === "Movies" && season > 1
+      const epLabel = isSingleMovie
+        ? title || "Movie"
+        : mediaType === "Movies" && season > 1
           ? `Season ${season} Episode ${episode}`
           : `Episode ${episode}`;
       const errMsg = `Downloaded local video file for ${epLabel} was not found on disk.`;
@@ -1094,10 +1118,13 @@ async function playInMpv(window, options) {
     mediaType === "Movies" && season > 1
       ? `S${season} Ep ${episode || 1}`
       : `Ep ${episode || 1}`;
-  const displayTitle = `${epLabel} - ${shortTitle}`;
+  const displayTitle = isSingleMovie
+    ? shortTitle
+    : `${epLabel} - ${shortTitle}`;
 
-  const windowTitle =
-    mediaType === "Movies"
+  const windowTitle = isSingleMovie
+    ? `StrawVerse - ${title || "Movie"}`
+    : mediaType === "Movies"
       ? `StrawVerse - ${title || "Movie"}${season > 1 ? ` - Season ${season}` : ""} - Episode ${episode || 1}`
       : `StrawVerse - ${title || "Anime"} - Episode ${episode || 1}`;
 
@@ -1197,8 +1224,13 @@ async function playInMpv(window, options) {
       }
     }
 
-    if (options.hasNext === undefined) options.hasNext = computedHasNext;
-    if (options.hasPrev === undefined) options.hasPrev = computedHasPrev;
+    if (isSingleMovie) {
+      options.hasNext = false;
+      options.hasPrev = false;
+    } else {
+      if (options.hasNext === undefined) options.hasNext = computedHasNext;
+      if (options.hasPrev === undefined) options.hasPrev = computedHasPrev;
+    }
   }
 
   const scriptOpts = [
@@ -1397,6 +1429,7 @@ async function playInMpv(window, options) {
       global.activeMpvSession.hasPrev = options.hasPrev;
       global.activeMpvSession.episodes = options.episodes;
       global.activeMpvSession.autoPlayNextEpisode = autoPlayNextEpisode;
+      global.activeMpvSession.isSingleMovie = isSingleMovie;
       global.activeMpvSession.hasTriggeredAutoNext = false;
       global.activeMpvSession.options = options;
     }
@@ -1465,7 +1498,7 @@ async function playInMpv(window, options) {
           command: [
             "set_property",
             "title",
-            `StrawVerse - ${title || "Player"} - Episode ${episode || 1}`,
+            windowTitle,
           ],
         }) + "\n",
       );
@@ -2062,7 +2095,13 @@ async function playInMpv(window, options) {
         ? sess.hasTriggeredAutoNext
         : hasTriggeredAutoNext;
 
-      if (isAutoPlay && hasNextEp && !alreadyTriggered) {
+      if (
+        isAutoPlay &&
+        hasNextEp &&
+        !alreadyTriggered &&
+        !isSingleMovie &&
+        !sess?.isSingleMovie
+      ) {
         if (sess) sess.hasTriggeredAutoNext = true;
         hasTriggeredAutoNext = true;
         logger.info(`[MPV] Auto-playing next episode (${reason})...`);

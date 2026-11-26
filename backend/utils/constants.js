@@ -5,7 +5,7 @@ if (!global.PORT) {
   global.PORT = 9545;
 }
 
-const VIDEO_EXTENSIONS = Object.freeze([".mp4", ".ts"]);
+const VIDEO_EXTENSIONS = Object.freeze([".mp4", ".mkv", ".ts"]);
 const SUBTITLE_EXTENSIONS = Object.freeze([".srt", ".vtt"]);
 const MANGA_EXTENSIONS = Object.freeze([".cbz"]);
 
@@ -580,12 +580,126 @@ function normalizeMediaKind(type) {
     norm === "tv" ||
     norm === "series" ||
     norm === "tv series" ||
+    norm === "tv-series" ||
     norm === "show" ||
-    norm === "tv show"
+    norm === "tv show" ||
+    norm === "mini-series" ||
+    norm === "miniseries"
   ) {
     return "tv";
   }
   return null;
+}
+
+/**
+ * Determine whether a Movies/Series entry represents a single standalone movie
+ * rather than a multi-episode / multi-season series.
+ */
+function detectIsSingleMovie({
+  mediaType = null,
+  type = null,
+  id = null,
+  episodes = null,
+  episodesJson = null,
+  season = null,
+  episodeId = null,
+  epNum = null,
+} = {}) {
+  const normSection = String(mediaType || "").toLowerCase().trim();
+  if (normSection === "anime" || normSection === "manga") {
+    return false;
+  }
+
+  const checkIdStr = `${id || ""} ${episodeId || ""}`;
+  if (
+    /(?:^|\s)tv:/i.test(checkIdStr) ||
+    /tv:[^:]+:\d+:\d+/i.test(checkIdStr) ||
+    /[Ss]\d+[Ee]\d+/i.test(checkIdStr)
+  ) {
+    return false;
+  }
+
+  if (season !== null && season !== undefined && Number(season) > 1) {
+    return false;
+  }
+
+  if (
+    epNum !== null &&
+    epNum !== undefined &&
+    !isNaN(Number(epNum)) &&
+    Number(epNum) > 1
+  ) {
+    return false;
+  }
+
+  const kind = normalizeMediaKind(type);
+  if (kind === "tv") {
+    return false;
+  }
+
+  if (episodesJson) {
+    try {
+      const counts =
+        typeof episodesJson === "string"
+          ? JSON.parse(episodesJson)
+          : episodesJson;
+      if (counts && typeof counts === "object" && !Array.isArray(counts)) {
+        const seasons = Object.keys(counts).map(Number);
+        const maxCount = Math.max(0, ...Object.values(counts).map(Number));
+        const total = Object.values(counts).reduce(
+          (acc, v) => acc + (Number(v) || 0),
+          0,
+        );
+        if (seasons.some((s) => s > 1) || maxCount > 1 || total > 1) {
+          return false;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (Array.isArray(episodes)) {
+    if (episodes.length > 1) return false;
+    if (episodes.length === 1) {
+      const ep = episodes[0] || {};
+      if (
+        (ep.season !== null && ep.season !== undefined && Number(ep.season) > 1) ||
+        (ep.number !== null && ep.number !== undefined && Number(ep.number) > 1) ||
+        (ep.id &&
+          (/tv:[^:]+:\d+:\d+/i.test(String(ep.id)) ||
+            /^tv:/i.test(String(ep.id)) ||
+            /[Ss]\d+[Ee]\d+/i.test(String(ep.id))))
+      ) {
+        return false;
+      }
+    }
+  }
+
+  if (kind === "movie") return true;
+  if (id && /^movie:/i.test(String(id))) return true;
+  if (
+    Array.isArray(episodes) &&
+    episodes.length === 1 &&
+    (episodes[0]?.isMovie === true || episodes[0]?.title === "Full Movie")
+  ) {
+    return true;
+  }
+
+  // Fallback when provider omitted `type` (typical for movie-only entries without seasons)
+  if (!type && (!Array.isArray(episodes) || episodes.length <= 1)) {
+    if (
+      Array.isArray(episodes) &&
+      episodes.length === 1 &&
+      episodes[0]?.season !== undefined &&
+      episodes[0]?.season !== null &&
+      Number(episodes[0].season) >= 1 &&
+      episodes[0]?.title !== "Full Movie"
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
 }
 
 function scoreMovieMatch(target = {}, candidate = {}) {
@@ -699,6 +813,7 @@ module.exports = {
   normalizeTitleForMatch,
   extractYearFromDate,
   normalizeMediaKind,
+  detectIsSingleMovie,
   scoreMovieMatch,
   rankMovieCandidates,
   VIDEO_EXTENSIONS,

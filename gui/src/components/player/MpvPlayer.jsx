@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Swal from "sweetalert2";
 import { Loader2 } from "lucide-react";
+import { isSingleMovieDetails } from "../../utils/common";
 
 export default function VideoPlayer({
   id,
@@ -18,6 +19,7 @@ export default function VideoPlayer({
   playerSubDub = "sub",
   subdub,
   type: propType = "Anime",
+  isSingleMovie = false,
 }) {
   const type =
     typeof id === "string" && (id.startsWith("tv:") || id.startsWith("movie:"))
@@ -25,6 +27,15 @@ export default function VideoPlayer({
       : propType === "Movies"
         ? "Movies"
         : "Anime";
+
+  const effectiveSingleMovie =
+    Boolean(isSingleMovie) ||
+    (type === "Movies" &&
+      isSingleMovieDetails(
+        { id, episodes: episodesList?.length ? episodesList : episodes },
+        episodesList?.length ? episodesList : episodes,
+        type,
+      ));
 
   const [loading, setLoading] = useState(true);
   const [statusMsg, setStatusMsg] = useState("Initializing MPV player...");
@@ -128,12 +139,16 @@ export default function VideoPlayer({
               Number(e.season || 1) === Number(targetSeason) &&
               Number(e.number) > Number(targetEpNum),
           );
-    const hasPrev =
-      currentIdx !== -1 ? currentIdx > 0 : Number(targetEpNum) > 1;
+    const hasPrev = effectiveSingleMovie
+      ? false
+      : currentIdx !== -1
+        ? currentIdx > 0
+        : Number(targetEpNum) > 1;
 
     const isMovieType = type === "Movies";
-    const epLabel =
-      isMovieType && targetSeason > 1
+    const epLabel = effectiveSingleMovie
+      ? animeTitle || "movie"
+      : isMovieType && targetSeason > 1
         ? `Season ${targetSeason} Episode ${targetEpNum}`
         : `Episode ${targetEpNum}`;
 
@@ -145,15 +160,16 @@ export default function VideoPlayer({
         mediaId: id,
         episodeId: targetEpId,
         episode: targetEpNum,
-        season: targetSeason,
+        season: effectiveSingleMovie ? null : targetSeason,
         isDownloaded: !!isDownloaded,
+        isSingleMovie: effectiveSingleMovie,
         title: animeTitle,
         image: image,
         provider: provider,
         malid: type === "Movies" ? null : malid,
         subdub: subdub || playerSubDub,
         episodes: sortedEpisodes,
-        hasNext,
+        hasNext: effectiveSingleMovie ? false : hasNext,
         hasPrev,
         type: type || "Anime",
       })
@@ -271,9 +287,11 @@ export default function VideoPlayer({
       (data) => {
         setLoading(true);
         setStatusMsg(
-          data?.episode
-            ? `Fetching sources for Episode ${data.episode}...`
-            : "Fetching episode sources...",
+          effectiveSingleMovie
+            ? `Fetching sources for ${animeTitle || "movie"}...`
+            : data?.episode
+              ? `Fetching sources for Episode ${data.episode}...`
+              : "Fetching episode sources...",
         );
       },
     );
@@ -281,6 +299,7 @@ export default function VideoPlayer({
     const removeMpvActionListener = window.sharedStateAPI.on(
       "mpv-action",
       (data) => {
+        if (effectiveSingleMovie) return;
         if (data?.action === "next") {
           handleNextEpisode();
         } else if (data?.action === "prev") {
@@ -293,9 +312,9 @@ export default function VideoPlayer({
       "mpv-closed",
       (data) => {
         setLoading(false);
-        if (data?.action === "next") {
+        if (!effectiveSingleMovie && data?.action === "next") {
           handleNextEpisode();
-        } else if (data?.action === "prev") {
+        } else if (!effectiveSingleMovie && data?.action === "prev") {
           handlePrevEpisode();
         } else if (onBack) {
           onBack();

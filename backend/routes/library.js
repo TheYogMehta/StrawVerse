@@ -28,6 +28,7 @@ const {
   isReservedTag,
   getReservedTags,
   SEASON_FOLDER_RE,
+  detectIsSingleMovie,
 } = require("../utils/constants");
 const { updateHistory } = require("../utils/history");
 const { autoTrackMAL } = require("../utils/mal");
@@ -1894,6 +1895,7 @@ router.get("/api/history/list", async (req, res) => {
           COALESCE(m.hidden, 0) AS hidden,
           mov.image_url,
           mov.provider,
+          mov.type AS mov_type,
           mov.episodes_json,
           NULL AS mal_id,
           CASE WHEN mov.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
@@ -1967,7 +1969,26 @@ router.get("/api/history/list", async (req, res) => {
           } catch (_) {}
         }
 
-        if (
+        const isSingleMovie = detectIsSingleMovie({
+          mediaType: "Movies",
+          type: log.mov_type || null,
+          id: log.media_id,
+          episodesJson: log.episodes_json || null,
+          season: log.season,
+          epNum: log.number,
+        });
+        log.is_single_movie = isSingleMovie;
+        delete log.mov_type;
+
+        if (isSingleMovie) {
+          if (log.is_completed === 1) {
+            log.has_next = false;
+          } else {
+            log.next_season = null;
+            log.next_number = 1;
+            log.has_next = true;
+          }
+        } else if (
           episodes &&
           typeof episodes === "object" &&
           !Array.isArray(episodes)

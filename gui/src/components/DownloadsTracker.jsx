@@ -382,8 +382,12 @@ export default function DownloadsTracker() {
                   itemSeason !== null && itemSeason !== undefined
                     ? `S${itemSeason} `
                     : "";
-                const displayTitle =
-                  item.Type === "Anime" || item.Type === "Movies"
+                const isItemSingleMovie = Boolean(
+                  item.isSingleMovie || item.config?.isSingleMovie,
+                );
+                const displayTitle = isItemSingleMovie
+                  ? `Movie ${item.Title}${qualStr}`
+                  : item.Type === "Anime" || item.Type === "Movies"
                     ? `${seasonPrefix}EP ${item.EpNum} ${item.Title}${qualStr}`
                     : `CHP ${item.EpNum} ${item.Title}${qualStr}`;
                 const isItemCooling =
@@ -406,7 +410,9 @@ export default function DownloadsTracker() {
                         }}
                       >
                         <span className="queue-meta">
-                          {item.Type.toUpperCase()}
+                          {isItemSingleMovie
+                            ? "MOVIE"
+                            : item.Type.toUpperCase()}
                         </span>
                         {isItemCooling && (
                           <span

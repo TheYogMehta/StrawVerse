@@ -192,6 +192,14 @@ const tables = {
     failed_requests: "INTEGER DEFAULT 0",
     updated_at: "INTEGER",
   },
+  MediaEnrichmentCache: {
+    cache_key: "TEXT PRIMARY KEY",
+    media_type: "TEXT NOT NULL",
+    source: "TEXT NOT NULL",
+    payload_json: "TEXT NOT NULL",
+    fetched_at: "INTEGER NOT NULL",
+    expires_at: "INTEGER NOT NULL",
+  },
 };
 
 function flattenParams(params) {

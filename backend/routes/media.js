@@ -46,8 +46,10 @@ const {
   getChapterNumberFromFilename,
   isMangaFile,
   rankMovieCandidates,
+  detectIsSingleMovie,
 } = require("../utils/constants");
 const { getDownloadsFolder } = require("../utils/DirectoryMaker");
+const { getMediaEnrichment } = require("../utils/mediaEnrichment");
 
 const router = express.Router();
 
@@ -3163,6 +3165,13 @@ router.post(
         data.availableProviders = Object.keys(global.Movies_providers || {}).map(
           (p) => ({ provider: p }),
         );
+        data.isSingleMovie = detectIsSingleMovie({
+          mediaType: "Movies",
+          type: data.type,
+          id: data.id || id,
+          episodes: Array.isArray(data.episodes) ? data.episodes : null,
+          episodesJson: data.episodes_json || null,
+        });
       }
 
       if (AnimeManga !== "Movies" && data && global.mappingDb) {
@@ -3835,10 +3844,13 @@ router.post("/api/info/items", async (req, res) => {
   const isAnime = type === "Anime";
   const fetchFunction =
     type === "Movies"
-      ? async (providerObj, itemId) => {
-          const info = await movieInfo(providerObj, null, itemId);
-          return { episodes: info?.episodes || [] };
-        }
+      if (type === "Movies") {
+        const info = await movieInfo(providerObj, null, itemId);
+        return {
+          episodes: info?.episodes || [],
+          isSingleMovie: Boolean(info?.isSingleMovie),
+        };
+      }
       : isAnime
         ? fetchEpisode
         : fetchChapters;
@@ -5270,6 +5282,68 @@ router.post("/api/movies/resolve-provider", async (req, res) => {
     return res.status(502).json({
       success: false,
       error: err.message || "Failed to search target extension",
+    });
+  }
+});
+
+// Asynchronous rich metadata & trailer enrichment for Anime and Movies/Series
+router.get("/api/media/enrichment", async (req, res) => {
+  try {
+    const rawType = typeof req.query.type === "string" ? req.query.type.trim() : "";
+    if (rawType !== "Anime" && rawType !== "Movies") {
+      return res.status(400).json({ error: "Invalid type; must be 'Anime' or 'Movies'" });
+    }
+
+    const rawTitle = typeof req.query.title === "string" ? req.query.title.trim() : "";
+    if (!rawTitle || rawTitle.length > 200) {
+      return res.status(400).json({ error: "Missing or invalid title (1-200 chars)" });
+    }
+
+    const rawId = typeof req.query.id === "string" ? req.query.id.trim() : "";
+    if (rawId.length > 512) {
+      return res.status(400).json({ error: "Invalid id parameter" });
+    }
+
+    const rawMalId = req.query.malId;
+    if (rawMalId !== undefined && rawMalId !== "") {
+      const parsedMal = Number(rawMalId);
+      if (!Number.isInteger(parsedMal) || parsedMal <= 0 || parsedMal > 99999999) {
+        return res.status(400).json({ error: "Invalid malId parameter" });
+      }
+    }
+
+    const rawMediaType =
+      typeof req.query.mediaType === "string" ? req.query.mediaType.trim().toLowerCase() : "";
+    if (rawMediaType && !["movie", "tv", "series", "film", "show"].includes(rawMediaType)) {
+      return res.status(400).json({ error: "Invalid mediaType parameter" });
+    }
+
+    const result = await getMediaEnrichment({
+      type: rawType,
+      title: rawTitle,
+      id: rawId,
+      malId: rawMalId,
+      year: typeof req.query.year === "string" ? req.query.year.trim() : undefined,
+      mediaType: rawMediaType || undefined,
+      forceRefresh: req.query.forceRefresh === "1" || req.query.forceRefresh === "true",
+    });
+
+    return res.json(result);
+  } catch (err) {
+    logger.warn(`[api/media/enrichment] Unexpected error: ${err.message}`);
+    return res.json({
+      found: false,
+      cached: false,
+      source: "none",
+      rating: null,
+      runtime: null,
+      status: null,
+      releaseYear: null,
+      directors: [],
+      studios: [],
+      cast: [],
+      trailers: [],
+      externalUrls: {},
     });
   }
 });

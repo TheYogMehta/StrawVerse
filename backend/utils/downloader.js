@@ -1,7 +1,7 @@
-const { spawn } = require("child_process");
 const http = require("http");
 const https = require("https");
 const { logger } = require("./AppLogger");
+const { getFfmpegPath, remuxMedia } = require("./ffmpeg");
 
 const keepAliveAgent = {
   http: new http.Agent({
@@ -32,20 +32,21 @@ const {
   setDomainErrorCap,
 } = require("./domainConcurrency");
 
-let mergeLockQueue = Promise.resolve();
-
-async function acquireMergeLock() {
-  let release;
-  const nextLock = new Promise((resolve) => {
-    release = resolve;
-  });
-  const currentLock = mergeLockQueue;
-  mergeLockQueue = mergeLockQueue.then(() => nextLock);
-  await currentLock;
-  return release;
+function estimatePlaylistDurationSec(playlistContent) {
+  if (!playlistContent || typeof playlistContent !== "string") return null;
+  let total = 0;
+  let count = 0;
+  const regex = /#EXTINF:\s*([\d.]+)/g;
+  let m;
+  while ((m = regex.exec(playlistContent)) !== null) {
+    const val = parseFloat(m[1]);
+    if (Number.isFinite(val) && val > 0) {
+      total += val;
+      count++;
+    }
+  }
+  return count > 0 ? total : null;
 }
-
-let resolvedFfmpegPath = null;
 
 function resolveUrl(relativeUrl, baseUrl) {
   if (!relativeUrl) return relativeUrl;
@@ -83,139 +84,6 @@ function stripPngHeader(buffer) {
   return buffer;
 }
 
-async function getFfmpegPath() {
-  if (resolvedFfmpegPath && fs.existsSync(resolvedFfmpegPath)) {
-    return resolvedFfmpegPath;
-  }
-
-  if (process.env.NODEJS_MOBILE_DATA_DIR || process.env.NATIVE_LIB_DIR) {
-    const candidateNativeDirs = [];
-
-    if (process.env.NATIVE_LIB_DIR) {
-      candidateNativeDirs.push(process.env.NATIVE_LIB_DIR);
-    }
-
-    try {
-      const maps = fs.readFileSync("/proc/self/maps", "utf-8");
-      const soMatch = maps.match(/\s(\/data\/app\/[^\s]+\/lib\/[^\s/]+)\//);
-      if (soMatch && soMatch[1]) {
-        candidateNativeDirs.push(soMatch[1]);
-      }
-      const soMatch2 = maps.match(
-        /\s(\/data\/app\/~~[^/]+\/app\.strawverse\.android-[^/]+\/lib\/[^\s/]+)\//,
-      );
-      if (soMatch2 && soMatch2[1]) {
-        candidateNativeDirs.push(soMatch2[1]);
-      }
-    } catch (e) {
-      logger.warn(`[FFmpeg] Could not read /proc/self/maps: ${e.message}`);
-    }
-
-    candidateNativeDirs.push("/data/data/app.strawverse.android/lib");
-    candidateNativeDirs.push("/data/user/0/app.strawverse.android/lib");
-
-    const userDataDir = process.env.NODEJS_MOBILE_DATA_DIR || process.cwd();
-    candidateNativeDirs.push(path.join(userDataDir, "bin"));
-
-    const seen = new Set();
-    for (const dir of candidateNativeDirs) {
-      if (!dir || seen.has(dir)) continue;
-      seen.add(dir);
-      const ffmpegPath = path.join(dir, "libffmpeg.so");
-      if (fs.existsSync(ffmpegPath)) {
-        logger.info(
-          `FFmpeg binary found in native library directory: ${ffmpegPath}`,
-        );
-        resolvedFfmpegPath = ffmpegPath;
-        return resolvedFfmpegPath;
-      }
-    }
-
-    throw new Error(
-      "FFmpeg binary (libffmpeg.so) not found in APK. " +
-        "Rebuild the app with 'node capacitor/scripts/fetch-ffmpeg.mjs' " +
-        "to bundle FFmpeg, then reinstall.",
-    );
-  }
-
-  // Desktop (Electron / Node.js)
-  const binaryName = process.platform === "win32" ? "ffmpeg.exe" : "ffmpeg";
-  const platformDir =
-    process.platform === "win32"
-      ? "win32"
-      : process.platform === "darwin"
-        ? "darwin"
-        : "linux";
-  const candidatePaths = [];
-
-  const resourceRoots = [];
-  if (process.resourcesPath) {
-    resourceRoots.push(path.join(process.resourcesPath, "app.asar.unpacked"));
-  }
-  try {
-    let electronApp = null;
-    try {
-      electronApp = require("electron").app;
-    } catch (e) {}
-    if (electronApp && typeof electronApp.getAppPath === "function") {
-      const dir = path.dirname(electronApp.getAppPath());
-      if (dir) resourceRoots.push(path.join(dir, "app.asar.unpacked"));
-    }
-  } catch (e) {}
-
-  for (const root of resourceRoots) {
-    candidatePaths.push(path.join(root, "ffmpeg", platformDir, binaryName));
-  }
-  candidatePaths.push(
-    path.join(
-      __dirname,
-      "..",
-      "..",
-      "electron",
-      "ffmpeg",
-      platformDir,
-      binaryName,
-    ),
-  );
-  candidatePaths.push(
-    path.join(__dirname, "..", "..", "ffmpeg", platformDir, binaryName),
-  );
-
-  if (process.platform === "linux") {
-    candidatePaths.push("/usr/bin/ffmpeg", "/usr/local/bin/ffmpeg");
-  } else if (process.platform === "darwin") {
-    candidatePaths.push("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg");
-  }
-
-  let ffmpegStatic = null;
-  try {
-    ffmpegStatic = require("ffmpeg-static");
-  } catch (e) {}
-  if (typeof ffmpegStatic === "string" && ffmpegStatic) {
-    candidatePaths.push(ffmpegStatic.replace("app.asar", "app.asar.unpacked"));
-  }
-  for (const root of resourceRoots) {
-    candidatePaths.push(
-      path.join(root, "node_modules", "ffmpeg-static", binaryName),
-    );
-  }
-  if (typeof ffmpegStatic === "string" && ffmpegStatic) {
-    candidatePaths.push(ffmpegStatic);
-  }
-
-  for (const p of candidatePaths) {
-    if (p && fs.existsSync(p)) {
-      resolvedFfmpegPath = p;
-      logger.info(
-        `[FFmpeg] Resolved FFmpeg binary path: ${resolvedFfmpegPath}`,
-      );
-      return resolvedFfmpegPath;
-    }
-  }
-
-  return binaryName;
-}
-
 // Tracks the last vault-clearance refresh so parallel segment workers
 // share one solver run instead of stampeding it.
 const clearanceRefresh = { at: 0, pending: null };
@@ -247,6 +115,39 @@ async function refreshCdnClearance(targetUrl, referer = null) {
   } catch (_) {
     return false;
   }
+}
+
+/** Merge segmented HLS WebVTT subtitle chunks into one standalone WebVTT document. */
+function mergeWebVttChunks(chunks) {
+  const cues = [];
+  const seenCues = new Set();
+
+  for (const chunk of chunks) {
+    if (!chunk || typeof chunk !== "string") continue;
+    const normalized = chunk.replace(/\r\n/g, "\n").trim();
+    if (!normalized) continue;
+
+    const blocks = normalized.split(/\n{2,}/);
+    for (const rawBlock of blocks) {
+      const cleanedLines = rawBlock.split("\n").filter((l) => {
+        const t = l.trim();
+        return (
+          t !== "" &&
+          !t.startsWith("WEBVTT") &&
+          !t.startsWith("X-TIMESTAMP-MAP") &&
+          !/^(Kind|Language):/i.test(t)
+        );
+      });
+      if (cleanedLines.length === 0) continue;
+      const blockText = cleanedLines.join("\n");
+      if (!blockText.includes("-->")) continue;
+      if (seenCues.has(blockText)) continue;
+      seenCues.add(blockText);
+      cues.push(blockText);
+    }
+  }
+
+  return cues.length > 0 ? `WEBVTT\n\n${cues.join("\n\n")}\n` : "";
 }
 
 function parseSpeedFloorBps(speedStr) {
@@ -547,11 +448,20 @@ class downloader {
     }
 
     const base = this.fileBase || `${this.Epnum}Ep`;
+    let dlContainer = "mp4";
+    try {
+      const liveCfg = await settingfetch();
+      if (liveCfg?.downloadContainer === "mkv") {
+        dlContainer = "mkv";
+      }
+    } catch (_) {}
+    this.downloadContainer = dlContainer;
     this.mp4 = path.join(this.directory, `${base}.mp4`);
     this.SegmentsFile = path.join(this.directory, `${base}.ts`);
     this.AudioSegments = null;
     this.AudioSegmentsFile = null;
     this.audioStreamUrl = null;
+    this.estimatedDurationSec = null;
 
     if (!this.streamUrl || this.streamUrl.length <= 0) {
       throw new Error("No Stream Url Provided");
@@ -789,6 +699,8 @@ class downloader {
         }
       }
 
+      this.mp4 = path.join(this.directory, `${base}.${this.downloadContainer}`);
+      this.estimatedDurationSec = estimatePlaylistDurationSec(Playlist);
       this.Segments = this.parsePlaylistSegments(Playlist, this.streamUrl);
       if (this.Segments.length <= 0) throw new Error("No Segments Found!");
 
@@ -1974,11 +1886,12 @@ class downloader {
             const urlPath = new URL(targetUrl).pathname;
             const parsedExt = path
               .extname(path.basename(urlPath))
-              .replace(".", "");
+              .replace(".", "")
+              .toLowerCase();
             if (parsedExt) ext = parsedExt;
           } catch (e) {}
 
-          let finalExt = ext;
+          let finalExt = ext === "m3u8" ? "vtt" : ext;
           if (finalExt === "vtt" && this.ChangeTosrt) {
             finalExt = "srt";
           }
@@ -2008,34 +1921,29 @@ class downloader {
             return;
           }
 
-          const subHeaders = await this.getMediaRequestHeaders(targetUrl);
-          let subtitleData;
-          try {
-            subtitleData = await this.fetchWithClearanceRetry(targetUrl, () =>
-              this.fetchMediaText(targetUrl, 15000),
+          let subtitleData = await this.fetchSubtitleText(targetUrl);
+
+          if (
+            typeof subtitleData === "string" &&
+            subtitleData.trim().startsWith("#EXTM3U")
+          ) {
+            subtitleData = await this.resolveHlsSubtitlePlaylist(
+              subtitleData,
+              targetUrl,
             );
-          } catch (e) {
-            try {
-              const cleanHeaders = { ...subHeaders };
-              delete cleanHeaders["Referer"];
-              delete cleanHeaders["referer"];
-              delete cleanHeaders["Origin"];
-              delete cleanHeaders["origin"];
-              subtitleData = await got(targetUrl, {
-                headers: cleanHeaders,
-                http2: false,
-                timeout: { request: 15000 },
-              }).text();
-            } catch (err) {
-              subtitleData = await got(targetUrl, {
-                http2: false,
-                timeout: { request: 15000 },
-              }).text();
-            }
+          }
+
+          if (!subtitleData || !String(subtitleData).trim()) {
+            logger.warn(
+              `Empty subtitle content after resolving ${url} (${lang}), skipping`,
+            );
+            return;
           }
 
           const isVtt =
-            finalExt === "vtt" || subtitleData.trim().startsWith("WEBVTT");
+            finalExt === "vtt" ||
+            ext === "m3u8" ||
+            subtitleData.trim().startsWith("WEBVTT");
 
           if (isVtt) {
             if (this.ChangeTosrt) {
@@ -2089,6 +1997,88 @@ class downloader {
     }
   }
 
+  async fetchSubtitleText(targetUrl) {
+    const subHeaders = await this.getMediaRequestHeaders(targetUrl);
+    try {
+      return await this.fetchWithClearanceRetry(targetUrl, () =>
+        this.fetchMediaText(targetUrl, 15000),
+      );
+    } catch (e) {
+      try {
+        const cleanHeaders = { ...subHeaders };
+        delete cleanHeaders["Referer"];
+        delete cleanHeaders["referer"];
+        delete cleanHeaders["Origin"];
+        delete cleanHeaders["origin"];
+        return await got(targetUrl, {
+          headers: cleanHeaders,
+          http2: false,
+          timeout: { request: 15000 },
+        }).text();
+      } catch (err) {
+        return await got(targetUrl, {
+          http2: false,
+          timeout: { request: 15000 },
+        }).text();
+      }
+    }
+  }
+
+  async resolveHlsSubtitlePlaylist(playlistContent, baseUrl, visited = new Set()) {
+    if (!playlistContent || visited.has(baseUrl) || visited.size >= 4) {
+      return playlistContent;
+    }
+    visited.add(baseUrl);
+
+    const lines = playlistContent
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+
+    if (playlistContent.includes("#EXT-X-STREAM-INF")) {
+      const variantLine = lines.find((l) => !l.startsWith("#"));
+      if (!variantLine) return "";
+      const variantUrl = resolveUrl(variantLine, baseUrl);
+      const variantText = await this.fetchSubtitleText(variantUrl);
+      if (variantText && variantText.trim().startsWith("#EXTM3U")) {
+        return this.resolveHlsSubtitlePlaylist(variantText, variantUrl, visited);
+      }
+      return variantText;
+    }
+
+    const segmentUrls = lines
+      .filter((l) => !l.startsWith("#"))
+      .map((l) => resolveUrl(l, baseUrl));
+
+    if (segmentUrls.length === 0) return "";
+
+    const results = new Array(segmentUrls.length);
+    const CONCURRENCY = 6;
+    let nextIdx = 0;
+
+    const worker = async () => {
+      while (nextIdx < segmentUrls.length) {
+        const idx = nextIdx++;
+        try {
+          results[idx] = await this.fetchSubtitleText(segmentUrls[idx]);
+        } catch (err) {
+          logger.warn(
+            `[Subtitles] Failed to fetch HLS subtitle chunk ${idx + 1}/${segmentUrls.length}: ${err.message}`,
+          );
+          results[idx] = "";
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, segmentUrls.length) }, () =>
+        worker(),
+      ),
+    );
+
+    return mergeWebVttChunks(results);
+  }
+
   convertToSRT(content) {
     try {
       const lines = content.split(/\r?\n/);
@@ -2097,7 +2087,7 @@ class downloader {
       let buffer = [];
 
       const timeRegex =
-        /^(\d{2}:)?\d{2}:\d{2}[\.,]\d{3} --> (\d{2}:)?\d{2}:\d{2}[\.,]\d{3}$/;
+        /^(\d{2}:)?\d{2}:\d{2}[\.,]\d{3}\s+-->\s+(\d{2}:)?\d{2}:\d{2}[\.,]\d{3}(?:\s+.*)?$/;
 
       for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim().replace(/<[^>]+>/g, "");
@@ -2122,7 +2112,11 @@ class downloader {
             buffer = [];
           }
 
-          let [start, end] = line.split(" --> ");
+          const arrowMatch = line.match(
+            /^((?:\d{2}:)?\d{2}:\d{2}[\.,]\d{3})\s+-->\s+((?:\d{2}:)?\d{2}:\d{2}[\.,]\d{3})/,
+          );
+          if (!arrowMatch) continue;
+          const [, start, end] = arrowMatch;
           const startMs = this.toMs(start);
           const endMs = this.toMs(end);
 
@@ -2172,259 +2166,92 @@ class downloader {
   }
 
   async MergeSegments() {
-    if (this.isDirectVideo) {
-      if (this.MergeSubtitles && this.downloadedPaths.length > 0) {
-        const releaseLock = await acquireMergeLock();
-        try {
-          const currentFfmpegPath = await getFfmpegPath();
-          const tempOutput = `${this.mp4}.remux.mp4`;
-          const ffmpegArgs = ["-y", "-i", this.mp4];
-          for (const sub of this.downloadedPaths) {
-            ffmpegArgs.push("-i", sub.path);
-          }
-          ffmpegArgs.push("-map", "0:v?", "-map", "0:a?");
-          for (let i = 0; i < this.downloadedPaths.length; i++) {
-            ffmpegArgs.push("-map", `${i + 1}:s`);
-          }
-          ffmpegArgs.push("-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text");
-          for (let i = 0; i < this.downloadedPaths.length; i++) {
-            const sub = this.downloadedPaths[i];
-            ffmpegArgs.push(`-metadata:s:s:${i}`, `language=${sub.lang}`);
-            if (sub.title) {
-              ffmpegArgs.push(`-metadata:s:s:${i}`, `title=${sub.title}`);
-            }
-          }
-          ffmpegArgs.push(tempOutput);
-
-          const nativeDir = path.dirname(currentFfmpegPath);
-          const spawnEnv = {
-            ...process.env,
-            LD_LIBRARY_PATH:
-              nativeDir +
-              (process.env.LD_LIBRARY_PATH
-                ? ":" + process.env.LD_LIBRARY_PATH
-                : ""),
-          };
-
-          await new Promise((resolve, reject) => {
-            const child = spawn(currentFfmpegPath, ffmpegArgs, {
-              env: spawnEnv,
-            });
-            child.on("close", (code) => {
-              if (code !== 0)
-                return reject(new Error(`FFmpeg exited with code ${code}`));
-              resolve();
-            });
-            child.on("error", reject);
-          });
-
-          await fs.promises.unlink(this.mp4).catch(() => {});
-          await fs.promises.rename(tempOutput, this.mp4);
-        } catch (e) {
-          logger.warn(
-            `[Video Remux] Failed to merge subtitles into direct MP4: ${e.message}`,
-          );
-        } finally {
-          releaseLock();
-        }
+    const abortController = new AbortController();
+    let cancelReason = null;
+    const cancelWatch = setInterval(() => {
+      if (global.isQueuePaused && global.isQueuePaused()) {
+        cancelReason = "Queue Paused";
+        abortController.abort();
+      } else if (
+        global.isEpisodeInQueue &&
+        !global.isEpisodeInQueue(this.EpID)
+      ) {
+        cancelReason = "Episode Cancelled";
+        abortController.abort();
       }
-      return;
-    }
+    }, 400);
+    if (typeof cancelWatch.unref === "function") cancelWatch.unref();
 
-    const releaseLock = await acquireMergeLock();
+    let lastRemuxPct = -1;
+    const onRemuxProgress = (p) => {
+      if (
+        p &&
+        Number.isFinite(p.percent) &&
+        p.percent !== lastRemuxPct &&
+        (p.percent % 5 === 0 || p.percent >= 99)
+      ) {
+        lastRemuxPct = p.percent;
+        this.logProgress(` (Remuxing ${p.percent}%)`).catch(() => {});
+      }
+    };
+
     try {
-      let ffmpegSucceeded = false;
-      let ffmpegError = null;
+      if (this.isDirectVideo) {
+        if (this.MergeSubtitles && this.downloadedPaths.length > 0) {
+          try {
+            await remuxMedia({
+              videoInput: this.mp4,
+              subtitles: this.downloadedPaths,
+              outputPath: this.mp4,
+              container: "mp4",
+              isDirectVideo: true,
+              signal: abortController.signal,
+              onProgress: onRemuxProgress,
+            });
+          } catch (e) {
+            if (e?.code === "ABORTED" || cancelReason) {
+              throw new Error(cancelReason || "Episode Cancelled");
+            }
+            logger.warn(
+              `[Video Remux] Failed to merge subtitles into direct MP4: ${e.message}`,
+            );
+          }
+        }
+        return;
+      }
 
       try {
-        const currentFfmpegPath = await getFfmpegPath();
-        const ffmpegArgs = [
-          "-y",
-          "-analyzeduration",
-          "50000000",
-          "-probesize",
-          "50000000",
-          "-i",
-          this.SegmentsFile,
-        ];
-
-        let hasSeparateAudio = false;
-        if (this.AudioSegmentsFile && fs.existsSync(this.AudioSegmentsFile)) {
-          hasSeparateAudio = true;
-          ffmpegArgs.push(
-            "-analyzeduration",
-            "50000000",
-            "-probesize",
-            "50000000",
-            "-i",
-            this.AudioSegmentsFile,
-          );
-        }
-
-        const subStartIndex = hasSeparateAudio ? 2 : 1;
-
-        if (this.MergeSubtitles && this.downloadedPaths.length > 0) {
-          for (const sub of this.downloadedPaths) {
-            ffmpegArgs.push("-i", sub.path);
-          }
-          if (hasSeparateAudio) {
-            ffmpegArgs.push("-map", "0:v", "-map", "1:a:0");
-          } else {
-            ffmpegArgs.push("-map", "0:v", "-map", "0:a?");
-          }
-          for (let i = 0; i < this.downloadedPaths.length; i++) {
-            ffmpegArgs.push("-map", `${subStartIndex + i}:s`);
-          }
-          ffmpegArgs.push("-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text");
-          for (let i = 0; i < this.downloadedPaths.length; i++) {
-            const sub = this.downloadedPaths[i];
-            ffmpegArgs.push(`-metadata:s:s:${i}`, `language=${sub.lang}`);
-            if (sub.title) {
-              ffmpegArgs.push(`-metadata:s:s:${i}`, `title=${sub.title}`);
-            }
-          }
-        } else {
-          if (hasSeparateAudio) {
-            ffmpegArgs.push("-map", "0:v", "-map", "1:a:0", "-c", "copy");
-          } else {
-            ffmpegArgs.push("-c", "copy");
-          }
-        }
-
-        const tempOutput = `${this.mp4}.remux.mp4`;
-        ffmpegArgs.push(tempOutput);
-
-        try {
-          const stats = fs.statSync(this.SegmentsFile);
-          logger.info(
-            `[Video Remux] Concatenated TS file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB (${stats.size} bytes)`,
-          );
-        } catch (e) {
-          logger.error(
-            `[Video Remux] Failed to check TS file size: ${e.message}`,
-          );
-        }
-
-        const nativeDir = path.dirname(currentFfmpegPath);
-        const spawnEnv = {
-          ...process.env,
-          LD_LIBRARY_PATH:
-            nativeDir +
-            (process.env.LD_LIBRARY_PATH
-              ? ":" + process.env.LD_LIBRARY_PATH
-              : ""),
-        };
-
-        const runFfmpeg = (args) => {
-          return new Promise((resolve, reject) => {
-            const child = spawn(currentFfmpegPath, args, { env: spawnEnv });
-            let ffmpegOutput = "";
-
-            if (child.stdout) {
-              child.stdout.on("data", (data) => {
-                ffmpegOutput += data.toString();
-              });
-            }
-            if (child.stderr) {
-              child.stderr.on("data", (data) => {
-                ffmpegOutput += data.toString();
-              });
-            }
-
-            child.on("close", (code, signal) => {
-              if (code !== 0) {
-                logger.error(`[Video Remux] FFmpeg output:\n${ffmpegOutput}`);
-                return reject(
-                  new Error(
-                    `FFmpeg exited with code ${code}${signal ? ` (signal: ${signal})` : ""}`,
-                  ),
-                );
-              }
-              resolve();
-            });
-
-            child.on("error", (err) => {
-              reject(new Error(`Failed to start FFmpeg: ${err.message}`));
-            });
-          });
-        };
-
-        try {
-          await runFfmpeg(ffmpegArgs);
-          ffmpegSucceeded = true;
-        } catch (initialErr) {
-          ffmpegError = initialErr;
-          // If subtitles merge failed, try fallback without subtitles (video/audio copy only)
-          if (this.MergeSubtitles && this.downloadedPaths.length > 0) {
-            logger.warn(
-              `[Video Remux] Remux with subtitles failed (${initialErr.message}). Retrying remux with video/audio only...`,
-            );
-            await fs.promises.unlink(tempOutput).catch(() => {});
-            const fallbackArgs = [
-              "-y",
-              "-f",
-              "mpegts",
-              "-i",
-              this.SegmentsFile,
-              "-c",
-              "copy",
-              tempOutput,
-            ];
-            try {
-              await runFfmpeg(fallbackArgs);
-              ffmpegSucceeded = true;
-            } catch (fallbackErr) {
-              logger.warn(
-                `[Video Remux] Fallback remux also failed: ${fallbackErr.message}`,
-              );
-              ffmpegError = fallbackErr;
-            }
-          }
-        }
-      } catch (err) {
-        ffmpegError = err;
+        const stats = fs.statSync(this.SegmentsFile);
+        logger.info(
+          `[Video Remux] Concatenated TS file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB (${stats.size} bytes)`,
+        );
+      } catch (e) {
+        logger.error(
+          `[Video Remux] Failed to check TS file size: ${e.message}`,
+        );
       }
 
-      const tempOutput = `${this.mp4}.remux.mp4`;
-      if (ffmpegSucceeded && fs.existsSync(tempOutput)) {
-        try {
-          await fs.promises.unlink(this.mp4).catch(() => {});
-          await fs.promises.rename(tempOutput, this.mp4);
-          const stats = fs.statSync(this.mp4);
-          let tsStats = null;
-          try {
-            tsStats = fs.statSync(this.SegmentsFile);
-          } catch (_) {}
-
-          if (
-            stats.size < 1024 * 1024 &&
-            tsStats &&
-            tsStats.size > 2 * 1024 * 1024
-          ) {
-            throw new Error(
-              `Output MP4 is suspiciously small (${stats.size} bytes vs ${tsStats.size} bytes TS), likely missing video stream`,
-            );
-          }
-
-          logger.info(
-            `[Video Remux] Output MP4 file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB (${stats.size} bytes)`,
-          );
-        } catch (e) {
-          ffmpegSucceeded = false;
-          ffmpegError = e;
-          logger.error(`[Video Remux] Validation failed for MP4: ${e.message}`);
-          await fs.promises.unlink(this.mp4).catch(() => {});
+      try {
+        const result = await remuxMedia({
+          videoInput: this.SegmentsFile,
+          audioInput: this.AudioSegmentsFile,
+          subtitles: this.MergeSubtitles ? this.downloadedPaths : [],
+          outputPath: this.mp4,
+          container: this.downloadContainer || "mp4",
+          isDirectVideo: false,
+          durationSec: this.estimatedDurationSec || null,
+          signal: abortController.signal,
+          onProgress: onRemuxProgress,
+        });
+        logger.info(
+          `[Video Remux] Output ${String(this.downloadContainer || "mp4").toUpperCase()} file size: ${(result.sizeBytes / 1024 / 1024).toFixed(2)} MB (${result.sizeBytes} bytes, strategy=${result.strategy})`,
+        );
+      } catch (ffmpegError) {
+        if (ffmpegError?.code === "ABORTED" || cancelReason) {
+          await this.CleanEverything(true);
+          throw new Error(cancelReason || "Episode Cancelled");
         }
-      } else {
-        // Ensure no corrupt/truncated partial file is left behind
-        try {
-          if (fs.existsSync(tempOutput)) {
-            await fs.promises.unlink(tempOutput).catch(() => {});
-          }
-          if (fs.existsSync(this.mp4)) {
-            await fs.promises.unlink(this.mp4).catch(() => {});
-          }
-        } catch (_) {}
+        await fs.promises.unlink(this.mp4).catch(() => {});
         logger.warn(
           `[Video Remux] FFmpeg failed: ${ffmpegError?.message}. Keeping .ts file as output.`,
         );
@@ -2445,10 +2272,12 @@ class downloader {
       await this.logProgress();
       await this.CleanEverything();
     } catch (err) {
-      await this.CleanEverything(true);
+      if (err.message !== "Queue Paused") {
+        await this.CleanEverything(true);
+      }
       throw err;
     } finally {
-      releaseLock();
+      clearInterval(cancelWatch);
     }
   }
 
@@ -2618,6 +2447,7 @@ class downloader {
       await fs.promises.unlink(this.mp4).catch(() => {});
       await fs.promises.unlink(`${this.mp4}.downloading`).catch(() => {});
       await fs.promises.unlink(`${this.mp4}.remux.mp4`).catch(() => {});
+      await fs.promises.unlink(`${this.mp4}.remux.mkv`).catch(() => {});
 
       const tempDir = path.join(
         this.directory,
@@ -2679,4 +2509,10 @@ async function download(args) {
   }
 }
 
-module.exports = { download, getFfmpegPath, stripPngHeader, downloader };
+module.exports = {
+  download,
+  getFfmpegPath,
+  stripPngHeader,
+  mergeWebVttChunks,
+  downloader,
+};

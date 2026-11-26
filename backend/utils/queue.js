@@ -35,6 +35,7 @@ const {
   formatEpisodeFilename,
   formatChapterFilename,
   isAndroid,
+  detectIsSingleMovie,
 } = require("./constants");
 const { verifyStreamReachability } = require("./streamVerifier");
 const { updateHistory } = require("./history");
@@ -860,16 +861,13 @@ async function downloadep(
   const isSingleMovie =
     Boolean(Videoconfig?.isSingleMovie) ||
     (isMovie &&
-      (Videoconfig?.season === null ||
-        Videoconfig?.season === undefined ||
-        Number(Videoconfig?.season) === 1) &&
-      (EpNum === null ||
-        EpNum === undefined ||
-        Number(EpNum) === 1 ||
-        String(EpNum).toLowerCase() === "movie" ||
-        String(EpNum).toLowerCase() === "full movie") &&
-      !String(AnimeEpId).match(/tv:[^:]+:(\d+):\d+/i) &&
-      !String(AnimeEpId).match(/[Ss]\d+[Ee]\d+/i));
+      detectIsSingleMovie({
+        mediaType: "Movies",
+        id: animeId,
+        episodeId: AnimeEpId,
+        season: Videoconfig?.season,
+        epNum: EpNum,
+      }));
 
   if (liveSettings.mediaServerNaming === true && !isSingleMovie) {
     // Season and show folder picked on the show's page (default: S1, title)
@@ -1396,16 +1394,13 @@ async function downloadEpisodeByQuality(
     const isSingleMovie =
       Boolean(config?.isSingleMovie) ||
       (isMovie &&
-        (config?.season === null ||
-          config?.season === undefined ||
-          Number(config?.season) === 1) &&
-        (episodeNumber === null ||
-          episodeNumber === undefined ||
-          Number(episodeNumber) === 1 ||
-          String(episodeNumber).toLowerCase() === "movie" ||
-          String(episodeNumber).toLowerCase() === "full movie") &&
-        !String(epid).match(/tv:[^:]+:(\d+):\d+/i) &&
-        !String(epid).match(/[Ss]\d+[Ee]\d+/i));
+        detectIsSingleMovie({
+          mediaType: "Movies",
+          id: animeId,
+          episodeId: epid,
+          season: config?.season,
+          epNum: episodeNumber,
+        }));
 
     const movieScheme =
       currentSettings?.moviesNamingScheme ||

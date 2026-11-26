@@ -4,6 +4,14 @@ const { getQueue, updateQueue, isQueuePaused } = require("../utils/queue");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getCurrentAppVersion } = require("../utils/constants");
 const { getChangelog } = require("../utils/changelog");
+const { getKeyValue, setKeyValue, run } = require("../utils/db");
+const { maskApiKey } = require("../utils/mediaEnrichment");
+const {
+  getFfmpegDiagnostics,
+  invalidateBinaryCache,
+  isAndroidRuntime,
+  validateFfmpegBinary,
+} = require("../utils/ffmpeg");
 
 const router = express.Router();
 
@@ -260,6 +268,97 @@ router.post("/api/extensions", async (req, res) => {
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Optional TMDB API Key configuration (stored server-side, never returned raw)
+router.get("/api/settings/tmdb-key", async (req, res) => {
+  try {
+    const rawKey = await getKeyValue("Settings", "tmdbApiKey");
+    const hasKey = typeof rawKey === "string" && rawKey.trim().length > 0;
+    return res.json({
+      configured: hasKey,
+      masked: hasKey ? maskApiKey(rawKey) : null,
+    });
+  } catch (err) {
+    logger.error("Failed to read TMDB key status: " + err.message);
+    return res.status(500).json({ error: "Failed to read TMDB key status" });
+  }
+});
+
+router.post("/api/settings/tmdb-key", async (req, res) => {
+  try {
+    const apiKey = typeof req.body?.apiKey === "string" ? req.body.apiKey.trim() : "";
+    if (!apiKey || apiKey.length < 16 || apiKey.length > 512 || /\s/.test(apiKey)) {
+      return res.status(400).json({
+        error: "Invalid TMDB API key or Read Access Token (16-512 chars, no spaces)",
+      });
+    }
+    await setKeyValue("Settings", "tmdbApiKey", apiKey);
+    try {
+      await run("DELETE FROM MediaEnrichmentCache WHERE cache_key LIKE 'movies:tmdb:%'");
+    } catch (_) {}
+    return res.json({
+      success: true,
+      configured: true,
+      masked: maskApiKey(apiKey),
+    });
+  } catch (err) {
+    logger.error("Failed to save TMDB key: " + err.message);
+    return res.status(500).json({ error: "Failed to save TMDB API key" });
+  }
+});
+
+router.delete("/api/settings/tmdb-key", async (req, res) => {
+  try {
+    await setKeyValue("Settings", "tmdbApiKey", null);
+    try {
+      await run("DELETE FROM MediaEnrichmentCache WHERE cache_key LIKE 'movies:tmdb:%'");
+    } catch (_) {}
+    return res.json({
+      success: true,
+      configured: false,
+      masked: null,
+    });
+  } catch (err) {
+    logger.error("Failed to clear TMDB key: " + err.message);
+    return res.status(500).json({ error: "Failed to clear TMDB API key" });
+  }
+});
+
+// FFmpeg binary & hardware encoder diagnostics
+router.get("/api/system/ffmpeg", async (req, res) => {
+  try {
+    const diagnostics = await getFfmpegDiagnostics();
+    res.json(diagnostics);
+  } catch (err) {
+    logger.error("Failed to read FFmpeg diagnostics: " + err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/api/system/ffmpeg/recheck", async (req, res) => {
+  try {
+    const customPath =
+      typeof req.body?.customPath === "string" ? req.body.customPath.trim() : "";
+    if (customPath) {
+      if (isAndroidRuntime()) {
+        return res.status(400).json({
+          error: "Custom FFmpeg binary path is not supported on Android",
+        });
+      }
+      const check = await validateFfmpegBinary(customPath);
+      if (!check.valid) {
+        return res.status(400).json({ error: check.error || "Invalid FFmpeg binary path" });
+      }
+    }
+
+    invalidateBinaryCache();
+    const diagnostics = await getFfmpegDiagnostics({ forceRefresh: true });
+    res.json(diagnostics);
+  } catch (err) {
+    logger.error("Failed to recheck FFmpeg diagnostics: " + err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

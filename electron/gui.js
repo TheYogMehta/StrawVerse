@@ -164,6 +164,7 @@ app.on("open-url", (event, url) => {
 
 try {
   app.commandLine.appendSwitch("force_high_performance_gpu");
+  app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
 } catch (e) {
   logger.error("[GPU] Failed to check forceHighPerformanceGpu: " + e.message);
 }
@@ -226,6 +227,9 @@ const { loadQueue, continuousExecution } = require(
   path.join(backendDir, "utils", "queue"),
 );
 const { StopDiscordRPC } = require(path.join(backendDir, "utils", "discord"));
+const { terminateAll: terminateFfmpeg } = require(
+  path.join(backendDir, "utils", "ffmpeg"),
+);
 const { createScrapperWindow, ExitScrapperWindow } = require(
   path.join(backendDir, "utils", "scrapper"),
 );
@@ -277,6 +281,35 @@ function stripElectronBrands(value = "") {
   return value
     .replace(/,?\s*"Electron";v="[^"]+"/g, "")
     .replace(/"Electron";v="[^"]+",?\s*/g, "");
+}
+
+function stripElectronFromUserAgent(ua = "") {
+  return String(ua)
+    .replace(/\s*StrawVerse\/[^\s]+/gi, "")
+    .replace(/\s*Electron\/[^\s]+/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
+const PASSTHROUGH_EMBED_DOMAINS = [
+  "youtube.com",
+  "youtube-nocookie.com",
+  "youtu.be",
+  "ytimg.com",
+  "googlevideo.com",
+  "ggpht.com",
+  "gstatic.com",
+  "googleapis.com",
+  "google.com",
+  "doubleclick.net",
+];
+
+function isPassthroughEmbedHost(hostname = "") {
+  const host = String(hostname).toLowerCase();
+  if (!host) return false;
+  return PASSTHROUGH_EMBED_DOMAINS.some(
+    (domain) => host === domain || host.endsWith("." + domain),
+  );
 }
 
 function normalizeHttpOrigin(value) {
@@ -416,6 +449,25 @@ const createWindow = () => {
           requestUrl.hostname === "localhost" &&
           requestUrl.port === String(global.PORT)
         ) {
+          callback({ requestHeaders: details.requestHeaders });
+          return;
+        }
+        if (isPassthroughEmbedHost(requestUrl.hostname)) {
+          for (const key of Object.keys(details.requestHeaders)) {
+            const lower = key.toLowerCase();
+            if (lower === "user-agent") {
+              details.requestHeaders[key] = stripElectronFromUserAgent(
+                details.requestHeaders[key],
+              );
+            } else if (
+              lower === "sec-ch-ua" ||
+              lower === "sec-ch-ua-full-version-list"
+            ) {
+              details.requestHeaders[key] = stripElectronBrands(
+                details.requestHeaders[key],
+              );
+            }
+          }
           callback({ requestHeaders: details.requestHeaders });
           return;
         }
@@ -861,7 +913,11 @@ app.whenReady().then(async () => {
   });
 
   if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify();
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      logger.warn(
+        `[AutoUpdater] Startup update check failed: ${err?.message || err}`,
+      );
+    });
   }
 
   try {
@@ -874,7 +930,14 @@ app.whenReady().then(async () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  terminateFfmpeg().catch(() => {});
 });
+
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.once(sig, () => {
+    terminateFfmpeg().catch(() => {});
+  });
+}
 
 // AutoUpdater
 autoUpdater.autoDownload = false;
@@ -919,11 +982,19 @@ autoUpdater.on("error", (err) => {
     (errMsg.includes("Code signature") ||
       err?.domain === "SQRLCodeSignatureErrorDomain" ||
       errMsg.includes("SQRLCodeSignatureErrorDomain"));
+  const isOfflineError =
+    errMsg.includes("ERR_INTERNET_DISCONNECTED") ||
+    errMsg.includes("ERR_NETWORK_CHANGED") ||
+    errMsg.includes("ERR_NAME_NOT_RESOLVED") ||
+    errMsg.includes("ENOTFOUND") ||
+    errMsg.includes("ETIMEDOUT");
 
   if (isCodeSignError) {
     logger.warn(
       "[AutoUpdater] macOS code signature verification failed (application is distributed unsigned). Direct download is recommended.",
     );
+  } else if (isOfflineError) {
+    logger.warn(`[AutoUpdater] Update check skipped (offline/network error): ${errMsg}`);
   } else {
     logger.error("Error checking for updates:", err);
   }

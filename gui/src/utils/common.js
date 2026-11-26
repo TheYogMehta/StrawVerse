@@ -257,3 +257,87 @@ export function getMalStatusLabel(status) {
   if (!status || typeof status !== "string") return "";
   return status.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+/**
+ * Determine whether a Movies/Series item represents a single standalone movie
+ * rather than a multi-episode / multi-season series.
+ */
+export function isSingleMovieDetails(details = null, episodes = [], appType = "Movies") {
+  if (appType !== "Movies") return false;
+  if (details?.isSingleMovie === true) return true;
+  if (details?.isSingleMovie === false) return false;
+
+  const idStr = String(details?.id || "");
+  if (/^tv:/i.test(idStr)) return false;
+
+  const rawType = String(details?.type || "").toLowerCase().trim();
+  if (
+    rawType === "tv" ||
+    rawType === "series" ||
+    rawType === "tv series" ||
+    rawType === "tv-series" ||
+    rawType === "show" ||
+    rawType === "tv show" ||
+    rawType === "mini-series" ||
+    rawType === "miniseries"
+  ) {
+    return false;
+  }
+
+  if (details?.episodes_json) {
+    try {
+      const counts =
+        typeof details.episodes_json === "string"
+          ? JSON.parse(details.episodes_json)
+          : details.episodes_json;
+      if (counts && typeof counts === "object" && !Array.isArray(counts)) {
+        const seasons = Object.keys(counts).map(Number);
+        const maxCount = Math.max(0, ...Object.values(counts).map(Number));
+        const total = Object.values(counts).reduce(
+          (acc, v) => acc + (Number(v) || 0),
+          0,
+        );
+        if (seasons.some((s) => s > 1) || maxCount > 1 || total > 1) {
+          return false;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (Array.isArray(episodes) && episodes.length > 0) {
+    if (episodes.length > 1) return false;
+    const ep = episodes[0] || {};
+    if (
+      (ep.season !== undefined && ep.season !== null && Number(ep.season) > 1) ||
+      (ep.number !== undefined && ep.number !== null && Number(ep.number) > 1) ||
+      (ep.id &&
+        (/tv:[^:]+:\d+:\d+/i.test(String(ep.id)) ||
+          /^tv:/i.test(String(ep.id)) ||
+          /[Ss]\d+[Ee]\d+/i.test(String(ep.id))))
+    ) {
+      return false;
+    }
+    if (ep.isMovie === true || ep.title === "Full Movie") return true;
+  }
+
+  if (rawType === "movie" || rawType === "movies" || rawType === "film") {
+    return true;
+  }
+  if (/^movie:/i.test(idStr)) return true;
+
+  if (!rawType && (!Array.isArray(episodes) || episodes.length <= 1)) {
+    if (
+      Array.isArray(episodes) &&
+      episodes.length === 1 &&
+      episodes[0]?.season !== undefined &&
+      episodes[0]?.season !== null &&
+      Number(episodes[0].season) >= 1 &&
+      episodes[0]?.title !== "Full Movie"
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}

@@ -15,6 +15,7 @@ const {
   hasLocalMediaFiles,
   cleanAlphanumeric,
   SEASON_FOLDER_RE,
+  detectIsSingleMovie,
 } = require("./constants");
 
 const cache = new NodeCache({ stdTTL: 60, checkperiod: 60 });
@@ -597,15 +598,32 @@ async function movieInfo(provider, dir, movieId) {
   }
 
   const data = await infoFn.call(provider.provider, movieId);
-  if (data && (!Array.isArray(data.episodes) || data.episodes.length === 0)) {
-    data.episodes = [
-      {
-        id: data.id || movieId,
-        episode: 1,
-        number: 1,
-        title: data.title || "Full Movie",
-      },
-    ];
+  if (data) {
+    const hasEpisodes = Array.isArray(data.episodes) && data.episodes.length > 0;
+    const singleMovie = detectIsSingleMovie({
+      type: data.type,
+      id: data.id || movieId,
+      episodes: hasEpisodes ? data.episodes : null,
+    });
+    data.isSingleMovie = singleMovie;
+    if (!hasEpisodes) {
+      data.episodes = [
+        {
+          id: data.id || movieId,
+          episode: 1,
+          number: 1,
+          season: singleMovie ? null : 1,
+          isMovie: singleMovie,
+          title: singleMovie ? data.title || "Full Movie" : "Episode 1",
+        },
+      ];
+    } else if (singleMovie && data.episodes.length === 1) {
+      data.episodes[0] = {
+        ...data.episodes[0],
+        season: null,
+        isMovie: true,
+      };
+    }
   }
   cache.set(cacheKey, data, 60);
   return data;

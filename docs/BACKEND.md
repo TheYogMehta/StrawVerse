@@ -20,6 +20,7 @@ backend/
     ├── scrapper.js       # HTTP scraping helper, headers, proxy agent
     ├── AnimeManga.js     # Provider aggregator (Gogo, Zoro, MangaDex, etc.)
     ├── domainConcurrency.js # Per-domain connection rate-limiting and circuit-breaker
+    ├── ffmpeg/              # Unified FFmpeg engine (binary, runner, probe, remux, castTranscode)
     ├── mpvPlayer.js      # Native MPV player socket and process controller
     ├── mal.js            # MAL API v2 client and PKCE token manager
     ├── AppLogger.js      # Structured circular in-memory and file logging
@@ -37,7 +38,7 @@ All API endpoints are mounted under `/api` (or root prefix handled in [`backend/
 | **Media**      | [`media.js`](../backend/routes/media.js)         | `GET /search`, `GET /info`, `GET /watch`, `GET /read`, `POST /api/movies/resolve-provider` | Resolves anime/movie episodes, video stream links (HLS/MP4), manga chapter image lists, and movie providers |
 | **Downloads**  | [`downloads.js`](../backend/routes/downloads.js) | `POST /download`, `GET /queue`, `POST /cancel`, `POST /retry`  | Enqueues episodes/chapters, streams download progress, controls queue lifecycle                |
 | **Library**    | [`library.js`](../backend/routes/library.js)     | `GET /library`, `POST /bookmark`, `GET /history`, `POST /tags`, provider switching | Interacts with local SQLite database to persist watch history, bookmarks, local files, and provider migrations |
-| **System**     | [`system.js`](../backend/routes/system.js)       | `GET /settings`, `POST /settings`, `GET /logs`, `POST /folder` | System settings, local directory pickers, system specs, Discord RPC config                     |
+| **System**     | [`system.js`](../backend/routes/system.js)       | `GET /settings`, `POST /settings`, `GET /logs`, `GET /system/ffmpeg`, `POST /system/ffmpeg/recheck` | System settings, local directory pickers, FFmpeg diagnostics/recheck, Discord RPC config |
 | **MAL**        | [`mal.js`](../backend/routes/mal.js)             | `GET /mal/auth`, `GET /mal/callback`, `POST /mal/sync`         | PKCE OAuth authentication with MyAnimeList, user list synchronization                          |
 
 ---
@@ -92,7 +93,7 @@ Download operations are handled by [`backend/utils/downloader.js`](../backend/ut
 ### 4.1 Features
 
 - **HLS Segment Downloader**: Fetches `.m3u8` playlists, downloads TS video fragments concurrently, and decrypts AES-128 if keys are specified.
-- **FFmpeg Transcoding & Remuxing**: Merges downloaded video streams with subtitle tracks (`.vtt`, `.ass`) into clean `.mp4` or `.mkv` containers.
+- **FFmpeg Engine (`backend/utils/ffmpeg/`)**: Centralizes cross-platform binary resolution (`libffmpeg.so`, validated Desktop custom `ffmpegCustomPath`, bundled/system/`ffmpeg-static`), safe shell-free `spawn` execution with `-progress pipe:1` parsing and shutdown tracking, `ffmpeg -i` stream probing with single-pass `.vtt` subtitle extraction, configurable MP4 (`+faststart`) / MKV (native ASS/VTT) download remuxing with multi-stage audio-repair fallbacks, and cross-platform Cast hardware encoding (`h264_videotoolbox`, `h264_nvenc`, `h264_qsv`, `h264_amf`, `h264_vaapi`, `libx264` fallback).
 - **CBZ Manga Packager**: Fetches individual manga chapter page images, caches them locally, and compiles them into `.cbz` archive formats.
 - **Domain Concurrency Limiter** ([`backend/utils/domainConcurrency.js`](../backend/utils/domainConcurrency.js)): Dynamically caps simultaneous TCP sockets per CDN/scraper hostname, monitoring 429/503 responses to trigger exponential backoff.
 

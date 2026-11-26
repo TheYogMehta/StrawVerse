@@ -14,6 +14,7 @@ const {
   rankMovieCandidates,
   SEASON_FOLDER_RE,
   parseSeasonFolderNumber,
+  detectIsSingleMovie,
 } = require("./constants");
 
 test("episode number from both naming schemes", () => {
@@ -235,4 +236,39 @@ test("season folder pattern supports both Season NN and numeric seasonnumber fol
   assert.strictEqual(parseSeasonFolderNumber("Season 02"), 2);
   assert.strictEqual(parseSeasonFolderNumber("2"), 2);
   assert.strictEqual(parseSeasonFolderNumber("subs"), null);
+});
+
+test("detectIsSingleMovie distinguishes standalone movies from series", () => {
+  assert.strictEqual(
+    detectIsSingleMovie({ type: "Movie", id: "movie:550" }),
+    true,
+  );
+  assert.strictEqual(
+    detectIsSingleMovie({
+      type: null,
+      id: "inception-2010",
+      episodes: [{ id: "inception-2010", number: 1, title: "Full Movie" }],
+    }),
+    true,
+  );
+  assert.strictEqual(
+    detectIsSingleMovie({ type: "TV", id: "tv:1399", episodes: [{ id: "tv:1399:1:1", number: 1, season: 1 }] }),
+    false,
+  );
+  assert.strictEqual(
+    detectIsSingleMovie({
+      type: null,
+      id: "show-1",
+      episodesJson: JSON.stringify({ 1: 8, 2: 9 }),
+    }),
+    false,
+  );
+  assert.strictEqual(
+    detectIsSingleMovie({
+      type: "Movie",
+      mediaType: "Anime",
+      id: "anime-movie",
+    }),
+    false,
+  );
 });

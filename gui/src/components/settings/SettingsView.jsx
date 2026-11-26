@@ -29,6 +29,7 @@ import {
 import SettingsRow from "./SettingsRow";
 import Dropdown from "../common/Dropdown";
 import "../css/SettingsView.css";
+import "../css/InfoEnrichment.css";
 
 const DiscordIcon = ({ size = 16, className = "" }) => (
   <svg
@@ -173,6 +174,10 @@ export default function SettingsView({
   const [moviesNamingScheme, setMoviesNamingScheme] = useState("default");
   const [jellyfinCompatibility, setJellyfinCompatibility] = useState(false);
   const [externalLogEnabled, setExternalLogEnabled] = useState(true);
+  const [tmdbKeyConfigured, setTmdbKeyConfigured] = useState(false);
+  const [tmdbKeyMasked, setTmdbKeyMasked] = useState(null);
+  const [tmdbKeyInput, setTmdbKeyInput] = useState("");
+  const [tmdbKeyBusy, setTmdbKeyBusy] = useState(false);
   const [maxLogFiles, setMaxLogFiles] = useState(5);
   const [logDirectory, setLogDirectory] = useState("");
   const [autoSkipIntro, setAutoSkipIntro] = useState(true);
@@ -428,6 +433,72 @@ export default function SettingsView({
       }
     }
   }, [activeTab]);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/settings/tmdb-key")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!active || !data) return;
+        setTmdbKeyConfigured(Boolean(data.configured));
+        setTmdbKeyMasked(data.masked || null);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const handleSaveTmdbKey = async () => {
+    const trimmed = tmdbKeyInput.trim();
+    if (!trimmed) return;
+    setTmdbKeyBusy(true);
+    try {
+      const res = await fetch("/api/settings/tmdb-key", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: trimmed }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        swalError("Invalid Key", data?.error || "Failed to save TMDB API key");
+        return;
+      }
+      setTmdbKeyConfigured(true);
+      setTmdbKeyMasked(data.masked || null);
+      setTmdbKeyInput("");
+      swalSuccess(
+        "TMDB Key Saved",
+        "Movies & TV Series will now use TMDB for actor portraits, crew, and trailers.",
+      );
+    } catch (err) {
+      swalError("Error", err.message || "Failed to save TMDB API key");
+    } finally {
+      setTmdbKeyBusy(false);
+    }
+  };
+
+  const handleClearTmdbKey = async () => {
+    setTmdbKeyBusy(true);
+    try {
+      const res = await fetch("/api/settings/tmdb-key", { method: "DELETE" });
+      if (!res.ok) {
+        swalError("Error", "Failed to clear TMDB API key");
+        return;
+      }
+      setTmdbKeyConfigured(false);
+      setTmdbKeyMasked(null);
+      setTmdbKeyInput("");
+      swalSuccess(
+        "TMDB Key Cleared",
+        "Movies & TV Series reverted to zero-setup public metadata.",
+      );
+    } catch (err) {
+      swalError("Error", err.message || "Failed to clear TMDB API key");
+    } finally {
+      setTmdbKeyBusy(false);
+    }
+  };
 
   const handleTouchStart = (e) => {
     if (!e.touches || e.touches.length !== 1) return;
@@ -2664,6 +2735,59 @@ export default function SettingsView({
                     />
                   </div>
                 </div>
+              </div>
+
+              {/* Metadata & Enrichment */}
+              <div className="settings-section glass-panel">
+                <h2 className="settings-section-title">Metadata &amp; Enrichment</h2>
+
+                <SettingsRow
+                  label="TMDB API Key (Optional)"
+                  desc="Movies &amp; TV Series already show trailers, cast, directors, and IMDb ratings out of the box. Add a free TMDB API key or Read Access Token to unlock actor portraits, full crew, and multiple trailers."
+                >
+                  <div className="tmdb-key-control">
+                    {tmdbKeyConfigured && (
+                      <span className="tmdb-key-status">
+                        <CheckCircle size={14} />
+                        <span>Active ({tmdbKeyMasked || "••••••••"})</span>
+                      </span>
+                    )}
+                    <input
+                      type="password"
+                      className="settings-text-input tmdb-key-input"
+                      value={tmdbKeyInput}
+                      onChange={(e) => setTmdbKeyInput(e.target.value)}
+                      placeholder={
+                        tmdbKeyConfigured
+                          ? "Enter new key to replace..."
+                          : "Paste TMDB v3 key or v4 token..."
+                      }
+                      autoComplete="off"
+                      aria-label="TMDB API Key"
+                    />
+                    <button
+                      type="button"
+                      className="settings-market-btn"
+                      style={{ marginTop: 0 }}
+                      onClick={handleSaveTmdbKey}
+                      disabled={tmdbKeyBusy || !tmdbKeyInput.trim()}
+                    >
+                      {tmdbKeyBusy ? "Saving..." : "Save Key"}
+                    </button>
+                    {tmdbKeyConfigured && (
+                      <button
+                        type="button"
+                        className="settings-logout-btn"
+                        style={{ marginTop: 0 }}
+                        onClick={handleClearTmdbKey}
+                        disabled={tmdbKeyBusy}
+                      >
+                        <Trash2 size={14} />
+                        <span>Clear</span>
+                      </button>
+                    )}
+                  </div>
+                </SettingsRow>
               </div>
             </div>
           )}
