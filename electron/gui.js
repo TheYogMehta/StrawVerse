@@ -821,13 +821,15 @@ app.whenReady().then(async () => {
   await loadQueue();
   global.updatePowerSaveBlocker();
 
-  checkForMappingUpdates().catch((err) => {
-    logger.error(
-      `[databaseUpdater] Error during startup database updates: ${err.message}`,
-    );
-  });
-
   await loadAllScrapers();
+
+  setTimeout(() => {
+    checkForMappingUpdates().catch((err) => {
+      logger.error(
+        `[databaseUpdater] Error during startup database updates: ${err.message}`,
+      );
+    });
+  }, 1500);
   globalShortcut.register("CommandOrControl+Shift+I", () => {});
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {

@@ -124,7 +124,7 @@ function isAndroidRuntime() {
   return Boolean(
     process.env.NODEJS_MOBILE_DATA_DIR ||
       process.env.NATIVE_LIB_DIR ||
-      process.env.DATADIR ||
+      process.env.PLATFORM === "android" ||
       process.platform === "android",
   );
 }

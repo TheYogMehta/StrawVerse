@@ -836,11 +836,17 @@ async function batchRun(dbNameOrOps, maybeOps) {
 
   const dbInstance = dbName === "mapping" ? global.mappingDb : global.db;
   if (!dbInstance) return;
+  const stmtCache = new Map();
   dbInstance.prepare("BEGIN").run();
   try {
     for (const op of operations) {
       const flatParams = flattenParams(op.params);
-      dbInstance.prepare(op.sql).run(...flatParams);
+      let stmt = stmtCache.get(op.sql);
+      if (!stmt) {
+        stmt = dbInstance.prepare(op.sql);
+        stmtCache.set(op.sql, stmt);
+      }
+      stmt.run(...flatParams);
     }
     dbInstance.prepare("COMMIT").run();
   } catch (e) {

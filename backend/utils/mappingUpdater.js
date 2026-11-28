@@ -225,6 +225,16 @@ async function applySyncResponse(data) {
   await ensureMappingTablesExist();
   await mappingExec("PRAGMA foreign_keys = OFF");
 
+  const unlinkedIdsSet = new Set();
+  if (global.db) {
+    try {
+      const unlinkedRows = await queryAll("SELECT id FROM unlinked_mal_ids");
+      for (const u of unlinkedRows || []) {
+        if (u?.id != null) unlinkedIdsSet.add(String(u.id));
+      }
+    } catch (_) {}
+  }
+
   try {
     // 1. Process regular & core tables (anime, manga, next_episodes, pahe, etc.)
     if (tables && typeof tables === "object") {
@@ -312,7 +322,7 @@ async function applySyncResponse(data) {
             }
           }
 
-          const CHUNK_SIZE = 500;
+          const CHUNK_SIZE = 200;
           for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
             const chunk = rows.slice(i, i + CHUNK_SIZE);
             const ops = [];
@@ -345,21 +355,17 @@ async function applySyncResponse(data) {
                 const targetIds = [row.id, row.uuid]
                   .filter(Boolean)
                   .map(String);
-                if (global.db && targetIds.length > 0) {
+                if (global.db && unlinkedIdsSet.size > 0 && targetIds.length > 0) {
                   for (const tid of targetIds) {
+                    if (!unlinkedIdsSet.has(tid)) continue;
                     try {
-                      const localEntry = await queryOne(
-                        "SELECT malid FROM unlinked_mal_ids WHERE id = ? LIMIT 1",
-                        [tid],
+                      await run("DELETE FROM unlinked_mal_ids WHERE id = ?", [
+                        tid,
+                      ]);
+                      unlinkedIdsSet.delete(tid);
+                      logger.info(
+                        `[mappingUpdater] Pruned duplicate local mapping for ${tid} (canonical MAL ID ${row.malid})`,
                       );
-                      if (localEntry) {
-                        await run("DELETE FROM unlinked_mal_ids WHERE id = ?", [
-                          tid,
-                        ]);
-                        logger.info(
-                          `[mappingUpdater] Pruned duplicate local mapping for ${tid} (canonical MAL ID ${row.malid})`,
-                        );
-                      }
                     } catch (_) {}
                   }
                 }
@@ -388,7 +394,7 @@ async function applySyncResponse(data) {
 
             if (ops.length > 0) {
               await batchRun("mapping", ops);
-              await new Promise((r) => setTimeout(r, 0));
+              await new Promise((r) => setTimeout(r, 15));
             }
           }
         }
@@ -459,7 +465,7 @@ async function applySyncResponse(data) {
             }
           }
 
-          const CHUNK_SIZE = 500;
+          const CHUNK_SIZE = 200;
           for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
             const chunk = rows.slice(i, i + CHUNK_SIZE);
             const ops = [];
@@ -482,7 +488,7 @@ async function applySyncResponse(data) {
 
             if (ops.length > 0) {
               await batchRun("mapping", ops);
-              await new Promise((r) => setTimeout(r, 0));
+              await new Promise((r) => setTimeout(r, 15));
             }
           }
         }

@@ -1511,13 +1511,20 @@ export default function Catalog({
     fetchData(1, activeFilters, "", null);
   };
 
+  const lastStatsJsonRef = useRef("");
+  const lastHistoryJsonRef = useRef("");
+
   const fetchHistoryData = useCallback(async () => {
     if (provider !== "local") return;
     try {
       const statsRes = await fetch("/api/history/stats");
       if (statsRes.ok) {
         const sData = await statsRes.json();
-        setStats(sData);
+        const serialized = JSON.stringify(sData);
+        if (serialized !== lastStatsJsonRef.current) {
+          lastStatsJsonRef.current = serialized;
+          setStats(sData);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch history stats:", err);
@@ -1560,7 +1567,11 @@ export default function Catalog({
             unique.push(grouped[key]);
           }
         }
-        setRecentHistory(unique);
+        const serialized = JSON.stringify(unique);
+        if (serialized !== lastHistoryJsonRef.current) {
+          lastHistoryJsonRef.current = serialized;
+          setRecentHistory(unique);
+        }
       }
     } catch (err) {
       console.error("Failed to fetch history list:", err);
@@ -1641,7 +1652,9 @@ export default function Catalog({
 
       window.addEventListener("focus", handleFocus);
       document.addEventListener("visibilitychange", handleVisibility);
-      const timer = setInterval(fetchHistoryData, 4000);
+      const timer = setInterval(() => {
+        if (!document.hidden) fetchHistoryData();
+      }, 4000);
 
       return () => {
         window.removeEventListener("focus", handleFocus);

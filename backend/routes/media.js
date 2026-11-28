@@ -4732,6 +4732,15 @@ router.get("/api/stream/m3u8", async (req, res) => {
         .send("Upstream returned invalid playlist manifest");
     }
     const base = url.substring(0, url.lastIndexOf("/") + 1);
+    const resolveM3u8Uri = (rawUri) => {
+      if (!rawUri) return rawUri;
+      if (/^https?:\/\//i.test(rawUri)) return rawUri;
+      try {
+        return new URL(rawUri, url).toString();
+      } catch (_) {
+        return base + rawUri;
+      }
+    };
     const refParam = customReferer
       ? `&referer=${encodeURIComponent(customReferer)}`
       : "";
@@ -4762,7 +4771,7 @@ router.get("/api/stream/m3u8", async (req, res) => {
           }
           return t.includes('URI="')
             ? t.replace(/URI="([^"]+)"/, (_, u) => {
-                const abs = u.startsWith("http") ? u : base + u;
+                const abs = resolveM3u8Uri(u);
                 regHost(abs);
                 const isSubOrAudio =
                   t.includes("TYPE=SUBTITLES") || t.includes("TYPE=AUDIO");
@@ -4776,7 +4785,7 @@ router.get("/api/stream/m3u8", async (req, res) => {
         const isVariant = nextIsVariantPlaylist;
         nextIsVariantPlaylist = false;
 
-        const abs = t.startsWith("http") ? t : base + t;
+        const abs = resolveM3u8Uri(t);
         regHost(abs);
         const proxy = isVariant || abs.includes(".m3u8") ? m3u8Proxy : segProxy;
         return `${proxy}${encodeURIComponent(abs)}${refParam}`;
