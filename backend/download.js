@@ -17,7 +17,11 @@ const {
 } = require("./utils/queue");
 const { MetadataAdd, FindMapping } = require("./utils/Metadata");
 const path = require("path");
-const { hasLocalMediaFiles, SEASON_FOLDER_RE } = require("./utils/constants");
+const {
+  hasLocalMediaFiles,
+  SEASON_FOLDER_RE,
+  detectIsSingleMovie,
+} = require("./utils/constants");
 
 // Helper to format item label (e.g. Ep 1, Ch 5, S2E3)
 function formatItemLabel(item, type) {
@@ -475,42 +479,66 @@ async function downloadMovieSingle(
       }
     }
 
-    if (saveinfo) {
-      const existing = await queryOne("SELECT id FROM Movies WHERE id = ?", [
+    let movieRow = null;
+    try {
+      movieRow = await queryOne(
+        "SELECT id, type, episodes_json FROM Movies WHERE id = ?",
+        [movieid],
+      );
+    } catch (_) {}
+
+    if (saveinfo && !movieRow) {
+      const moviedata = await movieInfo(
+        Moviesprovider,
+        config?.CustomDownloadLocationMovies,
         movieid,
-      ]);
-      if (!existing) {
-        const moviedata = await movieInfo(
-          Moviesprovider,
-          config?.CustomDownloadLocationMovies,
-          movieid,
-        );
-        if (moviedata) {
-          const finalTitle = moviedata?.title || Title;
-          MetadataAdd("Movies", {
-            id: movieid,
-            title: finalTitle,
-            provider: Moviesprovider.provider_name,
-            type: moviedata.type ?? "Movie",
-            description: moviedata.description ?? null,
-            status: moviedata.status ?? null,
-            genres:
-              moviedata?.genres?.length > 0
-                ? Array.isArray(moviedata.genres)
-                  ? moviedata.genres.join(",")
-                  : moviedata.genres
-                : "",
-            aired: moviedata?.aired || moviedata?.released || null,
-            ImageUrl: moviedata?.image_url || moviedata?.image,
-            EpisodesDataId: null,
-            MalID: null,
-          });
-        }
+      );
+      if (moviedata) {
+        const finalTitle = moviedata?.title || Title;
+        MetadataAdd("Movies", {
+          id: movieid,
+          title: finalTitle,
+          provider: Moviesprovider.provider_name,
+          type: moviedata.type ?? "Movie",
+          description: moviedata.description ?? null,
+          status: moviedata.status ?? null,
+          genres:
+            moviedata?.genres?.length > 0
+              ? Array.isArray(moviedata.genres)
+                ? moviedata.genres.join(",")
+                : moviedata.genres
+              : "",
+          aired: moviedata?.aired || moviedata?.released || null,
+          ImageUrl: moviedata?.image_url || moviedata?.image,
+          EpisodesDataId: null,
+          MalID: null,
+        });
+        movieRow = {
+          id: movieid,
+          type: moviedata.type ?? "Movie",
+          episodes_json: null,
+        };
       }
     }
 
+    const isSingleMovie = detectIsSingleMovie({
+      mediaType: "Movies",
+      type: movieRow?.type ?? null,
+      id: movieid,
+      episodeId: episodeid,
+      season: resolvedSeason,
+      epNum: number,
+      episodesJson: movieRow?.episodes_json ?? null,
+    });
+
     let is_in_queue = await checkEpisodeDownload(episodeid);
     if (is_in_queue) {
+      if (isSingleMovie) {
+        return {
+          error: true,
+          message: "This movie is already in queue.",
+        };
+      }
       const epLabel =
         resolvedSeason !== null && resolvedSeason !== undefined
           ? `S${resolvedSeason}E${number}`
@@ -538,12 +566,23 @@ async function downloadMovieSingle(
             ? downloadedList.includes(`s${resolvedSeason}_e${num}`)
             : false;
         const hasSeasonTags = downloadedList.some(
-          (x) => typeof x === "string" && x.startsWith("s"),
+          (x) => typeof x === "string" && /^s\d+_e/i.test(x),
         );
+        const allowUntaggedFallback =
+          !hasSeasonTags &&
+          (resolvedSeason === null ||
+            resolvedSeason === undefined ||
+            Number(resolvedSeason) <= 1);
         if (
           hasSeasonKey ||
-          (!hasSeasonTags && downloadedList.map(Number).includes(num))
+          (allowUntaggedFallback && downloadedList.map(Number).includes(num))
         ) {
+          if (isSingleMovie) {
+            return {
+              error: true,
+              message: "This movie is already downloaded.",
+            };
+          }
           const epLabel =
             resolvedSeason !== null && resolvedSeason !== undefined
               ? `S${resolvedSeason}E${number}`
@@ -556,47 +595,6 @@ async function downloadMovieSingle(
       }
     } catch (e) {
       // ignore
-    }
-
-    // Determine whether this download represents a single movie or a series episode
-    let isSingleMovie = false;
-    const isTvEpisodeId =
-      /tv:[^:]+:(\d+):\d+/i.test(String(episodeid)) ||
-      /[Ss]\d+[Ee]\d+/i.test(String(episodeid));
-
-    if (
-      !isTvEpisodeId &&
-      (resolvedSeason === null ||
-        resolvedSeason === undefined ||
-        Number(resolvedSeason) === 1)
-    ) {
-      const num = parseFloat(number);
-      if (isNaN(num) || num === 1) {
-        try {
-          const row = await queryOne(
-            "SELECT type, episodes_json FROM Movies WHERE id = ?",
-            [movieid],
-          );
-          if (!row || !row.type || String(row.type).toLowerCase() === "movie") {
-            if (!row?.episodes_json) {
-              isSingleMovie = true;
-            } else {
-              try {
-                const counts = JSON.parse(row.episodes_json);
-                const totalEps = Object.values(counts).reduce(
-                  (a, b) => a + Number(b),
-                  0,
-                );
-                if (totalEps <= 1) isSingleMovie = true;
-              } catch (_) {
-                isSingleMovie = true;
-              }
-            }
-          }
-        } catch (_) {
-          isSingleMovie = true;
-        }
-      }
     }
 
     const queueItem = {

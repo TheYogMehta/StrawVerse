@@ -30,6 +30,7 @@ import {
   parseTags,
   getMalStatusOptions,
   getMalStatusLabel,
+  isSingleMovieDetails,
 } from "../utils/common";
 import Dropdown from "./common/Dropdown";
 import "./css/InfoView.css";
@@ -308,10 +309,13 @@ export default function InfoView({
     }
 
     const newArgs = [...args];
-    while (newArgs.length < 10) {
+    while (newArgs.length < 11) {
       newArgs.push(undefined);
     }
     newArgs[9] = details?.malid || details?.MalID;
+    if (newArgs[11] === undefined) {
+      newArgs[11] = isSingleMovie;
+    }
     propOnWatch(...newArgs);
   };
 
@@ -387,9 +391,10 @@ export default function InfoView({
           const sKey = `s${season}_e${num}`;
           if (list.includes(sKey)) return true;
           const hasSeasonTags = list.some(
-            (x) => typeof x === "string" && x.startsWith("s"),
+            (x) => typeof x === "string" && /^s\d+_e/i.test(x),
           );
           if (hasSeasonTags) return false;
+          if (Number(season) > 1) return false;
         }
         return list.map(Number).includes(num);
       };
@@ -787,6 +792,10 @@ export default function InfoView({
   const dropdownRef = useRef(null);
   const [isProviderDropdownOpen, setIsProviderDropdownOpen] = useState(false);
   const providerDropdownRef = useRef(null);
+  const [isSwitchingProvider, setIsSwitchingProvider] = useState(false);
+  const [moviePickerState, setMoviePickerState] = useState(null);
+  const [moviePickerQuery, setMoviePickerQuery] = useState("");
+  const [moviePickerLoading, setMoviePickerLoading] = useState(false);
   const [isMalStatusDropdownOpen, setIsMalStatusDropdownOpen] = useState(false);
   const malStatusDropdownRef = useRef(null);
   const [isImageExpanded, setIsImageExpanded] = useState(false);
@@ -961,17 +970,26 @@ export default function InfoView({
     [historyProgress, malWatched, type],
   );
 
-  const watchedCount = useMemo(() => {
-    if (!episodesOrChapters || episodesOrChapters.length === 0) return 0;
-    return episodesOrChapters.filter((item) => isItemWatched(item)).length;
-  }, [episodesOrChapters, isItemWatched]);
+  const isSingleMovie = useMemo(
+    () => isSingleMovieDetails(details, episodesOrChapters, type),
+    [details, episodesOrChapters, type],
+  );
 
-  const showWatchedSort =
-    watchedCount > 0 && watchedCount < (episodesOrChapters?.length || 0);
+  const movieItem = useMemo(() => {
+    if (!isSingleMovie) return null;
+    return (
+      episodesOrChapters[0] || {
+        id: details?.id || id,
+        number: 1,
+        season: null,
+        title: details?.title || "Movie",
+      }
+    );
+  }, [isSingleMovie, episodesOrChapters, details?.id, details?.title, id]);
 
   // Compute available seasons for Movies/Series season filter
   const availableSeasons = useMemo(() => {
-    if (type !== "Movies" && type !== "Anime") return [];
+    if ((type !== "Movies" && type !== "Anime") || isSingleMovie) return [];
     const seasonSet = new Set();
     episodesOrChapters.forEach((item) => {
       if (item.season !== undefined && item.season !== null) {
@@ -983,6 +1001,31 @@ export default function InfoView({
       .sort((a, b) => a - b);
     return seasons.length > 1 ? seasons : [];
   }, [episodesOrChapters, type]);
+
+  // Scope items to the currently selected season when a season filter is active
+  const seasonScopedItems = useMemo(() => {
+    if (availableSeasons.length > 0) {
+      const targetS =
+        selectedSeason !== "all"
+          ? Number(selectedSeason)
+          : Number(availableSeasons[0]);
+      return episodesOrChapters.filter(
+        (item) =>
+          item.season !== undefined &&
+          item.season !== null &&
+          Number(item.season) === targetS,
+      );
+    }
+    return episodesOrChapters;
+  }, [episodesOrChapters, availableSeasons, selectedSeason]);
+
+  const watchedCount = useMemo(() => {
+    if (!seasonScopedItems || seasonScopedItems.length === 0) return 0;
+    return seasonScopedItems.filter((item) => isItemWatched(item)).length;
+  }, [seasonScopedItems, isItemWatched]);
+
+  const showWatchedSort =
+    watchedCount > 0 && watchedCount < (seasonScopedItems?.length || 0);
 
   const userSelectedSeasonRef = useRef(false);
 
@@ -1043,14 +1086,7 @@ export default function InfoView({
 
   const sortedItems = useMemo(() => {
     // Apply season filter first (for Movies/Series with multiple seasons)
-    const seasonFiltered =
-      availableSeasons.length > 0 && selectedSeason !== "all"
-        ? episodesOrChapters.filter(
-            (item) =>
-              item.season !== undefined &&
-              Number(item.season) === Number(selectedSeason),
-          )
-        : episodesOrChapters;
+    const seasonFiltered = seasonScopedItems;
 
     // Season-aware sorter: by season ASC then by episode number
     const seasonAwareSort = (a, b) => {
@@ -1071,30 +1107,51 @@ export default function InfoView({
     };
 
     if (sortOrder === "downloaded") {
-      const allDownloadedNums =
+      const matched = seasonFiltered.filter((item) =>
+        isItemFullyDownloaded(item),
+      );
+      if (matched.length > 0 || seasonFiltered.length > 0) {
+        return matched.sort(seasonAwareSort);
+      }
+
+      const rawList =
         type === "Anime" || type === "Movies"
-          ? Array.from(
-              new Set(
-                Array.isArray(details?.DownloadedEpisodes)
-                  ? details.DownloadedEpisodes.map(Number)
-                  : [
-                      ...(details?.DownloadedEpisodes?.sub || []),
-                      ...(details?.DownloadedEpisodes?.dub || []),
-                    ].map(Number),
-              ),
-            ).sort((a, b) => a - b)
-          : Array.from(
-              new Set((details?.DownloadedChapters || []).map(Number)),
-            ).sort((a, b) => a - b);
+          ? Array.isArray(details?.DownloadedEpisodes)
+            ? details.DownloadedEpisodes
+            : [
+                ...(details?.DownloadedEpisodes?.sub || []),
+                ...(details?.DownloadedEpisodes?.dub || []),
+              ]
+          : details?.DownloadedChapters || [];
 
-      allDownloadedNums.sort((a, b) => a - b);
+      const activeSeasonFilter =
+        availableSeasons.length > 0 && selectedSeason !== "all"
+          ? Number(selectedSeason)
+          : null;
 
-      return allDownloadedNums.map((num) => {
-        const existingItem = seasonFiltered.find(
-          (item) => Number(item.number) === num,
-        );
-        if (existingItem) return existingItem;
+      const fallbackEntries = [];
+      const seenKeys = new Set();
+      for (const entry of rawList) {
+        const sMatch =
+          typeof entry === "string"
+            ? entry.match(/^s(\d+)_e(\d+(?:\.\d+)?)$/i)
+            : null;
+        const entrySeason = sMatch ? parseInt(sMatch[1], 10) : 1;
+        const entryNum = sMatch ? parseFloat(sMatch[2]) : Number(entry);
+        if (isNaN(entryNum)) continue;
+        if (activeSeasonFilter !== null && entrySeason !== activeSeasonFilter) {
+          continue;
+        }
+        const key = `${entrySeason}:${entryNum}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        fallbackEntries.push({ season: entrySeason, num: entryNum });
+      }
+      fallbackEntries.sort((a, b) =>
+        a.season !== b.season ? a.season - b.season : a.num - b.num,
+      );
 
+      return fallbackEntries.map(({ season: s, num }) => {
         if (type === "Anime" || type === "Movies") {
           const subList = details?.DownloadedEpisodes?.sub || [];
           const dubList = details?.DownloadedEpisodes?.dub || [];
@@ -1103,19 +1160,19 @@ export default function InfoView({
           if (dubList.map(Number).includes(num)) localLangs.push("dub");
           if (localLangs.length === 0) localLangs.push("sub");
           return {
-            id: `local-ep-${num}`,
+            id: `local-ep-s${s}-${num}`,
             number: String(num),
+            season: s,
             title: `Episode ${num}`,
             hasDub: dubList.map(Number).includes(num),
             langs: localLangs,
           };
-        } else {
-          return {
-            id: `local-ch-${num}`,
-            number: String(num),
-            title: `Chapter ${num}`,
-          };
         }
+        return {
+          id: `local-ch-${num}`,
+          number: String(num),
+          title: `Chapter ${num}`,
+        };
       });
     }
 
@@ -1133,6 +1190,7 @@ export default function InfoView({
 
     return [...seasonFiltered].sort(seasonAwareSort);
   }, [
+    seasonScopedItems,
     episodesOrChapters,
     sortOrder,
     sortDirection,
@@ -1362,19 +1420,34 @@ export default function InfoView({
       const dl = targetDetails?.DownloadedEpisodes;
       const subList = Array.isArray(dl) ? dl : dl?.sub || [];
       const dubList = Array.isArray(dl) ? dl : dl?.dub || [];
-      const allNums = Array.from(new Set([...subList, ...dubList]))
-        .map(Number)
-        .sort((a, b) => a - b);
-      if (allNums.length > 0) {
-        const localEps = allNums.map((num) => ({
-          id: `local-ep-${num}`,
-          number: num,
-          title: `Episode ${num}`,
-          hasDub: dubList.includes(num),
-        }));
+      const rawEntries = [...subList, ...dubList];
+      const entryMap = new Map();
+      for (const raw of rawEntries) {
+        const sMatch =
+          typeof raw === "string"
+            ? raw.match(/^s(\d+)_e(\d+(?:\.\d+)?)$/i)
+            : null;
+        const epSeason = sMatch ? parseInt(sMatch[1], 10) : 1;
+        const epNum = sMatch ? parseFloat(sMatch[2]) : Number(raw);
+        if (isNaN(epNum)) continue;
+        const key = `${epSeason}:${epNum}`;
+        if (!entryMap.has(key)) {
+          entryMap.set(key, {
+            id: `local-ep-s${epSeason}-${epNum}`,
+            number: epNum,
+            season: epSeason,
+            title: `Episode ${epNum}`,
+            hasDub: dubList.includes(raw) || dubList.map(Number).includes(epNum),
+          });
+        }
+      }
+      const localEps = Array.from(entryMap.values()).sort((a, b) =>
+        a.season !== b.season ? a.season - b.season : a.number - b.number,
+      );
+      if (localEps.length > 0) {
         setEpisodesOrChapters(localEps);
         setItemsHasNext(false);
-        setTotalItemsCount(allNums.length);
+        setTotalItemsCount(localEps.length);
       } else {
         setEpisodesOrChapters([]);
         setItemsHasNext(false);
@@ -1462,21 +1535,20 @@ export default function InfoView({
 
     try {
       const activeSubDub = historyProgress?.lastSubDub || dubSelect || "sub";
-      const dl = details?.DownloadedEpisodes;
-      const isDownloaded = Boolean(
-        dl &&
-          (Array.isArray(dl)
-            ? dl.map(Number).includes(Number(epItem.number))
-            : (dl[activeSubDub] || []).map(Number).includes(Number(epItem.number)))
+      const isDownloadedLocalCast = isDownloaded(
+        epItem.number,
+        activeSubDub,
+        epItem.season ?? null,
       );
 
-      if (isDownloaded) {
+      if (isDownloadedLocalCast) {
         const watchRes = await apiPost("/api/watch", {
           ep: details?.id || id,
           epNum: epItem.number,
           Downloaded: true,
           subdub: activeSubDub,
           type: type || "Anime",
+          season: epItem.season || 1,
         });
         const srcs =
           watchRes?.sources ||
@@ -1565,9 +1637,18 @@ export default function InfoView({
   };
 
   const handleOpenCastModal = (targetItem) => {
-    const item = targetItem || nextToPlayItem || allSortedEpisodes[0];
+    const item =
+      targetItem ||
+      (isSingleMovie ? movieItem : null) ||
+      nextToPlayItem ||
+      allSortedEpisodes[0];
     if (!item) {
-      swalInfo("No Episode Available", "Please select an episode to cast.");
+      swalInfo(
+        isSingleMovie ? "Movie Unavailable" : "No Episode Available",
+        isSingleMovie
+          ? "Movie source is not available to cast."
+          : "Please select an episode to cast.",
+      );
       return;
     }
     setCastTargetEp(item);
@@ -1613,8 +1694,12 @@ export default function InfoView({
       }
 
       setCastConnectingStep(`Connecting to ${device.name || "TV"}...`);
-      const epLabel = `Episode ${castTargetEp.number}`;
-      const castTitle = `${details?.title || "Stream"} - ${epLabel}`;
+      const epLabel = isSingleMovie
+        ? "Movie"
+        : `Episode ${castTargetEp.number}`;
+      const castTitle = isSingleMovie
+        ? details?.title || "Movie"
+        : `${details?.title || "Stream"} - ${epLabel}`;
 
       const castRes = await fetch("/api/cast/start", {
         method: "POST",
@@ -1644,7 +1729,12 @@ export default function InfoView({
       setActiveCastTitle(castTitle);
       setShowCastModal(false);
       setIsCastPlaying(true);
-      swalSuccess("Casting Started", `Streaming ${epLabel} to ${device.name || "TV"}`);
+      swalSuccess(
+        "Casting Started",
+        isSingleMovie
+          ? `Streaming ${details?.title || "movie"} to ${device.name || "TV"}`
+          : `Streaming ${epLabel} to ${device.name || "TV"}`,
+      );
     } catch (err) {
       console.error("[InfoView] Cast start error:", err);
       swalError("Casting Failed", err.message || "Failed to start casting to device.");
@@ -1710,25 +1800,32 @@ export default function InfoView({
   const playItem = (targetItem, overrideSubDub = null) => {
     const activeSubDub = overrideSubDub || dubSelect;
     if (type === "Anime" || type === "Movies") {
-      const dl = details?.DownloadedEpisodes;
-      const isDownloadedLocal = Array.isArray(dl)
-        ? dl.map(Number).includes(Number(targetItem.number))
-        : activeSubDub === "dub"
-          ? (dl?.dub || []).map(Number).includes(Number(targetItem.number))
-          : (dl?.sub || []).map(Number).includes(Number(targetItem.number));
+      const targetSeason = isSingleMovie ? null : (targetItem.season ?? null);
+      const resolvedSubDub =
+        overrideSubDub ||
+        ["sub", "dub", "hsub"].find((langKey) =>
+          isDownloaded(targetItem.number, langKey, targetSeason),
+        ) ||
+        activeSubDub;
+      const isDownloadedLocal = isDownloaded(
+        targetItem.number,
+        resolvedSubDub,
+        targetSeason,
+      );
 
       onWatch(
         details?.id || id,
         isDownloadedLocal ? targetItem.id || targetItem.number : targetItem.id,
         isDownloadedLocal,
-        activeSubDub,
+        isDownloadedLocal ? resolvedSubDub : activeSubDub,
         episodesOrChapters,
         details?.DownloadedEpisodes,
         details?.title,
         details?.provider,
         details?.image,
         undefined, // malid passed by InfoView's onWatch wrapper
-        targetItem.season || 1,
+        isSingleMovie ? null : targetItem.season || 1,
+        isSingleMovie,
       );
     } else {
       const isDownloadedLocal = (details?.DownloadedChapters || [])
@@ -1864,28 +1961,24 @@ export default function InfoView({
                   : null;
               if (Array.isArray(updated.DownloadedEpisodes)) {
                 const current = updated.DownloadedEpisodes;
-                const toAdd = [];
-                if (!current.map(Number).includes(epNum)) toAdd.push(epNum);
-                if (sKey && !current.includes(sKey)) toAdd.push(sKey);
-                if (toAdd.length > 0) {
-                  updated.DownloadedEpisodes = [...current, ...toAdd];
+                const entryToAdd = sKey || epNum;
+                if (!current.includes(entryToAdd)) {
+                  updated.DownloadedEpisodes = [...current, entryToAdd];
                 }
               } else if (
                 updated.DownloadedEpisodes &&
                 typeof updated.DownloadedEpisodes === "object"
               ) {
                 const currentList = updated.DownloadedEpisodes[subdub] || [];
-                const toAdd = [];
-                if (!currentList.map(Number).includes(epNum)) toAdd.push(epNum);
-                if (sKey && !currentList.includes(sKey)) toAdd.push(sKey);
-                if (toAdd.length > 0) {
+                const entryToAdd = sKey || epNum;
+                if (!currentList.includes(entryToAdd)) {
                   updated.DownloadedEpisodes = {
                     ...updated.DownloadedEpisodes,
-                    [subdub]: [...currentList, ...toAdd],
+                    [subdub]: [...currentList, entryToAdd],
                   };
                 }
               } else {
-                updated.DownloadedEpisodes = sKey ? [epNum, sKey] : [epNum];
+                updated.DownloadedEpisodes = sKey ? [sKey] : [epNum];
               }
             } else {
               const currentList = (updated.DownloadedChapters || []).map(
@@ -2176,7 +2269,7 @@ export default function InfoView({
       }
     }
 
-    episodesOrChapters.forEach((item) => {
+    seasonScopedItems.forEach((item) => {
       if (!isItemUnavailable(item)) {
         const num = parseFloat(item.number);
         if (!isNaN(num) && isNumberInRange(num, rangeStr)) {
@@ -2257,14 +2350,17 @@ export default function InfoView({
   };
 
   const handleContinueWatchRead = async () => {
-    if (isCaughtUp) {
+    if (!isSingleMovie && isCaughtUp) {
       return;
     }
-    const targetItem = nextToPlayItem || allSortedEpisodes[0];
+    const targetItem =
+      (isSingleMovie ? movieItem : null) ||
+      nextToPlayItem ||
+      allSortedEpisodes[0];
     const activeSubDub = historyProgress?.lastSubDub || dubSelect;
 
     if (targetItem) {
-      if (targetItem.season && availableSeasons.length > 0) {
+      if (!isSingleMovie && targetItem.season && availableSeasons.length > 0) {
         userSelectedSeasonRef.current = true;
         setSelectedSeason(String(targetItem.season));
       }
@@ -2481,9 +2577,11 @@ export default function InfoView({
             </style>
             <div style="margin-bottom: 16px; font-size: 14px; color: var(--text-muted); line-height: 1.5; text-align: center;">
               ${
-                singleItem
-                  ? `Choose download options for Episode <strong>${singleItem.number}</strong>:`
-                  : `Choose download options for <strong>${targetEpisodes.length}</strong> selected episodes:`
+                isSingleMovie
+                  ? `Choose download options for <strong>${details?.title || "this movie"}</strong>:`
+                  : singleItem
+                    ? `Choose download options for Episode <strong>${singleItem.number}</strong>:`
+                    : `Choose download options for <strong>${targetEpisodes.length}</strong> selected episodes:`
               }
             </div>
             ${
@@ -2881,7 +2979,7 @@ export default function InfoView({
   const handleProviderSwitch = async (newId, newProvider) => {
     const oldId = id;
     try {
-      await fetch("/api/metadata/switch-provider", {
+      const res = await fetch("/api/metadata/switch-provider", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2891,11 +2989,113 @@ export default function InfoView({
           newProvider: newProvider,
         }),
       });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data?.success === false) {
+        swalError(
+          res.status === 409 ? "Download in Queue" : "Switch Failed",
+          data?.error || "Failed to switch extension.",
+        );
+        return false;
+      }
+      if (type === "Movies" && window.catalogCache) {
+        Object.keys(window.catalogCache).forEach((k) => {
+          if (k.startsWith("Movies_")) delete window.catalogCache[k];
+        });
+      }
     } catch (err) {
       console.error("Failed to migrate provider in database:", err);
+      swalError("Switch Failed", err?.message || "Failed to switch extension.");
+      return false;
     }
     setId(newId);
     setLocalMalProvider(newProvider);
+    return true;
+  };
+
+  const handleMovieProviderSelect = async (
+    targetProvider,
+    forcePicker = false,
+  ) => {
+    if (!targetProvider || isSwitchingProvider) return;
+    if (
+      !forcePicker &&
+      details?.provider &&
+      details.provider.toLowerCase() === targetProvider.toLowerCase()
+    ) {
+      return;
+    }
+
+    const searchTitle = details?.title || id;
+    setIsSwitchingProvider(true);
+    try {
+      const res = await fetch("/api/movies/resolve-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetProvider,
+          title: searchTitle,
+          year: details?.aired || details?.released || null,
+          mediaType: details?.type || null,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        swalError(
+          "Extension Error",
+          data?.error || `Could not search ${targetProvider}.`,
+        );
+        return;
+      }
+
+      if (!forcePicker && data.confidence === "high" && data.match?.id) {
+        await handleProviderSwitch(data.match.id, data.targetProvider);
+      } else {
+        setMoviePickerQuery(searchTitle);
+        setMoviePickerState({
+          targetProvider: data.targetProvider,
+          candidates: data.candidates || [],
+        });
+      }
+    } catch (err) {
+      swalError(
+        "Extension Error",
+        err?.message || `Failed to reach ${targetProvider}.`,
+      );
+    } finally {
+      setIsSwitchingProvider(false);
+    }
+  };
+
+  const performMoviePickerSearch = async (queryText) => {
+    if (!moviePickerState?.targetProvider) return;
+    const trimmed = String(queryText || "").trim();
+    if (!trimmed) return;
+    setMoviePickerLoading(true);
+    try {
+      const res = await fetch("/api/movies/resolve-provider", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          targetProvider: moviePickerState.targetProvider,
+          title: details?.title || trimmed,
+          year: details?.aired || details?.released || null,
+          mediaType: details?.type || null,
+          query: trimmed,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.success) {
+        swalError("Search Failed", data?.error || "Extension search failed.");
+        return;
+      }
+      setMoviePickerState((prev) =>
+        prev ? { ...prev, candidates: data.candidates || [] } : prev,
+      );
+    } catch (err) {
+      swalError("Search Failed", err?.message || "Extension search failed.");
+    } finally {
+      setMoviePickerLoading(false);
+    }
   };
 
   const selectMalTitle = async (selectedMalId) => {
@@ -3028,9 +3228,11 @@ export default function InfoView({
 
     await handleLocalDeleteFlow({
       numbers: allDownloaded,
-      confirmTitle: "Are you sure?",
-      confirmText: `Are you sure you want to delete all downloaded files for ${details?.title}?`,
-      confirmBtn: "Yes, delete all",
+      confirmTitle: isSingleMovie ? "Delete Movie?" : "Are you sure?",
+      confirmText: isSingleMovie
+        ? `Are you sure you want to delete the downloaded movie file for ${details?.title}?`
+        : `Are you sure you want to delete all downloaded files for ${details?.title}?`,
+      confirmBtn: isSingleMovie ? "Yes, delete movie" : "Yes, delete all",
       successTitle: "Deleted",
       successText: "Deleted successfully.",
       onComplete: () => fetchDetails(false),
@@ -3083,11 +3285,15 @@ export default function InfoView({
       items: [{ number: epNum, season: resolvedSeason }],
       season: resolvedSeason,
       subdub,
-      confirmTitle: "Delete Episode?",
-      confirmText: `Delete downloaded file for Episode ${epNum}${resolvedSeason ? ` (Season ${resolvedSeason})` : ""}${subdub ? ` (${subdub})` : ""}?`,
+      confirmTitle: isSingleMovie ? "Delete Movie?" : "Delete Episode?",
+      confirmText: isSingleMovie
+        ? `Delete downloaded file for "${details?.title || id}"?`
+        : `Delete downloaded file for Episode ${epNum}${resolvedSeason ? ` (Season ${resolvedSeason})` : ""}${subdub ? ` (${subdub})` : ""}?`,
       confirmBtn: "Yes, delete it",
       successTitle: "Deleted",
-      successText: "Episode file deleted.",
+      successText: isSingleMovie
+        ? "Movie file deleted."
+        : "Episode file deleted.",
       onComplete: () => fetchDetails(),
     });
   };
@@ -3543,20 +3749,18 @@ export default function InfoView({
     );
   }
 
-  const selectableItems = (
-    selectedSeason !== "all" && availableSeasons.length > 0
-      ? episodesOrChapters.filter(
-          (item) => Number(item.season || 1) === Number(selectedSeason),
-        )
-      : episodesOrChapters
-  ).filter((item) => !isItemUnavailable(item));
+  const selectableItems = seasonScopedItems.filter(
+    (item) => !isItemUnavailable(item),
+  );
   const allSelectableSelected =
     selectableItems.length > 0 &&
     selectableItems.every((item) => selectedItems.has(Number(item.number)));
 
   const activeSeasonNum =
-    selectedSeason !== "all" && availableSeasons.length > 0
-      ? Number(selectedSeason)
+    availableSeasons.length > 0
+      ? selectedSeason !== "all"
+        ? Number(selectedSeason)
+        : Number(availableSeasons[0])
       : null;
   const numToDownload = Array.from(selectedItems).filter((num) => {
     const downloaded =
@@ -3704,58 +3908,245 @@ export default function InfoView({
           {/* Action Row containing Play Actions & Library/Tracking Controls */}
           <div className="actions-row">
             {/* Quick Resumption / Play Actions */}
-            {(showContinueBtn || hasAnyDownloads) && (
-              <div className="quick-actions-wrapper">
-                {showContinueBtn && (
-                  <button
-                    onClick={handleContinueWatchRead}
-                    className="btn-action-base btn-continue"
-                  >
-                    {type === "Manga" ? (
-                      <BookOpen size={16} className="u-style-35" />
-                    ) : (
-                      <Play size={16} className="u-style-35" />
+            {isSingleMovie ? (
+              (() => {
+                const targetMovie = movieItem || {
+                  id: details?.id || id,
+                  number: 1,
+                  season: null,
+                  title: details?.title || "Movie",
+                };
+                const movieNum = Number(targetMovie.number || 1);
+                const movieDownloaded = isDownloaded(movieNum, null, null);
+                const movieDownloadedLang =
+                  ["sub", "dub", "hsub"].find((langKey) =>
+                    isDownloaded(movieNum, langKey, null),
+                  ) ||
+                  dubSelect ||
+                  "sub";
+                const movieStatus = (
+                  historyProgress?.episodesStatus || []
+                ).find(
+                  (h) =>
+                    Number(h.number) === movieNum &&
+                    (!h.season || Number(h.season) === 1),
+                );
+                const movieCompleted = Boolean(movieStatus?.isCompleted);
+                const movieHasProgress = Boolean(
+                  movieStatus &&
+                    Number(movieStatus.currentTime) > 0 &&
+                    !movieCompleted,
+                );
+                const movieQStatus = getItemQueueStatus(
+                  movieNum,
+                  null,
+                  targetMovie.id,
+                );
+                const canPlayMovie =
+                  !historyLoading &&
+                  !itemsLoading &&
+                  (episodesOrChapters.length > 0 || movieDownloaded);
+
+                return (
+                  <>
+                    <div className="quick-actions-wrapper">
+                      {canPlayMovie && (
+                        <button
+                          onClick={() =>
+                            playItem(
+                              targetMovie,
+                              movieDownloaded ? movieDownloadedLang : null,
+                            )
+                          }
+                          className="btn-action-base btn-continue"
+                        >
+                          <Play size={16} className="u-style-35" />
+                          <span>
+                            {movieHasProgress
+                              ? `Resume Movie (${formatTime(movieStatus.currentTime)})`
+                              : movieCompleted
+                                ? "Watch Movie Again"
+                                : movieDownloaded
+                                  ? "Play Movie"
+                                  : "Watch Movie"}
+                          </span>
+                        </button>
+                      )}
+
+                      {movieDownloaded ? (
+                        <>
+                          <button
+                            onClick={() =>
+                              handleOpenFile(
+                                movieNum,
+                                movieDownloadedLang,
+                                "open_folder",
+                                null,
+                              )
+                            }
+                            className="btn-action-base btn-watch-latest"
+                            title="Open movie folder in File Manager"
+                          >
+                            <FolderOpen size={16} className="u-style-35" />
+                            <span>Open Folder</span>
+                          </button>
+                          <button
+                            onClick={handleDeleteLocal}
+                            className="btn-action-base u-style-36"
+                            title="Delete downloaded movie"
+                          >
+                            <Trash2 size={16} className="u-style-35" />
+                            <span>Delete Download</span>
+                          </button>
+                        </>
+                      ) : movieQStatus.inProgress ? (
+                        <div
+                          className="btn-action-base btn-watch-latest"
+                          style={{ cursor: "default", gap: "8px" }}
+                        >
+                          <Loader2 size={15} className="spin" />
+                          <span>
+                            {movieQStatus.isQueued
+                              ? "Queued for Download"
+                              : `Downloading ${movieQStatus.pct}%`}
+                          </span>
+                        </div>
+                      ) : (
+                        localMalProvider !== "local" &&
+                        episodesOrChapters.length > 0 && (
+                          <button
+                            onClick={() => handleDownload(targetMovie)}
+                            className="btn-action-base btn-watch-latest"
+                            disabled={probingDownloadId !== null}
+                            title="Download movie for offline playback"
+                          >
+                            <Download size={16} className="u-style-35" />
+                            <span>
+                              {probingDownloadId ===
+                              (targetMovie.id || targetMovie.number)
+                                ? "Checking Sources..."
+                                : "Download Movie"}
+                            </span>
+                          </button>
+                        )
+                      )}
+
+                      <button
+                        onClick={() => handleOpenCastModal(targetMovie)}
+                        className={`btn-action-base btn-cast ${isCasting ? "active" : ""}`}
+                        title="Cast movie to Smart TV (Samsung, LG, Sony, Roku, Chromecast)"
+                      >
+                        <Cast size={16} className="u-style-35" />
+                        <span>
+                          {isCasting
+                            ? `Casting to ${activeCastDevice?.name || "TV"}`
+                            : "Cast to TV"}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleMarkRead(
+                            !movieCompleted,
+                            [movieNum],
+                            [{ number: movieNum, season: 1 }],
+                          )
+                        }
+                        className={`btn-action-base ${movieCompleted ? "btn-cast active" : "btn-watch-latest"}`}
+                        title={
+                          movieCompleted
+                            ? "Mark movie as unwatched"
+                            : "Mark movie as watched"
+                        }
+                      >
+                        <CheckCircle2 size={16} className="u-style-35" />
+                        <span>
+                          {movieCompleted ? "Watched" : "Mark as Watched"}
+                        </span>
+                      </button>
+                    </div>
+
+                    {movieHasProgress && Number(movieStatus.duration) > 0 && (
+                      <div
+                        className="item-progress-bar-wrap"
+                        style={{ marginTop: "10px", maxWidth: "360px" }}
+                      >
+                        <div className="item-progress-bar-bg">
+                          <div
+                            style={{
+                              width: `${Math.min(100, Math.max(0, (Number(movieStatus.currentTime) / Number(movieStatus.duration)) * 100))}%`,
+                              height: "100%",
+                              backgroundColor: "var(--accent)",
+                              borderRadius: "2px",
+                            }}
+                          />
+                        </div>
+                        <span className="item-progress-text">
+                          {formatTime(movieStatus.currentTime)} /{" "}
+                          {formatTime(movieStatus.duration)}
+                        </span>
+                      </div>
                     )}
-                    {type === "Manga"
-                      ? !hasAnyProgress
-                        ? "Start reading Chapter 1"
-                        : `Continue Reading Chapter ${nextToPlay}`
-                      : !hasAnyProgress
-                        ? "Start watching Episode 1"
-                        : nextToPlayItem?.season &&
-                            (type === "Movies" || availableSeasons.length > 0)
-                          ? `Continue Watching Season ${nextToPlaySeason} Episode ${nextToPlay}`
-                          : `Continue Watching Episode ${nextToPlay}`}
-                  </button>
-                )}
+                  </>
+                );
+              })()
+            ) : (
+              (showContinueBtn || hasAnyDownloads) && (
+                <div className="quick-actions-wrapper">
+                  {showContinueBtn && (
+                    <button
+                      onClick={handleContinueWatchRead}
+                      className="btn-action-base btn-continue"
+                    >
+                      {type === "Manga" ? (
+                        <BookOpen size={16} className="u-style-35" />
+                      ) : (
+                        <Play size={16} className="u-style-35" />
+                      )}
+                      {type === "Manga"
+                        ? !hasAnyProgress
+                          ? "Start reading Chapter 1"
+                          : `Continue Reading Chapter ${nextToPlay}`
+                        : !hasAnyProgress
+                          ? "Start watching Episode 1"
+                          : nextToPlayItem?.season &&
+                              (type === "Movies" || availableSeasons.length > 0)
+                            ? `Continue Watching Season ${nextToPlaySeason} Episode ${nextToPlay}`
+                            : `Continue Watching Episode ${nextToPlay}`}
+                    </button>
+                  )}
 
-                {type !== "Manga" && (
-                  <button
-                    onClick={() =>
-                      handleOpenCastModal(nextToPlayItem || allSortedEpisodes[0])
-                    }
-                    className={`btn-action-base btn-cast ${isCasting ? "active" : ""}`}
-                    title="Cast episode to Smart TV (Samsung, LG, Sony, Roku, Chromecast)"
-                  >
-                    <Cast size={16} className="u-style-35" />
-                    <span>
-                      {isCasting
-                        ? `Casting to ${activeCastDevice?.name || "TV"}`
-                        : "Cast to TV"}
-                    </span>
-                  </button>
-                )}
+                  {type !== "Manga" && (
+                    <button
+                      onClick={() =>
+                        handleOpenCastModal(
+                          nextToPlayItem || allSortedEpisodes[0],
+                        )
+                      }
+                      className={`btn-action-base btn-cast ${isCasting ? "active" : ""}`}
+                      title="Cast episode to Smart TV (Samsung, LG, Sony, Roku, Chromecast)"
+                    >
+                      <Cast size={16} className="u-style-35" />
+                      <span>
+                        {isCasting
+                          ? `Casting to ${activeCastDevice?.name || "TV"}`
+                          : "Cast to TV"}
+                      </span>
+                    </button>
+                  )}
 
-                {hasAnyDownloads && (
-                  <button
-                    onClick={handleDeleteLocal}
-                    className="btn-action-base u-style-36"
-                  >
-                    <Trash2 size={16} className="u-style-35" />
-                    <span>Delete All Downloads</span>
-                  </button>
-                )}
-              </div>
+                  {hasAnyDownloads && (
+                    <button
+                      onClick={handleDeleteLocal}
+                      className="btn-action-base u-style-36"
+                    >
+                      <Trash2 size={16} className="u-style-35" />
+                      <span>Delete All Downloads</span>
+                    </button>
+                  )}
+                </div>
+              )
             )}
 
             {/* Library Tags & Source Provider Selection */}
@@ -3820,6 +4211,146 @@ export default function InfoView({
                     details?.provider ||
                     (details?.linkedProviders &&
                       details.linkedProviders[0]?.provider);
+
+                  if (type === "Movies") {
+                    const installedMovies = (
+                      details?.availableProviders || []
+                    ).filter(
+                      (p, index, self) =>
+                        p.provider &&
+                        self.findIndex((t) => t.provider === p.provider) ===
+                          index,
+                    );
+                    const canSwitchMovie =
+                      installedMovies.length > 1 ||
+                      (installedMovies.length >= 1 &&
+                        (!activeProv || activeProv === "local source"));
+
+                    if (canSwitchMovie) {
+                      return (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            position: "relative",
+                          }}
+                        >
+                          <div
+                            className={`custom-dropdown-trigger ${isProviderDropdownOpen ? "open" : ""}`}
+                            onClick={() => {
+                              if (!isSwitchingProvider) {
+                                setIsProviderDropdownOpen(
+                                  !isProviderDropdownOpen,
+                                );
+                              }
+                            }}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              flex: 1,
+                              opacity: isSwitchingProvider ? 0.7 : 1,
+                              pointerEvents: isSwitchingProvider
+                                ? "none"
+                                : "auto",
+                            }}
+                          >
+                            {isSwitchingProvider ? (
+                              <Loader2 size={15} className="spin" />
+                            ) : (
+                              getProviderIcon(activeProv) && (
+                                <img
+                                  src={getProviderIcon(activeProv)}
+                                  alt=""
+                                  style={{
+                                    width: "16px",
+                                    height: "16px",
+                                    borderRadius: "3px",
+                                    objectFit: "contain",
+                                  }}
+                                />
+                              )
+                            )}
+                            <span
+                              className="custom-dropdown-trigger-text"
+                              style={{ flex: 1 }}
+                            >
+                              {isSwitchingProvider
+                                ? "Matching..."
+                                : activeProv === "local source"
+                                  ? "Local Source"
+                                  : activeProv || "Select Extension"}
+                            </span>
+                            <ChevronDown
+                              className="custom-dropdown-chevron"
+                              size={16}
+                              style={{ flexShrink: 0 }}
+                            />
+                          </div>
+
+                          {activeProv &&
+                            activeProv !== "local source" &&
+                            installedMovies.some(
+                              (p) => p.provider === activeProv,
+                            ) && (
+                              <button
+                                type="button"
+                                className="btn-watch-latest"
+                                style={{
+                                  height: "38px",
+                                  padding: "0 10px",
+                                  fontSize: "12px",
+                                  flexShrink: 0,
+                                }}
+                                title="Re-match this title on the current extension"
+                                disabled={isSwitchingProvider}
+                                onClick={() =>
+                                  handleMovieProviderSelect(activeProv, true)
+                                }
+                              >
+                                <Search size={13} />
+                              </button>
+                            )}
+
+                          {isProviderDropdownOpen && (
+                            <div className="custom-dropdown-menu">
+                              {installedMovies.map((p) => (
+                                <div
+                                  key={p.provider}
+                                  className={`custom-dropdown-item ${activeProv === p.provider ? "selected" : ""}`}
+                                  onClick={() => {
+                                    setIsProviderDropdownOpen(false);
+                                    handleMovieProviderSelect(p.provider);
+                                  }}
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "8px",
+                                  }}
+                                >
+                                  {getProviderIcon(p.provider) && (
+                                    <img
+                                      src={getProviderIcon(p.provider)}
+                                      alt=""
+                                      style={{
+                                        width: "16px",
+                                        height: "16px",
+                                        borderRadius: "3px",
+                                        objectFit: "contain",
+                                      }}
+                                    />
+                                  )}
+                                  <span>{p.provider}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+                  }
+
                   const validLinked = (details?.linkedProviders || []).filter(
                     (p, index, self) =>
                       p.provider &&
@@ -4076,11 +4607,18 @@ export default function InfoView({
         </div>
       </div>
 
-      {/* Episodes / Chapters List */}
-      <div className="items-section">
-        <div className="section-header">
-          <h2>{type === "Manga" ? "Chapters List" : "Episodes List"}</h2>
-        </div>
+      {/* Episodes / Chapters List (hidden for single standalone movies) */}
+      {!isSingleMovie && (
+        <div className="items-section">
+          <div className="section-header">
+            <h2>
+              {type === "Manga"
+                ? "Chapters List"
+                : availableSeasons.length > 0 && selectedSeason !== "all"
+                  ? `Season ${selectedSeason} Episodes`
+                  : "Episodes List"}
+            </h2>
+          </div>
         {episodesOrChapters.length > 0 && (
           <div className="bulk-actions">
             {/* In-Page Search Input */}
@@ -4332,7 +4870,7 @@ export default function InfoView({
           </div>
         )}
 
-        <div className="items-list">
+        <div className="items-list" key={`season-${selectedSeason}`}>
           {filteredItems.length === 0 && !itemsLoading && (
             <div
               className="empty-items-state"
@@ -4362,7 +4900,7 @@ export default function InfoView({
             </div>
           )}
           {filteredItems.map((item) => {
-            const hasSub = isDownloaded(item.number, "sub");
+            const hasSub = isDownloaded(item.number, "sub", item.season);
             const isLocal = localMalProvider === "local";
 
             const itemSeason = item.season ? Number(item.season) : null;
@@ -4401,7 +4939,7 @@ export default function InfoView({
             const isSelected = selectedItems.has(Number(item.number));
             return (
               <div
-                key={item.id}
+                key={`${item.season ?? "all"}-${item.id ?? item.number}`}
                 className={`item-card glass-panel ${customBorderClass} ${isSelected ? "selected" : ""}`}
                 onClick={(e) => handleItemClick(e, item)}
               >
@@ -5024,7 +5562,8 @@ export default function InfoView({
             )
           );
         })()}
-      </div>
+        </div>
+      )}
 
       {/* MAL Link Modal Overlay */}
       {type !== "Movies" && isLinkingMal && (
@@ -5121,6 +5660,113 @@ export default function InfoView({
                 <div className="mal-modal-status-initial">
                   Ready to search. Adjust title above if needed and click
                   Search.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Movie/Series Extension Match Picker Modal */}
+      {moviePickerState && (
+        <div
+          className="mal-modal-overlay"
+          onClick={() => setMoviePickerState(null)}
+        >
+          <div
+            className="mal-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mal-modal-header">
+              <div className="mal-modal-title-group">
+                <h2 className="mal-modal-title">
+                  Match on {moviePickerState.targetProvider}
+                </h2>
+                <span className="mal-modal-subtitle">
+                  Select the matching movie or series for "{details?.title}"
+                </span>
+              </div>
+              <button
+                className="mal-modal-close"
+                onClick={() => setMoviePickerState(null)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="mal-modal-search-bar">
+              <input
+                type="text"
+                value={moviePickerQuery}
+                onChange={(e) => setMoviePickerQuery(e.target.value)}
+                onKeyDown={(e) =>
+                  e.key === "Enter" &&
+                  performMoviePickerSearch(moviePickerQuery)
+                }
+                className="mal-modal-search-input"
+                placeholder={`Search ${moviePickerState.targetProvider}...`}
+                autoFocus
+              />
+              <button
+                onClick={() => performMoviePickerSearch(moviePickerQuery)}
+                className="mal-modal-search-btn"
+                disabled={moviePickerLoading}
+              >
+                <Search size={16} />
+                <span>Search</span>
+              </button>
+            </div>
+
+            <div className="mal-modal-results-container">
+              {moviePickerLoading ? (
+                <div className="mal-modal-status">
+                  <Loader2 size={24} className="spin" />
+                  <span>Searching {moviePickerState.targetProvider}...</span>
+                </div>
+              ) : moviePickerState.candidates.length > 0 ? (
+                <ul className="mal-modal-results-list">
+                  {moviePickerState.candidates.map((cand) => (
+                    <li
+                      key={cand.id}
+                      className="mal-modal-result-item"
+                      onClick={async () => {
+                        const targetProv = moviePickerState.targetProvider;
+                        setMoviePickerState(null);
+                        setIsSwitchingProvider(true);
+                        try {
+                          await handleProviderSwitch(cand.id, targetProv);
+                        } finally {
+                          setIsSwitchingProvider(false);
+                        }
+                      }}
+                    >
+                      {cand.image && (
+                        <img
+                          src={cand.image}
+                          alt={cand.title}
+                          className="mal-modal-result-image"
+                          onError={(e) => {
+                            e.target.src = "/images/image-404.png";
+                          }}
+                        />
+                      )}
+                      <div className="mal-modal-result-info">
+                        <div className="mal-modal-result-title">
+                          {cand.title}
+                        </div>
+                        <div className="mal-modal-result-meta">
+                          <span>
+                            {[cand.type, cand.year].filter(Boolean).join(" • ") ||
+                              "Match"}
+                          </span>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mal-modal-status">
+                  No results found on {moviePickerState.targetProvider}. Try
+                  adjusting the search title above.
                 </div>
               )}
             </div>
@@ -5317,7 +5963,7 @@ export default function InfoView({
               <div className="infoview-cast-section" style={{ marginTop: "16px" }}>
                 <div className="infoview-cast-list-header">
                   <span>2. Stream Quality & Subtitles</span>
-                  {castTargetEp && (
+                  {castTargetEp && !isSingleMovie && (
                     <span style={{ fontSize: "11px", color: "rgba(255,255,255,0.6)" }}>
                       Ep {castTargetEp.number}
                     </span>

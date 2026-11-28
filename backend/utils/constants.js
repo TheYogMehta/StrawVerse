@@ -5,7 +5,7 @@ if (!global.PORT) {
   global.PORT = 9545;
 }
 
-const VIDEO_EXTENSIONS = Object.freeze([".mp4", ".ts"]);
+const VIDEO_EXTENSIONS = Object.freeze([".mp4", ".mkv", ".ts"]);
 const SUBTITLE_EXTENSIONS = Object.freeze([".srt", ".vtt"]);
 const MANGA_EXTENSIONS = Object.freeze([".cbz"]);
 
@@ -51,7 +51,13 @@ function isMediaFile(fileNameOrPath, type = "Anime") {
 }
 
 // "Season 02" subfolders used by media-server naming (Show/Season 02/...)
-const SEASON_FOLDER_RE = /^Season \d+$/i;
+const SEASON_FOLDER_RE = /^(?:Season\s+)?(\d+)$/i;
+
+function parseSeasonFolderNumber(folderName) {
+  if (!folderName || typeof folderName !== "string") return null;
+  const m = folderName.trim().match(SEASON_FOLDER_RE);
+  return m ? parseInt(m[1], 10) : null;
+}
 
 // includeSeasons: also count media inside "Season NN" subfolders, so a show
 // folder that only holds season folders is never treated as empty.
@@ -549,10 +555,267 @@ function formatChapterFilename(
   return `${baseName}${ext.startsWith(".") ? ext : `.${ext}`}`;
 }
 
+function normalizeTitleForMatch(str) {
+  if (!str) return "";
+  return String(str)
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(?:19|20)\d{2}\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function extractYearFromDate(val) {
+  if (val === null || val === undefined) return null;
+  const match = String(val).match(/\b(19\d{2}|20\d{2})\b/);
+  return match ? match[1] : null;
+}
+
+function normalizeMediaKind(type) {
+  const norm = String(type || "").toLowerCase().trim();
+  if (!norm) return null;
+  if (norm === "movie" || norm === "movies" || norm === "film") return "movie";
+  if (
+    norm === "tv" ||
+    norm === "series" ||
+    norm === "tv series" ||
+    norm === "tv-series" ||
+    norm === "show" ||
+    norm === "tv show" ||
+    norm === "mini-series" ||
+    norm === "miniseries"
+  ) {
+    return "tv";
+  }
+  return null;
+}
+
+/**
+ * Determine whether a Movies/Series entry represents a single standalone movie
+ * rather than a multi-episode / multi-season series.
+ */
+function detectIsSingleMovie({
+  mediaType = null,
+  type = null,
+  id = null,
+  episodes = null,
+  episodesJson = null,
+  season = null,
+  episodeId = null,
+  epNum = null,
+} = {}) {
+  const normSection = String(mediaType || "").toLowerCase().trim();
+  if (normSection === "anime" || normSection === "manga") {
+    return false;
+  }
+
+  const checkIdStr = `${id || ""} ${episodeId || ""}`;
+  if (
+    /(?:^|\s)tv:/i.test(checkIdStr) ||
+    /tv:[^:]+:\d+:\d+/i.test(checkIdStr) ||
+    /[Ss]\d+[Ee]\d+/i.test(checkIdStr)
+  ) {
+    return false;
+  }
+
+  if (season !== null && season !== undefined && Number(season) > 1) {
+    return false;
+  }
+
+  if (
+    epNum !== null &&
+    epNum !== undefined &&
+    !isNaN(Number(epNum)) &&
+    Number(epNum) > 1
+  ) {
+    return false;
+  }
+
+  const kind = normalizeMediaKind(type);
+  if (kind === "tv") {
+    return false;
+  }
+
+  if (episodesJson) {
+    try {
+      const counts =
+        typeof episodesJson === "string"
+          ? JSON.parse(episodesJson)
+          : episodesJson;
+      if (counts && typeof counts === "object" && !Array.isArray(counts)) {
+        const seasons = Object.keys(counts).map(Number);
+        const maxCount = Math.max(0, ...Object.values(counts).map(Number));
+        const total = Object.values(counts).reduce(
+          (acc, v) => acc + (Number(v) || 0),
+          0,
+        );
+        if (seasons.some((s) => s > 1) || maxCount > 1 || total > 1) {
+          return false;
+        }
+      }
+    } catch (_) {}
+  }
+
+  if (Array.isArray(episodes)) {
+    if (episodes.length > 1) return false;
+    if (episodes.length === 1) {
+      const ep = episodes[0] || {};
+      if (
+        (ep.season !== null && ep.season !== undefined && Number(ep.season) > 1) ||
+        (ep.number !== null && ep.number !== undefined && Number(ep.number) > 1) ||
+        (ep.id &&
+          (/tv:[^:]+:\d+:\d+/i.test(String(ep.id)) ||
+            /^tv:/i.test(String(ep.id)) ||
+            /[Ss]\d+[Ee]\d+/i.test(String(ep.id))))
+      ) {
+        return false;
+      }
+    }
+  }
+
+  if (kind === "movie") return true;
+  if (id && /^movie:/i.test(String(id))) return true;
+  if (
+    Array.isArray(episodes) &&
+    episodes.length === 1 &&
+    (episodes[0]?.isMovie === true || episodes[0]?.title === "Full Movie")
+  ) {
+    return true;
+  }
+
+  // Fallback when provider omitted `type` (typical for movie-only entries without seasons)
+  if (!type && (!Array.isArray(episodes) || episodes.length <= 1)) {
+    if (
+      Array.isArray(episodes) &&
+      episodes.length === 1 &&
+      episodes[0]?.season !== undefined &&
+      episodes[0]?.season !== null &&
+      Number(episodes[0].season) >= 1 &&
+      episodes[0]?.title !== "Full Movie"
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+function scoreMovieMatch(target = {}, candidate = {}) {
+  const targetNorm = normalizeTitleForMatch(target.title);
+  const candNorm = normalizeTitleForMatch(candidate.title);
+  if (!targetNorm || !candNorm) return 0;
+
+  let score = 0;
+  if (targetNorm === candNorm) {
+    score += 70;
+  } else if (candNorm.includes(targetNorm) || targetNorm.includes(candNorm)) {
+    score += 40;
+  } else {
+    const targetTokens = new Set(targetNorm.split(" ").filter(Boolean));
+    const candTokens = new Set(candNorm.split(" ").filter(Boolean));
+    if (targetTokens.size > 0 && candTokens.size > 0) {
+      let overlap = 0;
+      for (const tok of targetTokens) {
+        if (candTokens.has(tok)) overlap++;
+      }
+      const unionSize = new Set([...targetTokens, ...candTokens]).size;
+      score += Math.round((overlap / unionSize) * 35);
+    }
+  }
+
+  const targetYear = extractYearFromDate(target.year);
+  const candYear =
+    extractYearFromDate(candidate.year) ||
+    extractYearFromDate(candidate.released) ||
+    extractYearFromDate(candidate.aired) ||
+    extractYearFromDate(candidate.releaseDate) ||
+    extractYearFromDate(candidate.title);
+
+  if (targetYear && candYear) {
+    const diff = Math.abs(parseInt(targetYear, 10) - parseInt(candYear, 10));
+    if (diff === 0) score += 20;
+    else if (diff === 1) score += 5;
+    else score -= 15;
+  }
+
+  const targetKind = normalizeMediaKind(target.mediaType || target.type);
+  const candKind = normalizeMediaKind(candidate.type);
+  if (targetKind && candKind) {
+    if (targetKind === candKind) score += 10;
+    else score -= 20;
+  }
+
+  return score;
+}
+
+function rankMovieCandidates(target = {}, rawResults = [], isManualQuery = false) {
+  if (!Array.isArray(rawResults) || rawResults.length === 0) {
+    return { confidence: "none", match: null, candidates: [] };
+  }
+
+  const seen = new Set();
+  const candidates = [];
+  for (const raw of rawResults) {
+    if (!raw || !raw.id) continue;
+    const idStr = String(raw.id);
+    if (seen.has(idStr)) continue;
+    seen.add(idStr);
+
+    const candYear =
+      extractYearFromDate(raw.year) ||
+      extractYearFromDate(raw.released) ||
+      extractYearFromDate(raw.aired) ||
+      extractYearFromDate(raw.releaseDate) ||
+      null;
+
+    const score = scoreMovieMatch(target, {
+      title: raw.title || raw.name || "",
+      year: candYear,
+      type: raw.type || raw.mediaType || null,
+    });
+
+    candidates.push({
+      id: idStr,
+      title: raw.title || raw.name || idStr,
+      image: raw.image || raw.image_url || raw.poster || null,
+      year: candYear,
+      type: raw.type || raw.mediaType || null,
+      score,
+    });
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  const topCandidates = candidates.slice(0, 15);
+  if (topCandidates.length === 0) {
+    return { confidence: "none", match: null, candidates: [] };
+  }
+
+  const top = topCandidates[0];
+  const second = topCandidates[1];
+  const isHighConfidence =
+    !isManualQuery &&
+    top.score >= 85 &&
+    (!second || top.score - second.score >= 15);
+
+  return {
+    confidence: isHighConfidence ? "high" : "low",
+    match: isHighConfidence ? top : null,
+    candidates: topCandidates,
+  };
+}
+
 module.exports = {
   formatEpisodeFilename,
   formatMovieFilename,
   formatChapterFilename,
+  normalizeTitleForMatch,
+  extractYearFromDate,
+  normalizeMediaKind,
+  detectIsSingleMovie,
+  scoreMovieMatch,
+  rankMovieCandidates,
   VIDEO_EXTENSIONS,
   SUBTITLE_EXTENSIONS,
   MANGA_EXTENSIONS,
@@ -574,6 +837,7 @@ module.exports = {
   getChapterNumberFromFilename,
   mediaServerFileBase,
   SEASON_FOLDER_RE,
+  parseSeasonFolderNumber,
   sleep,
   parseTags,
   SYSTEM_TAGS,

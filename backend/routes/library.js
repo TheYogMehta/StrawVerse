@@ -28,6 +28,7 @@ const {
   isReservedTag,
   getReservedTags,
   SEASON_FOLDER_RE,
+  detectIsSingleMovie,
 } = require("../utils/constants");
 const { updateHistory } = require("../utils/history");
 const { autoTrackMAL } = require("../utils/mal");
@@ -37,7 +38,9 @@ const {
   queryAll,
   queryOne,
   run,
+  batchRun,
 } = require("../utils/db");
+const { switchProviderMetadata } = require("../utils/providerSwitch");
 const { exec } = require("child_process");
 const { GetDir } = require("../utils/DirectoryMaker");
 const ImageCacheManager = require("../utils/ImageCacheManager");
@@ -650,51 +653,44 @@ router.post("/api/local/tags/remove", async (req, res) => {
 // Switch Provider Metadata Migration
 router.post("/api/metadata/switch-provider", async (req, res) => {
   try {
-    const { type, oldId, newId, newProvider } = req.body;
-    if (!type || !oldId || !newId || !newProvider) {
-      return res.status(400).json({ error: "Missing required parameters" });
-    }
-    if (oldId === newId) {
-      return res.json({ success: true, message: "No change needed" });
-    }
-
-    const table =
-      type === "Anime" ? "Anime" : type === "Movies" ? "Movies" : "Manga";
-    const existing = await queryOne(`SELECT * FROM ${table} WHERE id = ?`, [
-      oldId,
-    ]);
-
-    if (existing) {
-      await run(`DELETE FROM ${table} WHERE id = ?`, [oldId]);
-      existing.id = newId;
-      existing.provider = newProvider;
-      existing.last_updated = new Date().toISOString();
-      const columns = Object.keys(existing);
-      const placeholders = columns.map(() => "?").join(", ");
-      const values = columns.map((col) => existing[col]);
-
-      await run(
-        `INSERT OR REPLACE INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`,
-        values,
-      );
-      if (type === "Anime" || type === "Movies") {
-        await run(`UPDATE WatchHistory SET anime_id = ? WHERE anime_id = ?`, [
-          newId,
-          oldId,
-        ]);
-      } else {
-        await run(`UPDATE ReadHistory SET manga_id = ? WHERE manga_id = ?`, [
-          newId,
-          oldId,
-        ]);
-      }
-      return res.json({ success: true, migrated: true });
+    const { type, oldId, newId, newProvider } = req.body || {};
+    if (
+      typeof type !== "string" ||
+      typeof oldId !== "string" ||
+      typeof newId !== "string" ||
+      typeof newProvider !== "string" ||
+      !oldId.trim() ||
+      !newId.trim() ||
+      !newProvider.trim() ||
+      oldId.length > 512 ||
+      newId.length > 512 ||
+      newProvider.length > 512
+    ) {
+      return res.status(400).json({ error: "Missing or invalid parameters" });
     }
 
-    return res.json({ success: true, migrated: false });
+    const result = await switchProviderMetadata(
+      {
+        type: normalizeLibraryType(type, oldId),
+        oldId: oldId.trim(),
+        newId: newId.trim(),
+        newProvider: newProvider.trim(),
+      },
+      {
+        queryOne,
+        queryAll,
+        batchRun,
+        installedMovieProviders: global.Movies_providers || {},
+      },
+    );
+    return res.json(result);
   } catch (err) {
     logger.error(`Error in /api/metadata/switch-provider: ${err.message}`);
-    res.status(500).json({ error: err.message });
+    return res.status(err.statusCode || 500).json({
+      success: false,
+      error: err.message,
+      ...(err.code ? { code: err.code } : {}),
+    });
   }
 });
 
@@ -1895,6 +1891,7 @@ router.get("/api/history/list", async (req, res) => {
           COALESCE(m.hidden, 0) AS hidden,
           mov.image_url,
           mov.provider,
+          mov.type AS mov_type,
           mov.episodes_json,
           NULL AS mal_id,
           CASE WHEN mov.id IS NOT NULL THEN 1 ELSE 0 END AS exists_in_catalog,
@@ -1968,7 +1965,26 @@ router.get("/api/history/list", async (req, res) => {
           } catch (_) {}
         }
 
-        if (
+        const isSingleMovie = detectIsSingleMovie({
+          mediaType: "Movies",
+          type: log.mov_type || null,
+          id: log.media_id,
+          episodesJson: log.episodes_json || null,
+          season: log.season,
+          epNum: log.number,
+        });
+        log.is_single_movie = isSingleMovie;
+        delete log.mov_type;
+
+        if (isSingleMovie) {
+          if (log.is_completed === 1) {
+            log.has_next = false;
+          } else {
+            log.next_season = null;
+            log.next_number = 1;
+            log.has_next = true;
+          }
+        } else if (
           episodes &&
           typeof episodes === "object" &&
           !Array.isArray(episodes)

@@ -2,8 +2,7 @@
 const { logger } = require("./AppLogger");
 const path = require("path");
 const fs = require("fs");
-const child_process = require("child_process");
-const { getFfmpegPath } = require("./downloader");
+const { extractSubtitlesSinglePass } = require("./ffmpeg");
 const {
   tables,
   queryAll,
@@ -24,6 +23,7 @@ const {
   getChapterNumberFromFilename,
   parseTags,
   SEASON_FOLDER_RE,
+  detectIsSingleMovie,
 } = require("./constants");
 const { resolveMalIdFromMapping } = require("./mappingResolver");
 
@@ -1239,6 +1239,16 @@ async function getAllMetadata(
           totalEpisodes: totalEpisodes,
           watched: watchedEpisodes,
           nextEpisodeIn: nextEpisodeIn,
+          ...(type === "Movies"
+            ? {
+                isSingleMovie: detectIsSingleMovie({
+                  mediaType: "Movies",
+                  type: metadata.type,
+                  id: metadata.id,
+                  episodesJson: metadata.episodes_json,
+                }),
+              }
+            : {}),
         };
       }),
     );
@@ -1307,63 +1317,9 @@ async function FetchLocalProviderInfo(type, id) {
 
 async function extractSubtitlesFromVideo(videoPath, epNum) {
   try {
-    const ffmpegPath = await getFfmpegPath();
-    if (!ffmpegPath) return [];
-
     const parentDir = path.dirname(videoPath);
     const subsDir = path.join(parentDir, "subs");
-
-    return new Promise((resolve) => {
-      child_process.exec(
-        `"${ffmpegPath}" -i "${videoPath}"`,
-        (err, stdout, stderr) => {
-          const output = stderr || stdout || "";
-          const streamLines = output
-            .split("\n")
-            .filter((line) => line.includes("Subtitle:"));
-          if (streamLines.length === 0) {
-            return resolve([]);
-          }
-
-          if (!fs.existsSync(subsDir)) {
-            fs.mkdirSync(subsDir, { recursive: true });
-          }
-
-          const promises = streamLines.map((line) => {
-            const matchStream = line.match(/Stream #0:(\d+)/);
-            if (!matchStream) return Promise.resolve(null);
-            const streamIdx = matchStream[1];
-
-            let lang = "en";
-            const matchLang = line.match(/Stream #0:\d+\(([^)]+)\)/);
-            if (matchLang) {
-              lang = matchLang[1].slice(0, 3).toLowerCase();
-            }
-
-            const outFile = path.join(subsDir, `${epNum}Ep.${lang}.vtt`);
-            return new Promise((res) => {
-              child_process.exec(
-                `"${ffmpegPath}" -y -i "${videoPath}" -map 0:${streamIdx} "${outFile}"`,
-                (errOut) => {
-                  if (errOut) {
-                    res(null);
-                  } else {
-                    res({
-                      url: `/subtitles?file=${encodeURIComponent(outFile)}`,
-                      lang: lang,
-                    });
-                  }
-                },
-              );
-            });
-          });
-
-          Promise.all(promises).then((results) => {
-            resolve(results.filter(Boolean));
-          });
-        },
-      );
-    });
+    return await extractSubtitlesSinglePass(videoPath, subsDir, epNum);
   } catch (e) {
     logger.error(`Error in extractSubtitlesFromVideo: ${e.message}`);
     return [];

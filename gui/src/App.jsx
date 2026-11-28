@@ -619,6 +619,7 @@ export default function App() {
               image,
               malid,
               season,
+              isSingleMovie = false,
             ) => {
               setHistory((prev) =>
                 prev.map((item, idx) => {
@@ -662,7 +663,8 @@ export default function App() {
                 image,
                 malid,
                 type: detectedType,
-                season: season || 1,
+                season: isSingleMovie ? null : season || 1,
+                isSingleMovie: Boolean(isSingleMovie),
               });
             }}
             onRead={(
@@ -804,6 +806,7 @@ export default function App() {
             type={activePlayerParams.type}
             episodeNumOrId={activePlayerParams.ep}
             season={activePlayerParams.season}
+            isSingleMovie={Boolean(activePlayerParams.isSingleMovie)}
             isDownloaded={activePlayerParams.isDownloaded}
             subdub={activePlayerParams.subdub}
             episodesList={activePlayerParams.episodesList || []}

@@ -249,17 +249,22 @@ export default function CatalogGrid({
 
               {/* Indicator badges for downloaded, schedule, watched progress, or completed */}
               <div className="card-badges-container">
-                {item.Downloaded && item.Downloaded.length > 0 && (
-                  <div className="indicator-badge">
-                    <Download size={12} className="u-style-16" />
-                    {item.Downloaded.length}{" "}
-                    {type === "Manga"
-                      ? "Chs"
-                      : type === "Movies" && item.Downloaded.length === 1
+                {item.Downloaded && item.Downloaded.length > 0 && (() => {
+                  const isSingleMovieCard =
+                    type === "Movies" &&
+                    (item.isSingleMovie === true ||
+                      (item.isSingleMovie !== false &&
+                        String(item.type || "").toLowerCase() === "movie" &&
+                        item.Downloaded.length === 1));
+                  return (
+                    <div className="indicator-badge">
+                      <Download size={12} className="u-style-16" />
+                      {isSingleMovieCard
                         ? "Movie"
-                        : "Eps"}
-                  </div>
-                )}
+                        : `${item.Downloaded.length} ${type === "Manga" ? "Chs" : "Eps"}`}
+                    </div>
+                  );
+                })()}
 
                 {item.nextEpisodeIn && (
                   <div
@@ -271,40 +276,66 @@ export default function CatalogGrid({
                   </div>
                 )}
 
-                {item.isCompleted || item.malStatus === "completed" ? (
-                  <div
-                    className="indicator-badge completed-badge"
-                    title={`Completed${
-                      item.watched
-                        ? ` (${type === "Manga" ? "Ch " : "Ep "}${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""})`
-                        : ""
-                    }`}
-                  >
-                    <CheckCircle size={12} className="u-style-16" />
-                    Completed
-                    {item.watched > 0
-                      ? ` (${item.totalEpisodes > 0 ? `${item.watched}/${item.totalEpisodes}` : `${type === "Manga" ? "Ch " : "Ep "}${item.watched}`})`
-                      : ""}
-                  </div>
-                ) : (
-                  item.watched !== undefined &&
-                  item.watched !== null &&
-                  item.watched > 0 && (
-                    <div
-                      className="indicator-badge watched-badge"
-                      title={`${type === "Manga" ? "Read" : "Watched"}: ${type === "Manga" ? "Ch " : "Ep "}${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""}`}
-                    >
-                      {type === "Manga" ? (
-                        <BookOpen size={12} className="u-style-16" />
-                      ) : (
-                        <Eye size={12} className="u-style-16" />
-                      )}
-                      {item.totalEpisodes > 0
-                        ? `${item.watched}/${item.totalEpisodes}`
-                        : `${type === "Manga" ? "Ch " : "Ep "}${item.watched}`}
-                    </div>
-                  )
-                )}
+                {(() => {
+                  const isSingleMovieCard =
+                    type === "Movies" &&
+                    (item.isSingleMovie === true ||
+                      String(item.type || "").toLowerCase() === "movie");
+
+                  if (item.isCompleted || item.malStatus === "completed") {
+                    return (
+                      <div
+                        className="indicator-badge completed-badge"
+                        title={
+                          isSingleMovieCard
+                            ? "Watched"
+                            : `Completed${
+                                item.watched
+                                  ? ` (${type === "Manga" ? "Ch " : "Ep "}${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""})`
+                                  : ""
+                              }`
+                        }
+                      >
+                        <CheckCircle size={12} className="u-style-16" />
+                        {isSingleMovieCard
+                          ? "Watched"
+                          : `Completed${
+                              item.watched > 0
+                                ? ` (${item.totalEpisodes > 0 ? `${item.watched}/${item.totalEpisodes}` : `${type === "Manga" ? "Ch " : "Ep "}${item.watched}`})`
+                                : ""
+                            }`}
+                      </div>
+                    );
+                  }
+                  if (
+                    item.watched !== undefined &&
+                    item.watched !== null &&
+                    item.watched > 0
+                  ) {
+                    return (
+                      <div
+                        className="indicator-badge watched-badge"
+                        title={
+                          isSingleMovieCard
+                            ? "In Progress"
+                            : `${type === "Manga" ? "Read" : "Watched"}: ${type === "Manga" ? "Ch " : "Ep "}${item.watched}${item.totalEpisodes ? `/${item.totalEpisodes}` : ""}`
+                        }
+                      >
+                        {type === "Manga" ? (
+                          <BookOpen size={12} className="u-style-16" />
+                        ) : (
+                          <Eye size={12} className="u-style-16" />
+                        )}
+                        {isSingleMovieCard
+                          ? "In Progress"
+                          : item.totalEpisodes > 0
+                            ? `${item.watched}/${item.totalEpisodes}`
+                            : `${type === "Manga" ? "Ch " : "Ep "}${item.watched}`}
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
               </div>
             </div>
 

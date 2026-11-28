@@ -646,8 +646,26 @@ function createScrapperWindow() {
   });
 }
 
+const INTERACTIVE_CHALLENGE_GRACE_ITERATIONS = 3;
+
+function shouldRevealScrapperWindow({
+  iteration = 0,
+  isChallenge = false,
+  isHttpBlocked = false,
+  graceIterations = INTERACTIVE_CHALLENGE_GRACE_ITERATIONS,
+} = {}) {
+  if (!isChallenge && !isHttpBlocked) return false;
+  return iteration >= graceIterations;
+}
+
 function showScrapperWindow() {
   if (!global.ScrapperWindow || global.ScrapperWindow.isDestroyed()) return;
+  if (
+    typeof global.ScrapperWindow.isVisible === "function" &&
+    global.ScrapperWindow.isVisible()
+  ) {
+    return;
+  }
   try {
     if (global.win && !global.win.isDestroyed()) {
       try {
@@ -669,6 +687,12 @@ function showScrapperWindow() {
 
 function hideScrapperWindow() {
   if (!global.ScrapperWindow || global.ScrapperWindow.isDestroyed()) return;
+  if (
+    typeof global.ScrapperWindow.isVisible === "function" &&
+    !global.ScrapperWindow.isVisible()
+  ) {
+    return;
+  }
   try {
     global.ScrapperWindow.setAlwaysOnTop(false);
     try {
@@ -830,10 +854,6 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
 
       let navUrl = targetUrl;
 
-      if (force) {
-        showScrapperWindow();
-      }
-
       // Reset window state so title and DOM do not retain stale state
       try {
         await safeNavigateWindow(
@@ -905,7 +925,13 @@ global.cloudflarebypass = async (targetUrl, force = false, referer = null) => {
           global.LastScrapperResponseCode === 403 ||
           global.LastScrapperResponseCode === 503;
 
-        if (isChallenge || isHttpBlocked) {
+        if (
+          shouldRevealScrapperWindow({
+            iteration: i,
+            isChallenge,
+            isHttpBlocked,
+          })
+        ) {
           showScrapperWindow();
         }
 
@@ -1930,4 +1956,6 @@ global.axios.interceptors.response.use(
 module.exports = {
   createScrapperWindow,
   ExitScrapperWindow,
+  shouldRevealScrapperWindow,
+  INTERACTIVE_CHALLENGE_GRACE_ITERATIONS,
 };

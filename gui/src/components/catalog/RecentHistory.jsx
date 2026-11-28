@@ -142,9 +142,11 @@ export default function RecentHistory({
                 <span className="continue-number">
                   {type === "Manga"
                     ? `Chapter ${nextNum}`
-                    : (type === "Movies" || item.type === "Movies" || (item.season && item.season > 1))
-                      ? `Season ${nextSeason} Ep ${nextNum}`
-                      : `Episode ${nextNum}`}
+                    : item.is_single_movie
+                      ? "Movie"
+                      : (type === "Movies" || item.type === "Movies" || (item.season && item.season > 1))
+                        ? `Season ${nextSeason} Ep ${nextNum}`
+                        : `Episode ${nextNum}`}
                 </span>
                 <h4 className="continue-title" title={item.title}>
                   {item.title}

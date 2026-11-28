@@ -12,7 +12,9 @@ const macMpvUrl =
 
 const FFMPEG_RELEASE = "b6.1.1";
 const FFMPEG_WIN_URL = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-win32-x64.gz`;
+const FFMPEG_LINUX_URL = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-linux-x64.gz`;
 const FFMPEG_MAC_ARM64_URL = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-darwin-arm64.gz`;
+const FFMPEG_MAC_X64_URL = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-darwin-x64.gz`;
 
 const mpvDir = path.join(__dirname, "..", "mpv");
 const winDir = path.join(mpvDir, "win32");
@@ -21,6 +23,7 @@ const macDir = path.join(mpvDir, "darwin");
 
 const ffmpegDir = path.join(__dirname, "..", "ffmpeg");
 const ffmpegWinDir = path.join(ffmpegDir, "win32");
+const ffmpegLinuxDir = path.join(ffmpegDir, "linux");
 const ffmpegMacDir = path.join(ffmpegDir, "darwin");
 
 const downloadFile = async (url, destPath, progressLabel) => {
@@ -199,50 +202,66 @@ const setupConfig = async () => {
   console.log("Configured isolated mpv.conf successfully.");
 };
 
-const setupFfmpegWindows = async () => {
-  const destExe = path.join(ffmpegWinDir, "ffmpeg.exe");
-
-  if (fs.existsSync(destExe) && fs.statSync(destExe).size > 0) {
-    console.log("Windows FFmpeg binary already exists, skipping download.");
+const downloadGzBinary = async (url, destDir, binaryName, label, makeExecutable = false) => {
+  const destExe = path.join(destDir, binaryName);
+  if (fs.existsSync(destExe) && fs.statSync(destExe).size > 1024 * 1024) {
+    if (makeExecutable) {
+      try {
+        fs.chmodSync(destExe, 0o755);
+      } catch (_) {}
+    }
+    console.log(`${label} binary already exists, skipping download.`);
     return;
   }
 
-  if (!fs.existsSync(ffmpegWinDir)) {
-    fs.mkdirSync(ffmpegWinDir, { recursive: true });
+  if (!fs.existsSync(destDir)) {
+    fs.mkdirSync(destDir, { recursive: true });
   }
 
-  console.log("Downloading Windows FFmpeg binary...");
-  const response = await got(FFMPEG_WIN_URL, { responseType: "buffer" });
-  const decompressed = require("zlib").gunzipSync(response.body);
-  fs.writeFileSync(destExe, decompressed);
+  const tmpExe = `${destExe}.tmp`;
+  try {
+    console.log(`Downloading ${label} binary...`);
+    const response = await got(url, { responseType: "buffer" });
+    const decompressed = require("zlib").gunzipSync(response.body);
+    if (!decompressed || decompressed.length < 1024 * 1024) {
+      throw new Error(`Decompressed ${label} binary is unexpectedly small (${decompressed?.length || 0} bytes)`);
+    }
+    fs.writeFileSync(tmpExe, decompressed);
+    if (makeExecutable) {
+      fs.chmodSync(tmpExe, 0o755);
+    }
+    if (fs.existsSync(destExe)) {
+      fs.unlinkSync(destExe);
+    }
+    fs.renameSync(tmpExe, destExe);
+    console.log(`Downloaded and verified ${label} binary successfully.`);
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmpExe)) fs.unlinkSync(tmpExe);
+    } catch (_) {}
+    throw err;
+  }
+};
 
-  console.log("Downloaded and extracted Windows ffmpeg.exe successfully.");
+const setupFfmpegWindows = async () => {
+  await downloadGzBinary(FFMPEG_WIN_URL, ffmpegWinDir, "ffmpeg.exe", "Windows FFmpeg", false);
+};
+
+const setupFfmpegLinux = async () => {
+  try {
+    await downloadGzBinary(FFMPEG_LINUX_URL, ffmpegLinuxDir, "ffmpeg", "Linux FFmpeg", true);
+  } catch (err) {
+    console.warn("Could not setup Linux FFmpeg automatically:", err.message);
+  }
 };
 
 const setupFfmpegMac = async () => {
-  const destExe = path.join(ffmpegMacDir, "ffmpeg");
-
-  if (fs.existsSync(destExe) && fs.statSync(destExe).size > 0) {
-    console.log("macOS FFmpeg binary already exists, skipping download.");
-    return;
-  }
-
-  if (!fs.existsSync(ffmpegMacDir)) {
-    fs.mkdirSync(ffmpegMacDir, { recursive: true });
-  }
-
+  const macUrl = process.arch === "x64" ? FFMPEG_MAC_X64_URL : FFMPEG_MAC_ARM64_URL;
+  const archLabel = process.arch === "x64" ? "macOS x64 FFmpeg" : "macOS arm64 FFmpeg";
   try {
-    console.log("Downloading macOS arm64 FFmpeg binary...");
-    const response = await got(FFMPEG_MAC_ARM64_URL, {
-      responseType: "buffer",
-    });
-    const decompressed = require("zlib").gunzipSync(response.body);
-    fs.writeFileSync(destExe, decompressed);
-    fs.chmodSync(destExe, 0o755);
-
-    console.log("Downloaded and extracted macOS arm64 ffmpeg successfully.");
+    await downloadGzBinary(macUrl, ffmpegMacDir, "ffmpeg", archLabel, true);
   } catch (err) {
-    console.warn("Could not setup macOS FFmpeg automatically:", err.message);
+    console.warn(`Could not setup ${archLabel} automatically:`, err.message);
   }
 };
 
@@ -291,6 +310,7 @@ const main = async () => {
     await setupMacMpv();
     await setupConfig();
     await setupFfmpegWindows();
+    await setupFfmpegLinux();
     await setupFfmpegMac();
     console.log("All binaries and custom skins configured successfully!");
   } catch (err) {

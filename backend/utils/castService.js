@@ -104,7 +104,15 @@ class CastService {
         lower.startsWith("docker") ||
         lower.startsWith("veth") ||
         lower.startsWith("tailscale") ||
-        lower.startsWith("wg")
+        lower.startsWith("wg") ||
+        lower.startsWith("tun") ||
+        lower.startsWith("tap") ||
+        lower.startsWith("utun") ||
+        lower.startsWith("br-") ||
+        lower.startsWith("bridge") ||
+        lower.startsWith("awdl") ||
+        lower.startsWith("llw") ||
+        lower.startsWith("anpi")
       ) {
         continue;
       }
@@ -152,12 +160,40 @@ class CastService {
       ({ iface, ip }) =>
         new Promise((resolve) => {
           let socket;
+          let timer = null;
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            if (timer) {
+              clearTimeout(timer);
+              timer = null;
+            }
+            if (socket) {
+              try {
+                socket.close();
+              } catch (_) {}
+            }
+            resolve();
+          };
+
           try {
             socket = dgram.createSocket({ type: "udp4", reuseAddr: true });
             sockets.push(socket);
           } catch (err) {
-            return resolve();
+            return finish();
           }
+
+          // Catch async ICMP / interface route errors (e.g. EHOSTUNREACH) so
+          // UDP.onMessage never surfaces as an uncaught exception.
+          socket.on("error", (err) => {
+            if (typeof logger.debug === "function") {
+              logger.debug(
+                `[cast] SSDP socket error on ${iface} (${ip}): ${err.message}`,
+              );
+            }
+            finish();
+          });
 
           socket.on("message", async (msg, rinfo) => {
             const text = msg.toString();
@@ -223,35 +259,49 @@ class CastService {
             this.discoveredDevices.set(id, device);
           });
 
-          socket.bind(0, ip, () => {
-            try {
-              socket.setBroadcast(true);
-              socket.setMulticastTTL(4);
-              socket.setMulticastInterface(ip);
-            } catch (_) {}
+          try {
+            socket.bind(0, ip, () => {
+              if (settled) return;
+              try {
+                socket.setBroadcast(true);
+                socket.setMulticastTTL(4);
+                socket.setMulticastInterface(ip);
+              } catch (_) {}
 
-            const queries = [
-              "urn:schemas-upnp-org:device:MediaRenderer:1",
-              "urn:schemas-upnp-org:service:AVTransport:1",
-              "ssdp:all",
-            ];
+              const queries = [
+                "urn:schemas-upnp-org:device:MediaRenderer:1",
+                "urn:schemas-upnp-org:service:AVTransport:1",
+                "ssdp:all",
+              ];
 
-            for (const st of queries) {
-              const msg = [
-                "M-SEARCH * HTTP/1.1",
-                "HOST: 239.255.255.250:1900",
-                'MAN: "ssdp:discover"',
-                "MX: 2",
-                `ST: ${st}`,
-                "",
-                "",
-              ].join("\r\n");
+              for (const st of queries) {
+                const msg = [
+                  "M-SEARCH * HTTP/1.1",
+                  "HOST: 239.255.255.250:1900",
+                  'MAN: "ssdp:discover"',
+                  "MX: 2",
+                  `ST: ${st}`,
+                  "",
+                  "",
+                ].join("\r\n");
 
-              socket.send(Buffer.from(msg), 0, msg.length, 1900, "239.255.255.250");
-            }
+                try {
+                  socket.send(
+                    Buffer.from(msg),
+                    0,
+                    msg.length,
+                    1900,
+                    "239.255.255.250",
+                    () => {},
+                  );
+                } catch (_) {}
+              }
 
-            setTimeout(resolve, timeoutMs - 500);
-          });
+              timer = setTimeout(finish, Math.max(200, timeoutMs - 500));
+            });
+          } catch (_) {
+            finish();
+          }
         }),
     );
 

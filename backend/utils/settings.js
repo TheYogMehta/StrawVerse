@@ -87,12 +87,46 @@ async function reconcileActiveProvider(Type) {
 async function settingupdate(newSettings = {}) {
   const wasMediaServerEnabled = Boolean(config.mediaServerNaming);
   const oldMangaScheme = config.mangaNamingScheme || "default";
+  const oldFfmpegCustomPath =
+    typeof config.ffmpegCustomPath === "string" ? config.ffmpegCustomPath : "";
   if (newSettings && typeof newSettings === "object") {
+    const validEncoders = new Set([
+      "auto",
+      "videotoolbox",
+      "nvenc",
+      "qsv",
+      "amf",
+      "vaapi",
+      "software",
+    ]);
     for (const [k, v] of Object.entries(newSettings)) {
-      if (v !== undefined) {
+      if (v === undefined) continue;
+      if (k === "downloadContainer") {
+        config[k] = v === "mkv" ? "mkv" : "mp4";
+      } else if (k === "castHwEncoder") {
+        const normEnc = String(v || "auto").toLowerCase();
+        config[k] = validEncoders.has(normEnc) ? normEnc : "auto";
+      } else if (k === "remuxConcurrency") {
+        const parsed = parseInt(v, 10);
+        config[k] = isAndroid
+          ? 1
+          : Math.min(Math.max(Number.isFinite(parsed) ? parsed : 1, 1), 2);
+      } else if (k === "ffmpegCustomPath") {
+        config[k] = typeof v === "string" ? v.trim() : "";
+      } else {
         config[k] = v;
       }
     }
+  }
+
+  if (
+    typeof config.ffmpegCustomPath === "string" &&
+    config.ffmpegCustomPath !== oldFfmpegCustomPath
+  ) {
+    try {
+      const { invalidateBinaryCache } = require("./ffmpeg");
+      invalidateBinaryCache();
+    } catch (_) {}
   }
 
   if (
@@ -299,6 +333,45 @@ async function settingfetch() {
       changes = true;
     }
 
+    if (!config?.hasOwnProperty("ffmpegCustomPath")) {
+      config.ffmpegCustomPath = "";
+      changes = true;
+    }
+
+    if (
+      !config?.hasOwnProperty("downloadContainer") ||
+      (config.downloadContainer !== "mp4" && config.downloadContainer !== "mkv")
+    ) {
+      config.downloadContainer = "mp4";
+      changes = true;
+    }
+
+    const validEncoders = new Set([
+      "auto",
+      "videotoolbox",
+      "nvenc",
+      "qsv",
+      "amf",
+      "vaapi",
+      "software",
+    ]);
+    if (
+      !config?.hasOwnProperty("castHwEncoder") ||
+      !validEncoders.has(String(config.castHwEncoder || "").toLowerCase())
+    ) {
+      config.castHwEncoder = "auto";
+      changes = true;
+    }
+
+    const parsedRemux = parseInt(config?.remuxConcurrency, 10);
+    const clampedRemux = isAndroid
+      ? 1
+      : Math.min(Math.max(Number.isFinite(parsedRemux) ? parsedRemux : 1, 1), 2);
+    if (config?.remuxConcurrency !== clampedRemux) {
+      config.remuxConcurrency = clampedRemux;
+      changes = true;
+    }
+
     if (changes) {
       await settingSave();
     }
@@ -367,6 +440,10 @@ async function SettingsLoad() {
             mangaNamingScheme: "default",
             moviesNamingScheme: "default",
             minDownloadSpeed: "300 KB/s",
+            ffmpegCustomPath: "",
+            downloadContainer: "mp4",
+            castHwEncoder: "auto",
+            remuxConcurrency: 1,
           };
 
     if (config && !config.hasOwnProperty("subFontSize")) {

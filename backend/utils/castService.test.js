@@ -270,3 +270,42 @@ test("castService: cleanupBurnSession cleans up active process and directory", (
   assert.strictEqual(fs.existsSync(dummyDir), false);
   assert.strictEqual(fs.existsSync(dummySub), false);
 });
+
+test("castService: discoverDevices handles UDP EHOSTUNREACH socket errors without uncaught exception", async () => {
+  const EventEmitter = require("node:events");
+  const dgram = require("node:dgram");
+  const origCreateSocket = dgram.createSocket;
+  const origNetworkInterfaces = os.networkInterfaces;
+
+  os.networkInterfaces = () => ({
+    en0: [{ family: "IPv4", internal: false, address: "192.168.1.50" }],
+  });
+
+  dgram.createSocket = () => {
+    const emitter = new EventEmitter();
+    emitter.bind = (_port, _ip, cb) => {
+      if (cb) cb();
+      setImmediate(() => {
+        const err = new Error("recvmsg EHOSTUNREACH");
+        err.code = "EHOSTUNREACH";
+        emitter.emit("error", err);
+      });
+    };
+    emitter.setBroadcast = () => {};
+    emitter.setMulticastTTL = () => {};
+    emitter.setMulticastInterface = () => {};
+    emitter.send = (_buf, _off, _len, _port, _addr, cb) => {
+      if (cb) cb(null);
+    };
+    emitter.close = () => {};
+    return emitter;
+  };
+
+  try {
+    const devices = await castService.discoverDevices(600);
+    assert.ok(Array.isArray(devices));
+  } finally {
+    dgram.createSocket = origCreateSocket;
+    os.networkInterfaces = origNetworkInterfaces;
+  }
+});

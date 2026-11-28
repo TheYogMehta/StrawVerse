@@ -4,6 +4,12 @@ const { getQueue, updateQueue, isQueuePaused } = require("../utils/queue");
 const ImageCacheManager = require("../utils/ImageCacheManager");
 const { getCurrentAppVersion } = require("../utils/constants");
 const { getChangelog } = require("../utils/changelog");
+const {
+  getFfmpegDiagnostics,
+  invalidateBinaryCache,
+  isAndroidRuntime,
+  validateFfmpegBinary,
+} = require("../utils/ffmpeg");
 
 const router = express.Router();
 
@@ -260,6 +266,42 @@ router.post("/api/extensions", async (req, res) => {
     res.json({ ok: true, result });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// FFmpeg binary & hardware encoder diagnostics
+router.get("/api/system/ffmpeg", async (req, res) => {
+  try {
+    const diagnostics = await getFfmpegDiagnostics();
+    res.json(diagnostics);
+  } catch (err) {
+    logger.error("Failed to read FFmpeg diagnostics: " + err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/api/system/ffmpeg/recheck", async (req, res) => {
+  try {
+    const customPath =
+      typeof req.body?.customPath === "string" ? req.body.customPath.trim() : "";
+    if (customPath) {
+      if (isAndroidRuntime()) {
+        return res.status(400).json({
+          error: "Custom FFmpeg binary path is not supported on Android",
+        });
+      }
+      const check = await validateFfmpegBinary(customPath);
+      if (!check.valid) {
+        return res.status(400).json({ error: check.error || "Invalid FFmpeg binary path" });
+      }
+    }
+
+    invalidateBinaryCache();
+    const diagnostics = await getFfmpegDiagnostics({ forceRefresh: true });
+    res.json(diagnostics);
+  } catch (err) {
+    logger.error("Failed to recheck FFmpeg diagnostics: " + err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

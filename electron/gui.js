@@ -226,6 +226,9 @@ const { loadQueue, continuousExecution } = require(
   path.join(backendDir, "utils", "queue"),
 );
 const { StopDiscordRPC } = require(path.join(backendDir, "utils", "discord"));
+const { terminateAll: terminateFfmpeg } = require(
+  path.join(backendDir, "utils", "ffmpeg"),
+);
 const { createScrapperWindow, ExitScrapperWindow } = require(
   path.join(backendDir, "utils", "scrapper"),
 );
@@ -861,7 +864,11 @@ app.whenReady().then(async () => {
   });
 
   if (app.isPackaged) {
-    autoUpdater.checkForUpdatesAndNotify();
+    autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+      logger.warn(
+        `[AutoUpdater] Startup update check failed: ${err?.message || err}`,
+      );
+    });
   }
 
   try {
@@ -874,7 +881,14 @@ app.whenReady().then(async () => {
 
 app.on("will-quit", () => {
   globalShortcut.unregisterAll();
+  terminateFfmpeg().catch(() => {});
 });
+
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.once(sig, () => {
+    terminateFfmpeg().catch(() => {});
+  });
+}
 
 // AutoUpdater
 autoUpdater.autoDownload = false;

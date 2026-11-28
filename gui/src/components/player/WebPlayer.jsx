@@ -1,6 +1,6 @@
 /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
 import { useEffect, useRef, useState } from "react";
-import { apiPost } from "../../utils/common";
+import { apiPost, isSingleMovieDetails } from "../../utils/common";
 
 if (
   typeof window !== "undefined" &&
@@ -123,6 +123,7 @@ export default function VideoPlayer({
   malid,
   hideExit = false,
   type: propType = "Anime",
+  isSingleMovie = false,
 }) {
   const type =
     typeof id === "string" && (id.startsWith("tv:") || id.startsWith("movie:"))
@@ -130,6 +131,11 @@ export default function VideoPlayer({
       : propType === "Movies"
         ? "Movies"
         : "Anime";
+
+  const effectiveSingleMovie =
+    Boolean(isSingleMovie) ||
+    (type === "Movies" &&
+      isSingleMovieDetails({ id, episodes: episodesList }, episodesList, type));
 
   const videoRef = useRef(null);
   const loadedSubMapRef = useRef({});
@@ -619,9 +625,11 @@ export default function VideoPlayer({
       typeof currentEpisode === "object"
         ? currentEpisode.number || currentEpisode.id
         : currentEpisode;
-    const displayTitle = animeTitle
-      ? `${animeTitle} - Ep ${cleanEp}`
-      : "StrawVerse Video";
+    const displayTitle = effectiveSingleMovie
+      ? animeTitle || "StrawVerse Movie"
+      : animeTitle
+        ? `${animeTitle} - Ep ${cleanEp}`
+        : "StrawVerse Video";
 
     document.title = displayTitle;
 
@@ -638,7 +646,7 @@ export default function VideoPlayer({
     return () => {
       document.title = originalTitle;
     };
-  }, [animeTitle, currentEpisode, image]);
+  }, [animeTitle, currentEpisode, image, effectiveSingleMovie]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -650,9 +658,11 @@ export default function VideoPlayer({
         typeof currentEpisode === "object"
           ? currentEpisode.number || currentEpisode.id
           : currentEpisode;
-      const displayTitle = animeTitle
-        ? `${animeTitle} - Ep ${cleanEp}`
-        : "StrawVerse Video";
+      const displayTitle = effectiveSingleMovie
+        ? animeTitle || "StrawVerse Movie"
+        : animeTitle
+          ? `${animeTitle} - Ep ${cleanEp}`
+          : "StrawVerse Video";
       document.title = `${displayTitle} (PiP)`;
     };
 
@@ -662,9 +672,11 @@ export default function VideoPlayer({
         typeof currentEpisode === "object"
           ? currentEpisode.number || currentEpisode.id
           : currentEpisode;
-      const displayTitle = animeTitle
-        ? `${animeTitle} - Ep ${cleanEp}`
-        : "StrawVerse Video";
+      const displayTitle = effectiveSingleMovie
+        ? animeTitle || "StrawVerse Movie"
+        : animeTitle
+          ? `${animeTitle} - Ep ${cleanEp}`
+          : "StrawVerse Video";
       document.title = displayTitle;
     };
 
@@ -677,7 +689,7 @@ export default function VideoPlayer({
         video.removeEventListener("leavepictureinpicture", handleLeavePiP);
       }
     };
-  }, [selectedSource, animeTitle, currentEpisode]);
+  }, [selectedSource, animeTitle, currentEpisode, effectiveSingleMovie]);
 
   const togglePiP = async () => {
     const video = videoRef.current;
@@ -733,7 +745,7 @@ export default function VideoPlayer({
 
   const handleEnded = () => {
     saveWatchProgress(true);
-    if (nextIndex !== -1) {
+    if (!effectiveSingleMovie && nextIndex !== -1) {
       handleNextEpisode();
     }
   };
@@ -977,9 +989,12 @@ export default function VideoPlayer({
   const currentIndex = currentEpisodeObj
     ? sortedEpisodes.indexOf(currentEpisodeObj)
     : -1;
-  const prevIndex = currentIndex > 0 ? currentIndex - 1 : -1;
+  const prevIndex =
+    !effectiveSingleMovie && currentIndex > 0 ? currentIndex - 1 : -1;
   const nextIndex =
-    currentIndex !== -1 && currentIndex < sortedEpisodes.length - 1
+    !effectiveSingleMovie &&
+    currentIndex !== -1 &&
+    currentIndex < sortedEpisodes.length - 1
       ? currentIndex + 1
       : -1;
 
@@ -1768,9 +1783,18 @@ export default function VideoPlayer({
             </button>
           )}
           <span className="player-episode-title">
-            Playing Episode{" "}
-            {currentEpisodeObj ? currentEpisodeObj.number : "Stream"} (
-            {(subdub || "sub").toUpperCase()})
+            {effectiveSingleMovie ? (
+              <>
+                Playing {animeTitle || "Movie"} (
+                {(subdub || "sub").toUpperCase()})
+              </>
+            ) : (
+              <>
+                Playing Episode{" "}
+                {currentEpisodeObj ? currentEpisodeObj.number : "Stream"} (
+                {(subdub || "sub").toUpperCase()})
+              </>
+            )}
           </span>
           <span
             className={`player-header-badge ${isCurrentDownloaded ? "local" : "online"}`}
@@ -2178,7 +2202,7 @@ export default function VideoPlayer({
       {/* Control Navigation & Source Section */}
       <div className="player-controls-footer">
         {/* Next/Prev Navigation */}
-        {!hideExit && sortedEpisodes.length > 0 && (
+        {!hideExit && !effectiveSingleMovie && sortedEpisodes.length > 0 && (
           <div className="player-navigation">
             <button
               onClick={handlePrevEpisode}
